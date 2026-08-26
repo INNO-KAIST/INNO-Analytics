@@ -228,6 +228,62 @@ button.mapsw,span.mapsw{width:18px;height:18px;border-radius:5px;border:1px soli
 .overlay .modal .tbl{margin-top:4px}
 .overlay .modal .row.right{justify-content:flex-end}
 
+/* ---- 상시 파일 사이드바 ------------------------------------
+   파일 목록을 탭으로 두면 '지금 무엇을 보고 있는지'가 화면에서 사라진다.
+   왼쪽에 붙여 두고 접을 수 있게 한다. */
+.shell{display:flex;align-items:flex-start;gap:0}
+.side{flex:0 0 290px;width:290px;position:sticky;top:10px;
+  max-height:calc(100vh - 96px);display:flex;flex-direction:column;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);
+  overflow:hidden;transition:flex-basis .16s ease,width .16s ease,opacity .12s ease}
+.side.collapsed{flex-basis:0;width:0;border-width:0;opacity:0;pointer-events:none}
+.sidehead{display:flex;align-items:center;gap:6px;padding:9px 10px;border-bottom:1px solid var(--line);
+  font-size:12.5px;font-weight:800;color:var(--ink2);flex:0 0 auto}
+.sidehead .ttl{letter-spacing:.02em}
+.sidehead .cnt{font-size:11px;font-weight:700;color:var(--muted);background:var(--chip);
+  border-radius:999px;padding:1px 7px}
+.sidehead .spacer{flex:1}
+.sidelist{overflow:auto;flex:1 1 auto;padding:6px}
+.sideitem{padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;
+  margin-bottom:3px;position:relative}
+.sideitem .x{position:absolute;top:4px;right:4px;width:18px;height:18px;border:none;background:none;
+  color:var(--muted);cursor:pointer;border-radius:5px;font-size:13px;line-height:1;opacity:0;padding:0}
+.sideitem:hover .x,.sideitem.sel .x{opacity:1}
+.sideitem .x:hover{background:var(--risk-soft);color:var(--risk)}
+.sideitem .n{padding-right:16px}
+.sideitem:hover{background:var(--chip)}
+.sideitem.sel{background:var(--primary-soft);border-color:var(--primary)}
+/* 파일명은 잘라내지 않는다 — 배율·시료 번호가 이름 끝에 붙어 있어서
+   말줄임하면 정작 구분에 필요한 부분이 사라진다. 줄바꿈해서 전부 보여 준다. */
+.sideitem .n{font-size:11.5px;font-weight:700;color:var(--ink);line-height:1.35;
+  word-break:break-word;overflow-wrap:anywhere}
+.sideitem.sel .n{color:var(--primary-strong)}
+.sideitem .m{font-size:10.5px;color:var(--muted);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.sideitem .kd{font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--chip);color:var(--muted);border-radius:4px;padding:0 4px}
+.sidedrop{flex:0 0 auto;margin:6px;padding:12px 8px;border:1.5px dashed var(--line);border-radius:8px;
+  text-align:center;font-size:11.5px;color:var(--muted);cursor:pointer;line-height:1.5}
+.sidedrop.over{border-color:var(--primary);background:var(--primary-soft);color:var(--primary-strong)}
+.sidetog{flex:0 0 auto;align-self:flex-start;position:sticky;top:10px;margin:0 2px;
+  width:16px;height:52px;border:1px solid var(--line);border-left:none;
+  border-radius:0 8px 8px 0;background:var(--card);color:var(--muted);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:11px;padding:0}
+.side.collapsed + .sidetog{border-left:1px solid var(--line);border-radius:8px}
+.sidetog:hover{color:var(--primary);border-color:var(--primary)}
+.main{flex:1 1 auto;min-width:0;padding-left:14px}
+@media (max-width:900px){
+  /* 좁은 화면에서는 본문 옆에 둘 자리가 없다 — 겹쳐 띄우고, 기본은 접힘(JS에서 결정) */
+  .side{position:fixed;left:8px;top:64px;bottom:16px;width:min(300px,calc(100vw - 60px));
+    flex-basis:0;z-index:60;max-height:none;box-shadow:0 18px 48px rgba(0,0,0,.28)}
+  .side.collapsed{box-shadow:none;width:0}
+  /* 토글은 항상 사이드바 바깥에 있어야 누를 수 있다 */
+  .sidetog{position:fixed;top:64px;z-index:62;border-radius:8px;border-left:1px solid var(--line);
+    left:calc(min(300px,100vw - 60px) + 12px);height:44px;width:22px;
+    box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .side.collapsed + .sidetog{left:8px;box-shadow:none}
+  .main{padding-left:0}
+}
+
 </style>
 </head>
 <body>
@@ -239,8 +295,23 @@ button.mapsw,span.mapsw{width:18px;height:18px;border-radius:5px;border:1px soli
     <button class="chipbtn" id="chipTheme" title="라이트/다크 테마 전환" aria-label="테마 전환"></button>
     <span class="copyright">© 2026 WonJeong Yu</span>
   </div>
-  <div class="nav" id="nav"></div>
-  <div id="view"></div>
+  <div class="shell">
+    <aside class="side" id="side">
+      <div class="sidehead">
+        <span class="ttl">파일</span><span class="cnt" id="sideCnt">0</span>
+        <span class="spacer"></span>
+        <button class="btn xs" id="sideOpen">열기…</button>
+      </div>
+      <div class="sidelist" id="sideList"></div>
+      <div class="sidedrop" id="sideDrop">여기로 끌어놓기<br><span class="muted">.emd · .dm3 · .tif · .mrc · .bcf</span></div>
+      <input type="file" id="fin" accept=".emd,.h5,.hdf5,.bcf,.dm3,.dm4,.tif,.tiff,.mrc,.mrcs,.st,.rec,.ali" multiple style="display:none">
+    </aside>
+    <button class="sidetog" id="sideTog" title="파일 목록 접기/펼치기" aria-label="파일 목록 접기/펼치기"></button>
+    <div class="main">
+      <div class="nav" id="nav"></div>
+      <div id="view"></div>
+    </div>
+  </div>
 </div>
 <div id="toasts"></div>
 <div id="busy"><div class="box"><div class="spin"></div><span class="txt">처리 중…</span></div></div>
@@ -33324,6 +33395,7 @@ function pixelSizeOf(md){
    ============================================================ */
 let _fileSeq=0;
 async function loadFiles(fileList){
+  const before=state.files.length;
   // NOTE: snapshot the FileList synchronously — a FileList from an <input>
   // or a DataTransfer is invalidated as soon as we yield to the event loop.
   const arr=[...fileList].filter(f=>/\.(emd|h5|hdf5|bcf|dm3|dm4|tif|tiff|mrc|mrcs|st|rec|ali)$/i.test(f.name));
@@ -33368,7 +33440,9 @@ async function loadFiles(fileList){
     await sleep(0);
   }
   busy(false);
-  if(state.curFile==null&&state.files.length) selectFile(state.files.length-1);
+  /* 방금 연 파일로 옮겨 준다 — 열었는데 화면이 그대로면 열린 줄 모른다.
+     여러 개를 한 번에 열었으면 그 중 첫 번째로 간다(읽는 순서와 맞다). */
+  if(state.files.length>before) selectFile(before);
   else renderView();
 }
 
@@ -33604,7 +33678,8 @@ function barLabel(m){
 /* ============================================================
    Views
    ============================================================ */
-const VIEWS=[["files","파일"],["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["lattice","격자 · FFT"],["interf","간섭 검사"],["meta","메타데이터"]];
+/* 파일 목록은 탭이 아니라 왼쪽 상시 열이다 — 지금 무엇을 보고 있는지가 화면에서 사라지면 안 된다. */
+const VIEWS=[["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["lattice","격자 · FFT"],["interf","간섭 검사"],["meta","메타데이터"]];
 function go(v){
   state.view=v;
   if(v==="maps"){
@@ -33629,9 +33704,11 @@ function renderView(){
   }).join("");
   nav.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>go(b.dataset.v); });
   const root=$("#view"); root.innerHTML="";
+  renderSidebar();
+  if(!rec){ renderWelcome(root); return; }
+  if(state.view==="files") state.view = rec.images.length?"image":(rec.spectra.length?"spectrum":"meta");
   try{
-    if(state.view==="files") renderFiles(root);
-    else if(state.view==="image") renderImage(root);
+    if(state.view==="image") renderImage(root);
     else if(state.view==="maps") renderMaps(root);
     else if(state.view==="spectrum") renderSpectrum(root);
     else if(state.view==="lattice") renderLattice(root);
@@ -33640,39 +33717,112 @@ function renderView(){
   }catch(e){ console.error(e); root.innerHTML=`<div class="card"><div class="note danger">화면 렌더 오류: ${esc(e.message||e)}</div></div>`; }
 }
 
-/* ---------------- files view ---------------- */
-function renderFiles(root){
+/* ---------------- 파일 사이드바 ---------------- */
+function fileBits(f){
+  const b=[];
+  if(f.err) b.push('<span class="badge risk">오류</span>');
+  if(f.images&&f.images.length) b.push(`<span class="badge info">Img ${f.images.length}</span>`);
+  if(f.spectra&&f.spectra.length) b.push(`<span class="badge ok">Spec ${f.spectra.length}</span>`);
+  if(f.streams&&f.streams.length) b.push(`<span class="badge warn">SI ${f.streams.length}</span>`);
+  return b;
+}
+/* 파일을 닫을 때 h5wasm 가상 파일시스템까지 비운다 — 안 그러면 WASM 힙에 그대로 남는다 */
+function closeRec(f){
+  try{ if(f&&f.h5&&typeof f.h5.close==="function") f.h5.close(); }catch(e){}
+  try{ if(f&&f.vpath) h5wasm.FS.unlink(f.vpath); }catch(e){}
+}
+function removeFile(i){
+  const f=state.files[i]; if(!f) return;
+  closeRec(f);
+  state.files.splice(i,1);
+  if(state.files.length===0){ state.curFile=null; }
+  else if(state.curFile===i) selectFile(Math.min(i,state.files.length-1));
+  else if(state.curFile>i) state.curFile--;
+  IMG.cache=null; LATFFT=null; LASTSPEC=null;
+  if(state.lat) state.lat.spots=[];
+  renderView();
+}
+function removeAllFiles(){
+  state.files.forEach(closeRec);
+  state.files=[]; state.curFile=null; state.curImage=0; state.curSpec=0;
+  IMG.cache=null; LATFFT=null; LASTSPEC=null;
+  state.spec.els=[]; state.spec.cand=null; state.spec.qExcl=[];
+  if(state.lat){ state.lat.spots=[]; state.lat.cx=state.lat.cy=null; }
+  renderView();
+  toast("불러온 파일을 모두 닫았습니다","ok");
+}
+function sideCollapsed(){
+  if(state._side==null){
+    let v=null; try{ v=localStorage.getItem("innoanalytics_side"); }catch(e){}
+    /* 저장된 선택이 없으면 화면 폭으로 정한다 — 좁은 화면에서는 겹쳐 뜨므로 접힌 채로 시작한다 */
+    state._side = (v==null) ? (window.innerWidth<900) : (v==="1");
+  }
+  return state._side;
+}
+function setSideCollapsed(v){
+  state._side=!!v;
+  try{ localStorage.setItem("innoanalytics_side", v?"1":"0"); }catch(e){}
+  const el=$("#side"), tg=$("#sideTog");
+  if(el) el.classList.toggle("collapsed",!!v);
+  if(tg) tg.textContent = v?"›":"‹";
+}
+function renderSidebar(){
+  const list=$("#sideList"); if(!list) return;
+  const cnt=$("#sideCnt"); if(cnt) cnt.textContent=state.files.length;
+  list.innerHTML="";
+  if(!state.files.length){
+    list.innerHTML='<div class="muted" style="padding:10px;font-size:11.5px;line-height:1.6">아직 연 파일이 없습니다.<br>아래로 끌어놓거나 [열기…]를 누르세요.</div>';
+  }
+  state.files.forEach((f,i)=>{
+    const el=h(`<div class="sideitem ${i===state.curFile?"sel":""}" title="${esc(f.name)}">
+      <button class="x" title="이 파일 닫기">✕</button>
+      <div class="n">${esc(f.name)}</div>
+      <div class="m"><span class="kd">${esc(f.kind||"?")}</span>${fmtBytes(f.size)}</div>
+      <div class="m">${fileBits(f).join("")}</div>
+    </div>`);
+    el.onclick=e=>{ if(e.target.classList.contains("x")) return; selectFile(i); };
+    el.querySelector(".x").onclick=e=>{ e.stopPropagation(); removeFile(i); };
+    list.appendChild(el);
+  });
+  const head=$(".sidehead");
+  if(head && !head.querySelector("#sideClr")){
+    const b=h('<button class="btn xs" id="sideClr" title="불러온 파일을 모두 닫습니다">전체 제거</button>');
+    head.insertBefore(b, head.querySelector("#sideOpen"));
+  }
+  const clr=$("#sideClr");
+  if(clr){ clr.disabled=!state.files.length;
+    clr.onclick=()=>{ if(!state.files.length) return;
+      if(state.files.length>1 && !confirm(`불러온 파일 ${state.files.length}개를 모두 닫습니다. 계속할까요?`)) return;
+      removeAllFiles(); }; }
+}
+function renderWelcome(root){
   root.appendChild(h(`<div class="card">
-    <h3>파일 열기 <span class="hint">Velox .emd (HDF5) · 브라우저에서 직접 파싱 — 서버 전송 없음</span></h3>
-    <div class="dropzone" id="dz"><b>.emd · .dm3 · .tif · .mrc · .bcf 파일을 여기로 끌어놓기</b><br><span class="muted">Velox(.emd) · Gatan(.dm3/.dm4) · TIFF · MRC/CCP4 · Bruker(.bcf) · HDF5(.h5) · 여러 개 동시 가능</span></div>
-    <input type="file" id="fin" accept=".emd,.h5,.hdf5,.bcf,.dm3,.dm4,.tif,.tiff,.mrc,.mrcs,.st,.rec,.ali" multiple style="display:none">
+    <h3>파일 열기 <span class="hint">브라우저에서 직접 파싱 — 서버 전송 없음</span></h3>
+    <div class="dropzone" id="dzMain"><b>.emd · .dm3 · .tif · .mrc · .bcf 파일을 여기로 끌어놓기</b><br>
+      <span class="muted">Velox(.emd) · Gatan(.dm3/.dm4) · TIFF · MRC/CCP4 · Bruker(.bcf) · HDF5(.h5) · 여러 개 동시 가능</span></div>
+    <div class="note" style="margin-top:10px">연 파일은 <b>왼쪽 열</b>에 계속 보입니다 — 거기서 눌러 바로 옮겨 다닐 수 있고,
+      열 가장자리의 화살표로 접을 수 있습니다.</div>
   </div>`));
-  const dz=$("#dz"), fin=$("#fin");
-  dz.onclick=()=>fin.click();
-  fin.onchange=()=>{ loadFiles(fin.files); fin.value=""; };
+  const dz=$("#dzMain");
+  dz.onclick=()=>$("#fin").click();
   ["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("over");}));
   ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("over");}));
   dz.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
-
-  if(!state.files.length) return;
-  const card=h(`<div class="card"><h3>불러온 파일 <span class="hint">${state.files.length}개 · 클릭하여 선택</span></h3><div class="flist"></div></div>`);
-  const list=card.querySelector(".flist");
-  state.files.forEach((f,i)=>{
-    const bits=[];
-    if(f.err) bits.push('<span class="badge risk">오류</span>');
-    if(f.images.length) bits.push(`<span class="badge info">Image ${f.images.length}</span>`);
-    if(f.spectra.length) bits.push(`<span class="badge ok">Spectrum ${f.spectra.length}</span>`);
-    if(f.streams.length) bits.push(`<span class="badge warn">Stream ${f.streams.length}</span>`);
-    if(!bits.length) bits.push('<span class="badge gray">데이터셋 없음</span>');
-    const el=h(`<div class="fitem ${i===state.curFile?"sel":""}">
-      <div class="n" title="${esc(f.name)}">${esc(f.name)}</div>
-      <div class="m">${fmtBytes(f.size)}</div>
-      <div class="m" style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap">${bits.join("")}</div>
-    </div>`);
-    el.onclick=()=>selectFile(i);
-    list.appendChild(el);
-  });
-  root.appendChild(card);
+}
+/* 사이드바의 상시 요소(열기·끌어놓기·접기)는 한 번만 붙인다 */
+function initSidebar(){
+  const fin=$("#fin"), dz=$("#sideDrop"), open=$("#sideOpen"), tog=$("#sideTog");
+  if(fin) fin.onchange=()=>{ loadFiles(fin.files); fin.value=""; };
+  if(open) open.onclick=()=>fin.click();
+  if(dz){
+    dz.onclick=()=>fin.click();
+    ["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("over");}));
+    ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("over");}));
+    dz.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
+  }
+  if(tog) tog.onclick=()=>setSideCollapsed(!sideCollapsed());
+  setSideCollapsed(sideCollapsed());
+  /* 전역 드롭은 boot() 에 이미 있다 — 여기서 또 걸면 파일이 두 번 열린다 */
 }
 
 /* ---------------- image view ---------------- */
@@ -36498,6 +36648,7 @@ function initTheme(){
 }
 (function boot(){
   initTheme();
+  initSidebar();
   renderView();
   ensureH5().then(()=>{
     const el=$("#h5stat"); if(el){ el.innerHTML='<span class="dot"></span>HDF5 준비됨'; el.classList.add("on"); }
