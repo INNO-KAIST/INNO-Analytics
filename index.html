@@ -31545,6 +31545,952 @@ function measureParticles(img){
 </script>
 <script>
 /* ============================================================
+   HRTEM 격자 해석 — FFT · d-spacing · 역FFT
+
+   측정 사슬(각 단계에서 무엇이 오차를 넣는지 명시한다)
+
+     실공간 화소 px [nm/px]  ──(파일 메타데이터, 현미경 배율 교정에 의존)
+       → 창함수 적용 (가장자리 불연속이 만드는 십자 줄무늬 제거)
+       → 2D FFT → 파워 스펙트럼 |F|²
+       → 역공간 눈금 Δg = 1/(N·px) [1/nm]
+       → 스폿 위치를 부화소로 정밀화 (파워 가중 중심 반복)
+       → Friedel 짝(±g) 평균 → 중심 오프셋이 상쇄된다
+       → |g| → d = 1/|g|
+
+   각도(스폿 사이 각)는 px 에 전혀 의존하지 않으므로 배율 교정 오차의 영향을 받지 않는다.
+   따라서 정대(zone axis) 판정에는 d 보다 각이 더 믿을 만하다.
+   ============================================================ */
+
+/* ---- 1차원 복소 FFT (반복형 Cooley-Tukey, 제자리) ---- */
+function fftRadix2(re, im, inverse){
+  const n = re.length;
+  if (n & (n-1)) throw new Error("FFT 길이는 2의 거듭제곱이어야 합니다: "+n);
+  for (let i=1, j=0; i<n; i++){
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j){ let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; }
+  }
+  for (let len=2; len<=n; len<<=1){
+    const ang = (inverse ? 2 : -2) * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i=0; i<n; i+=len){
+      let cr=1, ci=0;
+      for (let k=0; k<len/2; k++){
+        const ar=re[i+k],           ai=im[i+k];
+        const br=re[i+k+len/2],     bi=im[i+k+len/2];
+        const tr=br*cr-bi*ci,       ti=br*ci+bi*cr;
+        re[i+k]=ar+tr;              im[i+k]=ai+ti;
+        re[i+k+len/2]=ar-tr;        im[i+k+len/2]=ai-ti;
+        const ncr=cr*wr-ci*wi;      ci=cr*wi+ci*wr; cr=ncr;
+      }
+    }
+  }
+  if (inverse) for (let i=0;i<n;i++){ re[i]/=n; im[i]/=n; }
+}
+/* ---- 2차원 FFT (행 → 열) ---- */
+function fft2(re, im, N, inverse){
+  const rr=new Float64Array(N), ri=new Float64Array(N);
+  for (let y=0; y<N; y++){
+    const o=y*N;
+    for (let x=0;x<N;x++){ rr[x]=re[o+x]; ri[x]=im[o+x]; }
+    fftRadix2(rr, ri, inverse);
+    for (let x=0;x<N;x++){ re[o+x]=rr[x]; im[o+x]=ri[x]; }
+  }
+  for (let x=0; x<N; x++){
+    for (let y=0;y<N;y++){ rr[y]=re[y*N+x]; ri[y]=im[y*N+x]; }
+    fftRadix2(rr, ri, inverse);
+    for (let y=0;y<N;y++){ re[y*N+x]=rr[y]; im[y*N+x]=ri[y]; }
+  }
+}
+/* ---- 사분면 교환: DC 를 가운데로 ---- */
+function fftShift(a, N){
+  const h=N>>1, out=new Float64Array(N*N);
+  for (let y=0;y<N;y++){
+    const sy=(y+h)%N;
+    for (let x=0;x<N;x++) out[y*N+x]=a[sy*N+((x+h)%N)];
+  }
+  return out;
+}
+/* ---- 창함수 ----
+   직사각 창은 가장자리 불연속 때문에 파워 스펙트럼에 밝은 십자를 만들고,
+   그 꼬리가 약한 스폿을 덮는다. Hann 은 주엽이 2배 넓어지는 대신 그 꼬리를 없앤다.
+   '위치'를 재는 데는 주엽이 넓은 편이 부화소 적합에 오히려 유리하다. */
+const HR_WINDOWS={
+  hann:   (i,n)=>0.5-0.5*Math.cos(2*Math.PI*i/(n-1)),
+  hamming:(i,n)=>0.54-0.46*Math.cos(2*Math.PI*i/(n-1)),
+  none:   ()=>1
+};
+function applyWindow(buf, N, kind){
+  const f=HR_WINDOWS[kind]||HR_WINDOWS.hann;
+  if (kind==="none") return;
+  const w=new Float64Array(N);
+  for (let i=0;i<N;i++) w[i]=f(i,N);
+  for (let y=0;y<N;y++){ const o=y*N, wy=w[y];
+    for (let x=0;x<N;x++) buf[o+x]*=wy*w[x]; }
+}
+
+/* ---- 파워 스펙트럼 계산 ----
+   src: 실공간 정사각 배열(N×N), px: nm/px
+   반환 {N, px, dg, power(shifted), re, im (unshifted, 역FFT용), mean} */
+function hrPower(src, N, px, winKind){
+  const re=new Float64Array(N*N), im=new Float64Array(N*N);
+  let mean=0;
+  for (let i=0;i<N*N;i++) mean+=src[i];
+  mean/=N*N;
+  /* 평균을 빼면 DC 가 0 이 되어 저주파 꼬리가 약한 스폿을 덮는 일이 줄어든다 */
+  for (let i=0;i<N*N;i++) re[i]=src[i]-mean;
+  applyWindow(re, N, winKind);
+  fft2(re, im, N, false);
+  const pw=new Float64Array(N*N);
+  for (let i=0;i<N*N;i++) pw[i]=re[i]*re[i]+im[i]*im[i];
+  return {N, px, dg:1/(N*px), power:fftShift(pw,N), re, im, mean, win:winKind};
+}
+
+/* ---- 부화소 스폿 정밀화 ----
+   파워 가중 중심을 반복해서 구한다. 창 반지름은 스폿 폭에 맞춰 잡는다.
+   (로그를 씌운 뒤 포물선 적합하는 방법도 있지만, 배경이 있으면 편향이 생긴다.
+    파워 가중 중심은 대칭 스폿에서 편향이 없다.) */
+function hrRefineSpot(P, cx, cy, r){
+  const N=P.N, pw=P.power;
+  r=r||6;
+  let x=cx, y=cy;
+  for (let it=0; it<12; it++){
+    const x0=Math.max(0,Math.round(x-r)), x1=Math.min(N-1,Math.round(x+r));
+    const y0=Math.max(0,Math.round(y-r)), y1=Math.min(N-1,Math.round(y+r));
+    /* 창 안의 최소값을 배경으로 빼야 중심이 창 가운데로 끌리지 않는다 */
+    let bg=Infinity;
+    for (let j=y0;j<=y1;j++) for (let i=x0;i<=x1;i++){
+      const dx=i-x, dy=j-y; if (dx*dx+dy*dy>r*r) continue;
+      const v=pw[j*N+i]; if (v<bg) bg=v;
+    }
+    let sw=0, sx=0, sy=0, peak=0;
+    for (let j=y0;j<=y1;j++) for (let i=x0;i<=x1;i++){
+      const dx=i-x, dy=j-y; if (dx*dx+dy*dy>r*r) continue;
+      const v=pw[j*N+i]-bg; if (!(v>0)) continue;
+      sw+=v; sx+=v*i; sy+=v*j; if (v>peak) peak=v;
+    }
+    if (!(sw>0)) return null;
+    const nx=sx/sw, ny=sy/sw;
+    const moved=Math.hypot(nx-x, ny-y);
+    x=nx; y=ny;
+    if (moved<1e-4) break;
+  }
+  /* 2차 모멘트에서 스폿 폭을 얻는다 — 불확도 추정에 쓴다 */
+  const x0=Math.max(0,Math.round(x-r)), x1=Math.min(N-1,Math.round(x+r));
+  const y0=Math.max(0,Math.round(y-r)), y1=Math.min(N-1,Math.round(y+r));
+  let bg=Infinity;
+  for (let j=y0;j<=y1;j++) for (let i=x0;i<=x1;i++){
+    const dx=i-x, dy=j-y; if (dx*dx+dy*dy>r*r) continue;
+    const v=pw[j*N+i]; if (v<bg) bg=v;
+  }
+  let sw=0, s2=0, amp=0;
+  for (let j=y0;j<=y1;j++) for (let i=x0;i<=x1;i++){
+    const dx=i-x, dy=j-y; const rr=dx*dx+dy*dy; if (rr>r*r) continue;
+    const v=pw[j*N+i]-bg; if (!(v>0)) continue;
+    sw+=v; s2+=v*rr; if (v>amp) amp=v;
+  }
+  const sigma=sw>0?Math.sqrt(s2/sw/2):r/2;      // 등방 가정
+  return {x, y, sigma, sum:sw, amp, snr: bg>0?amp/bg:Infinity};
+}
+
+/* ---- 스폿 하나의 측정값 ----
+   중심 대칭 짝(Friedel)을 함께 재서 |g| 를 평균한다 — 중심 오프셋이 상쇄된다. */
+function hrMeasure(P, cx, cy, r){
+  const N=P.N, c=N/2;
+  const a=hrRefineSpot(P, cx, cy, r);
+  if (!a) return null;
+  const b=hrRefineSpot(P, 2*c-a.x, 2*c-a.y, r);
+  let gx=a.x-c, gy=a.y-c, nUsed=1, halfSep=null;
+  if (b){
+    /* 두 스폿의 '차/2' 를 쓰면 중심 추정이 아예 필요 없다 */
+    gx=(a.x-b.x)/2; gy=(a.y-b.y)/2; nUsed=2;
+    halfSep=Math.hypot(gx,gy);
+  }
+  const gpx=Math.hypot(gx,gy);
+  if (!(gpx>0.5)) return null;
+  const g=gpx*P.dg;                                  // 1/nm
+  const d=1/g;                                       // nm
+  /* 불확도: 중심 추정 오차 ≈ σ/√(SNR·화소수) 를 보수적으로 σ/√amp 로 잡고,
+     Friedel 평균이면 √2 만큼 줄어든다. 여기에 격자 한 칸의 1/10 을 바닥으로 둔다. */
+  const posSd=Math.max(0.1, (a.sigma||2)/Math.sqrt(Math.max(1,a.amp/ (a.snr>1?1:1))) )/Math.sqrt(nUsed);
+  const sdRel=Math.min(0.5, posSd/gpx);
+  return {
+    gx, gy, gpx, g, d,
+    dSd: d*sdRel,
+    angle: Math.atan2(-gy, gx)*180/Math.PI,          // 화면 y 는 아래로 증가 → 부호 반전
+    a, b, friedel: nUsed===2, sigma:a.sigma, amp:a.amp, snr:a.snr
+  };
+}
+/* 두 g 벡터 사이의 각 — 화소 크기에 의존하지 않는다(배율 교정 오차와 무관) */
+function hrAngleBetween(m1, m2){
+  const d=(m1.gx*m2.gx+m1.gy*m2.gy)/(Math.hypot(m1.gx,m1.gy)*Math.hypot(m2.gx,m2.gy));
+  return Math.acos(Math.max(-1,Math.min(1,d)))*180/Math.PI;
+}
+
+/* ---- 마스크 역FFT ----
+   spots: [{x,y,r}] (shifted 좌표계). Friedel 짝을 자동으로 함께 넣는다 —
+   넣지 않으면 역변환이 복소수가 되어 물리적으로 말이 안 된다.
+   가장자리는 raised-cosine 으로 부드럽게 — 딱딱한 마스크는 링잉을 만든다. */
+function hrInverse(P, spots, opt){
+  const N=P.N, c=N/2, keepDC=!!(opt&&opt.keepDC), soft=(opt&&opt.soft!=null)?opt.soft:0.35;
+  const mask=new Float64Array(N*N);
+  const add=(sx,sy,r)=>{
+    const rr=Math.ceil(r);
+    for (let j=Math.max(0,Math.floor(sy-rr)); j<=Math.min(N-1,Math.ceil(sy+rr)); j++)
+      for (let i=Math.max(0,Math.floor(sx-rr)); i<=Math.min(N-1,Math.ceil(sx+rr)); i++){
+        const t=Math.hypot(i-sx, j-sy)/r;
+        if (t>1) continue;
+        const w = t<(1-soft) ? 1 : 0.5*(1+Math.cos(Math.PI*(t-(1-soft))/soft));
+        const k=j*N+i; if (w>mask[k]) mask[k]=w;
+      }
+  };
+  for (const s of spots){ add(s.x,s.y,s.r); add(2*c-s.x, 2*c-s.y, s.r); }
+  if (keepDC) add(c,c,Math.max(2,(opt&&opt.dcR)||3));
+  /* mask 는 shifted 좌표계 → unshifted 로 되돌려 곱한다 */
+  const m2=fftShift(mask,N);
+  const re=new Float64Array(N*N), im=new Float64Array(N*N);
+  for (let i=0;i<N*N;i++){ re[i]=P.re[i]*m2[i]; im[i]=P.im[i]*m2[i]; }
+  fft2(re, im, N, true);
+  /* Friedel 대칭 마스크라면 허수부는 수치오차 수준이어야 한다 — 검사해서 알린다 */
+  let sr=0, si=0;
+  for (let i=0;i<N*N;i++){ sr+=re[i]*re[i]; si+=im[i]*im[i]; }
+  return {img:re, imagFrac: sr>0?Math.sqrt(si/sr):0, mask};
+}
+
+/* ---- 알려진 d 로 화소 크기를 되짚는 교정 ----
+   현미경 배율 교정은 보통 1~2% 오차를 갖는다. 이것이 d 측정의 지배적 계통오차이므로,
+   조성을 아는 표준 격자면(예: Au(111) 0.2355 nm, Si(111) 0.3135 nm)을 재서 보정한다.
+   반환 factor 를 px 에 곱하면 그 스폿의 d 가 알려진 값과 일치한다. */
+function hrCalibFactor(measured_d, known_d){
+  if (!(measured_d>0 && known_d>0)) return null;
+  return known_d/measured_d;
+}
+/* 잘 알려진 교정용 격자면 — 사용자가 고르면 값이 채워진다.
+   출처: 상온 격자상수(ICDD/문헌 통용값). 어디까지나 '교정용 기준'이며,
+   시료 자체의 d 를 여기서 가져다 쓰라는 뜻이 아니다. */
+const HR_STANDARDS=[
+  {name:"Au (111)", d:0.23550}, {name:"Au (200)", d:0.20390},
+  {name:"Si (111)", d:0.31355}, {name:"Si (220)", d:0.19201},
+  {name:"Al (111)", d:0.23380}, {name:"graphite (002)", d:0.33480}
+];
+
+/* ---- 방위 평균 배경 ----
+   파워 스펙트럼은 |g| 가 작을수록 압도적으로 밝다(비정질 헤일로·저주파 구조·CTF 포락선).
+   그래서 '가장 밝은 점'을 그냥 고르면 늘 중심 근처만 잡힌다. 반지름마다 중앙값을 구해
+   그것으로 나누면, 각 반지름에서 '주변보다 얼마나 튀는가'로 스폿을 비교할 수 있다.
+   중앙값을 쓰는 이유: 평균은 스폿 자신에게 끌려간다. */
+function hrRadialBg(P){
+  const N=P.N, c=N/2, pw=P.power;
+  const nb=Math.ceil(Math.hypot(c,c))+1;
+  const bins=[]; for(let i=0;i<nb;i++) bins.push([]);
+  for(let y=0;y<N;y++){ const dy=y-c;
+    for(let x=0;x<N;x++){ const dx=x-c;
+      bins[Math.round(Math.hypot(dx,dy))].push(pw[y*N+x]); } }
+  const med=new Float64Array(nb);
+  for(let i=0;i<nb;i++){
+    const a=bins[i]; if(!a.length){ med[i]=i>0?med[i-1]:1; continue; }
+    a.sort((p,q)=>p-q); med[i]=a[a.length>>1] || 1e-30;
+  }
+  /* 반지름 방향으로 살짝 매끈하게 — 통 경계에서 튀는 것을 막는다 */
+  const sm=new Float64Array(nb);
+  for(let i=0;i<nb;i++){
+    let s=0,n=0;
+    for(let k=-2;k<=2;k++){ const j=i+k; if(j<0||j>=nb) continue; s+=med[j]; n++; }
+    sm[i]=s/n || 1e-30;
+  }
+  return sm;
+}
+/* 배경으로 정규화한 파워 — 스폿 탐색과 SNR 보고에 쓴다 */
+function hrNormPower(P){
+  const N=P.N, c=N/2, bg=hrRadialBg(P), out=new Float64Array(N*N);
+  for(let y=0;y<N;y++){ const dy=y-c;
+    for(let x=0;x<N;x++){ const dx=x-c;
+      const r=Math.round(Math.hypot(dx,dy));
+      out[y*N+x]=P.power[y*N+x]/(bg[Math.min(bg.length-1,r)]||1e-30); } }
+  return out;
+}
+/* 스폿 자동 탐색 — 정규화 파워에서 국소 최대를 찾고 Friedel 짝은 하나로 센다 */
+function hrFindSpots(P, opt){
+  opt=opt||{};
+  const N=P.N, c=N/2, np=hrNormPower(P);
+  const rmin=opt.rmin||6, rmax=opt.rmax||N*0.45, want=opt.max||6, minSnr=opt.minSnr||4;
+  const sep=opt.sep||Math.max(6,(opt.pickR||8)*1.5);
+  const cand=[];
+  for(let y=2;y<N-2;y++) for(let x=2;x<N-2;x++){
+    const rr=Math.hypot(x-c,y-c); if(rr<rmin||rr>rmax) continue;
+    const v=np[y*N+x]; if(v<minSnr) continue;
+    let ok=true;
+    for(let dy=-2;dy<=2&&ok;dy++) for(let dx=-2;dx<=2;dx++){ if(!dx&&!dy) continue;
+      if(np[(y+dy)*N+x+dx]>v){ ok=false; break; } }
+    if(ok) cand.push({x,y,v});
+  }
+  cand.sort((a,b)=>b.v-a.v);
+  const out=[], taken=[];
+  for(const q of cand){
+    if(out.length>=want) break;
+    if(taken.some(t=>Math.hypot(t.x-q.x,t.y-q.y)<sep)) continue;
+    if(taken.some(t=>Math.hypot(t.x-(2*c-q.x),t.y-(2*c-q.y))<sep)) continue;
+    const m=hrMeasure(P,q.x,q.y,opt.pickR||8); if(!m) continue;
+    m.snrN=q.v;                       // 배경 대비 몇 배인가 — 이쪽이 의미 있는 SNR 이다
+    taken.push(q); out.push({x:q.x,y:q.y,m,on:true});
+  }
+  return out;
+}
+
+/* ---- 고차 반사 일관성 검사 ----
+   같은 방향에 |g| 가 정수배로 놓인 스폿들은 같은 격자면의 1차·2차·3차 반사다.
+   이 관계가 성립하는지 자체가 측정이 옳다는 독립 증거이고(정수비에서 벗어나면 뭔가 틀렸다),
+   여러 차수를 함께 쓰면 원점을 지나는 직선 적합으로 g1 을 더 정확히 얻는다.
+   반환: [{members:[i...], orders:[n...], g1, d1, refined, maxDev}] */
+function hrOrderGroups(spots, angTolDeg, ratioTol){
+  angTolDeg=angTolDeg||2.0; ratioTol=ratioTol||0.04;
+  const ms=spots.map((s,i)=>({i,m:s.m})).filter(o=>o.m);
+  const used=new Set(), groups=[];
+  ms.sort((a,b)=>a.m.g-b.m.g);
+  for(let a=0;a<ms.length;a++){
+    if(used.has(ms[a].i)) continue;
+    const base=ms[a], mem=[base], ord=[1];
+    for(let b=a+1;b<ms.length;b++){
+      if(used.has(ms[b].i)) continue;
+      /* 같은 직선 위인가 — 180° 반대도 같은 방향으로 본다 */
+      let da=Math.abs(base.m.angle-ms[b].m.angle)%180;
+      if(da>90) da=180-da;
+      if(da>angTolDeg) continue;
+      const ratio=ms[b].m.g/base.m.g;
+      const n=Math.round(ratio);
+      if(n<2||n>8) continue;
+      if(Math.abs(ratio-n)/n>ratioTol) continue;
+      mem.push(ms[b]); ord.push(n);
+    }
+    if(mem.length<2) continue;
+    mem.forEach(o=>used.add(o.i));
+    /* 원점을 지나는 최소제곱: g1 = Σ(n·g_n)/Σ(n²) */
+    let sn=0, sg=0, dev=0;
+    mem.forEach((o,k)=>{ sn+=ord[k]*ord[k]; sg+=ord[k]*o.m.g; });
+    const g1=sg/sn;
+    mem.forEach((o,k)=>{ dev=Math.max(dev, Math.abs(o.m.g-ord[k]*g1)/(ord[k]*g1)); });
+    groups.push({members:mem.map(o=>o.i), orders:ord, g1, d1:1/g1, maxDev:dev});
+  }
+  return groups;
+}
+/* ---- 축 정렬 아티팩트 경고 ----
+   가로/세로 축에 딱 붙은 스폿은 카메라 판독 줄무늬·스캔 잡음·창 누출이 만든 것이 많다.
+   실제 격자가 우연히 축에 정렬될 수도 있으므로 '경고'이지 '판정'이 아니다. */
+function hrAxisSuspect(m, tolDeg){
+  tolDeg=tolDeg||1.5;
+  const a=((m.angle%180)+180)%180;
+  return Math.min(a, Math.abs(a-90), Math.abs(a-180))<tolDeg;
+}
+
+</script>
+<script>
+/* ============================================================
+   Gatan DigitalMicrograph — .dm3 / .dm4 리더
+
+   DM 파일은 이름 붙은 태그 트리 하나다. 이미지 화소값도, 화소 크기(교정값)도
+   모두 그 트리 안에 들어 있다. dm3(버전 3)와 dm4(버전 4)는 구조가 같고
+   길이 필드 폭만 다르다 — 4바이트 대 8바이트.
+
+   중요한 점: 헤더·태그 구조는 항상 빅엔디안이고, 데이터는 헤더가 지정한
+   바이트오더를 따른다. 이 둘을 섞으면 조용히 쓰레기가 나온다.
+   ============================================================ */
+
+/* Gatan 태그 데이터 타입 → [DataView 메서드, 바이트 수] */
+const DM_T={
+  2:["getInt16",2], 3:["getInt32",4], 4:["getUint16",2], 5:["getUint32",4],
+  6:["getFloat32",4], 7:["getFloat64",8], 8:["getInt8",1], 9:["getInt8",1],
+  10:["getInt8",1], 11:["getBigInt64",8], 12:["getBigUint64",8]
+};
+
+function dmIsDM(u8){
+  if(!u8||u8.length<16) return false;
+  const dv=new DataView(u8.buffer,u8.byteOffset,Math.min(64,u8.length));
+  const v=dv.getInt32(0,false);
+  if(v!==3&&v!==4) return false;
+  const bo=v===4?dv.getInt32(12,false):dv.getInt32(8,false);
+  return bo===0||bo===1;
+}
+
+function dmParse(u8, opt){
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  const ver=dv.getInt32(0,false);
+  if(ver!==3&&ver!==4) throw new Error("DM 파일이 아닙니다 (version="+ver+")");
+  const big=ver===4;
+  let p=4;
+  p+= big?8:4;                                  // root length
+  const le = dv.getInt32(p,false)===1; p+=4;    // 데이터 바이트오더
+  const out={};                                  // path -> value
+  const arrays=[];                               // 큰 배열은 위치만 기록
+  const MAXINLINE=(opt&&opt.maxInline)||4096;
+
+  const rLen=()=>{ if(big){ const v=Number(dv.getBigInt64(p,false)); p+=8; return v; }
+                   const v=dv.getInt32(p,false); p+=4; return v; };
+
+  function typeSize(defs,i){                     // [바이트수, 다음 인덱스]
+    const t=defs[i];
+    if(t===15){                                  // struct
+      const nf=defs[i+2]; let sz=0, j=i+3;
+      for(let k=0;k<nf;k++){ j++; sz+=DM_T[defs[j]][1]; j++; }
+      return [sz,j];
+    }
+    if(t===20){ const [sz,j]=typeSize(defs,i+1); return [sz*defs[j], j+1]; }
+    return [DM_T[t][1], i+1];
+  }
+  function readOne(t){
+    const [m,sz]=DM_T[t]; let v=dv[m](p,le); p+=sz;
+    return (typeof v==="bigint")?Number(v):v;
+  }
+  function readData(defs,path){
+    const t=defs[0];
+    if(DM_T[t]){ out[path]=readOne(t); return; }
+    if(t===18){ p+=2*defs[1]; return; }          // string
+    if(t===15){ const [sz]=typeSize(defs,0); p+=sz; return; }
+    if(t===20){
+      const et=defs[1];
+      if(DM_T[et]){
+        const n=defs[defs.length-1], [m,sz]=DM_T[et];
+        if(n>MAXINLINE){                          // 화소 데이터 — 위치만 기록
+          out[path]={__array:true, type:et, n, offset:p, le};
+          arrays.push(out[path]); p+=sz*n; return;
+        }
+        if(et===4){                               // 유니코드 문자열 (길이 1 도 문자열이다)
+          let s=""; for(let k=0;k<n;k++){ s+=String.fromCharCode(dv.getUint16(p,le)); p+=2; }
+          out[path]=s.replace(/\0+$/,""); return;
+        }
+        const a=new Array(n);
+        for(let k=0;k<n;k++){ let v=dv[m](p,le); p+=sz; a[k]=(typeof v==="bigint")?Number(v):v; }
+        out[path]=(et===9||et===10)?a.map(c=>String.fromCharCode(c&255)).join("").replace(/\0+$/,""):a;
+        return;
+      }
+      const [sz,j]=typeSize(defs,1); p+=sz*defs[j]; return;
+    }
+    throw new Error("알 수 없는 DM 데이터 타입 "+t+" ("+path+")");
+  }
+  function readGroup(path){
+    p+=2;                                         // sorted, open
+    const n=rLen();
+    /* 같은 이름의 형제를 하나로 뭉개면 안 된다 — ImageList 의 썸네일과 본 이미지,
+       Dimension 의 x·y 를 구분해야 하므로 이름이 비면 인덱스를 붙인다. */
+    const seen={};
+    for(let i=0;i<n;i++){
+      if(p>=u8.byteLength) break;
+      const nlen=dv.getUint16(p+1,false);
+      let nm=""; for(let k=0;k<nlen;k++) nm+=String.fromCharCode(dv.getUint8(p+3+k));
+      const key=nm||"[]";
+      seen[key]=(seen[key]==null)?0:seen[key]+1;
+      if(!readTagIndexed(path,seen[key])) break;
+    }
+  }
+  function readTagIndexed(path,idx){
+    if(p>=u8.byteLength) return false;
+    const kind=dv.getUint8(p); p+=1;
+    if(kind===0) return false;
+    const nlen=dv.getUint16(p,false); p+=2;
+    let name=""; for(let i=0;i<nlen;i++) name+=String.fromCharCode(dv.getUint8(p+i));
+    p+=nlen;
+    if(big) rLen();
+    const full=path+"/"+(name||("#"+idx));
+    if(kind===20) readGroup(full);
+    else if(kind===21){
+      if(!(dv.getUint8(p)===37&&dv.getUint8(p+1)===37&&dv.getUint8(p+2)===37&&dv.getUint8(p+3)===37))
+        throw new Error("DM 태그 구분자(%%%%)가 없습니다: "+full);
+      p+=4;
+      const nd=rLen(), defs=new Array(nd);
+      for(let i=0;i<nd;i++) defs[i]=rLen();
+      readData(defs,full);
+    } else return false;
+    return true;
+  }
+  readGroup("");
+  return {ver, le, tags:out, arrays, u8, dv};
+}
+
+/* 배열 태그를 실제 숫자 배열로 꺼낸다 */
+function dmArray(D, spec){
+  const [m,sz]=DM_T[spec.type];
+  const out=(spec.type===6||spec.type===7)?new Float64Array(spec.n):new Float64Array(spec.n);
+  let p=spec.offset;
+  for(let i=0;i<spec.n;i++){ let v=D.dv[m](p,spec.le); p+=sz;
+    out[i]=(typeof v==="bigint")?Number(v):v; }
+  return out;
+}
+
+/* ImageList 에서 이미지들을 뽑는다. 썸네일이 섞여 있으므로 화소 수로 고른다. */
+function dmImages(D){
+  const T=D.tags, imgs=[];
+  const idx=new Set();
+  for(const k in T){ const m=k.match(/^\/ImageList\/(#?\d+|[^/]+)\//); if(m) idx.add(m[1]); }
+  for(const id of idx){
+    const base="/ImageList/"+id;
+    const data=T[base+"/ImageData/Data"];
+    if(!data||!data.__array) continue;
+    const dims=[];
+    for(let i=0;i<4;i++){ const v=T[base+"/ImageData/Dimensions/#"+i]; if(v==null) break; dims.push(v); }
+    if(dims.length<2) continue;
+    const w=dims[0], h=dims[1];
+    if(w*h>data.n) continue;
+    const sc=[], un=[];
+    for(let i=0;i<2;i++){
+      sc.push(T[base+"/ImageData/Calibrations/Dimension/#"+i+"/Scale"]);
+      un.push(T[base+"/ImageData/Calibrations/Dimension/#"+i+"/Units"]);
+    }
+    imgs.push({id, base, w, h, n:data.n, data,
+      scale:sc[0], scaleY:sc[1]!=null?sc[1]:sc[0], unit:dmStr(un[0]),
+      name:T[base+"/Name"]||"",
+      tags:Object.fromEntries(Object.entries(T).filter(([k])=>k.startsWith(base+"/ImageTags/"))
+              .map(([k,v])=>[k.slice((base+"/ImageTags/").length),v]))});
+  }
+  imgs.sort((a,b)=>b.w*b.h-a.w*a.h);
+  return imgs;
+}
+/* 태그 값이 문자열인지 배열인지 일정하지 않다 — 한 곳에서 문자열로 만든다 */
+function dmStr(v){
+  if(v==null) return "";
+  if(typeof v==="string") return v.trim();
+  if(Array.isArray(v)) return v.map(c=>typeof c==="number"?String.fromCharCode(c&0xffff):String(c)).join("").replace(/\0+$/,"").trim();
+  return String(v).trim();
+}
+/* 길이 단위를 미터로 */
+function dmUnitToM(u){
+  const s=String(u||"").trim().toLowerCase();
+  if(s==="m") return 1;
+  if(s==="cm") return 1e-2;
+  if(s==="mm") return 1e-3;
+  if(s==="um"||s==="µm"||s==="µm") return 1e-6;
+  if(s==="nm") return 1e-9;
+  if(s==="a"||s==="å"||s==="Å"||s==="angstrom") return 1e-10;
+  if(s==="pm") return 1e-12;
+  return null;                       // 1/nm 같은 역공간 단위는 여기서 처리하지 않는다
+}
+
+/* ---- 앱의 파일 레코드로 변환 ----
+   .emd/.bcf 와 같은 모양을 만들어 하류 코드(이미지 뷰·격자 FFT)가 출처를 몰라도 되게 한다. */
+function parseDM(u8,name,size){
+  const rec={name,size,vpath:null,h5:null,tree:[],images:[],spectra:[],streams:[],err:null,
+             kind:"dm", text:null};
+  const D=dmParse(u8);
+  const imgs=dmImages(D);
+  if(!imgs.length) throw new Error("DM 파일에서 이미지를 찾지 못했습니다");
+  const store={};
+  imgs.forEach((im,i)=>{
+    const base="/DM/Image/"+i;
+    const arr=dmArray(D,im.data);
+    const px=(()=>{ const k=dmUnitToM(im.unit);
+      return (k!=null&&im.scale>0)?{x:im.scale*k, y:(im.scaleY||im.scale)*k, unit:"m"}:null; })();
+    store[base+"/Data"]={shape:[im.h,im.w,1],dtype:"f8",value:arr};
+    const T=im.tags||{};
+    /* Velox 메타데이터와 같은 모양으로 맞춰 준다 — 기존 화면이 그대로 읽는다 */
+    const md={
+      BinaryResult:{ Detector:dmStr(T["Acquisition/Device/Name"]||T["DataBar/Device Name"])||"CCD",
+                     PixelSize: px?{width:String(px.x), height:String(px.y)}:undefined,
+                     PixelUnitX:"m" },
+      Instrument:{ InstrumentModel:dmStr(T["Microscope Info/Name"]), Manufacturer:"Gatan DM" },
+      Optics:{ AccelerationVoltage: T["Microscope Info/Voltage"]!=null?String(T["Microscope Info/Voltage"]):undefined },
+      Acquisition:{ AcquisitionStartDatetime:{ DateTime: T["DataBar/Acquisition Time (OS)"]!=null?"0":"0" } },
+      __dm:T
+    };
+    rec.images.push({kind:"image",uid:base,base,shape:[im.h,im.w,1],dtype:"f8",md,px,
+      det:md.BinaryResult.Detector, title:dmStr(im.name)||("Image "+(i+1)), isMap:false,
+      dmScale:im.scale, dmUnit:im.unit,
+      dmMag:T["Microscope Info/Actual Magnification"],
+      dmMagInd:T["Microscope Info/Indicated Magnification"]});
+    rec.tree.push({path:base, kind:"image", note:`${im.w}×${im.h} · ${im.scale} ${im.unit}/px`});
+  });
+  rec.h5={ get(path){ const d=store[path]; if(!d) return null;
+      return {shape:d.shape,dtype:d.dtype,value:d.value,slice(){ return d.value; }}; },
+    keys(){ return Object.keys(store); } };
+  rec.dmTags=D.tags;
+  return rec;
+}
+
+</script>
+<script>
+/* ============================================================
+   Baseline TIFF 리더 (+ Gatan 개인 태그)
+
+   연구실 .tif 는 DigitalMicrograph 가 내보낸 8비트 팔레트 이미지다.
+   즉 '표시용 사본'이고 원본 계조(dm3 는 int32)가 아니다. 게다가
+   XResolution 은 72 dpi 라는 무의미한 기본값이라 화소 크기가 없다.
+
+   다만 Gatan 은 개인 태그 65027 에 DM 태그 트리를 통째로 심어 둔다.
+   거기에 Actual Magnification 이 있으므로
+       화소 크기 = (카메라 화소 [µm] × 비닝) / 실제배율
+   로 되짚을 수 있다. 같은 시료의 .dm3 교정값과 0.0004% 안에서 일치하는 것을
+   확인했다(그 검증 기록은 사용 가이드 참조).
+   ============================================================ */
+function tiffIsTiff(u8){
+  if(!u8||u8.length<8) return false;
+  const a=u8[0],b=u8[1];
+  if(!((a===0x49&&b===0x49)||(a===0x4D&&b===0x4D))) return false;
+  const le=a===0x49;
+  const dv=new DataView(u8.buffer,u8.byteOffset,8);
+  const magic=dv.getUint16(2,le);
+  return magic===42||magic===43;
+}
+const TIFF_TYPESZ={1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8,16:8,17:8,18:8};
+
+async function tiffParse(u8){
+  if(!tiffIsTiff(u8)) throw new Error("TIFF 가 아닙니다");
+  const le=u8[0]===0x49;
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  const big=dv.getUint16(2,le)===43;
+  if(big) throw new Error("BigTIFF 는 아직 지원하지 않습니다");
+  let ifd=dv.getUint32(4,le);
+  const pages=[];
+  while(ifd>0 && ifd<u8.byteLength){
+    const n=dv.getUint16(ifd,le);
+    const tags={};
+    for(let i=0;i<n;i++){
+      const o=ifd+2+i*12;
+      const code=dv.getUint16(o,le), type=dv.getUint16(o+2,le), cnt=dv.getUint32(o+4,le);
+      const sz=TIFF_TYPESZ[type]||1, total=sz*cnt;
+      let vo=o+8;
+      if(total>4) vo=dv.getUint32(o+8,le);
+      const rd=k=>{
+        const q=vo+k*sz;
+        switch(type){
+          case 1: case 7: return dv.getUint8(q);
+          case 2: return dv.getUint8(q);
+          case 3: return dv.getUint16(q,le);
+          case 4: return dv.getUint32(q,le);
+          case 5: return dv.getUint32(q,le)/(dv.getUint32(q+4,le)||1);
+          case 6: return dv.getInt8(q);
+          case 8: return dv.getInt16(q,le);
+          case 9: return dv.getInt32(q,le);
+          case 10: return dv.getInt32(q,le)/(dv.getInt32(q+4,le)||1);
+          case 11: return dv.getFloat32(q,le);
+          case 12: return dv.getFloat64(q,le);
+          default: return dv.getUint8(q);
+        }
+      };
+      if(type===2){
+        let s=""; for(let k=0;k<cnt;k++){ const c=dv.getUint8(vo+k); if(c) s+=String.fromCharCode(c); }
+        tags[code]={type,cnt,value:s,offset:vo};
+      }else if(cnt===1){
+        tags[code]={type,cnt,value:rd(0),offset:vo};
+      }else{
+        tags[code]={type,cnt,value:null,offset:vo,get:rd,
+          all:()=>{ const a=new Array(cnt); for(let k=0;k<cnt;k++) a[k]=rd(k); return a; }};
+      }
+      if(code===65027) tags[code].raw=u8.subarray(vo,vo+total);
+    }
+    pages.push(tags);
+    ifd=dv.getUint32(ifd+2+n*12,le);
+    if(pages.length>16) break;
+  }
+  return {le,dv,u8,pages};
+}
+function tiffTagVal(t,def){ if(!t) return def; return t.value!=null?t.value:(t.all?t.all():def); }
+
+async function tiffDecodePage(T,pi){
+  const tg=T.pages[pi||0], le=T.le, dv=T.dv, u8=T.u8;
+  const W=tiffTagVal(tg[256]), H=tiffTagVal(tg[257]);
+  const bps=tiffTagVal(tg[258],1), comp=tiffTagVal(tg[259],1), photo=tiffTagVal(tg[262],1);
+  const spp=tiffTagVal(tg[277],1), fmt=tiffTagVal(tg[339],1);
+  const bpsArr=Array.isArray(bps)?bps:[bps];
+  if(spp!==1) throw new Error("다채널 TIFF 는 지원하지 않습니다 (samples/pixel="+spp+")");
+  const bits=bpsArr[0];
+  if(![8,16,32].includes(bits)) throw new Error(bits+"비트 TIFF 는 지원하지 않습니다");
+  if(tg[322]) throw new Error("타일 TIFF 는 아직 지원하지 않습니다");
+  const offs=tg[273]?(tg[273].all?tg[273].all():[tg[273].value]):null;
+  const cnts=tg[279]?(tg[279].all?tg[279].all():[tg[279].value]):null;
+  if(!offs) throw new Error("StripOffsets 가 없습니다");
+  const rps=tiffTagVal(tg[278],H);
+  const bytesPer=bits/8;
+  const raw=new Uint8Array(W*H*bytesPer);
+  let outPos=0;
+  for(let s=0;s<offs.length;s++){
+    let chunk=u8.subarray(offs[s], offs[s]+cnts[s]);
+    if(comp===1){ /* 그대로 */ }
+    else if(comp===32773) chunk=tiffPackBits(chunk);
+    else if(comp===5) chunk=tiffLZW(chunk);
+    else if(comp===8||comp===32946) chunk=await tiffInflate(chunk);
+    else throw new Error("압축 방식 "+comp+" 은 아직 지원하지 않습니다");
+    raw.set(chunk.subarray(0,Math.min(chunk.length, raw.length-outPos)), outPos);
+    outPos+=chunk.length;
+    if(outPos>=raw.length) break;
+  }
+  /* 예측자(Predictor=2, 수평 차분) 되돌리기 */
+  if(tiffTagVal(tg[317],1)===2){
+    const rv=new DataView(raw.buffer);
+    for(let y=0;y<H;y++){ const o=y*W*bytesPer;
+      for(let x=1;x<W;x++){
+        if(bits===8) raw[o+x]=(raw[o+x]+raw[o+x-1])&255;
+        else if(bits===16) rv.setUint16(o+x*2, (rv.getUint16(o+x*2,le)+rv.getUint16(o+(x-1)*2,le))&0xffff, le);
+        else rv.setUint32(o+x*4, (rv.getUint32(o+x*4,le)+rv.getUint32(o+(x-1)*4,le))>>>0, le);
+      } }
+  }
+  const rv=new DataView(raw.buffer);
+  const data=new Float64Array(W*H);
+  for(let i=0;i<W*H;i++){
+    let v;
+    if(bits===8) v=raw[i];
+    else if(bits===16) v=(fmt===2)?rv.getInt16(i*2,le):rv.getUint16(i*2,le);
+    else v=(fmt===3)?rv.getFloat32(i*4,le):((fmt===2)?rv.getInt32(i*4,le):rv.getUint32(i*4,le));
+    data[i]=v;
+  }
+  /* photometric 0 = 0 이 흰색 */
+  if(photo===0){ const mx=(1<<bits)-1; for(let i=0;i<data.length;i++) data[i]=mx-data[i]; }
+  /* 팔레트(3) 는 색인 자체가 계조다 — 회색 램프인지 확인만 하고 색인을 그대로 쓴다 */
+  let paletteGray=null;
+  if(photo===3&&tg[320]&&tg[320].all){
+    const cm=tg[320].all(), n=cm.length/3;
+    let gray=true;
+    for(let i=0;i<n;i+=Math.max(1,n>>5)){ if(cm[i]!==cm[n+i]||cm[i]!==cm[2*n+i]){ gray=false; break; } }
+    paletteGray=gray;
+  }
+  return {w:W,h:H,data,bits,photo,comp,fmt,paletteGray,
+          desc:tiffTagVal(tg[270],""), tags:tg};
+}
+function tiffPackBits(src){
+  const out=[]; let i=0;
+  while(i<src.length){
+    const n=(src[i]<<24>>24); i++;
+    if(n>=0){ for(let k=0;k<=n;k++) out.push(src[i++]); }
+    else if(n!==-128){ const b=src[i++]; for(let k=0;k<1-n;k++) out.push(b); }
+  }
+  return Uint8Array.from(out);
+}
+function tiffLZW(src){
+  const out=[]; let dict=[], bits=9, prev=null;
+  const reset=()=>{ dict=new Array(256); for(let i=0;i<256;i++) dict[i]=[i];
+                    dict.length=258; bits=9; prev=null; };
+  reset();
+  let bitPos=0;
+  const read=()=>{
+    const byte=bitPos>>3, shift=bitPos&7;
+    if(byte+2>=src.length&&byte>=src.length) return 257;
+    const v=((src[byte]<<16)|((src[byte+1]||0)<<8)|(src[byte+2]||0));
+    bitPos+=bits;
+    return (v>>(24-shift-bits))&((1<<bits)-1);
+  };
+  for(;;){
+    const code=read();
+    if(code===257) break;
+    if(code===256){ reset(); continue; }
+    let entry;
+    if(dict[code]) entry=dict[code];
+    else if(prev) entry=prev.concat([prev[0]]);
+    else break;
+    for(const b of entry) out.push(b);
+    if(prev) dict.push(prev.concat([entry[0]]));
+    prev=entry;
+    if(dict.length+1>=(1<<bits)&&bits<12) bits++;
+  }
+  return Uint8Array.from(out);
+}
+async function tiffInflate(src){
+  if(typeof DecompressionStream==="undefined") throw new Error("이 브라우저는 deflate TIFF 를 풀 수 없습니다");
+  const rs=new Blob([src]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return new Uint8Array(await new Response(rs).arrayBuffer());
+}
+
+/* ---- Gatan 개인 태그에서 화소 크기를 되짚는다 ----
+   카메라 물리 화소는 TIFF 쪽 태그에 없다. 카메라 이름은 있으므로,
+   이름 → 물리 화소 등록부에서 찾는다. 등록에 없으면 '모른다'고 말하고
+   사용자에게 받는다 — 추측해서 채우면 d 가 조용히 틀린다. */
+const TIFF_CAMERAS={
+  "US1000XP":{umPerPx:14, src:"같은 시료 .dm3 의 Acquisition/Device/CCD/Pixel Size (um) 태그 (연구실 파일에서 확인, 2026-08-26)"}
+};
+function tiffCameraPixel(name){
+  const s=String(name||"").trim();
+  for(const k in TIFF_CAMERAS) if(s.toUpperCase().indexOf(k.toUpperCase())>=0) return Object.assign({key:k},TIFF_CAMERAS[k]);
+  return null;
+}
+function tiffGatanScale(tagMap){
+  const t=tagMap&&tagMap[65027];
+  if(!t||!t.raw) return {ok:false, why:"Gatan 개인 태그(65027)가 없습니다"};
+  let D;
+  try{ D=dmParse(t.raw); }catch(e){ return {ok:false, why:"Gatan 태그를 읽지 못했습니다: "+(e.message||e)}; }
+  const T=D.tags;
+  const find=suffix=>{ for(const k in T) if(k.endsWith(suffix)) return T[k]; return null; };
+  const M=find("/Microscope Info/Actual Magnification");
+  const Mi=find("/Microscope Info/Indicated Magnification");
+  const cam=dmStr(find("/Acquisition/Device/Name")||find("/DataBar/Device Name"));
+  const hb=find("/Acquisition/Parameters/Detector/hbin")||find("/DataBar/Binning")||1;
+  const kv=find("/Microscope Info/Voltage");
+  const scope=dmStr(find("/Microscope Info/Name"));
+  if(!(M>0)) return {ok:false, why:"Actual Magnification 태그가 없습니다", cam, kv, scope};
+  const cp=tiffCameraPixel(cam);
+  if(!cp) return {ok:false, why:`카메라 '${cam||"이름 없음"}' 의 물리 화소 크기를 모릅니다`, cam, mag:M, magInd:Mi, bin:hb, kv, scope};
+  const nmPerPx = cp.umPerPx*1000*(hb||1)/M;
+  return {ok:true, nmPerPx, cam, camPx:cp.umPerPx, camSrc:cp.src, mag:M, magInd:Mi, bin:hb||1, kv, scope,
+          how:`(${cp.umPerPx} µm × 비닝 ${hb||1}) / 실제배율 ${M.toFixed(0)}`};
+}
+
+/* ---- 앱의 파일 레코드로 변환 ---- */
+async function parseTIFF(u8,name,size){
+  const rec={name,size,vpath:null,h5:null,tree:[],images:[],spectra:[],streams:[],err:null,
+             kind:"tiff", text:null};
+  const T=await tiffParse(u8);
+  const store={};
+  for(let i=0;i<T.pages.length;i++){
+    let pg;
+    try{ pg=await tiffDecodePage(T,i); }catch(e){ if(i===0) throw e; else break; }
+    const base="/TIFF/Image/"+i;
+    store[base+"/Data"]={shape:[pg.h,pg.w,1],dtype:"f8",value:pg.data};
+    const gs=tiffGatanScale(T.pages[i]);
+    const px=gs.ok?{x:gs.nmPerPx*1e-9, y:gs.nmPerPx*1e-9, unit:"m"}:null;
+    const md={
+      BinaryResult:{ Detector:(gs.cam||"TIFF"),
+                     PixelSize: px?{width:String(px.x),height:String(px.y)}:undefined, PixelUnitX:"m" },
+      Instrument:{ InstrumentModel:dmStr(gs.scope||""), Manufacturer:"TIFF" },
+      Optics:{ AccelerationVoltage: gs.kv!=null?String(gs.kv):undefined }
+    };
+    rec.images.push({kind:"image",uid:base,base,shape:[pg.h,pg.w,1],dtype:"f8",md,px,
+      det:md.BinaryResult.Detector, title:(name.replace(/\.[^.]+$/,"")+(T.pages.length>1?(" #"+(i+1)):"")),
+      isMap:false, tiffBits:pg.bits, tiffPhoto:pg.photo, tiffPalGray:pg.paletteGray, gatan:gs});
+    rec.tree.push({path:base, kind:"image",
+      note:`${pg.w}×${pg.h} · ${pg.bits}bit${pg.photo===3?" 팔레트":""} · ${gs.ok?gs.nmPerPx.toFixed(5)+" nm/px":"화소 크기 없음"}`});
+  }
+  if(!rec.images.length) throw new Error("TIFF 에서 이미지를 읽지 못했습니다");
+  rec.h5={ get(path){ const d=store[path]; if(!d) return null;
+      return {shape:d.shape,dtype:d.dtype,value:d.value,slice(){ return d.value; }}; },
+    keys(){ return Object.keys(store); } };
+  return rec;
+}
+
+</script>
+<script>
+/* ============================================================
+   MRC / CCP4 리더 (FEI2 확장 헤더 포함)
+
+   헤더는 1024바이트 고정이고 화소 크기는 CELLA / MX 에서 나온다(단위 Å).
+   같은 취득의 .emd 와 대조해 이 값이 정확히 일치하는 것을 확인했다(41.151 pm).
+
+   FEI/Thermo 는 EXTTYP='FEI1'/'FEI2' 확장 헤더에 자체 메타데이터를 넣는데,
+   그 스키마를 검증하지 못했으므로 **화소 크기는 표준 헤더에서만** 가져오고
+   확장 헤더에서는 읽을 수 있는 문자열(장비·검출기 이름)만 기회적으로 뽑는다.
+   검증 못한 오프셋에서 숫자를 꺼내 쓰면 조용히 틀린 값이 된다.
+   ============================================================ */
+function mrcIsMrc(u8){
+  if(!u8||u8.length<1024) return false;
+  /* 'MAP ' 도장이 있으면 확실하다 */
+  if(u8[208]===0x4D&&u8[209]===0x41&&u8[210]===0x50&&u8[211]===0x20) return true;
+  /* 옛 파일은 도장이 없다 — 머리 값이 말이 되는지로 판정한다 */
+  const dv=new DataView(u8.buffer,u8.byteOffset,1024);
+  for(const le of [true,false]){
+    const nx=dv.getInt32(0,le), ny=dv.getInt32(4,le), nz=dv.getInt32(8,le), mode=dv.getInt32(12,le);
+    if(nx>0&&ny>0&&nz>0&&nx<1e5&&ny<1e5&&nz<1e5&&[0,1,2,3,4,6,12].includes(mode)) return true;
+  }
+  return false;
+}
+const MRC_MODE={0:{n:"int8",b:1},1:{n:"int16",b:2},2:{n:"float32",b:4},
+                3:{n:"complex int16",b:4},4:{n:"complex float32",b:8},
+                6:{n:"uint16",b:2},12:{n:"float16",b:2}};
+function halfToFloat(h){
+  const s=(h&0x8000)?-1:1, e=(h>>10)&0x1f, f=h&0x3ff;
+  if(e===0) return s*Math.pow(2,-14)*(f/1024);
+  if(e===31) return f?NaN:s*Infinity;
+  return s*Math.pow(2,e-15)*(1+f/1024);
+}
+function mrcParseHeader(u8){
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  /* MACHST(212) 로 바이트오더를 정한다. 0x44 0x44 = little, 0x11 0x11 = big.
+     도장이 없으면 머리 값이 말이 되는 쪽을 고른다. */
+  let le=true;
+  const m0=dv.getUint8(212), m1=dv.getUint8(213);
+  if(m0===0x11&&m1===0x11) le=false;
+  else if(!(m0===0x44&&m1===0x44)){
+    const nxL=dv.getInt32(0,true), nxB=dv.getInt32(0,false);
+    le = (nxL>0&&nxL<1e5) ? true : ((nxB>0&&nxB<1e5)?false:true);
+  }
+  const g=(o)=>dv.getInt32(o,le), f=(o)=>dv.getFloat32(o,le);
+  const str=(o,n)=>{ let s=""; for(let i=0;i<n;i++){ const c=dv.getUint8(o+i); if(c>=32&&c<127) s+=String.fromCharCode(c); } return s.trim(); };
+  const H={le, nx:g(0), ny:g(4), nz:g(8), mode:g(12),
+    mx:g(28), my:g(32), mz:g(36),
+    cella:[f(40),f(44),f(48)], cellb:[f(52),f(56),f(60)],
+    mapc:g(64), mapr:g(68), maps:g(72),
+    dmin:f(76), dmax:f(80), dmean:f(84),
+    ispg:g(88), nsymbt:g(92), exttyp:str(104,4), nversion:g(108),
+    origin:[f(196),f(200),f(204)], map:str(208,4), rms:f(216), nlabl:g(220)};
+  H.labels=[];
+  for(let i=0;i<Math.min(H.nlabl,10);i++){ const s=str(224+80*i,80); if(s) H.labels.push(s); }
+  const md=MRC_MODE[H.mode];
+  if(!md) throw new Error("지원하지 않는 MRC MODE "+H.mode);
+  H.modeName=md.n; H.bytes=md.b;
+  H.dataOffset=1024+Math.max(0,H.nsymbt|0);
+  /* 화소 크기 — MRC 표준. CELLA 는 Å 이고 MX 는 격자 칸 수다. */
+  H.pxA = (H.mx>0&&H.cella[0]>0)? H.cella[0]/H.mx : null;
+  H.pyA = (H.my>0&&H.cella[1]>0)? H.cella[1]/H.my : null;
+  const need=H.dataOffset + H.nx*H.ny*H.nz*H.bytes;
+  H.sizeOk = need<=u8.byteLength;
+  H.expected=need;
+  return H;
+}
+/* 확장 헤더에서 읽을 수 있는 문자열만 뽑는다 — 숫자 오프셋은 검증하지 않았으므로 쓰지 않는다 */
+function mrcExtStrings(u8,H,maxBytes){
+  const out=[];
+  if(!(H.nsymbt>0)) return out;
+  /* 확장 헤더의 문자열은 앞뒤에 길이 바이트·구분자가 붙어 나오는 일이 많다.
+     장비 이름 앞의 '@' 같은 것이 그것이라 문자·숫자 전까지 잘라낸다. */
+  const end=Math.min(1024+H.nsymbt, 1024+(maxBytes||4096), u8.byteLength);
+  let cur="";
+  for(let i=1024;i<end;i++){
+    const c=u8[i];
+    if(c>=32&&c<127){ cur+=String.fromCharCode(c); }
+    else { if(cur.length>=4) out.push(cur); cur=""; }
+  }
+  if(cur.length>=4) out.push(cur);
+  return [...new Set(out.map(t=>t.replace(/^[^A-Za-z0-9]+/,"").trim()).filter(t=>t.length>=4))].slice(0,12);
+}
+function mrcSlice(u8,H,z){
+  const n=H.nx*H.ny, off=H.dataOffset+z*n*H.bytes;
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  const out=new Float64Array(n), le=H.le;
+  let p=off;
+  switch(H.mode){
+    case 0: for(let i=0;i<n;i++){ out[i]=dv.getInt8(p); p+=1; } break;
+    case 1: for(let i=0;i<n;i++){ out[i]=dv.getInt16(p,le); p+=2; } break;
+    case 2: for(let i=0;i<n;i++){ out[i]=dv.getFloat32(p,le); p+=4; } break;
+    case 6: for(let i=0;i<n;i++){ out[i]=dv.getUint16(p,le); p+=2; } break;
+    case 12: for(let i=0;i<n;i++){ out[i]=halfToFloat(dv.getUint16(p,le)); p+=2; } break;
+    case 3: for(let i=0;i<n;i++){ const re=dv.getInt16(p,le), im=dv.getInt16(p+2,le); p+=4; out[i]=Math.hypot(re,im); } break;
+    case 4: for(let i=0;i<n;i++){ const re=dv.getFloat32(p,le), im=dv.getFloat32(p+4,le); p+=8; out[i]=Math.hypot(re,im); } break;
+    default: throw new Error("지원하지 않는 MODE "+H.mode);
+  }
+  return out;
+}
+/* ---- 앱의 파일 레코드로 변환 ---- */
+function parseMRC(u8,name,size){
+  const rec={name,size,vpath:null,h5:null,tree:[],images:[],spectra:[],streams:[],err:null,
+             kind:"mrc", text:null};
+  const H=mrcParseHeader(u8);
+  if(!H.sizeOk) throw new Error(`MRC 크기가 헤더와 맞지 않습니다 (필요 ${H.expected}, 실제 ${u8.byteLength})`);
+  const strs=mrcExtStrings(u8,H,4096);
+  const px=(H.pxA>0)?{x:H.pxA*1e-10, y:(H.pyA||H.pxA)*1e-10, unit:"m"}:null;
+  const store={};
+  const nz=Math.max(1,H.nz|0), NMAX=Math.min(nz,64);
+  for(let z=0;z<NMAX;z++){
+    const base="/MRC/Image/"+z;
+    store[base+"/Data"]={shape:[H.ny,H.nx,1],dtype:H.modeName,value:mrcSlice(u8,H,z)};
+    const md={
+      BinaryResult:{ Detector: strs.find(s=>/ceta|falcon|orius|us\d|camera|haadf|bm-/i.test(s))||"MRC",
+                     PixelSize: px?{width:String(px.x),height:String(px.y)}:undefined, PixelUnitX:"m" },
+      Instrument:{ InstrumentModel: strs.find(s=>/talos|tecnai|titan|glacios|krios/i.test(s))||"",
+                   Manufacturer:"MRC "+(H.exttyp||"") },
+      Optics:{}, __mrc:{header:H, strings:strs}
+    };
+    rec.images.push({kind:"image",uid:base,base,shape:[H.ny,H.nx,1],dtype:H.modeName,md,px,
+      det:md.BinaryResult.Detector,
+      title:(name.replace(/\.[^.]+$/,"")+(nz>1?(" z"+(z+1)):"")),
+      isMap:false, mrc:{mode:H.mode,modeName:H.modeName,exttyp:H.exttyp,nversion:H.nversion,
+                        cella:H.cella[0],mx:H.mx,pxA:H.pxA,strings:strs,nz}});
+    rec.tree.push({path:base,kind:"image",
+      note:`${H.nx}×${H.ny} · ${H.modeName} · ${H.pxA?(H.pxA/10).toFixed(5)+" nm/px":"화소 크기 없음"}`});
+  }
+  if(nz>NMAX) rec.tree.push({path:"/MRC",kind:"note",note:`z 슬라이스 ${nz}장 중 ${NMAX}장만 열었습니다`});
+  rec.h5={ get(path){ const d=store[path]; if(!d) return null;
+      return {shape:d.shape,dtype:d.dtype,value:d.value,slice(){ return d.value; }}; },
+    keys(){ return Object.keys(store); } };
+  rec.mrcHeader=H;
+  return rec;
+}
+
+</script>
+<script>
+/* ============================================================
    Bruker .bcf 읽기
 
    .bcf는 AidAim SFS(Single File System) 컨테이너다. 안에는 보통 내부 파일이
@@ -32380,9 +33326,9 @@ let _fileSeq=0;
 async function loadFiles(fileList){
   // NOTE: snapshot the FileList synchronously — a FileList from an <input>
   // or a DataTransfer is invalidated as soon as we yield to the event loop.
-  const arr=[...fileList].filter(f=>/\.(emd|h5|hdf5|bcf)$/i.test(f.name));
-  if(!arr.length){ toast(".emd / .h5 / .bcf 파일을 선택하세요","warn"); return; }
-  const needH5=arr.some(f=>!/\.bcf$/i.test(f.name));
+  const arr=[...fileList].filter(f=>/\.(emd|h5|hdf5|bcf|dm3|dm4|tif|tiff|mrc|mrcs|st|rec|ali)$/i.test(f.name));
+  if(!arr.length){ toast(".emd / .h5 / .bcf / .dm3 / .dm4 / .tif / .mrc 파일을 선택하세요","warn"); return; }
+  const needH5=arr.some(f=>/\.(emd|h5|hdf5)$/i.test(f.name));
   if(needH5){ busy(true,"HDF5 엔진 준비 중…"); await ensureH5(); }
   busy(true,"파일 읽는 중…");
   for(const file of arr){
@@ -32391,6 +33337,21 @@ async function loadFiles(fileList){
       if(/\.bcf$/i.test(file.name) || bcfIsBcf(buf)){
         const rec=await parseBcf(buf,file.name,file.size);
         state.files.push(rec);
+        await sleep(0);
+        continue;
+      }
+      if(/\.dm[34]$/i.test(file.name) || dmIsDM(buf)){
+        state.files.push(parseDM(buf,file.name,file.size));
+        await sleep(0);
+        continue;
+      }
+      if(/\.tiff?$/i.test(file.name) || tiffIsTiff(buf)){
+        state.files.push(await parseTIFF(buf,file.name,file.size));
+        await sleep(0);
+        continue;
+      }
+      if(/\.(mrc|mrcs|st|rec|ali)$/i.test(file.name) || mrcIsMrc(buf)){
+        state.files.push(parseMRC(buf,file.name,file.size));
         await sleep(0);
         continue;
       }
@@ -32437,6 +33398,7 @@ function parseEmd(vpath,name,size){
               px:pixelSizeOf(md), det:(md&&md.BinaryResult&&md.BinaryResult.Detector)||""};
     }).filter(Boolean);
   };
+  rec.kind="emd";
   rec.images=grab("/Data/Image","image");
   rec.spectra=grab("/Data/Spectrum","spectrum");
   rec.streams=grab("/Data/SpectrumStream","stream");
@@ -32642,7 +33604,7 @@ function barLabel(m){
 /* ============================================================
    Views
    ============================================================ */
-const VIEWS=[["files","파일"],["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["interf","간섭 검사"],["meta","메타데이터"]];
+const VIEWS=[["files","파일"],["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["lattice","격자 · FFT"],["interf","간섭 검사"],["meta","메타데이터"]];
 function go(v){
   state.view=v;
   if(v==="maps"){
@@ -32661,6 +33623,7 @@ function renderView(){
     if(k==="maps"){ const n=mapCapable(rec); cnt=n?`<span class="cnt">${n}</span>`:""; if(!n) dis="disabled"; }
     if(k==="spectrum"){ const n=rec?rec.spectra.length:0; cnt=`<span class="cnt">${n}</span>`; if(!n) dis="disabled"; }
     if(k==="meta"&&!rec) dis="disabled";
+    if(k==="lattice"&&!(rec&&rec.images&&rec.images.length)) dis="disabled";
     if(k==="interf"&&!rec) dis="";
     return `<button data-v="${k}" class="${state.view===k?"active":""}" ${dis}>${t}${cnt}</button>`;
   }).join("");
@@ -32671,6 +33634,7 @@ function renderView(){
     else if(state.view==="image") renderImage(root);
     else if(state.view==="maps") renderMaps(root);
     else if(state.view==="spectrum") renderSpectrum(root);
+    else if(state.view==="lattice") renderLattice(root);
     else if(state.view==="interf") renderInterf(root);
     else renderMeta(root);
   }catch(e){ console.error(e); root.innerHTML=`<div class="card"><div class="note danger">화면 렌더 오류: ${esc(e.message||e)}</div></div>`; }
@@ -32680,8 +33644,8 @@ function renderView(){
 function renderFiles(root){
   root.appendChild(h(`<div class="card">
     <h3>파일 열기 <span class="hint">Velox .emd (HDF5) · 브라우저에서 직접 파싱 — 서버 전송 없음</span></h3>
-    <div class="dropzone" id="dz"><b>.emd · .bcf 파일을 여기로 끌어놓기</b><br><span class="muted">Velox(.emd) · Bruker(.bcf) · HDF5(.h5) · 여러 개 동시 가능</span></div>
-    <input type="file" id="fin" accept=".emd,.h5,.hdf5,.bcf" multiple style="display:none">
+    <div class="dropzone" id="dz"><b>.emd · .dm3 · .tif · .mrc · .bcf 파일을 여기로 끌어놓기</b><br><span class="muted">Velox(.emd) · Gatan(.dm3/.dm4) · TIFF · MRC/CCP4 · Bruker(.bcf) · HDF5(.h5) · 여러 개 동시 가능</span></div>
+    <input type="file" id="fin" accept=".emd,.h5,.hdf5,.bcf,.dm3,.dm4,.tif,.tiff,.mrc,.mrcs,.st,.rec,.ali" multiple style="display:none">
   </div>`));
   const dz=$("#dz"), fin=$("#fin");
   dz.onclick=()=>fin.click();
@@ -35544,6 +36508,378 @@ function initTheme(){
       if(ev==="drop") loadFiles(e.dataTransfer.files); }
   }));
 })();
+
+/* ============================================================
+   격자 · FFT 화면
+   ============================================================ */
+function latState(){
+  if(!state.lat) state.lat={N:512, cx:null, cy:null, win:"hann", spots:[], gamma:0.4, bgNorm:false,
+    maskR:8, soft:0.35, keepDC:false, pxCal:null, calibNote:"", showInv:true, pickR:8};
+  return state.lat;
+}
+let LATFFT=null;   // {key, P, roi}
+
+function latPx(img){
+  const L=latState();
+  const base=img.px&&img.px.x>0 ? img.px.x*1e9 : null;   // nm/px
+  if(base==null) return null;
+  return L.pxCal ? base*L.pxCal : base;
+}
+function latExtract(img,N,cx,cy){
+  const W=img.w,H=img.h;
+  const x0=Math.max(0,Math.min(W-N,Math.round(cx-N/2)));
+  const y0=Math.max(0,Math.min(H-N,Math.round(cy-N/2)));
+  const out=new Float64Array(N*N);
+  for(let j=0;j<N;j++){ const so=(y0+j)*W+x0, o=j*N;
+    for(let i=0;i<N;i++) out[o+i]=img.data[so+i]; }
+  return {buf:out,x0,y0};
+}
+function latEnsure(){
+  const L=latState(), img=loadImageData(); if(!img) return null;
+  const px=latPx(img); if(px==null) return null;
+  const N=Math.min(L.N, 1<<Math.floor(Math.log2(Math.min(img.w,img.h))));
+  if(L.cx==null){ L.cx=img.w/2; L.cy=img.h/2; }
+  const key=[img.key,N,Math.round(L.cx),Math.round(L.cy),L.win,px].join("|");
+  if(LATFFT&&LATFFT.key===key) return LATFFT;
+  const roi=latExtract(img,N,L.cx,L.cy);
+  const P=hrPower(roi.buf,N,px,L.win);
+  LATFFT={key,P,roi,N,px,img};
+  /* 화소 크기가 바뀌면 이미 찍은 스폿의 d 도 다시 계산해야 한다 */
+  L.spots=L.spots.map(sp=>{ const m=hrMeasure(P,sp.x,sp.y,L.pickR); return m?Object.assign({},sp,{m}):sp; });
+  return LATFFT;
+}
+function latDrawReal(cv,F){
+  const img=F.img, L=latState();
+  const S=Math.min(520, Math.max(320, cv.clientWidth||420));
+  cv.width=S; cv.height=S;
+  const g=cv.getContext("2d");
+  const im=g.createImageData(S,S);
+  const lo=pctValue(0.5), hi=pctValue(99.7), rg=(hi>lo)?(hi-lo):1;
+  for(let y=0;y<S;y++){ const sy=Math.min(img.h-1,Math.floor(y*img.h/S));
+    for(let x=0;x<S;x++){ const sx=Math.min(img.w-1,Math.floor(x*img.w/S));
+      let v=(img.data[sy*img.w+sx]-lo)/rg; v=v<0?0:v>1?1:v;
+      const c=(v*255)|0, k=(y*S+x)*4;
+      im.data[k]=c; im.data[k+1]=c; im.data[k+2]=c; im.data[k+3]=255; } }
+  g.putImageData(im,0,0);
+  const sc=S/img.w;
+  g.strokeStyle="#34D399"; g.lineWidth=2;
+  g.strokeRect(F.roi.x0*sc, F.roi.y0*sc, F.N*sc, F.N*sc);
+  g.fillStyle="#34D399"; g.font="bold 12px system-ui";
+  g.fillText(`${F.N}² · ${(F.N*F.px).toFixed(1)} nm`, F.roi.x0*sc+4, F.roi.y0*sc-5);
+  /* 실공간 눈금자 */
+  const barNm=Math.pow(10,Math.round(Math.log10(img.w*F.px*0.2)));
+  const bp=barNm/F.px*sc;
+  g.fillStyle="#fff"; g.fillRect(12,S-22,bp,4);
+  g.fillText(`${barNm>=1?barNm+" nm":(barNm*1000)+" pm"}`, 12, S-26);
+  cv._sc=sc;
+}
+function latDrawFFT(cv,F){
+  const L=latState(), N=F.N, P=F.P;
+  const S=Math.min(520, Math.max(320, cv.clientWidth||420));
+  cv.width=S; cv.height=S;
+  const g=cv.getContext("2d");
+  /* 로그 스케일 — 파워는 동적범위가 10^6 을 넘어 선형으로는 아무것도 안 보인다.
+     그리고 최소~최대로 늘이면 몇 개의 극단값 때문에 나머지가 회색으로 뭉갠다.
+     백분위로 자르는 것이 FFT 표시의 정석이다. */
+  const base = L.bgNorm ? (F._np||(F._np=hrNormPower(P))) : P.power;
+  const lg=new Float64Array(N*N);
+  for(let i=0;i<N*N;i++) lg[i]=Math.log10(1e-12+base[i]);
+  const srt=Float64Array.from(lg); srt.sort();
+  const q=t=>srt[Math.max(0,Math.min(srt.length-1,Math.round(t*(srt.length-1))))];
+  const mn=q(0.30), mx=q(0.99995);
+  const im=g.createImageData(S,S);
+  const gam=L.gamma;
+  for(let y=0;y<S;y++){ const sy=Math.min(N-1,Math.floor(y*N/S));
+    for(let x=0;x<S;x++){ const sx=Math.min(N-1,Math.floor(x*N/S));
+      let v=(lg[sy*N+sx]-mn)/((mx-mn)||1);
+      v=Math.pow(Math.max(0,Math.min(1,v)), gam<=0?1:1/(0.2+2.8*gam));
+      const c=(v*255)|0, k=(y*S+x)*4;
+      im.data[k]=c; im.data[k+1]=c; im.data[k+2]=c; im.data[k+3]=255; } }
+  g.putImageData(im,0,0);
+  const sc=S/N, c=N/2*sc;
+  /* 역공간 눈금 — 1/nm 원 */
+  g.strokeStyle="rgba(52,211,153,.35)"; g.setLineDash([4,4]); g.lineWidth=1;
+  for(let k=1;k<=8;k++){ const r=k/P.dg*sc; if(r>S*0.72) break;
+    g.beginPath(); g.arc(c,c,r,0,7); g.stroke(); }
+  g.setLineDash([]);
+  g.fillStyle="rgba(52,211,153,.9)"; g.font="11px system-ui";
+  g.fillText("1 nm⁻¹", c+1/P.dg*sc+3, c-3);
+  L.spots.forEach((sp,i)=>{
+    if(!sp.m) return;
+    const px1=sp.m.a.x*sc, py1=sp.m.a.y*sc;
+    g.strokeStyle="#F59E0B"; g.lineWidth=2;
+    g.beginPath(); g.arc(px1,py1,L.maskR*sc,0,7); g.stroke();
+    if(sp.m.b){ g.strokeStyle="rgba(245,158,11,.45)";
+      g.beginPath(); g.arc(sp.m.b.x*sc, sp.m.b.y*sc, L.maskR*sc,0,7); g.stroke(); }
+    g.fillStyle="#F59E0B"; g.font="bold 12px system-ui";
+    g.fillText(`${i+1}: ${(sp.m.d*10).toFixed(3)} Å`, px1+L.maskR*sc+4, py1+4);
+  });
+  cv._sc=sc; cv._N=N;
+}
+function latDrawInv(cv,F){
+  const L=latState();
+  const spots=L.spots.filter(s=>s.m&&s.on!==false).map(s=>({x:s.m.a.x,y:s.m.a.y,r:L.maskR}));
+  if(!spots.length){ cv.width=10; cv.height=10; return null; }
+  const inv=hrInverse(F.P,spots,{keepDC:L.keepDC,soft:L.soft});
+  const N=F.N, S=Math.min(520, Math.max(320, cv.clientWidth||420));
+  cv.width=S; cv.height=S;
+  const g=cv.getContext("2d");
+  let mn=Infinity,mx=-Infinity;
+  for(let i=0;i<N*N;i++){ const v=inv.img[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+  const rg=(mx>mn)?(mx-mn):1;
+  const im=g.createImageData(S,S);
+  for(let y=0;y<S;y++){ const sy=Math.min(N-1,Math.floor(y*N/S));
+    for(let x=0;x<S;x++){ const sx=Math.min(N-1,Math.floor(x*N/S));
+      const c=(((inv.img[sy*N+sx]-mn)/rg)*255)|0, k=(y*S+x)*4;
+      im.data[k]=c; im.data[k+1]=c; im.data[k+2]=c; im.data[k+3]=255; } }
+  g.putImageData(im,0,0);
+  const barNm=Math.pow(10,Math.round(Math.log10(N*F.px*0.25)));
+  const bp=barNm/F.px*(S/N);
+  g.fillStyle="#fff"; g.font="bold 12px system-ui";
+  g.fillRect(12,S-22,bp,4);
+  g.fillText(`${barNm>=1?barNm+" nm":(barNm*1000)+" pm"}`,12,S-26);
+  return inv;
+}
+
+function renderLattice(root){
+  const L=latState(), rec=curRec();
+  const img0=loadImageData();
+  if(!img0){ root.innerHTML='<div class="card"><div class="note">이 파일에는 이미지가 없습니다.</div></div>'; return; }
+  const pxBase=img0.px&&img0.px.x>0?img0.px.x*1e9:null;
+  if(pxBase==null){ root.innerHTML='<div class="card"><div class="note warn"><b>화소 크기가 파일에 없습니다.</b> d-spacing 은 화소 크기 없이는 계산할 수 없습니다 — 배율 정보가 있는 원본 파일을 여세요.</div></div>'; return; }
+  const F=latEnsure();
+  if(!F){ root.innerHTML='<div class="card"><div class="note warn">FFT 를 준비하지 못했습니다.</div></div>'; return; }
+  /* 화소 크기가 어디서 왔는지 — d 값 전체가 여기에 걸려 있으므로 반드시 밝힌다 */
+  const imNow=rec.images[state.curImage]||{};
+  const provenance=(()=>{
+    if(imNow.gatan) return imNow.gatan.ok
+      ? {kind:"tiff", txt:`TIFF 에는 화소 크기가 없어 <b>Gatan 개인 태그에서 되짚었습니다</b> — ${esc(imNow.gatan.how)}.
+           카메라 물리 화소는 등록부 값(${esc(imNow.gatan.cam||"")})이며 출처는 ${esc(TIFF_CAMERAS[Object.keys(TIFF_CAMERAS).find(k=>(imNow.gatan.cam||"").toUpperCase().includes(k.toUpperCase()))]?.src||"미상")} 입니다.`, ok:true}
+      : {kind:"tiff", txt:`<b>이 TIFF 에서는 화소 크기를 얻을 수 없습니다</b> — ${esc(imNow.gatan.why||"")}.
+           같은 이름의 <b>.dm3</b> 파일이 있으면 그쪽을 여세요(교정값이 파일 안에 있습니다).`, ok:false};
+    if(imNow.dmScale!=null) return {kind:"dm", ok:true,
+      txt:`Gatan .dm3 의 <b>교정 태그</b>에서 직접 읽었습니다 — ${imNow.dmScale} ${esc(imNow.dmUnit||"")}/px${imNow.dmMag?` · 실제배율 ${Math.round(imNow.dmMag)}`:""}${imNow.dmMagInd?` (표시배율 ${Math.round(imNow.dmMagInd)})`:""}.`};
+    return {kind:"emd", ok:true, txt:"파일 메타데이터의 화소 크기를 그대로 씁니다."};
+  })();
+  const eightBit = imNow.tiffBits===8;
+  const px=F.px, dg=F.P.dg;
+  const nyq=2*px, prac=4*px;
+  const opts=rec.images.map((im,i)=>`<option value="${i}" ${i===state.curImage?"selected":""}>${esc(im.title||im.det||("Image "+(i+1)))} · ${im.shape[1]}×${im.shape[0]}</option>`).join("");
+  const sizes=[256,512,1024,2048].filter(n=>n<=Math.min(img0.w,img0.h));
+
+  /* rows 안에서 쓰므로 반드시 먼저 선언한다 (TDZ) */
+  const groups=hrOrderGroups(L.spots);
+  const suspect=L.spots.map(sp=>sp.m?hrAxisSuspect(sp.m):false);
+  const rows=L.spots.map((sp,i)=>{
+    if(!sp.m) return "";
+    const m=sp.m;
+    return `<tr>
+      <td class="l"><label class="row" style="gap:5px"><input type="checkbox" class="latOn" data-i="${i}" ${sp.on!==false?"checked":""}><b>${i+1}</b></label></td>
+      <td class="num">${(m.d*10).toFixed(4)}</td>
+      <td class="num">${m.d.toFixed(5)}</td>
+      <td class="num">${m.g.toFixed(4)}</td>
+      <td class="num">${m.angle.toFixed(2)}</td>
+      <td class="num">${m.gpx.toFixed(2)}</td>
+      <td class="num">${m.friedel?'<span class="badge ok">O</span>':'<span class="badge warn">X</span>'}</td>
+      <td class="num">${suspect[i]?'<span class="badge warn" title="가로·세로 축에 정렬된 스폿은 카메라 줄무늬·스캔 잡음·창 누출인 경우가 많습니다">축 정렬</span>':""}</td>
+      <td class="num">${m.snrN!=null?m.snrN.toFixed(1):(isFinite(m.snr)?m.snr.toFixed(1):"∞")}</td>
+      <td class="num"><button class="btn xs latDel" data-i="${i}">삭제</button></td></tr>`;
+  }).join("");
+  const pairs=[];
+  for(let i=0;i<L.spots.length;i++) for(let j=i+1;j<L.spots.length;j++){
+    const a=L.spots[i].m, b=L.spots[j].m; if(!a||!b) continue;
+    pairs.push(`<tr><td class="l">${i+1} ↔ ${j+1}</td><td class="num">${hrAngleBetween(a,b).toFixed(2)}°</td>
+      <td class="num">${(a.d/b.d).toFixed(4)}</td></tr>`);
+  }
+
+  root.appendChild(h(`<div>
+    <div class="tiles">
+      <div class="tile accent"><div class="v">${(px*1000).toFixed(2)} pm</div><div class="k">화소 크기</div>
+        <div class="s">${L.pxCal?`교정 ×${L.pxCal.toFixed(5)}`:"파일 메타데이터"}</div></div>
+      <div class="tile"><div class="v">${F.N}²</div><div class="k">FFT 영역</div><div class="s">${(F.N*px).toFixed(1)} nm</div></div>
+      <div class="tile"><div class="v">${dg.toFixed(4)}</div><div class="k">역공간 눈금 Δg [nm⁻¹]</div>
+        <div class="s">1/(N·px)</div></div>
+      <div class="tile"><div class="v">${(prac*1000).toFixed(0)} pm</div><div class="k">실용 d 하한</div>
+        <div class="s">Nyquist ${(nyq*1000).toFixed(0)} pm · 4 px/줄 기준</div></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <label class="f" style="min-width:220px">이미지<select id="latImg">${opts}</select></label>
+        <label class="f">FFT 영역<select id="latN">${sizes.map(n=>`<option value="${n}" ${n===F.N?"selected":""}>${n}²</option>`).join("")}</select></label>
+        <label class="f">창함수<select id="latWin">
+          <option value="hann" ${L.win==="hann"?"selected":""}>Hann (권장)</option>
+          <option value="hamming" ${L.win==="hamming"?"selected":""}>Hamming</option>
+          <option value="none" ${L.win==="none"?"selected":""}>없음</option></select></label>
+        <label class="f">FFT 대비<input type="range" id="latGam" min="0.05" max="1" step="0.05" value="${L.gamma}" style="width:110px"></label>
+        <label class="row" style="gap:5px;font-size:12px;font-weight:600"><input type="checkbox" id="latBg" ${L.bgNorm?"checked":""}>배경 제거</label>
+        <label class="f">스폿 반지름 [px]<input type="number" id="latR" class="mono" style="width:80px" value="${L.maskR}" min="2" max="40" step="1"></label>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm" id="latAuto">스폿 자동 찾기</button>
+        <button class="btn sm" id="latClr">스폿 지우기</button>
+      </div>
+      <div class="note ${provenance.ok?"":"warn"}" style="margin-top:8px">
+        <b>화소 크기 출처</b> — ${provenance.txt}
+        ${eightBit?`<br><b>이 파일은 8비트 표시용 사본입니다</b>(원본 .dm3 는 32비트). 같은 이미지의 dm3 와 대조해 보면
+          d 값은 <b>0.01% 안에서 일치</b>하므로 격자 측정에는 문제가 없지만, 약한 스폿의 대비는 손해를 봅니다.`:""}
+      </div>
+      <div class="note" style="margin-top:8px">왼쪽 이미지를 <b>클릭</b>하면 FFT 영역이 그 자리로 옮겨집니다 ·
+        가운데 FFT 를 <b>클릭</b>하면 그 스폿을 잽니다(부화소 정밀화 + Friedel 짝 자동).
+        <b>d = 1/|g|</b>, 각도는 화면 기준 반시계입니다.</div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="gap:14px;align-items:flex-start;flex-wrap:wrap">
+        <div><div class="muted" style="margin-bottom:4px">실공간 — 클릭해서 영역 이동</div>
+          <canvas id="latReal" style="border-radius:8px;cursor:crosshair;max-width:100%"></canvas></div>
+        <div><div class="muted" style="margin-bottom:4px">FFT 파워 스펙트럼 — 클릭해서 스폿 측정</div>
+          <canvas id="latFFT" style="border-radius:8px;cursor:crosshair;max-width:100%"></canvas></div>
+        <div><div class="muted" style="margin-bottom:4px">역FFT (선택 스폿만) <span id="latInvNote"></span></div>
+          <canvas id="latInv" style="border-radius:8px;max-width:100%"></canvas>
+          <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
+            <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="latDC" ${L.keepDC?"checked":""}>DC 포함</label>
+            <label class="f" style="font-size:11.5px">가장자리 부드럽게<input type="range" id="latSoft" min="0" max="0.9" step="0.05" value="${L.soft}" style="width:90px"></label>
+          </div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>측정값 <span class="hint">d = 1/|g| · Friedel 짝을 함께 재서 중심 오차를 상쇄</span>
+        <span style="flex:1"></span>
+        <button class="btn sm" id="latCsv">CSV</button>
+        <button class="btn sm" id="latPng">PNG 저장</button></h3>
+      ${rows?`<div class="tblwrap"><table class="tbl"><thead><tr>
+        <th class="l">#</th><th>d [Å]</th><th>d [nm]</th><th>|g| [nm⁻¹]</th><th>각 [°]</th><th>|g| [px]</th><th>Friedel</th><th title="가로·세로 축에 붙은 스폿은 아티팩트일 수 있습니다">주의</th><th title="같은 반지름의 배경 중앙값 대비 몇 배인가">배경대비</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`
+      :`<div class="note">FFT 를 클릭해 스폿을 고르세요.</div>`}
+      ${groups.length?`<div class="note okay" style="margin-top:10px">
+        <b>고차 반사 일관성</b> — 같은 방향에 |g| 가 정수배로 놓인 스폿은 같은 격자면의 1차·2차·… 반사입니다.
+        정수비에서 벗어나면 측정이나 교정에 문제가 있다는 신호이므로, 이 검사는 <b>독립 증거</b>가 됩니다.<br>
+        ${groups.map(gp=>`· 스폿 ${gp.members.map(i=>"#"+(i+1)).join(", ")} = ${gp.orders.join("차, ")}차 →
+          1차 <b>${(gp.d1*10).toFixed(4)} Å</b> (여러 차수 동시 적합) · 정수비 최대 편차 <b>${(100*gp.maxDev).toFixed(2)}%</b>
+          ${gp.maxDev<0.01?'<span class="badge ok">일관</span>':gp.maxDev<0.03?'<span class="badge warn">느슨</span>':'<span class="badge risk">불일치</span>'}`).join("<br>")}
+      </div>`:""}
+      ${suspect.some(Boolean)?`<div class="note warn" style="margin-top:10px">
+        <b>축에 정렬된 스폿이 있습니다</b> (#${suspect.map((v,i)=>v?i+1:0).filter(Boolean).join(", #")}).
+        가로·세로에 딱 붙은 스폿은 카메라 판독 줄무늬·스캔 잡음·창 누출이 만드는 경우가 많습니다 —
+        실공간 이미지에서 그 방향의 줄무늬가 실제 격자인지 확인하세요. 실제 격자가 우연히 축에 정렬될 수도 있으므로
+        <b>경고이지 판정이 아닙니다.</b></div>`:""}
+      ${pairs.length?`<div class="tblwrap" style="margin-top:10px"><table class="tbl"><thead><tr>
+        <th class="l">스폿 쌍</th><th>사잇각</th><th>d 비</th></tr></thead><tbody>${pairs.join("")}</tbody></table></div>
+        <div class="muted" style="margin-top:6px">사잇각과 d 비는 <b>화소 크기에 의존하지 않습니다</b> —
+        배율 교정이 틀려도 이 두 값은 맞습니다. 정대(zone axis) 판정에는 d 자체보다 이쪽이 믿을 만합니다.</div>`:""}
+    </div>
+
+    <div class="card">
+      <h3>배율 교정 <span class="hint">d 측정의 지배적 계통오차는 현미경 배율 교정입니다 (보통 1~2%)</span></h3>
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <label class="f">기준 스폿<select id="latCalS">${L.spots.map((sp,i)=>sp.m?`<option value="${i}">#${i+1} · ${(sp.m.d*10).toFixed(3)} Å</option>`:"").join("")}</select></label>
+        <label class="f">알려진 격자면<select id="latCalStd"><option value="">직접 입력</option>
+          ${HR_STANDARDS.map(s=>`<option value="${s.d}">${esc(s.name)} · ${(s.d*10).toFixed(3)} Å</option>`).join("")}</select></label>
+        <label class="f">알려진 d [Å]<input type="number" id="latCalD" class="mono" style="width:100px" step="0.0001" placeholder="예: 2.3550"></label>
+        <button class="btn sm primary" id="latCalGo">교정 적용</button>
+        <button class="btn sm" id="latCalRst">해제</button>
+      </div>
+      <div class="note ${L.pxCal?"okay":""}" style="margin-top:8px">
+        ${L.pxCal
+          ? `<b>교정 적용 중 — 화소 크기 ×${L.pxCal.toFixed(5)}</b> (${(pxBase*1000).toFixed(3)} → ${(px*1000).toFixed(3)} pm/px).
+             ${esc(L.calibNote||"")}<br>이 보정은 <b>이 배율에서만</b> 유효합니다 — 배율을 바꾸면 다시 교정하세요.`
+          : `<b>교정 없이 파일의 화소 크기를 그대로 쓰고 있습니다.</b>
+             아래 d 값들은 그 배율 교정이 맞다는 전제 위에 있습니다. 표준 격자면을 같은 배율로 찍어 두었다면
+             여기서 교정하세요 — 하지 않았다면 <b>d 의 절대값에 1~2% 계통오차</b>가 있다고 보고하는 것이 정직합니다.`}
+      </div>
+    </div>
+  </div>`));
+
+  const cvR=$("#latReal"), cvF=$("#latFFT"), cvI=$("#latInv");
+  latDrawReal(cvR,F); latDrawFFT(cvF,F);
+  const inv=latDrawInv(cvI,F);
+  const note=$("#latInvNote");
+  if(note&&inv) note.innerHTML=`<span class="muted">허수부 ${(100*inv.imagFrac).toExponential(1)}% — Friedel 대칭 확인</span>`;
+
+  cvR.onclick=e=>{ const r=cvR.getBoundingClientRect(), sc=cvR._sc*(cvR.width/r.width);
+    L.cx=(e.clientX-r.left)*(cvR.width/r.width)/cvR._sc; L.cy=(e.clientY-r.top)*(cvR.height/r.height)/cvR._sc;
+    L.spots=[]; renderView(); };
+  cvF.onclick=e=>{ const r=cvF.getBoundingClientRect();
+    const x=(e.clientX-r.left)*(cvF.width/r.width)/cvF._sc, y=(e.clientY-r.top)*(cvF.height/r.height)/cvF._sc;
+    const m=hrMeasure(F.P,x,y,L.pickR);
+    if(!m){ toast("그 자리에서 스폿을 찾지 못했습니다 — 대비를 올리거나 더 가깝게 찍어 보세요","warn"); return; }
+    { const np=F._np||(F._np=hrNormPower(F.P));
+      m.snrN=np[Math.min(F.N-1,Math.round(m.a.y))*F.N+Math.min(F.N-1,Math.round(m.a.x))]; }
+    if(m.gpx<3){ toast("중심(DC)에 너무 가깝습니다","warn"); return; }
+    L.spots.push({x,y,m,on:true}); renderView(); };
+
+  $("#latImg").onchange=e=>{ state.curImage=+e.target.value; IMG.cache=null; LATFFT=null; L.cx=null; L.spots=[]; renderView(); };
+  $("#latN").onchange=e=>{ L.N=+e.target.value; L.spots=[]; renderView(); };
+  $("#latWin").onchange=e=>{ L.win=e.target.value; renderView(); };
+  $("#latGam").oninput=e=>{ L.gamma=+e.target.value; latDrawFFT(cvF,F); };
+  $("#latBg").onchange=e=>{ L.bgNorm=e.target.checked; latDrawFFT(cvF,F); };
+  $("#latR").onchange=e=>{ L.maskR=Math.max(2,num(e.target.value,8)); L.pickR=L.maskR; renderView(); };
+  $("#latDC").onchange=e=>{ L.keepDC=e.target.checked; renderView(); };
+  $("#latSoft").onchange=e=>{ L.soft=+e.target.value; renderView(); };
+  $("#latClr").onclick=()=>{ L.spots=[]; renderView(); };
+  root.querySelectorAll(".latDel").forEach(b=>b.onclick=()=>{ L.spots.splice(+b.dataset.i,1); renderView(); });
+  root.querySelectorAll(".latOn").forEach(c=>c.onchange=()=>{ L.spots[+c.dataset.i].on=c.checked; renderView(); });
+
+  $("#latAuto").onclick=()=>{
+    const out=hrFindSpots(F.P,{pickR:L.pickR, rmin:Math.max(6,L.maskR), max:6, minSnr:4});
+    if(!out.length){ toast("배경 대비 4배를 넘는 스폿을 찾지 못했습니다 — 영역을 결정질 위로 옮기거나 FFT 영역을 키워 보세요","warn"); return; }
+    L.spots=out; renderView();
+    toast(`스폿 ${out.length}개 (배경 대비 ${out.map(o=>o.m.snrN.toFixed(0)).join("·")}배)`,"ok");
+  };
+
+  const stdSel=$("#latCalStd"); if(stdSel) stdSel.onchange=()=>{ if(stdSel.value) $("#latCalD").value=(+stdSel.value*10).toFixed(4); };
+  $("#latCalGo").onclick=()=>{
+    const i=+($("#latCalS")&&$("#latCalS").value); const sp=L.spots[i];
+    const dA=num($("#latCalD").value,null);
+    if(!sp||!sp.m||!(dA>0)){ toast("기준 스폿과 알려진 d 를 모두 지정하세요","err"); return; }
+    const f=hrCalibFactor(sp.m.d, dA/10);
+    if(!f){ toast("교정 계수를 계산할 수 없습니다","err"); return; }
+    L.pxCal=(L.pxCal||1)*f;
+    L.calibNote=`기준: #${i+1} 측정 ${(sp.m.d*10).toFixed(4)} Å → 지정 ${dA.toFixed(4)} Å (${((f-1)*100).toFixed(2)}% 보정)`;
+    LATFFT=null; renderView();
+    toast(`화소 크기를 ${((f-1)*100).toFixed(2)}% 보정했습니다`,"ok");
+  };
+  $("#latCalRst").onclick=()=>{ L.pxCal=null; L.calibNote=""; LATFFT=null; renderView(); };
+
+  $("#latCsv").onclick=()=>{
+    const r=[["#","d_A","d_nm","g_1_per_nm","angle_deg","g_px","friedel","snr",
+              "px_nm","px_calibrated","N","window","roi_x0","roi_y0","source"]];
+    L.spots.forEach((sp,i)=>{ if(!sp.m) return; const m=sp.m;
+      r.push([i+1,(m.d*10).toFixed(5),m.d.toFixed(6),m.g.toFixed(5),m.angle.toFixed(3),m.gpx.toFixed(3),
+              m.friedel?1:0,(m.snrN!=null?m.snrN.toFixed(2):(isFinite(m.snr)?m.snr.toFixed(2):"inf")),
+              px.toFixed(6),L.pxCal?L.pxCal.toFixed(6):1,F.N,L.win,F.roi.x0,F.roi.y0,(rec.name||"")]); });
+    for(let i=0;i<L.spots.length;i++) for(let j=i+1;j<L.spots.length;j++){
+      const a=L.spots[i].m,b=L.spots[j].m; if(!a||!b) continue;
+      r.push([`pair_${i+1}_${j+1}`,"","","",hrAngleBetween(a,b).toFixed(3),"","","","","","","","","","d_ratio="+(a.d/b.d).toFixed(5)]);
+    }
+    downloadText(r.map(v=>v.join(",")).join("\n"),(rec.name||"lattice").replace(/\.[^.]+$/,"")+"_dspacing.csv","text/csv");
+  };
+  $("#latPng").onclick=()=>{
+    /* 세 장을 한 장으로 합쳐 내보낸다 — 실공간 · FFT · 역FFT 가 함께 있어야 근거가 된다 */
+    const S=cvF.width, pad=14, hdr=52, gap=12;
+    const n=cvI.width>20?3:2;
+    const W=pad*2+S*n+gap*(n-1), H=hdr+S+pad+34;
+    const o=document.createElement("canvas"); o.width=W; o.height=H;
+    const g=o.getContext("2d");
+    g.fillStyle="#0B0F14"; g.fillRect(0,0,W,H);
+    g.fillStyle="#E5E7EB"; g.font="bold 15px system-ui";
+    g.fillText(`${rec.name||"HRTEM"} — 격자 해석`, pad, 24);
+    g.fillStyle="#9CA3AF"; g.font="12px system-ui";
+    g.fillText(`화소 ${(px*1000).toFixed(2)} pm${L.pxCal?` (교정 ×${L.pxCal.toFixed(5)})`:" (파일값)"} · FFT ${F.N}² · 창 ${L.win} · Δg ${dg.toFixed(4)} nm⁻¹`, pad, 42);
+    g.drawImage(cvR,pad,hdr); g.drawImage(cvF,pad+S+gap,hdr);
+    if(n===3) g.drawImage(cvI,pad+2*(S+gap),hdr);
+    g.fillStyle="#9CA3AF"; g.font="11px system-ui";
+    const lbl=["실공간 (초록 = FFT 영역)","FFT 파워 스펙트럼","역FFT (선택 스폿)"];
+    for(let i=0;i<n;i++) g.fillText(lbl[i], pad+i*(S+gap), hdr+S+16);
+    const ds=L.spots.filter(s=>s.m).map((s,i)=>`#${i+1} ${(s.m.d*10).toFixed(3)} Å @ ${s.m.angle.toFixed(1)}°`).join("   ");
+    g.fillStyle="#F59E0B"; g.font="12px system-ui";
+    g.fillText(ds||"(스폿 없음)", pad, hdr+S+32);
+    o.toBlob(bl=>{ const a=document.createElement("a");
+      a.href=URL.createObjectURL(bl); a.download=(rec.name||"lattice").replace(/\.[^.]+$/,"")+"_fft.png";
+      a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); });
+  };
+}
 
 </script>
 </body>
