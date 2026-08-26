@@ -193,6 +193,39 @@ html[data-theme="dark"] .toast{background:#1E2A44;border:1px solid var(--line2)}
   .vwrap{grid-template-columns:1fr}
 }
 
+/* ---------- 원소 맵 겹쳐보기 ---------- */
+.maprow{display:flex;align-items:center;gap:8px;padding:3px 0}
+.maprow .mapname{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.maprow input[type=range]{width:78px;flex:0 0 auto}
+button.mapsw,span.mapsw{width:18px;height:18px;border-radius:5px;border:1px solid rgba(0,0,0,.25);
+  flex:0 0 auto;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+.pickpop{position:absolute;z-index:60;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;padding:8px;display:grid;grid-template-columns:repeat(6,18px);gap:7px;
+  box-shadow:0 8px 28px rgba(0,0,0,.25)}
+.btn.xs{padding:1px 6px;font-size:11px;line-height:1.5}
+#mstage{display:flex;align-items:center;justify-content:center;position:relative}
+#mcv{display:block;background:#000;border-radius:8px}
+.badge.ok{background:rgba(52,199,89,.15);color:#1f8b3d;border-color:rgba(52,199,89,.35)}
+[data-theme=dark] .badge.ok{color:#5fd47f}
+
+/* ---------- 대화상자 ----------
+   .overlay/.modal 에 규칙이 없어 '표준시료로 k 재기' 창이 화면 가운데가 아니라
+   문서 맨 아래에 스타일 없이 붙고 있었다. */
+.overlay{position:fixed;inset:0;z-index:200;background:rgba(15,23,42,.45);
+  -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+  display:block;overflow:auto;padding:24px}
+.overlay.center{display:flex;align-items:flex-start;justify-content:center}
+[data-theme=dark] .overlay{background:rgba(0,0,0,.6)}
+.overlay .modal{position:relative;background:var(--card);color:var(--fg);
+  border:1px solid var(--line);border-radius:14px;padding:20px 22px;width:100%;
+  margin:auto;box-shadow:0 24px 64px rgba(0,0,0,.35)}
+.overlay .modal h2{font-size:17px;font-weight:700;margin:0 0 12px;padding-right:28px}
+.overlay .modal .closex{position:absolute;top:10px;right:12px;border:none;background:none;
+  font-size:16px;line-height:1;cursor:pointer;color:var(--muted);padding:4px 6px;border-radius:6px}
+.overlay .modal .closex:hover{background:var(--chip);color:var(--fg)}
+.overlay .modal .tbl{margin-top:4px}
+.overlay .modal .row.right{justify-content:flex-end}
+
 </style>
 </head>
 <body>
@@ -31506,6 +31539,277 @@ async function parseBcf(u8,name,size){
 
 </script>
 <script>
+/* ============================================================
+   스펙트럼 이미지(SI) — 스트림 디코드, ROI 스펙트럼, 원소 맵
+
+   Velox의 /Data/SpectrumStream 은 픽셀별 X선 이벤트를 uint16 하나씩 늘어놓은
+   스트림이다. 65535 는 '다음 픽셀로' 표시이고, 나머지 값은 그 시점 픽셀에서
+   검출된 X선의 채널 번호다. 마커 총수 = 폭 × 높이 × 프레임수 이므로 픽셀은
+   마커를 세는 것만으로 정확히 매겨진다.
+
+   전체 이벤트의 97~98%는 제로 스트로브(펄스 프로세서의 기준선 복원)라 유효
+   하한 아래에서 버려진다. 남는 것은 실제 파일에서 22만~59만 개뿐이라, 희소
+   목록 (픽셀, 채널) 로 전부 메모리에 들고 있어도 1~4 MB다. 그러면 ROI
+   스펙트럼도 임의 비닝 원소맵도 즉시 계산된다.
+
+   검증(Example #5, 512×512×106):
+     프레임 경계   FrameLocationTable[f] 이전 마커 수 = f × 512 × 512   (전 프레임 일치)
+     스펙트럼      디코드 결과가 /Data/Spectrum 과 채널별로 완전히 동일 (최대 차이 0)
+     공간 정렬     Velox 자체 맵과의 상관이 ±1 픽셀 이동보다 항상 높다
+                   (F 0.901 / Na 0.751 / Lu 0.571 — 그대로가 최고)
+   ============================================================ */
+
+const SI_MARKER=65535;
+
+function siScanSize(rec){
+  const md=(rec.streams[0]||{}).md||{};
+  let W=num(md.Scan&&md.Scan.ScanSize&&md.Scan.ScanSize.width);
+  let H=num(md.Scan&&md.Scan.ScanSize&&md.Scan.ScanSize.height);
+  if(!W||!H){
+    const st=rec.images.find(im=>(im.shape||[]).length>2&&im.shape[2]>1);
+    if(st){ W=st.shape[1]; H=st.shape[0]; }
+  }
+  return (W&&H)?{W,H}:null;
+}
+
+/* 스트림을 훑어 희소 이벤트 목록을 만든다. 한 번에 다 읽지 않고 잘라 읽는다. */
+async function decodeStream(rec,onProg){
+  if(rec.si) return rec.si;
+  if(!rec.streams||!rec.streams.length) return null;
+  const sz=siScanSize(rec); if(!sz) throw new Error("스캔 크기를 알 수 없습니다");
+  const {W,H}=sz, NPIX=W*H;
+  const md0=rec.streams[0].md||{};
+  const d=analyticalDetector(md0)||{};
+  const disp=num(d.Dispersion,5), off=num(d.OffsetEnergy,-250), beg=num(d.BeginEnergy,120);
+  const ch0=Math.max(0,Math.ceil((beg-off)/disp));
+  const nch=(rec.spectra[0]&&rec.spectra[0].shape&&rec.spectra[0].shape[0])||4096;
+
+  const pixParts=[], chParts=[];
+  let total=0, dropped=0, markers=0, seen=0, grand=0;
+  for(const st of rec.streams) grand+=(rec.h5.get(st.base+"/Data").shape[0]|0);
+
+  for(const st of rec.streams){
+    const ds=rec.h5.get(st.base+"/Data");
+    const N=ds.shape[0]|0;
+    /* 잘라 읽는 크기. 경계를 넘을 때 마커 누적(p)이 이어져야 한다 —
+       시험에서 작게 줄여 그 경로를 강제로 지나가게 한다. */
+    const CH=(typeof window!=="undefined"&&window.__SI_CHUNK)||(4<<20);
+    let p=0;                                  // 이 검출기에서 지금까지 본 마커 수
+    for(let a=0;a<N;a+=CH){
+      const b=Math.min(N,a+CH);
+      const blk=ds.slice([[a,b],[0,1]]);
+      const L=blk.length;
+      const P=new Int32Array(L), C=new Int16Array(L);
+      let k=0;
+      for(let i=0;i<L;i++){
+        const v=blk[i];
+        if(v===SI_MARKER){ p++; continue; }
+        if(v<ch0){ dropped++; continue; }
+        P[k]=p%NPIX; C[k]=v; k++;
+      }
+      if(k){ pixParts.push(P.subarray(0,k)); chParts.push(C.subarray(0,k)); total+=k; }
+      seen+=L;
+      if(onProg) await onProg(seen/Math.max(1,grand));
+    }
+    markers+=p;
+  }
+  const pix=new Int32Array(total), ch=new Int16Array(total);
+  let w=0;
+  for(let i=0;i<pixParts.length;i++){ pix.set(pixParts[i],w); ch.set(chParts[i],w); w+=pixParts[i].length; }
+  const nFrames=NPIX>0?Math.round(markers/NPIX/rec.streams.length):0;
+
+  rec.si={pix,ch,W,H,NPIX,nch,disp,off,ch0,nFrames,
+          nDet:rec.streams.length,total,dropped,markers};
+  return rec.si;
+}
+
+/* 마스크(길이 NPIX, 0/1)에 해당하는 픽셀만 모은 스펙트럼 */
+function siSpectrum(si,mask){
+  const y=new Float64Array(si.nch);
+  const pix=si.pix, ch=si.ch, n=pix.length;
+  for(let i=0;i<n;i++){ if(mask[pix[i]]) y[ch[i]]++; }
+  return y;
+}
+function siMaskCount(mask){ let c=0; for(let i=0;i<mask.length;i++) if(mask[i]) c++; return c; }
+
+/* 사각 영역 + (선택) 기준 상의 밝기 임계로 마스크를 만든다.
+   임계는 지지막·그리드를 빼고 입자만 고르는 데 쓴다. */
+function siMask(si,rect,gate){
+  const m=new Uint8Array(si.NPIX);
+  const x0=Math.max(0,Math.floor(rect?rect.x0:0)), x1=Math.min(si.W-1,Math.ceil(rect?rect.x1:si.W-1));
+  const y0=Math.max(0,Math.floor(rect?rect.y0:0)), y1=Math.min(si.H-1,Math.ceil(rect?rect.y1:si.H-1));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) m[y*si.W+x]=1;
+  if(gate&&gate.data&&gate.w===si.W&&gate.h===si.H){
+    const g=gate.data, lo=gate.lo, hi=(gate.hi==null?Infinity:gate.hi);
+    for(let i=0;i<m.length;i++) if(m[i]&&!(g[i]>=lo&&g[i]<=hi)) m[i]=0;
+  }
+  return m;
+}
+
+/* 채널 구간을 비닝해 맵으로. bin=1 이면 원본 화소. */
+function siWindowMap(si,lo,hi,bin){
+  bin=Math.max(1,bin|0);
+  const BW=Math.ceil(si.W/bin), BH=Math.ceil(si.H/bin);
+  const m=new Float32Array(BW*BH);
+  const pix=si.pix, ch=si.ch, n=pix.length, W=si.W;
+  for(let i=0;i<n;i++){
+    const c=ch[i]; if(c<lo||c>hi) continue;
+    const p=pix[i], x=p%W, y=(p-x)/W;
+    m[((y/bin)|0)*BW+((x/bin)|0)]++;
+  }
+  return {data:m,w:BW,h:BH,bin};
+}
+
+/* 원소 맵. 주선 창에서 세고, 양옆 창으로 배경을 빼는 고전적인 방법이다.
+   (Velox·Bruker의 'Integration' 과 같은 성격 — 겹친 선은 분리하지 못한다) */
+function siElementMap(si,el,fam,bin,fwhmMn){
+  const r=XRL[el]; if(!r||!r.lines[fam]) return null;
+  const Emin=Math.max(0.2,(si.off+si.disp*si.ch0)/1000), Emax=(si.off+si.disp*(si.nch-1))/1000;
+  const ls=r.lines[fam].filter(l=>l[1]>=Emin&&l[1]<=Emax&&l[2]>=0.02);
+  if(!ls.length) return null;
+  const pr=ls.reduce((a,b)=>b[2]>a[2]?b:a,ls[0]);
+  const E0=pr[1]*1000, fw=fwhmAt(E0,fwhmMn||130);
+  const chOfE=e=>Math.round((e-si.off)/si.disp);
+  const lo=chOfE(E0-fw*0.75), hi=chOfE(E0+fw*0.75);
+  const bl0=chOfE(E0-fw*2.6), bl1=chOfE(E0-fw*1.1);
+  const br0=chOfE(E0+fw*1.1), br1=chOfE(E0+fw*2.6);
+  const pk=siWindowMap(si,lo,hi,bin);
+  const bL=siWindowMap(si,Math.max(si.ch0,bl0),Math.max(si.ch0,bl1),bin);
+  const bR=siWindowMap(si,br0,Math.min(si.nch-1,br1),bin);
+  const wPk=hi-lo+1, wBg=(Math.max(0,bl1-bl0+1)+Math.max(0,br1-br0+1))||1;
+  const k=wPk/wBg;
+  const out=new Float32Array(pk.data.length);
+  for(let i=0;i<out.length;i++) out[i]=Math.max(0, pk.data[i]-k*(bL.data[i]+bR.data[i]));
+  let gross=0,net=0;
+  for(let i=0;i<out.length;i++){ gross+=pk.data[i]; net+=out[i]; }
+  return {data:out,w:pk.w,h:pk.h,bin,el,fam,E:E0,gross,net,
+          win:[lo,hi],bg:[bl0,bl1,br0,br1]};
+}
+
+/* ---------- 비닝 화소마다 동시 적합(NNLS)으로 만드는 원소 맵 ----------
+
+   창 적분은 겹친 선을 분리하지 못한다(Tm/Yb/Lu L선, Ni Ka 어깨에 묻힌 Lu La 등).
+   비닝 화소마다 스펙트럼을 세워 동시에 풀면 그 배분이 제대로 된다.
+
+   핵심은 계산량이 아니라 구조다. 원소 모형 A 가 모든 화소에서 같으므로
+
+       G = AᵀWA          <- 화소와 무관, 한 번만 계산
+       b_p = AᵀW y_p     <- 이벤트를 훑으며 누적할 수 있다
+
+   b_p 누적은 이벤트 하나당 원소 수만큼의 곱셈이라 22만 이벤트 × 10원소 = 220만 번이다.
+   화소별로 스펙트럼을 따로 만들어 들고 있을 필요가 없다(64×64×4096 = 67 MB를 아낀다).
+
+   배경은 빼지 않고 '모양이 고정된 성분 하나'로 같이 적합한다. 두께에 따라 크기만
+   변하므로 화소마다 세기를 하나 더 푸는 것으로 충분하다.
+
+   G 가 모든 화소에서 같으므로 (AᵀWA)⁻¹ 도 같다 — 검출한계가 맵 전체에서 하나다.   */
+
+function siFitMaps(si,cands,bin,fwhmMn,opts){
+  opts=opts||{};
+  bin=Math.max(1,bin|0);
+  const nch=si.nch, i0=si.ch0;
+  const S={nch, E:new Float64Array(nch), cal:{disp:si.disp,off:si.off}, i0};
+  for(let i=0;i<nch;i++) S.E[i]=(si.off+si.disp*i)/1000;
+  const Emin=Math.max(0.2,S.E[i0]), Emax=Math.min(20,S.E[nch-1]);
+  const rho=opts.rho||0;
+
+  const cols=[];
+  for(const c of cands){
+    const pr=elementProfile(S,c.el,c.fam,fwhmMn,[Emin,Emax]);
+    if(!pr) continue;
+    const relOf=fam=>{
+      const L=(XRL[c.el].lines[fam]||[]);
+      const mx=L.reduce((a,l)=>Math.max(a,l[2]),0)||1;
+      return L.filter(l=>l[1]>=Emin&&l[1]<=Emax&&l[2]>=0.02).reduce((a,l)=>a+l[2],0)/mx;
+    };
+    const prof=Float64Array.from(pr.prof);
+    let relSumM=0;
+    /* 식별에서 쓴 것과 같은 M 계열 결합 — 세기 정의를 맞춰야 k-factor가 통한다 */
+    if(rho>0 && c.fam==="L" && XRL[c.el].lines.M){
+      const mp=elementProfile(S,c.el,"M",fwhmMn,[Emin,Emax]);
+      if(mp && famAllowed(c.el,"M",mp.principal)){
+        for(let i=mp.lo;i<=mp.hi;i++) prof[i]+=rho*mp.prof[i];
+        relSumM=relOf("M")*rho;
+      }
+    }
+    cols.push({el:c.el,fam:c.fam,prof,relSum:relOf(c.fam),relSumM});
+  }
+  if(!cols.length) return null;
+  /* 배경 — 모양은 합산 스펙트럼에서 잰 것을 쓰고 크기만 화소마다 푼다 */
+  if(opts.bgShape){
+    let mx=0; for(let i=i0;i<nch;i++) mx=Math.max(mx,opts.bgShape[i]);
+    if(mx>0){
+      const p=new Float64Array(nch);
+      for(let i=i0;i<nch;i++) p[i]=opts.bgShape[i]/mx;
+      cols.push({el:"__bg",fam:"",prof:p,relSum:1,bg:true});
+    }
+  }
+  const K=cols.length;
+
+  const BW=Math.ceil(si.W/bin), BH=Math.ceil(si.H/bin), NB=BW*BH;
+
+  /* 가중치 = 1/분산. 한 화소가 기대하는 카운트로 잡는다(합산 ÷ 화소 수). */
+  const ySum=new Float64Array(nch);
+  const pix=si.pix, ch=si.ch, n=pix.length;
+  for(let i=0;i<n;i++) ySum[ch[i]]++;
+  const w=new Float64Array(nch);
+  for(let i=i0;i<nch;i++) w[i]=1/Math.max(0.05, ySum[i]/NB);
+
+  /* wA[ch][k] 를 평탄 배열로 미리 계산 — 이벤트 누적이 곧바로 읽어 쓴다 */
+  const wA=new Float64Array(nch*K);
+  for(let i=i0;i<nch;i++){
+    const wi=w[i], base=i*K;
+    for(let k=0;k<K;k++) wA[base+k]=wi*cols[k].prof[i];
+  }
+  /* G = AᵀWA */
+  const G=new Float64Array(K*K);
+  for(let i=i0;i<nch;i++){
+    const base=i*K;
+    for(let j=0;j<K;j++){
+      const a=cols[j].prof[i]; if(a===0) continue;
+      for(let k=j;k<K;k++) G[j*K+k]+=a*wA[base+k];
+    }
+  }
+  for(let j=0;j<K;j++) for(let k=0;k<j;k++) G[j*K+k]=G[k*K+j];
+  let tr=0; for(let j=0;j<K;j++) tr+=G[j*K+j];
+  for(let j=0;j<K;j++) G[j*K+j]+=(tr/K)*1e-9;
+
+  /* b_p = AᵀW y_p — 이벤트를 훑으며 누적 */
+  const B=new Float64Array(NB*K);
+  const W_=si.W;
+  for(let i=0;i<n;i++){
+    const c0=ch[i]; if(c0<i0) continue;
+    const p=pix[i], x=p%W_, y=(p-x)/W_;
+    const b=(((y/bin)|0)*BW+((x/bin)|0))*K, base=c0*K;
+    for(let k=0;k<K;k++) B[b+k]+=wA[base+k];
+  }
+
+  /* 화소마다 NNLS. G가 같으므로 반복은 K² 짜리 갱신뿐이다. */
+  const amp=new Float64Array(NB*K), bv=new Float64Array(K);
+  for(let p=0;p<NB;p++){
+    for(let k=0;k<K;k++) bv[k]=B[p*K+k];
+    const c=nnlsCD(G,bv,K,60);
+    for(let k=0;k<K;k++) amp[p*K+k]=c[k];
+  }
+
+  /* 불확도 — 활성 집합을 전부 쓴 경우의 (AᵀWA)⁻¹. 맵 전체에서 하나다. */
+  const inv=invSym(Float64Array.from(G),K);
+  const out=[];
+  for(let k=0;k<K;k++){
+    if(cols[k].bg) continue;
+    const scale=(cols[k].relSum||1)+(cols[k].relSumM||0);
+    const d=new Float32Array(NB);
+    let tot=0;
+    for(let p=0;p<NB;p++){ const v=amp[p*K+k]*scale; d[p]=v; tot+=v; }
+    const sd=(inv&&inv[k*K+k]>0)?Math.sqrt(inv[k*K+k])*scale:Infinity;
+    out.push({el:cols[k].el,fam:cols[k].fam,data:d,w:BW,h:BH,bin,
+              total:tot,mdl:3*sd,perPx:tot/NB});
+  }
+  return {maps:out,K,NB,bin,nEl:cols.length-(opts.bgShape?1:0)};
+}
+
+</script>
+<script>
 /* ===================================================================
    INNO Analytics — STEM / EDS analysis platform
    (c) 2026 WonJeong Yu.  Velox .emd (HDF5) reader built on NIST h5wasm.
@@ -31572,7 +31876,8 @@ const state = {
     tool:"none", p0:null, p1:null, roi:null, showBar:true, barPos:"br",
     frameMode:"sum"     // "sum" | "first" — 다중 프레임 스택을 어떻게 볼 것인가
   },
-  spec: { logY:false, els:[], eMax:null, fwhmMn:130, showLines:true, qExcl:[] }
+  spec: { logY:false, els:[], eMax:null, fwhmMn:130, showLines:true, qExcl:[] },
+  maps: { key:null, layers:[], bin:8, baseOn:true, baseW:0.45, gamma:1, smooth:3, pick:null, method:"fit" }
 };
 
 /* ============================================================
@@ -31823,6 +32128,18 @@ function parseEmd(vpath,name,size){
   rec.images=grab("/Data/Image","image");
   rec.spectra=grab("/Data/Spectrum","spectrum");
   rec.streams=grab("/Data/SpectrumStream","stream");
+  /* Velox가 저장해 둔 겹쳐보기 상태 (원소 -> 혼합 비율) */
+  rec.mixDefaults=(function(){
+    const out={};
+    try{
+      const g=f.get("/SharedProperties/DisplayGroupItem");
+      if(g&&g.keys) for(const k of g.keys()){
+        const j=JSON.parse(strOf(f.get("/SharedProperties/DisplayGroupItem/"+k).value));
+        if(j&&j.name!=null) out[j.name]={w:num(j.blendFactor,0), mode:j.blendMode||"", sel:!!j.selected};
+      }
+    }catch(e){}
+    return out;
+  })();
   /* 원소맵 이름 — 없으면 검출기 이름을 그대로 쓴다 */
   const titles=imageTitles(f);
   rec.images.forEach(im=>{ const t=titles[im.base]; if(t){ im.title=t.title; im.isMap=(t.id!=="HAADF"&&/SuperX/i.test(im.det||"")); } });
@@ -32013,14 +32330,23 @@ function barLabel(m){
 /* ============================================================
    Views
    ============================================================ */
-const VIEWS=[["files","파일"],["image","이미지"],["spectrum","EDS 스펙트럼"],["interf","간섭 검사"],["meta","메타데이터"]];
-function go(v){ state.view=v; renderView(); }
+const VIEWS=[["files","파일"],["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["interf","간섭 검사"],["meta","메타데이터"]];
+function go(v){
+  state.view=v;
+  if(v==="maps"){
+    const r=curRec();
+    if(r&&r.si&&!r.mapCands){ ensureMapCands(r).then(()=>{ try{ ensureFitMaps(r,state.maps.bin); }catch(e){} renderView(); }); return; }
+    if(r&&r.si&&state.maps.method==="fit"){ try{ ensureFitMaps(r,state.maps.bin); }catch(e){} }
+  }
+  renderView();
+}
 function renderView(){
   const rec=curRec();
   const nav=$("#nav");
   nav.innerHTML=VIEWS.map(([k,t])=>{
     let dis="",cnt="";
     if(k==="image"){ const n=rec?rec.images.length:0; cnt=`<span class="cnt">${n}</span>`; if(!n) dis="disabled"; }
+    if(k==="maps"){ const n=mapCapable(rec); cnt=n?`<span class="cnt">${n}</span>`:""; if(!n) dis="disabled"; }
     if(k==="spectrum"){ const n=rec?rec.spectra.length:0; cnt=`<span class="cnt">${n}</span>`; if(!n) dis="disabled"; }
     if(k==="meta"&&!rec) dis="disabled";
     if(k==="interf"&&!rec) dis="";
@@ -32031,6 +32357,7 @@ function renderView(){
   try{
     if(state.view==="files") renderFiles(root);
     else if(state.view==="image") renderImage(root);
+    else if(state.view==="maps") renderMaps(root);
     else if(state.view==="spectrum") renderSpectrum(root);
     else if(state.view==="interf") renderInterf(root);
     else renderMeta(root);
@@ -32364,9 +32691,56 @@ function renderImage(root){
     for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const v=c.data[y*c.w+x]; s+=v;s2+=v*v; if(v<mn)mn=v; if(v>mx)mx=v; cnt++; }
     const mean=s/cnt, sd=Math.sqrt(Math.max(0,s2/cnt-mean*mean));
     const areaTxt=c.px?fmtLen(W*c.px.x)+" × "+fmtLen(H*c.px.y):`${W} × ${H} px`;
+    const rec2=curRec();
+    const canSI = rec2 && rec2.streams && rec2.streams.length && c.w===(siScanSize(rec2)||{}).W && c.h===(siScanSize(rec2)||{}).H;
     box.innerHTML=`<h3 style="font-size:14px">ROI 통계 <span class="hint">${areaTxt} · ${cnt.toLocaleString()} px</span></h3>
       <div class="readout">평균 <b>${mean.toFixed(2)}</b> · 표준편차 <b>${sd.toFixed(2)}</b> · 최소 <b>${mn}</b> · 최대 <b>${mx}</b><br>
-      SNR (평균/표준편차) <b>${sd>0?(mean/sd).toFixed(2):"–"}</b></div>`;
+      SNR (평균/표준편차) <b>${sd>0?(mean/sd).toFixed(2):"–"}</b></div>`
+      + (canSI?`<div class="sep"></div>
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn sm" id="roiSpec">이 영역의 EDS 스펙트럼</button>
+        <label class="row" style="gap:5px;font-size:12px;font-weight:600">
+          <input type="checkbox" id="roiGate"> 밝기 임계 적용
+        </label>
+        <span class="muted" id="roiGateTxt" style="font-size:11.5px">현재 표시 최소값 <b>${Math.round(S.lo)}</b> 이상만</span>
+      </div>
+      <div class="muted" style="margin-top:6px;line-height:1.5">임계를 켜면 표시 최소값 아래(지지막·구멍)를 빼고 입자 픽셀만 모읍니다. 임계는 좌측 <b>최소</b> 슬라이더로 조절합니다.</div>`:"");
+    const btn=$("#roiSpec");
+    if(btn) btn.onclick=()=>makeRoiSpectrum({x0,y0,x1,y1}, $("#roiGate").checked);
+  }
+
+  /* ROI → 스펙트럼. 스트림은 처음 한 번만 디코드하고 레코드에 붙여 둔다. */
+  async function makeRoiSpectrum(rect,useGate){
+    const rec2=curRec(); if(!rec2) return;
+    try{
+      if(!rec2.si){
+        busy(true,"스펙트럼 스트림 디코드 중… 0%");
+        let last=0;
+        await decodeStream(rec2, async(t)=>{
+          const pc=Math.round(t*100);
+          if(pc>=last+5){ last=pc; busy(true,"스펙트럼 스트림 디코드 중… "+pc+"%"); await sleep(0); }
+        });
+      }
+      busy(true,"영역 스펙트럼 계산 중…");
+      await sleep(0);
+      const si=rec2.si;
+      const gate = useGate ? {data:c.data,w:c.w,h:c.h,lo:S.lo,hi:null} : null;
+      const mask=siMask(si,rect,gate);
+      const npx=siMaskCount(mask);
+      if(!npx){ busy(false); toast("선택된 픽셀이 없습니다 — 임계를 낮춰 보세요","warn"); return; }
+      const y=siSpectrum(si,mask);
+      let tot=0; for(let i=0;i<y.length;i++) tot+=y[i];
+      const md=(rec2.streams[0]||{}).md||{};
+      const label=`ROI ${rect.x1-rect.x0+1}×${rect.y1-rect.y0+1}px`+(useGate?" · 임계":"");
+      rec2.spectra.push({kind:"spectrum", uid:"__roi"+rec2.spectra.length, base:null,
+        shape:[si.nch,1], dtype:"<Q", md, px:null, det:label, role:"ROI",
+        roiData:y, sumDet:true, nDet:si.nDet,
+        roiInfo:{rect,useGate,npx,counts:tot,frac:npx/si.NPIX}});
+      state.curSpec=rec2.spectra.length-1;
+      busy(false);
+      toast(`${npx.toLocaleString()} px · 유효 ${Math.round(tot).toLocaleString()} 카운트`,"ok");
+      go("spectrum");
+    }catch(e){ busy(false); console.error(e); toast("ROI 스펙트럼 실패: "+(e&&e.message||e),"err"); }
   }
 
   /* export */
@@ -32523,6 +32897,52 @@ function makeTiff16(data,w,h,nmPerPx){
 /* ============================================================
    EDS spectrum
    ============================================================ */
+/* 제로 스트로브 봉우리 = 0 eV 짜리 전자 노이즈 분포. 그 폭이 곧 sigma0 이다.
+   검출 하한 아래에 항상 들어 있고(전체 카운트의 90% 이상인 경우도 있다),
+   메타데이터의 노이즈 항목보다 신뢰할 수 있다. 재지 못하면 null. */
+function zeroPeakSigma(raw,off,disp,nch){
+  if(!raw||!disp) return null;
+  /* 0 eV 를 중심으로 ±180 eV */
+  const lo=Math.max(0,Math.round((-180-off)/disp)), hi=Math.min(nch-1,Math.round((180-off)/disp));
+  if(hi-lo<8) return null;
+  let sw=0,sx=0,sxx=0;
+  for(let i=lo;i<=hi;i++){ const y=raw[i]; if(!(y>0)) continue;
+    const E=off+disp*i; sw+=y; sx+=y*E; sxx+=y*E*E; }
+  if(!(sw>200)) return null;
+  const mu=sx/sw, v=sxx/sw-mu*mu;
+  if(!(v>1)) return null;
+  let sd=Math.sqrt(v);
+  if(Math.abs(mu)>120) return null;              // 0 eV 근처가 아니면 스트로브가 아니다
+  /* 봉우리 중심부를 로그-포물선으로 적합해 정련 (꼬리·이웃선의 영향을 줄인다) */
+  const a=Math.max(lo,Math.round((mu-2.2*sd-off)/disp)), b=Math.min(hi,Math.round((mu+2.2*sd-off)/disp));
+  let n=0,Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
+  for(let i=a;i<=b;i++){
+    const y=raw[i]; if(!(y>0)) continue;
+    const x=(off+disp*i-mu)/100, ly=Math.log(y);
+    n++; Sx+=x; Sx2+=x*x; Sx3+=x*x*x; Sx4+=x*x*x*x; Sy+=ly; Sxy+=x*ly; Sx2y+=x*x*ly;
+  }
+  if(n<6) return null;
+  /* 정규방정식 3x3 */
+  const M=[[Sx4,Sx3,Sx2],[Sx3,Sx2,Sx],[Sx2,Sx,n]], B=[Sx2y,Sxy,Sy];
+  for(let c=0;c<3;c++){
+    let p=c; for(let r=c+1;r<3;r++) if(Math.abs(M[r][c])>Math.abs(M[p][c])) p=r;
+    if(Math.abs(M[p][c])<1e-12) return null;
+    if(p!==c){ const t=M[p]; M[p]=M[c]; M[c]=t; const tb=B[p]; B[p]=B[c]; B[c]=tb; }
+    for(let r=0;r<3;r++){ if(r===c) continue;
+      const f=M[r][c]/M[c][c];
+      for(let k=c;k<3;k++) M[r][k]-=f*M[c][k];
+      B[r]-=f*B[c]; }
+  }
+  const A2=B[0]/M[0][0];
+  if(!(A2<0)) return null;
+  const sig=Math.sqrt(-1/(2*A2))*100;            // x 를 100 eV 단위로 썼다
+  if(!(sig>4&&sig<80)) return null;
+  /* 봉우리에 채널이 너무 적게 걸리면 폭을 믿을 수 없다 */
+  if(4*sig/disp < 6) return null;
+  return sig;
+}
+const F_FANO=0.12, EPS_SI=3.86, E_MNKA=5895;
+const F=F_FANO, eps=EPS_SI, Emn0=E_MNKA;
 function specCalib(md,summed){
   const d=(summed?summedDetector(md):analyticalDetector(md))||{};
   let disp=num(d.Dispersion), off=num(d.OffsetEnergy);
@@ -32541,16 +32961,20 @@ function specCalib(md,summed){
   const given=num(d.FwhmMnKa);
   const fwhmMn = (given!=null && given>0) ? given
     : (noise!=null && noise>0) ? 2.355*Math.sqrt(noise*noise + F*eps*Emn) : null;
-  return {disp,off,beginE,noise,fwhmMn,
+  const fwhmExplicit = (given!=null && given>0);
+  return {disp,off,beginE,noise,fwhmMn,fwhmExplicit,
           detName:d.DetectorName||(br&&br.Detector)||"EDS",
           liveTime:num(d.LiveTime), realTime:num(d.RealTime),
           icr:num(d.InputCountRate), ocr:num(d.OutputCountRate)};
 }
+let LASTSPEC=null;
 function loadSpectrum(){
   const rec=curRec(); if(!rec||!rec.spectra.length) return null;
   const sp=rec.spectra[state.curSpec]; if(!sp) return null;
   let nch, nspec=1, y;
-  if(sp.virtualSum){
+  if(sp.roiData){
+    nch=sp.roiData.length; y=Float64Array.from(sp.roiData); nspec=sp.nDet||1;
+  }else if(sp.virtualSum){
     /* 세그먼트를 전부 더한다 */
     nch=sp.shape[0]; y=new Float64Array(nch);
     for(const base of sp.parts){
@@ -32570,7 +32994,7 @@ function loadSpectrum(){
   }
   /* 합산 스펙트럼이면(파일이 저장한 Summed든, 여기서 만든 4분할 합이든)
      계수율·live time은 세그먼트 하나가 아니라 넷 전체 기준이어야 한다. */
-  const isSum = !!sp.virtualSum || /^summed$/i.test(sp.role||"");
+  const isSum = !!sp.virtualSum || !!sp.sumDet || /^summed$/i.test(sp.role||"");
   const cal=specCalib(sp.md, isSum);
   const E=new Float64Array(nch);
   for(let i=0;i<nch;i++) E[i]=(cal.off+cal.disp*i)/1000;   // keV
@@ -32580,8 +33004,26 @@ function loadSpectrum(){
   const raw=y.slice(0);
   let dropped=0;
   for(let i=0;i<i0;i++){ dropped+=y[i]; y[i]=0; }
+  /* 분해능. 파일이 분해능 모형을 '직접' 담고 있으면(Bruker의 SigmaAbs/SigmaLin)
+     그것을 쓴다. Velox의 ElectronicsNoise 처럼 해석이 모호한 값만 있을 때는
+     제로 스트로브 봉우리를 직접 재는 편이 낫다 — 그 값이 파일의 제로 피크와
+     맞지 않는 것을 실측으로 확인했다(27.69 -> 실측 sigma 16.83). */
+  const sig0raw=zeroPeakSigma(raw,cal.off,cal.disp,nch);
+  if(sig0raw!=null){
+    /* 채널 폭이 만드는 겉보기 넓어짐을 뺀다 */
+    const sig0=Math.sqrt(Math.max(1,sig0raw*sig0raw-cal.disp*cal.disp/12));
+    cal.sigma0=sig0;
+    cal.fwhmMnFile=cal.fwhmMn;
+    const meas=2.355*Math.sqrt(sig0*sig0+F*eps*Emn0);
+    if(cal.fwhmExplicit && cal.fwhmMn!=null){
+      cal.fwhmMnMeas=meas; cal.fwhmSrc="파일 분해능 모형";
+    }else{
+      cal.fwhmMn=meas; cal.fwhmSrc="제로 스트로브 실측";
+    }
+  } else if(cal.fwhmMn!=null){ cal.fwhmSrc=cal.fwhmExplicit?"파일 분해능 모형":"파일 메타데이터"; }
   if(cal.fwhmMn!=null) state.spec.fwhmMn=Math.round(cal.fwhmMn);
-  return {y,raw,E,nch,nspec,i0,dropped,cal,md:sp.md,sp};
+  LASTSPEC={y,raw,E,nch,nspec,i0,dropped,cal,md:sp.md,sp};
+  return LASTSPEC;
 }
 /* detector energy resolution: FWHM(E)=2.355*sqrt(sigma_noise^2 + F*eps*E), all eV */
 function fwhmAt(E_eV,fwhmMn){
@@ -32629,6 +33071,451 @@ function veloxQuantHtml(rec){
     </div></div>`;
 }
 
+/* ============================================================
+   원소 맵 겹쳐보기
+   ============================================================ */
+const MAP_PALETTE=[
+  ["빨강","#FF3B30"],["초록","#34C759"],["파랑","#0A84FF"],["노랑","#FFD60A"],
+  ["자홍","#FF2D92"],["하늘","#32ADE6"],["주황","#FF9F0A"],["보라","#BF5AF2"],
+  ["연두","#A3E635"],["청록","#2DD4BF"],["분홍","#FF8FAB"],["흰색","#F5F5F7"]
+];
+function hex2rgb(h){ const v=parseInt(h.slice(1),16); return [(v>>16)&255,(v>>8)&255,v&255]; }
+
+/* 이 파일에 원소 맵을 만들 수 있는가 — Velox 맵이 있거나 스트림이 있으면 된다 */
+function mapCapable(rec){
+  if(!rec) return 0;
+  const nv=(rec.images||[]).filter(im=>im.isMap).length;
+  /* 스트림이 있어도 래스터 정의가 없으면(점 스펙트럼 파일) 맵을 만들 수 없다 */
+  const st=((rec.streams||[]).length && siScanSize(rec))?1:0;
+  return nv||st;
+}
+function baseImageOf(rec){
+  if(!rec||!rec.images) return null;
+  const im=rec.images.find(x=>!x.isMap&&(x.shape||[]).length>=2);
+  return im||null;
+}
+/* 층의 표시 상한. 계수 맵은 화소의 대부분이 0이라 전체 백분위를 쓰면 상한이
+   최대값보다 훨씬 낮게 잡히고 거의 모든 화소가 잘려 색이 포화된다.
+   0이 아닌 값들 중에서 잡는다. */
+function autoHi(data){
+  const a=[];
+  for(let i=0;i<data.length;i++){ const v=data[i]; if(v>0) a.push(v); }
+  if(!a.length) return 1;
+  a.sort((x,y)=>x-y);
+  const hi=a[Math.min(a.length-1,Math.floor(a.length*0.995))];
+  return hi>0?hi:(a[a.length-1]||1);
+}
+/* 표시용 평활 — 박스 블러 2회(≈가우시안). 계산값은 그대로 두고 화면에만 쓴다.
+   픽셀당 카운트가 1 미만이라 평활 없이는 구조가 보이지 않는다. */
+function blurMap(src,r){
+  if(!r||r<1) return src;
+  const w=src.w,h=src.h;
+  let a=Float32Array.from(src.data), b=new Float32Array(w*h);
+  for(let pass=0;pass<2;pass++){
+    for(let y=0;y<h;y++){
+      let acc=0; const row=y*w;
+      for(let x=-r;x<=r;x++) acc+=a[row+Math.max(0,Math.min(w-1,x))];
+      for(let x=0;x<w;x++){
+        b[row+x]=acc/(2*r+1);
+        acc-=a[row+Math.max(0,Math.min(w-1,x-r))];
+        acc+=a[row+Math.max(0,Math.min(w-1,x+r+1))];
+      }
+    }
+    for(let x=0;x<w;x++){
+      let acc=0;
+      for(let y=-r;y<=r;y++) acc+=b[Math.max(0,Math.min(h-1,y))*w+x];
+      for(let y=0;y<h;y++){
+        a[y*w+x]=acc/(2*r+1);
+        acc-=b[Math.max(0,Math.min(h-1,y-r))*w+x];
+        acc+=b[Math.max(0,Math.min(h-1,y+r+1))*w+x];
+      }
+    }
+  }
+  return {data:a,w,h};
+}
+function layerDisp(L,r){
+  const key=String(r);
+  if(!L._dk||L._dk!==key){ L._disp=blurMap(L.src,r); L._dk=key; L._hi=autoHi(L._disp.data); }
+  return L;
+}
+function readImageArray(rec,im){
+  const ds=rec.h5.get(im.base+"/Data"); if(!ds) return null;
+  const sh=ds.shape, H=sh[0], W=sh[1], N=sh.length>2?sh[2]:1;
+  let d;
+  if(N>1){
+    const acc=new Float32Array(W*H), per=W*H;
+    const chunk=Math.max(1,Math.min(N,Math.floor(8e6/per)));
+    for(let f0=0;f0<N;f0+=chunk){
+      const f1=Math.min(N,f0+chunk), blk=ds.slice([[0,H],[0,W],[f0,f1]]), nf=f1-f0;
+      for(let i=0;i<per;i++){ let a=0; const b=i*nf; for(let k=0;k<nf;k++) a+=blk[b+k]; acc[i]+=a; }
+    }
+    d=acc;
+  } else d=ds.value;
+  return {data:d,w:W,h:H};
+}
+/* 파일이 바뀌면 층을 새로 만든다 */
+function buildMapLayers(rec){
+  const M=state.maps;
+  if(M.key===rec.name) return;
+  M.key=rec.name; M.layers=[]; M.pick=null;
+  let ci=0;
+  const mx=rec.mixDefaults||{};
+  for(const im of (rec.images||[])){
+    if(!im.isMap) continue;
+    const src=readImageArray(rec,im); if(!src) continue;
+    const nm=im.title||"?";
+    const d=mx[nm];
+    M.layers.push({id:"v_"+im.uid, el:nm, fam:"", kind:"velox",
+                   color:MAP_PALETTE[ci%MAP_PALETTE.length][1],
+                   on:d?(d.w>0):false, w:d?Math.max(0.2,d.w):1,
+                   src, hi:autoHi(src.data)});
+    ci++;
+  }
+  /* 파일이 아무 것도 켜 두지 않았으면 앞의 두 층만 켠다 — 전부 켜면 흰색으로 포화된다 */
+  if(M.layers.length && !M.layers.some(L=>L.on))
+    M.layers.slice(0,2).forEach(L=>{ L.on=true; L.w=1; });
+  const base=rec.mixDefaults&&(rec.mixDefaults.HAADF||rec.mixDefaults.BF);
+  if(base&&base.w!=null) M.baseW=Math.max(0.15,Math.min(1,base.w*0.45));
+}
+function mapLayerLabel(L){
+  if(L.kind!=="calc") return L.el+" (Velox)";
+  return L.el+" "+L.fam+"선"+(L.stats&&L.stats.mdl!=null?" ⊕":" ▭");
+}
+
+/* 지금 방식으로 한 원소의 맵을 만든다 */
+function calcMap(rec,el,fam,bin){
+  if(state.maps.method==="fit"){
+    const f=ensureFitMaps(rec,bin);
+    const m=f&&f.by[el+"|"+fam];
+    if(m) return m;
+  }
+  return siElementMap(rec.si,el,fam,bin,state.spec.fwhmMn);
+}
+function recalcCalcLayers(rec){
+  const M=state.maps;
+  for(const L of M.layers){
+    if(L.kind!=="calc") continue;
+    const m=calcMap(rec,L.el,L.fam,M.bin);
+    if(m){ L.src={data:m.data,w:m.w,h:m.h}; L.hi=autoHi(m.data); L.stats=m; L._dk=null; }
+  }
+}
+/* 선택 목록에 그 원소의 맵이 얼마나 쓸 만한지 붙인다 */
+function fitNote(rec,c){
+  if(state.maps.method!=="fit") return " · "+c.xMdl.toFixed(1)+"×MDL(합산)";
+  const f=rec._fit&&rec._fit[state.maps.bin];
+  const m=f&&f.by[c.el+"|"+c.fam];
+  if(!m) return " · "+c.xMdl.toFixed(1)+"×MDL(합산)";
+  return " · 화소당 "+m.perPx.toFixed(2)+" (한계 "+m.mdl.toFixed(1)+")";
+}
+
+function renderMaps(root){
+  const rec=curRec();
+  if(!mapCapable(rec)){ root.innerHTML='<div class="card"><div class="note">이 파일에는 원소 맵을 만들 자료가 없습니다.</div></div>'; return; }
+  buildMapLayers(rec);
+  const M=state.maps;
+  const baseIm=baseImageOf(rec);
+  const scan=siScanSize(rec)||{W:(baseIm?baseIm.shape[1]:512),H:(baseIm?baseIm.shape[0]:512)};
+  const px=baseIm?baseIm.px:null;
+
+  const swatch=(L)=>`<button class="mapsw" data-id="${L.id}" title="색 바꾸기" style="background:${L.color}"></button>`;
+  const rows=M.layers.map(L=>`
+    <div class="maprow" data-id="${L.id}">
+      <label class="row" style="gap:6px;flex:1;min-width:0">
+        <input type="checkbox" class="mapon" data-id="${L.id}" ${L.on?"checked":""}>
+        ${swatch(L)}
+        <span class="mapname">${esc(mapLayerLabel(L))}</span>
+      </label>
+      <input type="range" class="mapw" data-id="${L.id}" min="0" max="200" value="${Math.round(L.w*100)}">
+      ${L.kind==="calc"?`<button class="btn xs mapdel" data-id="${L.id}" title="제거">✕</button>`:""}
+    </div>`).join("");
+
+  const cands=(rec.mapCands||[]).filter(c=>!M.layers.some(L=>L.kind==="calc"&&L.el===c.el&&L.fam===c.fam));
+  const hasStream=(rec.streams||[]).length>0;
+
+  const wrap=h(`<div>
+    <div class="tiles">
+      <div class="tile accent"><div class="v">${scan.W}×${scan.H}</div><div class="k">스캔</div></div>
+      <div class="tile"><div class="v">${px?fmtLen(px.x*scan.W):"–"}</div><div class="k">시야 (가로)</div></div>
+      <div class="tile"><div class="v">${M.layers.filter(L=>L.on).length} / ${M.layers.length}</div><div class="k">겹친 층</div></div>
+      <div class="tile"><div class="v">${rec.si?rec.si.total.toLocaleString():"–"}</div><div class="k">유효 X선 이벤트</div></div>
+      <div class="tile"><div class="v">${rec.si?("1/"+M.bin):"–"}</div><div class="k">계산 맵 비닝</div></div>
+      <div class="tile"><div class="v">${rec.si?fmtLen((px?px.x:0)*M.bin):"–"}</div><div class="k">비닝 화소 크기</div></div>
+    </div>
+    <div class="vwrap">
+      <div>
+        <div class="stage" id="mstage" style="min-height:420px">
+          <canvas id="mcv"></canvas>
+          <div class="sbar" id="msbar" style="display:none"><div class="lbl"></div><div class="bar"></div></div>
+        </div>
+      </div>
+      <div class="ctrls">
+        <div class="card">
+          <h3 style="font-size:13px;margin-bottom:10px">층</h3>
+          <div class="maprow" style="border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:8px">
+            <label class="row" style="gap:6px;flex:1;min-width:0">
+              <input type="checkbox" id="mBaseOn" ${M.baseOn?"checked":""}>
+              <span class="mapsw" style="background:linear-gradient(90deg,#111,#eee);cursor:default"></span>
+              <span class="mapname">${esc(baseIm?(baseIm.title||baseIm.det||"기준 상"):"기준 상")}</span>
+            </label>
+            <input type="range" id="mBaseW" min="0" max="150" value="${Math.round(M.baseW*100)}">
+          </div>
+          <div id="mapRows">${rows||'<div class="muted">층이 없습니다</div>'}</div>
+          <div class="sep"></div>
+          <div class="crow"><span>밝기(감마)</span><input type="range" id="mGam" min="30" max="200" value="${Math.round(M.gamma*100)}"><b>${M.gamma.toFixed(2)}</b></div>
+          <div class="crow"><span>평활</span><input type="range" id="mSm" min="0" max="8" value="${M.smooth}"><b>${M.smooth?("±"+M.smooth+"px"):"없음"}</b></div>
+        </div>
+        ${hasStream?`<div class="card">
+          <h3 style="font-size:13px;margin-bottom:8px">스트림에서 맵 계산</h3>
+          ${rec.si?`
+          <div class="seg" id="mMeth" style="margin-bottom:8px">
+            <button data-m="fit" class="${M.method==="fit"?"active":""}">동시 적합</button>
+            <button data-m="win" class="${M.method==="win"?"active":""}">창 적분</button>
+          </div>
+          <label class="f">원소
+            <select id="mAddSel">${cands.length?cands.map(c=>`<option value="${c.el}|${c.fam}">${c.el} ${c.fam}선${fitNote(rec,c)}</option>`).join(""):'<option value="">후보 없음</option>'}</select>
+          </label>
+          <div class="row" style="gap:6px;margin-top:8px">
+            <button class="btn sm" id="mAdd" ${cands.length?"":"disabled"}>맵 추가</button>
+            <label class="f" style="flex:1">비닝
+              <select id="mBin">${[1,2,4,8,16,32].map(b=>`<option value="${b}" ${b===M.bin?"selected":""}>${b}×${b} → ${Math.ceil(scan.W/b)}px</option>`).join("")}</select>
+            </label>
+          </div>
+          <div class="muted" style="margin-top:8px;line-height:1.5">${M.method==="fit"
+            ?`검출된 원소 전부와 배경을 <b>화소마다 동시에</b> 풉니다. 겹친 선(Ni Kα에 묻힌 Lu Lα 등)이 제대로 나뉩니다. 어느 원소를 화면에 띄우든 적합에는 항상 전부 들어갑니다.`
+            :`주선 창에서 세고 양옆 창으로 배경을 뺍니다. Velox·Bruker의 창 적분과 같은 성격이라 겹친 선은 분리하지 못합니다.`}</div>
+          `:`<button class="btn" id="mDecode">스펙트럼 스트림 디코드</button>
+             <div class="muted" style="margin-top:8px;line-height:1.5">픽셀별 X선을 읽어 들입니다. 한 번만 하면 이후 맵과 ROI 스펙트럼은 즉시 계산됩니다.</div>`}
+        </div>`:""}
+        <div class="card">
+          <h3 style="font-size:13px;margin-bottom:8px">내보내기</h3>
+          <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap">
+            <button class="btn sm" id="mPng">PNG (겹친 그림)</button>
+            <label class="f" style="flex:1;min-width:150px">TIFF로 내보낼 층
+              <select id="mTifSel">${M.layers.map((L,i)=>`<option value="${i}">${esc(mapLayerLabel(L))}</option>`).join("")||'<option value="">없음</option>'}</select>
+            </label>
+            <button class="btn sm" id="mTif" ${M.layers.length?"":"disabled"}>TIFF (원본값)</button>
+          </div>
+          <div class="muted" style="margin-top:8px;line-height:1.5">PNG는 화면에 보이는 합성 그대로, TIFF는 그 층의 <b>계산값 그대로</b>(평활 전) 저장합니다.</div>
+        </div>
+      </div>
+    </div>
+    <div id="mPick" class="pickpop" style="display:none"></div>
+  </div>`);
+  root.appendChild(wrap);
+
+  const cv=$("#mcv"), stage=$("#mstage");
+  const W=scan.W, H=scan.H;
+  cv.width=W; cv.height=H;
+  const ctx=cv.getContext("2d");
+
+  let baseArr=null;
+  if(baseIm){ const b=readImageArray(rec,baseIm); if(b&&b.w===W&&b.h===H) baseArr=b; }
+  const baseHi=baseArr?autoHi(baseArr.data):1;
+  let baseLo=Infinity;
+  if(baseArr){ for(let i=0;i<baseArr.data.length;i++) if(baseArr.data[i]<baseLo) baseLo=baseArr.data[i]; }
+
+  function composite(){
+    const out=new Uint8ClampedArray(W*H*4);
+    const g=1/(M.gamma||1);
+    if(M.baseOn&&baseArr){
+      const span=(baseHi-baseLo)||1, bw=M.baseW;
+      for(let i=0;i<W*H;i++){
+        let t=(baseArr.data[i]-baseLo)/span; t=t<0?0:t>1?1:t;
+        const v=Math.pow(t,g)*255*bw;
+        const o=i*4; out[o]=v; out[o+1]=v; out[o+2]=v;
+      }
+    }
+    for(const L of M.layers){
+      if(!L.on||!L.src) continue;
+      /* 평활 반경은 스캔 화소 기준이다. 비닝한 맵은 격자가 이미 굵으므로 그만큼 나눈다 */
+      const bin=Math.max(1,Math.round(W/L.src.w));
+      layerDisp(L, Math.round(M.smooth/bin));
+      const [r,gg,bb]=hex2rgb(L.color);
+      const D=L._disp||L.src;
+      const sw=D.w, sh=D.h, hi=L._hi||L.hi||1, wt=L.w;
+      const fx=sw/W, fy=sh/H;
+      for(let y=0;y<H;y++){
+        /* 이중선형 — 굵은 격자를 최근접으로 늘리면 계단이 그대로 보인다 */
+        const gy=Math.min(sh-1,Math.max(0,(y+0.5)*fy-0.5));
+        const y0=gy|0, y1=Math.min(sh-1,y0+1), ty=gy-y0;
+        const r0=y0*sw, r1=y1*sw;
+        for(let x=0;x<W;x++){
+          const gx=Math.min(sw-1,Math.max(0,(x+0.5)*fx-0.5));
+          const x0=gx|0, x1=Math.min(sw-1,x0+1), tx=gx-x0;
+          const a=D.data[r0+x0], b2=D.data[r0+x1], c2=D.data[r1+x0], d2=D.data[r1+x1];
+          const v=(a+(b2-a)*tx)*(1-ty)+(c2+(d2-c2)*tx)*ty;
+          if(v<=0) continue;
+          let t=v/hi; if(t>1) t=1;
+          t=Math.pow(t,g)*wt;
+          const o=(y*W+x)*4;
+          out[o]+=r*t; out[o+1]+=gg*t; out[o+2]+=bb*t;
+        }
+      }
+    }
+    for(let i=3;i<out.length;i+=4) out[i]=255;
+    ctx.putImageData(new ImageData(out,W,H),0,0);
+    fitCanvas();
+  }
+  function fitCanvas(){
+    const sr=stage.getBoundingClientRect();
+    const k=Math.min(sr.width/W,(sr.height||420)/H);
+    cv.style.width=(W*k)+"px"; cv.style.height=(H*k)+"px";
+    cv.style.imageRendering=k>=1?"pixelated":"auto";
+    const sb=$("#msbar");
+    if(px&&sb){
+      const target=W*px.x*0.25, nice=niceBar(target);
+      const wpx=(nice/px.x)*k;
+      sb.style.display="block";
+      sb.querySelector(".bar").style.width=wpx+"px";
+      sb.querySelector(".lbl").textContent=barLabel(nice);
+    }
+  }
+
+  /* --- 상호작용 --- */
+  $("#mBaseOn").onchange=e=>{ M.baseOn=e.target.checked; composite(); };
+  $("#mBaseW").oninput=e=>{ M.baseW=(+e.target.value)/100; composite(); };
+  $("#mGam").oninput=e=>{ M.gamma=(+e.target.value)/100; e.target.nextElementSibling.textContent=M.gamma.toFixed(2); composite(); };
+  $("#mSm").oninput=e=>{ M.smooth=+e.target.value; e.target.nextElementSibling.textContent=M.smooth?("±"+M.smooth+"px"):"없음"; composite(); };
+  wrap.querySelectorAll(".mapon").forEach(b=>b.onchange=()=>{
+    const L=M.layers.find(x=>x.id===b.dataset.id); if(L){ L.on=b.checked; composite(); }
+  });
+  wrap.querySelectorAll(".mapw").forEach(b=>b.oninput=()=>{
+    const L=M.layers.find(x=>x.id===b.dataset.id); if(L){ L.w=(+b.value)/100; composite(); }
+  });
+  wrap.querySelectorAll(".mapdel").forEach(b=>b.onclick=()=>{
+    M.layers=M.layers.filter(x=>x.id!==b.dataset.id); renderView();
+  });
+  const pop=$("#mPick");
+  wrap.querySelectorAll(".mapsw").forEach(b=>{
+    if(!b.dataset.id) return;
+    b.onclick=(ev)=>{
+      const L=M.layers.find(x=>x.id===b.dataset.id); if(!L) return;
+      pop.innerHTML=MAP_PALETTE.map(([n,c])=>`<button class="mapsw" data-c="${c}" title="${n}" style="background:${c};${c===L.color?"outline:2px solid var(--fg);outline-offset:2px":""}"></button>`).join("");
+      const r0=b.getBoundingClientRect();
+      pop.style.display="block";
+      pop.style.left=Math.max(8,Math.min(window.innerWidth-230,r0.left+window.scrollX-8))+"px";
+      pop.style.top=(r0.bottom+window.scrollY+6)+"px";
+      pop.querySelectorAll("button").forEach(x=>x.onclick=()=>{
+        L.color=x.dataset.c; pop.style.display="none";
+        b.style.background=L.color; composite();
+      });
+      ev.stopPropagation();
+    };
+  });
+  document.addEventListener("click",()=>{ if(pop) pop.style.display="none"; },{once:true});
+
+  const dec=$("#mDecode");
+  if(dec) dec.onclick=async()=>{
+    try{
+      busy(true,"스펙트럼 스트림 디코드 중… 0%");
+      let last=0;
+      await decodeStream(rec, async t=>{
+        const pc=Math.round(t*100);
+        if(pc>=last+5){ last=pc; busy(true,"스펙트럼 스트림 디코드 중… "+pc+"%"); await sleep(0); }
+      });
+      await ensureMapCands(rec);
+      busy(true,"동시 적합 준비 중…"); await sleep(0);
+      try{ ensureFitMaps(rec,M.bin); }catch(e){ console.error(e); }
+      busy(false); renderView();
+    }catch(e){ busy(false); toast("디코드 실패: "+(e&&e.message||e),"err"); }
+  };
+  const meth=$("#mMeth");
+  if(meth) meth.querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+    if(M.method===b.dataset.m) return;
+    M.method=b.dataset.m;
+    busy(true,"맵 다시 계산 중…"); await sleep(0);
+    try{ recalcCalcLayers(rec); } finally { busy(false); }
+    renderView();
+  });
+  const binSel=$("#mBin");
+  if(binSel) binSel.onchange=async()=>{
+    M.bin=+binSel.value;
+    busy(true,"맵 다시 계산 중…"); await sleep(0);
+    try{ recalcCalcLayers(rec); } finally { busy(false); }
+    renderView();
+  };
+  const add=$("#mAdd");
+  if(add) add.onclick=async()=>{
+    const v=$("#mAddSel").value; if(!v) return;
+    const [el,fam]=v.split("|");
+    busy(true,el+" 맵 계산 중…"); await sleep(0);
+    const m=calcMap(rec,el,fam,M.bin);
+    busy(false);
+    if(!m){ toast(el+" "+fam+"선이 측정 범위에 없습니다","warn"); return; }
+    const used=new Set(M.layers.map(L=>L.color));
+    const col=(MAP_PALETTE.find(([n,c])=>!used.has(c))||MAP_PALETTE[M.layers.length%MAP_PALETTE.length])[1];
+    const nOn=M.layers.filter(L=>L.on).length;
+    M.layers.push({id:"c_"+el+"_"+fam, el, fam, kind:"calc", color:col, on:true,
+                   w:nOn>=3?0.7:1,
+                   src:{data:m.data,w:m.w,h:m.h}, hi:autoHi(m.data), stats:m});
+    renderView();
+  };
+  $("#mPng").onclick=()=>{
+    cv.toBlob(b=>downloadBlob(b,(rec.name||"maps").replace(/\.[^.]+$/,"")+"_colormix.png"));
+  };
+  $("#mTif").onclick=()=>{
+    const sel=$("#mTifSel"); const L=M.layers[+(sel?sel.value:-1)];
+    if(!L){ toast("내보낼 층이 없습니다","warn"); return; }
+    const nmPerPx=px?px.x*1e9*(L.src.w?W/L.src.w:1):null;
+    downloadBlob(makeTiff16(L.src.data,L.src.w,L.src.h,nmPerPx),
+      (rec.name||"map").replace(/\.[^.]+$/,"")+"_"+L.el+(L.fam?("_"+L.fam+"line"):"_velox")+".tif");
+  };
+
+  composite();
+  window.addEventListener("resize",MAPRESIZE);
+  MAPFIT.fit=()=>{ try{ fitCanvas(); }catch(e){} };
+}
+const MAPFIT={fit:null};
+let _mrzT=null;
+function MAPRESIZE(){ clearTimeout(_mrzT); _mrzT=setTimeout(()=>{ if(state.view==="maps"&&MAPFIT.fit) MAPFIT.fit(); },120); }
+
+/* 현재 비닝에 대한 동시 적합 결과. 비닝마다 한 번만 계산해 캐시한다. */
+function ensureFitMaps(rec,bin){
+  rec._fit=rec._fit||{};
+  if(rec._fit[bin]) return rec._fit[bin];
+  if(!rec.si||!rec.mapCands||!rec.mapCands.length) return null;
+  const keep=state.curSpec;
+  const iSum=rec.spectra.findIndex(s=>/^summed$/i.test(s.role||""));
+  state.curSpec=iSum>=0?iSum:0;
+  const S=loadSpectrum();
+  state.curSpec=keep;
+  if(!S) return null;
+  const fwhmMn=state.spec.fwhmMn;
+  const bgShape=specBackground(S.y,S,fwhmMn);
+  const r=siFitMaps(rec.si,rec.mapCands,bin,fwhmMn,{rho:rec.mapRho||0,bgShape});
+  if(!r) return null;
+  const by={};
+  for(const m of r.maps) by[m.el+"|"+m.fam]=m;
+  rec._fit[bin]={by,info:r};
+  return rec._fit[bin];
+}
+/* 맵으로 만들 만한 원소 후보 — 합산 스펙트럼에서 검출된 것 */
+async function ensureMapCands(rec){
+  if(rec.mapCands) return rec.mapCands;
+  try{
+    const keep=state.curSpec;
+    const iSum=rec.spectra.findIndex(s=>/^summed$/i.test(s.role||""));
+    state.curSpec=iSum>=0?iSum:0;
+    const S=loadSpectrum();
+    state.curSpec=keep;
+    /* 맵 후보는 식별 기준보다 느슨하게 잡는다 — 합산에서 약해도 특정 영역에만
+       몰려 있으면 맵에서는 또렷하게 보일 수 있다. 스펙트럼 탭에 직접 적어 넣은
+       원소도 함께 올린다. */
+    const hits=S?autoIdentifyNNLS(S):[];
+    rec.mapRho=hits.rho||0;
+    const cands=hits.filter(x=>x.xMdl>=2).map(x=>({el:x.el,fam:x.fam,xMdl:x.xMdl}));
+    const have=new Set(cands.map(c=>c.el));
+    for(const el of (state.spec.els||[])){
+      if(have.has(el)) continue;
+      const h=hits.find(x=>x.el===el);
+      const fam=h?h.fam:(S?chooseFamily(el,[Math.max(0.2,S.cal.beginE/1000),Math.min(20,S.E[S.nch-1])]):null);
+      if(fam){ cands.push({el,fam,xMdl:h?h.xMdl:0}); have.add(el); }
+    }
+    rec.mapCands=cands;
+  }catch(e){ rec.mapCands=[]; }
+  return rec.mapCands;
+}
+
 function renderSpectrum(root){
   const S=loadSpectrum();
   if(!S){ root.innerHTML='<div class="card"><div class="note">이 파일에는 <b>/Data/Spectrum</b> 데이터셋이 없습니다. HAADF 이미지 전용 .emd 로 보입니다.</div></div>'; return; }
@@ -32639,7 +33526,8 @@ function renderSpectrum(root){
     /* 'Summed'가 무엇의 합인지는 파일마다 다르다 — Velox는 Super-X 세그먼트의 합,
        Bruker는 이미 합쳐진 하나. 실제로 몇 개를 더했는지에 따라 표기한다. */
     const nSeg=s.virtualSum?(s.parts?s.parts.length:0):0;
-    const nm=s.role ? (/^summed$/i.test(s.role)?(nSeg>1?("Summed ("+nSeg+"분할 합)"):"Summed"):s.role)
+    const nm=s.roiData ? s.det
+           : s.role ? (/^summed$/i.test(s.role)?(nSeg>1?("Summed ("+nSeg+"분할 합)"):"Summed"):s.role)
                     : ("Spectrum "+(i+1));
     return `<option value="${i}" ${i===state.curSpec?"selected":""}>${esc(nm)} · ${s.shape.join("×")}</option>`;
   }).join("");
@@ -32652,7 +33540,8 @@ function renderSpectrum(root){
       <div class="tile accent"><div class="v">${S.nch}</div><div class="k">채널</div></div>
       <div class="tile"><div class="v">${S.cal.disp} eV</div><div class="k">채널당 분산</div></div>
       <div class="tile"><div class="v">${S.cal.off} eV</div><div class="k">채널 0 오프셋</div></div>
-      <div class="tile"><div class="v">${(S.E[S.nch-1]).toFixed(1)} keV</div><div class="k">최대 에너지</div></div>
+      <div class="tile"><div class="v">${S.cal.fwhmMn!=null?S.cal.fwhmMn.toFixed(1)+" eV":"–"}</div><div class="k">분해능 FWHM(Mn Kα)</div>
+        <div class="s">${esc(S.cal.fwhmSrc||"")}${S.cal.sigma0!=null?` · σ₀ ${S.cal.sigma0.toFixed(1)} eV`:""}</div></div>
       <div class="tile accent"><div class="v">${total.toLocaleString()}</div><div class="k">유효 카운트</div>
         <div class="s">≥ ${S.cal.beginE} eV</div></div>
       <div class="tile"><div class="v" style="font-size:16px">${esc(S.cal.detName)}</div><div class="k">검출기</div>
@@ -32661,7 +33550,8 @@ function renderSpectrum(root){
     ${(S.dropped>0)?`<div class="note" style="margin-bottom:12px">
       <b>${S.dropped.toLocaleString()} counts</b>(전체의 ${dropPct.toFixed(1)}%)가 검출기 유효 구간
       <b>${S.cal.beginE} eV</b> 아래에 있어 제외했습니다 — 제로 스트로브·전자 노이즈로,
-      X선이 아닙니다. 배경 추정·피크 탐색·자동 식별은 모두 유효 구간만 사용합니다.</div>`:""}
+      X선이 아닙니다. 배경 추정·피크 탐색·자동 식별은 모두 유효 구간만 사용합니다.
+      ${S.cal.fwhmSrc==="제로 스트로브 실측"?`<br>다만 이 봉우리의 <b>폭</b>은 전자 노이즈 그 자체이므로, 분해능(σ₀ = ${S.cal.sigma0.toFixed(1)} eV)은 여기서 직접 쟀습니다${S.cal.fwhmMnFile!=null?` — 메타데이터 값으로 계산하면 ${S.cal.fwhmMnFile.toFixed(1)} eV 로 ${(S.cal.fwhmMnFile-S.cal.fwhmMn).toFixed(1)} eV 넓습니다`:""}.`:""}</div>`:""}
     ${veloxQuantHtml(rec)}
     ${bruker선택원소Html(rec)}
     <div class="card">
@@ -32766,7 +33656,8 @@ function quantCard(cand){
   const use=all.filter(c=>!excl.has(c.el));
   if(use.length<2){ box.innerHTML=`<div class="card"><h3>정량 (Cliff-Lorimer)</h3>
     <div class="note warn">정량에 포함된 원소가 2종 미만입니다 — 제외를 조정하세요.</div></div>`; return; }
-  const kmap=kfLoad();
+  const act=kfActive(), kmap=act?act.k:{};
+  const cond=kfCond(LASTSPEC), mism=kfMismatch(act,cond);
   const q=quantify(use,kmap);
   if(!q){ box.innerHTML=""; return; }
   const exRows=all.filter(c=>excl.has(c.el)).map(c=>`<tr class="muted">
@@ -32785,7 +33676,16 @@ function quantCard(cand){
       <span class="hint">C<sub>A</sub>/C<sub>B</sub> = k<sub>AB</sub> · (I<sub>A</sub>/I<sub>B</sub>) — 박막 근사</span>
       <span style="flex:1"></span>
       <button class="btn sm" id="qStd">표준시료로 k 재기…</button>
-      <button class="btn sm" id="qClr">k 초기화</button></h3>
+      <button class="btn sm" id="qLib">k 세트…</button></h3>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <span class="muted" style="font-size:12px">쓰는 k 세트</span>
+      <b style="font-size:12.5px">${act?esc(act.name):"없음"}</b>
+      ${act&&act.cond?`<span class="badge">${act.cond.kV!=null?act.cond.kV+" kV · ":""}${esc(act.cond.det||"")}${act.cond.fwhmMn!=null?" · "+act.cond.fwhmMn+" eV":""}</span>`:""}
+      ${act&&act.at?`<span class="muted" style="font-size:11.5px">${esc(act.at)}</span>`:""}
+    </div>
+    ${mism.length?`<div class="note warn" style="margin-bottom:10px">
+      <b>이 k 세트는 지금 스펙트럼과 조건이 다릅니다.</b> k는 가속전압·검출기·기하가 같을 때만
+      옮겨집니다 — 다르면 조성이 조용히 틀립니다.<br>${mism.map(x=>"· "+esc(x)).join("<br>")}</div>`:""}
     ${q.allK?"":`<div class="note warn" style="margin-bottom:10px">
       <b>k-factor가 없는 원소가 ${q.nMissing}종 있어 조성을 계산하지 않았습니다.</b>
       k 없이 세기만 비교하면 조성이 아닙니다 — 원소마다 X선이 나오는 효율이 크게 다릅니다.<br>
@@ -32801,8 +33701,7 @@ function quantCard(cand){
       k-factor 자체의 불확도, 흡수·형광 보정(두꺼운 시료), 겹침으로 인한 계통오차는 포함되지 않습니다.
       박막 근사가 성립하지 않는 두꺼운 영역에서는 값이 실제와 크게 다를 수 있습니다.</div>
   </div>`;
-  $("#qClr").onclick=()=>{ if(!confirm("저장된 k-factor를 모두 지울까요?")) return;
-    kfSave({}); quantCard(cand); toast("k-factor를 지웠습니다","ok"); };
+  $("#qLib").onclick=()=>openKfLib(cand);
   $("#qStd").onclick=()=>openStdDialog(use,cand);
   box.querySelectorAll(".qEx").forEach(cb=>cb.onchange=()=>{
     const s=new Set(state.spec.qExcl||[]);
@@ -32810,6 +33709,88 @@ function quantCard(cand){
     state.spec.qExcl=[...s];
     quantCard(cand);
   });
+}
+/* k 세트 관리 — 고르기·이름 바꾸기·지우기·주고받기 */
+function openKfLib(cand){
+  const draw=()=>{
+    const st=kfStore(), cond=kfCond(LASTSPEC);
+    const rows=st.sets.map(x=>{
+      const mm=kfMismatch(x,cond);
+      const ks=Object.keys(x.k||{});
+      return `<tr>
+        <td class="l"><label class="row" style="gap:6px"><input type="radio" name="kfsel" value="${x.id}" ${x.id===st.active?"checked":""}>
+          <b>${esc(x.name)}</b></label>
+          <div class="muted" style="font-size:11.5px;margin-left:22px">
+            ${x.cond?`${x.cond.kV!=null?x.cond.kV+" kV · ":""}${esc(x.cond.det||"")}${x.cond.fwhmMn!=null?" · "+x.cond.fwhmMn+" eV":""}`:"조건 기록 없음"}
+            ${x.at?" · "+esc(x.at):""}${x.src?" · "+esc(x.src):""}
+          </div></td>
+        <td class="l" style="font-size:11.5px">${ks.map(k=>esc(k.replace("_"," "))+" "+(+x.k[k]).toFixed(3)).join("<br>")||"–"}</td>
+        <td class="num">${mm.length?`<span class="badge warn">조건 다름</span>`:`<span class="badge ok">일치</span>`}</td>
+        <td class="num"><button class="btn xs kfRen" data-id="${x.id}">이름</button>
+          <button class="btn xs kfDel" data-id="${x.id}">삭제</button></td></tr>`;
+    }).join("");
+    return `<div class="overlay center"><div class="modal" style="max-width:820px">
+      <button class="closex">✕</button><h2>k-factor 세트</h2>
+      <div class="note" style="margin-bottom:10px">k는 <b>가속전압·검출기·기하가 같을 때만</b> 옮겨집니다.
+        잴 때의 조건을 함께 저장해 두고, 지금 스펙트럼과 다르면 표시합니다.</div>
+      ${st.sets.length?`<table class="tbl wrap"><thead><tr><th class="l">세트</th><th class="l">k</th><th>지금 조건과</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`:'<div class="note warn">저장된 세트가 없습니다. 조성을 아는 시료를 열고 <b>표준시료로 k 재기</b>를 쓰세요.</div>'}
+      <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap">
+        <button class="btn sm" id="kfExp" ${st.sets.length?"":"disabled"}>JSON 내보내기</button>
+        <label class="btn sm" style="cursor:pointer">JSON 들여오기<input type="file" id="kfImp" accept=".json" style="display:none"></label>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="kfOk">닫기</button></div>
+    </div></div>`;
+  };
+  let ov=h(draw());
+  document.body.appendChild(ov);
+  const close=()=>{ ov.remove(); quantCard(cand); };
+  const rebind=()=>{
+    ov.onclick=e=>{ if(e.target===ov) close(); };
+    ov.querySelector(".closex").onclick=close;
+    ov.querySelector("#kfOk").onclick=close;
+    ov.querySelectorAll('input[name=kfsel]').forEach(r=>r.onchange=()=>{
+      const st=kfStore(); st.active=r.value; kfPut(st); refresh();
+    });
+    ov.querySelectorAll(".kfRen").forEach(b=>b.onclick=()=>{
+      const st=kfStore(), x=st.sets.find(y=>y.id===b.dataset.id); if(!x) return;
+      const n=prompt("세트 이름",x.name); if(n==null) return;
+      x.name=n.trim()||x.name; kfPut(st); refresh();
+    });
+    ov.querySelectorAll(".kfDel").forEach(b=>b.onclick=()=>{
+      const st=kfStore(), x=st.sets.find(y=>y.id===b.dataset.id); if(!x) return;
+      if(!confirm(`'${x.name}' 세트를 지울까요?`)) return;
+      st.sets=st.sets.filter(y=>y.id!==x.id);
+      if(st.active===x.id) st.active=st.sets.length?st.sets[0].id:null;
+      kfPut(st); refresh();
+    });
+    const ex=ov.querySelector("#kfExp");
+    if(ex) ex.onclick=()=>{
+      const st=kfStore();
+      downloadText(JSON.stringify({format:"inno-analytics-kfactors",version:2,sets:st.sets},null,2),
+        "kfactors.json","application/json");
+    };
+    const im=ov.querySelector("#kfImp");
+    if(im) im.onchange=async()=>{
+      const f=im.files&&im.files[0]; if(!f) return;
+      try{
+        const j=JSON.parse(await f.text());
+        const incoming=Array.isArray(j)?j:(j.sets||[]);
+        if(!incoming.length) throw new Error("세트가 없습니다");
+        const st=kfStore();
+        let n=0;
+        for(const x of incoming){
+          if(!x||!x.k||typeof x.k!=="object") continue;
+          st.sets.unshift(Object.assign({},x,{id:kfNewId()})); n++;
+        }
+        if(n&&!st.active) st.active=st.sets[0].id;
+        kfPut(st); refresh();
+        toast(`세트 ${n}개를 들여왔습니다`,"ok");
+      }catch(e){ toast("들여오기 실패: "+(e&&e.message||e),"err"); }
+    };
+  };
+  const refresh=()=>{ const nv=h(draw()); ov.replaceWith(nv); ov=nv; rebind(); };
+  rebind();
 }
 function openStdDialog(use,cand){
   const els=use.map(c=>c.el);
@@ -32823,6 +33804,8 @@ function openStdDialog(use,cand){
     <div style="margin-top:10px">${els.map(e=>`<label class="f" style="display:inline-block;width:46%;margin:0 2% 8px 0">
       ${esc(e)}<input type="number" step="any" min="0" class="stdIn" data-el="${esc(e)}" placeholder="0"></label>`).join("")}</div>
     <label class="f">k 기준 원소 <select id="stdRef">${els.map(e=>`<option>${esc(e)}</option>`).join("")}</select></label>
+    <label class="f" style="margin-top:8px">세트 이름 <input type="text" id="stdName" placeholder="예: NaLuF4:Tm 200 kV Talos"></label>
+    <div class="muted" style="margin-top:6px;line-height:1.5">잴 때의 가속전압·검출기·분해능이 함께 기록됩니다. k는 그 조건에서만 옮겨집니다.</div>
     <div class="row right" style="margin-top:14px;gap:6px">
       <button class="btn" id="stdCancel">취소</button>
       <button class="btn primary" id="stdOk">k 계산하고 저장</button></div>
@@ -32839,9 +33822,17 @@ function openStdDialog(use,cand){
     const mode=ov.querySelector("#stdMode").value, ref=ov.querySelector("#stdRef").value;
     const r=kFromStandard(use,comp,mode,ref);
     if(r.err){ toast(r.err,"err"); return; }
-    const m=kfLoad(); Object.assign(m,r.k); kfSave(m);
+    const nm=(ov.querySelector("#stdName").value||"").trim();
+    const rec=curRec(), S=LASTSPEC;
+    const st=kfStore();
+    const set={id:kfNewId(),
+      name: nm || (Object.keys(comp).join("")+" 표준"),
+      at: new Date().toISOString().slice(0,16).replace("T"," "),
+      cond: kfCond(S), ref:r.ref, refFam:r.refFam, mode, comp, k:r.k,
+      src: rec?rec.name:"", spec: S&&S.sp?(S.sp.det||S.sp.role||""):""};
+    st.sets.unshift(set); st.active=set.id; kfPut(st);
     close(); quantCard(cand);
-    toast(`k-factor ${Object.keys(r.k).length}종을 ${esc(r.ref)} 기준으로 저장했습니다`,"ok");
+    toast(`'${esc(set.name)}' 세트에 k-factor ${Object.keys(r.k).length}종을 저장했습니다`,"ok");
   };
 }
 function fmtSig(v){
@@ -32904,18 +33895,29 @@ function specBackground(y,S,fwhmMn){
     wid[i]=Math.max(6,Math.min(45,w));
     if(wid[i]>pmax) pmax=wid[i];
   }
+  /* 유효 구간의 하한. 그 아래는 제로 스트로브 구간이라 y가 0으로 눌려 있다.
+     창이 거기까지 내려가면 0과 평균을 내게 되어 배경이 0쪽으로 무너지고,
+     그 손상이 반복 과정에서 오른쪽으로 창 너비만큼 번진다. 그래서 가장자리를
+     배열 끝이 아니라 '유효 구간의 끝'으로 자른다. */
+  const lo=S?Math.max(0,Math.min(n-1,S.i0|0)):0;
   let v=new Float64Array(n), w2=new Float64Array(n);
-  for(let i=0;i<n;i++) v[i]=Math.log(Math.log(Math.sqrt(Math.max(0,y[i])+1)+1)+1);
+  for(let i=0;i<n;i++){
+    const yy=Math.max(0, i<lo ? y[lo] : y[i]);
+    v[i]=Math.log(Math.log(Math.sqrt(yy+1)+1)+1);
+  }
   for(let p=1;p<=pmax;p++){
     for(let i=0;i<n;i++){
       if(p>wid[i]){ w2[i]=v[i]; continue; }
-      const a=i-p>=0?v[i-p]:v[0], b=i+p<n?v[i+p]:v[n-1];
+      const a=v[Math.max(lo,i-p)], b=v[Math.min(n-1,i+p)];
       w2[i]=Math.min(v[i],(a+b)/2);
     }
     const t=v; v=w2; w2=t;
   }
   const bg=new Float64Array(n);
-  for(let i=0;i<n;i++){ const e=Math.exp(Math.exp(v[i])-1)-1; bg[i]=Math.max(0,e*e-1); }
+  for(let i=0;i<n;i++){
+    if(i<lo){ bg[i]=0; continue; }
+    const e=Math.exp(Math.exp(v[i])-1)-1; bg[i]=Math.max(0,e*e-1);
+  }
   return bg;
 }
 /* channel index for a given energy (keV) */
@@ -33089,12 +34091,25 @@ function subtractElement(S,net,fits,fwhmMn){
    ============================================================ */
 /* 원소 한 개의 계열 모형. 선 면적이 rel 비율을 따르도록 정규화한다.
    반환 진폭 c의 의미: 선 l의 면적 = c · rel_l */
+/* 저에너지 응답의 비대칭. 불완전 전하수집으로 저에너지 쪽에 지수 꼬리가 붙는다.
+   모양(에너지 의존과 감쇠 길이)은 실측에서 고정하고, 크기만 스펙트럼마다 tau 로 잰다. */
+const TAIL_BETA=0.90;      // 감쇠 길이 (sigma 단위)
+const TAIL_F677=0.27;      // 677 eV(F Ka)에서의 꼬리 비율 — 실측
+const TAIL_N=2.93;         // 에너지 의존 지수 — O/F 실측비에서
+const TAIL_FMAX=0.85;      // 상한
+function tailFrac(E_eV){
+  if(!(E_eV>0)) return 0;
+  return Math.min(TAIL_FMAX, TAIL_F677*Math.pow(677/E_eV,TAIL_N));
+}
 function elementProfile(S,el,fam,fwhmMn,Erange){
   const r=XRL[el]; if(!r||!r.lines[fam]) return null;
   const ls=r.lines[fam].filter(([nm,e,i])=>e>=Erange[0]&&e<=Erange[1]&&i>=0.02);
   if(!ls.length) return null;
   const mx=ls.reduce((a,l)=>Math.max(a,l[2]),0)||1;
   const prof=new Float64Array(S.nch);
+  /* dtail = tau 1단위당 프로파일 변화량. 프로파일이 fT에 대해 정확히 선형이라
+     (프로파일 = 가우시안 + fT·(꼬리−가우시안)) 이 배열 하나로 다룰 수 있다. */
+  let dtail=null, dlo=S.nch, dhi=0;
   let lo=S.nch, hi=0, principal=0, prMax=0;
   for(const [nm,e,i] of ls){
     const rel=i/mx;
@@ -33108,9 +34123,35 @@ function elementProfile(S,el,fam,fwhmMn,Erange){
     for(let k=a;k<=b;k++) prof[k]+=rel*tmp[k-a]/sum;
     if(a<lo) lo=a; if(b>hi) hi=b;
     if(rel>prMax){ prMax=rel; principal=e; }
+
+    const fT=tailFrac(e*1000);
+    if(fT>1e-3){
+      if(!dtail) dtail=new Float64Array(S.nch);
+      /* 가우시안을 저에너지 쪽 한쪽 지수와 합성곱한다 (면적 보존).
+         커널 합이 1이므로 꼬리와 가우시안의 면적이 같다. */
+      const lam=Math.max(0.3,TAIL_BETA*sg);            // 채널 단위 감쇠 길이
+      const q=Math.exp(-1/lam), norm=1-q;
+      const nk=Math.min(400,Math.ceil(6*lam));
+      const ta=Math.max(S.i0|0,a-nk);
+      for(let k=ta;k<=b;k++){
+        let acc=0, wq=norm;
+        const jmax=Math.min(nk,b-k);
+        for(let j=0;j<=jmax;j++){
+          const idx=k+j;
+          if(idx>=a) acc+=tmp[idx-a]*wq;
+          wq*=q;
+        }
+        const t=acc/sum;
+        const g=(k>=a&&k<=b)?tmp[k-a]/sum:0;
+        dtail[k]+=rel*fT*(t-g);
+      }
+      if(ta<dlo) dlo=ta; if(b>dhi) dhi=b;
+    }
   }
   if(hi<=lo) return null;
-  return {prof,lo,hi,principal,nLines:ls.length};
+  const out={prof,lo,hi,principal,nLines:ls.length};
+  if(dtail){ out.dtail=dtail; out.dlo=Math.min(dlo,lo); out.dhi=Math.max(dhi,hi); }
+  return out;
 }
 /* EDS에서 각 계열을 실제로 판정에 쓰는 범위. 벗어난 계열은 후보로 올리지 않는다.
    경계를 L은 Z>=30, M은 Z>=57, 주선 >=0.80 keV로 둔다. 그 아래에서는 형광수율이
@@ -33203,10 +34244,52 @@ const IMPLAUSIBLE=new Set(["Tc","Pm","Po","At","Rn","Fr","Ra","Ac","Pa"]);
    Cliff-Lorimer 정량
    ============================================================ */
 const KF_KEY="inno_analytics_kfactors_v1";
-function kfLoad(){
-  try{ return JSON.parse(localStorage.getItem(KF_KEY)||"{}"); }catch(e){ return {}; }
+const KF_KEY2="inno_analytics_kfactors_v2";
+/* 세트 저장소. 예전의 평평한 지도가 있으면 세트 하나로 옮겨 담는다. */
+function kfStore(){
+  let st=null;
+  try{ st=JSON.parse(localStorage.getItem(KF_KEY2)||"null"); }catch(e){}
+  if(!st||!Array.isArray(st.sets)) st={sets:[],active:null};
+  try{
+    const old=JSON.parse(localStorage.getItem(KF_KEY)||"null");
+    if(old&&Object.keys(old).length&&!st.sets.some(x=>x.id==="legacy")){
+      st.sets.unshift({id:"legacy",name:"이전에 저장한 값",at:null,cond:null,ref:null,comp:null,k:old,
+                       note:"조건이 기록되지 않은 예전 저장분입니다."});
+      if(!st.active) st.active="legacy";
+      kfPut(st);
+    }
+  }catch(e){}
+  if(st.active&&!st.sets.some(x=>x.id===st.active)) st.active=st.sets.length?st.sets[0].id:null;
+  return st;
 }
-function kfSave(m){ try{ localStorage.setItem(KF_KEY,JSON.stringify(m)); }catch(e){} }
+function kfPut(st){ try{ localStorage.setItem(KF_KEY2,JSON.stringify(st)); }catch(e){} }
+function kfActive(){ const st=kfStore(); return st.sets.find(x=>x.id===st.active)||null; }
+function kfLoad(){ const a=kfActive(); return a?a.k:{}; }
+function kfSave(m){                      // 활성 세트의 k 를 갈아끼운다(옛 호출 호환)
+  const st=kfStore(); const a=st.sets.find(x=>x.id===st.active);
+  if(a){ a.k=m; kfPut(st); }
+}
+/* 지금 스펙트럼의 조건 */
+function kfCond(S){
+  if(!S) return null;
+  const kv=S.md&&S.md.Optics?num(S.md.Optics.AccelerationVoltage):null;
+  return {kV: kv!=null?Math.round(kv/1000):null,
+          det: S.cal.detName||"", fwhmMn: S.cal.fwhmMn!=null?+S.cal.fwhmMn.toFixed(1):null,
+          disp: S.cal.disp};
+}
+/* 활성 세트를 지금 스펙트럼에 써도 되는가 */
+function kfMismatch(set,cond){
+  if(!set||!cond) return [];
+  const c=set.cond; if(!c) return ["조건이 기록되지 않은 세트입니다"];
+  const out=[];
+  if(c.kV!=null&&cond.kV!=null&&c.kV!==cond.kV) out.push(`가속전압 ${c.kV} kV → ${cond.kV} kV`);
+  if(c.fwhmMn!=null&&cond.fwhmMn!=null&&Math.abs(c.fwhmMn-cond.fwhmMn)/c.fwhmMn>0.05)
+    out.push(`분해능 ${c.fwhmMn} → ${cond.fwhmMn} eV`);
+  if(c.det&&cond.det&&c.det.replace(/[^A-Za-z]/g,"")!==cond.det.replace(/[^A-Za-z]/g,""))
+    out.push(`검출기 ${c.det} → ${cond.det}`);
+  return out;
+}
+function kfNewId(){ return "k"+Math.random().toString(36).slice(2,9); }
 function kfKey(el,fam){ return el+"_"+fam; }
 
 /* C_A/C_B = k_AB · (I_A/I_B) — k는 무게분율 기준이다.
@@ -33252,8 +34335,8 @@ function kFromStandard(list,comp,mode,ref){
   return {k:out, ref:R0.el, refFam:R0.fam};
 }
 
-function identifyCore(S,opts,rho){
-  opts=opts||{}; rho=rho||0;
+function identifyCore(S,opts,rho,tau){
+  opts=opts||{}; rho=rho||0; tau=tau||0;
   const fwhmMn=state.spec.fwhmMn;
   const bg=specBackground(S.y,S,fwhmMn);
   const Emin=Math.max(0.20,S.cal.beginE/1000,S.E[0]), Emax=Math.min(S.E[S.nch-1],20);
@@ -33272,6 +34355,10 @@ function identifyCore(S,opts,rho){
     if(IMPLAUSIBLE.has(el) && !(opts.allowAll)) continue;
     const fam=chooseFamily(el,[Emin,Emax]); if(!fam) continue;
     const pr=elementProfile(S,el,fam,fwhmMn,[Emin,Emax]); if(!pr) continue;
+    if(tau>0&&pr.dtail){
+      for(let i=pr.dlo;i<=pr.dhi;i++) pr.prof[i]+=tau*pr.dtail[i];
+      pr.lo=Math.min(pr.lo,pr.dlo); pr.hi=Math.max(pr.hi,pr.dhi);
+    }
     /* 같은 원소의 M 계열을 '묶인 모양'으로 붙인다. 진폭은 따로 두지 않는다 —
        독립 진폭으로 두면 Si Ka 옆의 Yb Mg처럼 거의 겹치는 성분이 생겨
        세기는 그대로인데 sigma만 3배로 부푼다. */
@@ -33499,14 +34586,61 @@ function estimateRho(S,first){
   return Math.max(0,Math.min(3,num/den));
 }
 
-/* 2단: L선만으로 한 번 풀고, 그 잔차로 rho를 잰 다음, rho가 의미 있으면 다시 푼다. */
+/* 잔차에서 저에너지 꼬리의 크기 tau 를 잰다. rho 와 같은 구조다 —
+   프로파일이 tau 에 대해 선형이라 한 번의 최소제곱으로 끝난다. */
+function estimateTau(S,first){
+  const cx=first&&first.__ctx; if(!cx) return 0;
+  const {d,wt,cands,keep,c}=cx;
+  const m=new Float64Array(S.nch);
+  let lo=S.nch, hi=0, any=false;
+  for(let a=0;a<keep.length;a++){
+    const cd=cands[keep[a]];
+    if(!cd.dtail||!(c[a]>0)) continue;
+    for(let i=cd.dlo;i<=cd.dhi;i++) m[i]+=c[a]*cd.dtail[i];
+    if(cd.dlo<lo) lo=cd.dlo; if(cd.dhi>hi) hi=cd.dhi;
+    any=true;
+  }
+  if(!any) return 0;
+  const fit=new Float64Array(S.nch);
+  for(let a=0;a<keep.length;a++){
+    if(!(c[a]>0)) continue;
+    const cd=cands[keep[a]];
+    for(let i=cd.lo;i<=cd.hi;i++) fit[i]+=c[a]*cd.prof[i];
+  }
+  let num=0, den=0;
+  for(let i=lo;i<=hi;i++){
+    if(wt[i]<=0||m[i]===0) continue;
+    num+=wt[i]*(d[i]-fit[i])*m[i]; den+=wt[i]*m[i]*m[i];
+  }
+  if(!(den>0)) return 0;
+  const chi2r=(first[0]&&first[0].chi2r)||1;
+  if(num*num/den/Math.max(1,chi2r)<9) return 0;      // 3sigma 이상 좋아질 때만
+  return Math.max(0,Math.min(2,num/den));
+}
+
+/* 2단: 순수 가우시안으로 한 번 풀고, 그 잔차에서 M 계열 결합비 rho 와
+   저에너지 꼬리 크기 tau 를 잰 다음, 의미가 있으면 그것을 넣어 다시 푼다.
+   둘은 에너지 구간이 거의 겹치지 않아(M선 1.2~1.9 keV, 꼬리 대부분 1 keV 아래)
+   따로 재도 무방하다. */
 function autoIdentifyNNLS(S,opts){
-  const first=identifyCore(S,opts,0);
-  const rho=estimateRho(S,first);
-  if(!(rho>0.05)) { if(first) first.rho=0; return first; }
-  const second=identifyCore(S,opts,rho);
-  if(second) second.rho=rho;
-  return second;
+  const noTail=(typeof window!=="undefined"&&window.__NOTAIL);
+  let cur=identifyCore(S,opts,0,0), rho=0, tau=0;
+  /* estimateRho/estimateTau 는 '지금 잔차가 더 필요로 하는 양'을 돌려준다.
+     그래서 값을 갈아끼우는 것이 아니라 더해 나간다. 증분이 유의하지 않으면
+     (내부 3sigma 관문에서 0이 나오면) 수렴한 것이다.
+     둘은 서로 영향을 준다 — 꼬리를 넣어야 그 위의 원소가 검출 등급에 올라오고
+     그래야 그 원소의 M 계열이 rho 추정에 들어간다. */
+  for(let pass=0; pass<3; pass++){
+    const dr=estimateRho(S,cur), dt=noTail?0:estimateTau(S,cur);
+    if(!(dr>0.05)&&!(dt>0.05)) break;
+    rho=Math.max(0,Math.min(3,rho+dr));
+    tau=Math.max(0,Math.min(2,tau+dt));
+    const nx=identifyCore(S,opts,rho,tau);
+    if(!nx) break;
+    cur=nx;
+  }
+  if(cur){ cur.rho=rho; cur.tau=tau; }
+  return cur;
 }
 
 function autoIdentifyLegacy(S,opts){
