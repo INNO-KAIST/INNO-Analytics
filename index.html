@@ -33890,12 +33890,12 @@ function renderView(){
     if(k==="interf"&&!rec) dis="";
     return `<button data-v="${k}" class="${state.view===k?"active":""}" ${dis}>${t}${cnt}</button>`;
   }).join("");
-  nav.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>{ state._viewUser=b.dataset.v; go(b.dataset.v); }; });
+  nav.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>{ state._viewUser=b.dataset.v; go(b.dataset.v); if(window.matchMedia&&matchMedia("(max-width:720px)").matches) window.scrollTo(0,0); }; });
   const root=$("#view"); root.innerHTML="";
   renderSidebar();
   renderProv(rec);
-  if(!rec){ renderWelcome(root); return; }
-  if(state.view==="files") state.view = rec.images.length?"image":(rec.spectra.length?"spectrum":"meta");
+  if(!rec && state.view!=="interf"){ renderWelcome(root); return; }
+  if(rec && state.view==="files") state.view = rec.images.length?"image":(rec.spectra.length?"spectrum":"meta");
   try{
     if(state.view==="image") renderImage(root);
     else if(state.view==="maps") renderMaps(root);
