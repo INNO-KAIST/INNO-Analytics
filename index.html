@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#33202f">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
 <title>INNO Analytics — STEM / EDS</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='bg' cx='0.5' cy='0.42' r='0.72'><stop offset='0' stop-color='%23134E4A'/><stop offset='1' stop-color='%23071014'/></radialGradient><linearGradient id='sh' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2334D399'/><stop offset='1' stop-color='%2322D3EE'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23bg)'/><path d='M18 74 L36 42 L50 60 L62 30 L82 74 Z' fill='url(%23sh)' opacity='0.92'/><circle cx='62' cy='30' r='6' fill='%23F0FDFA'/></svg>">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22iana%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234f3048%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%2333202f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23iana%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Ccircle cx=%2232%22 cy=%2232%22 r=%2219%22 stroke=%22%23e1b7d5%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45%22 stroke=%22%23F4F6F1%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3C/svg%3E">
 <script>/* theme boot (FOUC 방지) */
 (function(){try{var t=localStorage.getItem("innoanalytics_theme");
 if(t!=="light"&&t!=="dark"){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}
@@ -381,12 +381,14 @@ input[type=text],input[type=number],input[type=search],select,textarea{border-co
   .sidetog,.side.collapsed + .sidetog{top:auto;bottom:18px;width:44px;height:44px;border-radius:999px;border:1px solid var(--border-strong);
     background:var(--surface);color:var(--accent);font-size:14px;box-shadow:var(--shadow-lg);z-index:72}
 }
+
+.brand-mark{display:block;flex:none;width:30px;height:30px;border-radius:8px}
 </style>
 </head>
 <body>
 <div id="app">
   <div class="topbar">
-    <div class="brand"><span class="logo"><em>INNO</em> Analytics</span><span class="ver">STEM / EDS v0.1</span></div>
+    <div class="brand" style="align-items:center"><svg class="brand-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26"><defs><linearGradient id="anmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f3048"/><stop offset=".62" stop-color="#33202f"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#anmk)"/><rect x=".75" y=".75" width="62.5" height="62.5" rx="14.3" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="1.5"/><circle cx="32" cy="32" r="19" stroke="#e1b7d5" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45" stroke="#F4F6F1" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span class="logo"><em>INNO</em> Analytics</span><span class="ver">STEM / EDS v0.1</span></div>
     <div class="spacer"></div>
     <span class="chipbtn" id="h5stat"><span class="dot"></span>HDF5 준비 중…</span>
     <button class="chipbtn" id="chipTheme" title="라이트/다크 테마 전환" aria-label="테마 전환"></button>
