@@ -396,6 +396,30 @@ body{word-break:keep-all}
 
 .brand-mark{display:block;flex:none;width:30px;height:30px;border-radius:8px}
 
+/* rd3-analytics */
+.prov{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:-4px 0 12px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:12.5px;min-width:0}
+.prov[hidden]{display:none}
+.prov-name{max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prov-sep{width:1px;height:14px;background:var(--line)}
+.prov-px.warn{color:var(--warn)}
+.prov a{color:var(--accent);font-weight:600}
+#measCard:empty{display:none}
+#measCard h3{flex-wrap:wrap}
+.latnopx-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.latnopx-opt{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.latgrid{display:block}
+@media(min-width:1280px){
+  .latgrid{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px;align-items:start}
+  .latside .latmeas th:nth-child(3),.latside .latmeas td:nth-child(3),.latside .latmeas th:nth-child(4),.latside .latmeas td:nth-child(4),.latside .latmeas th:nth-child(6),.latside .latmeas td:nth-child(6),.latside .latmeas th:nth-child(8),.latside .latmeas td:nth-child(8){display:none}
+  .latside .latmeas th,.latside .latmeas td{padding-left:6px;padding-right:6px}
+  .latside .latmeas td:first-child label{flex-wrap:nowrap}
+  .latmain .card>.row>div{flex:1 1 250px;min-width:0}
+  .latmain canvas{width:100%;height:auto;max-width:360px!important}
+  .latside .latmeas td label.row{white-space:nowrap}
+  .latside{position:sticky;top:12px;display:flex;flex-direction:column;gap:0;max-height:calc(100vh - 24px);overflow:auto}
+}
+@media(max-width:720px){.prov-name{max-width:22ch}}
+
 /* ════════ INNO suite UX layer — 공통 CSS (2026-09-29) ════════ */
 /* 앱 전환 버튼·메뉴 (크롬 위) */
 .inno-apps{position:relative;display:inline-flex}
@@ -465,6 +489,7 @@ body{word-break:keep-all}
     <button class="sidetog" id="sideTog" title="파일 목록 접기/펼치기" aria-label="파일 목록 접기/펼치기"></button>
     <div class="main">
       <div class="nav" id="nav"></div>
+      <div id="provStrip" class="prov" aria-live="polite"></div>
       <div id="view"></div>
     </div>
   </div>
@@ -33697,7 +33722,14 @@ function selectFile(i){
   IMG.cache=null;
   state.img.p0=state.img.p1=state.img.roi=null;
   state.img.zoom=1; state.img.cx=.5; state.img.cy=.5;
-  if(rec && rec.images.length) state.view="image";
+  /* ③ 사용자가 고른 탭은 새 파일이 지원하면 유지한다 (파일 여러 개를 같은 탭에서 비교) */
+  const want=state._viewUser;
+  const fits=v=> v==="meta"||v==="interf" ? !!rec
+    : (v==="image"||v==="lattice") ? !!(rec&&rec.images.length)
+    : v==="spectrum" ? !!(rec&&rec.spectra.length)
+    : v==="maps" ? !!mapCapable(rec) : false;
+  if(want && fits(want)) state.view=want;
+  else if(rec && rec.images.length) state.view="image";
   else if(rec && rec.spectra.length) state.view="spectrum";
   else state.view="meta";
   renderView();
@@ -33858,9 +33890,10 @@ function renderView(){
     if(k==="interf"&&!rec) dis="";
     return `<button data-v="${k}" class="${state.view===k?"active":""}" ${dis}>${t}${cnt}</button>`;
   }).join("");
-  nav.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>go(b.dataset.v); });
+  nav.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>{ state._viewUser=b.dataset.v; go(b.dataset.v); }; });
   const root=$("#view"); root.innerHTML="";
   renderSidebar();
+  renderProv(rec);
   if(!rec){ renderWelcome(root); return; }
   if(state.view==="files") state.view = rec.images.length?"image":(rec.spectra.length?"spectrum":"meta");
   try{
@@ -33871,6 +33904,42 @@ function renderView(){
     else if(state.view==="interf") renderInterf(root);
     else renderMeta(root);
   }catch(e){ console.error(e); root.innerHTML=`<div class="card"><div class="note danger">화면 렌더 오류: ${esc(e.message||e)}</div></div>`; }
+}
+
+/* ③ 파일 출처 줄 — 지금 보는 값이 어느 파일·어떤 화소 크기(어디서 온 값)에 기대는지 모든 탭 위에 한 줄로.
+   이미지 데이터는 읽지 않는다(스펙트럼 탭에서 SI 프레임을 합치는 비용을 만들지 않도록 메타데이터만 사용). */
+function renderProv(rec){
+  const el=document.getElementById("provStrip"); if(!el) return;
+  if(!rec){ el.innerHTML=""; el.hidden=true; return; }
+  el.hidden=false;
+  const ext=((rec.name||"").match(/\.([A-Za-z0-9]+)$/)||[,""])[1].toUpperCase();
+  const bits=[];
+  bits.push(`<b class="prov-name" title="${esc(rec.name||"")}">${esc(rec.name||"")}</b>`);
+  if(ext) bits.push(`<span class="badge info">${esc(ext)}</span>`);
+  if(rec.err) bits.push(`<span class="badge risk" title="${esc(String(rec.err))}">읽기 오류</span>`);
+  const nI=rec.images?rec.images.length:0, nS=rec.spectra?rec.spectra.length:0, nSI=rec.streams?rec.streams.length:0;
+  if(nI){
+    const im=rec.images[state.curImage]||rec.images[0]||{};
+    const px=im.px&&im.px.x>0?im.px.x:null;
+    const L=state.lat&&state.lat.imgKey===(rec.name+"|"+im.uid)?state.lat:((state.latByImg||{})[rec.name+"|"+im.uid]||{});
+    let pxTxt, cls="";
+    /* 이 줄은 '파일이 가진 값'을 말한다. 격자 탭의 교정·직접 입력은 격자 측정에만 쓰이므로 따로 표시한다 */
+    if(px){
+      const src=im.gatan&&im.gatan.ok?"Gatan 태그":im.dmScale!=null?".dm 교정 태그":"파일 메타데이터";
+      pxTxt=`화소 <b>${fmtLen(px)}</b> <span class="muted">· ${src}</span>`;
+    } else { pxTxt=`<b>화소 크기 없음</b>`; cls="warn"; }
+    const latPxNm=(px?px*1e9:(L.pxManual||0))*(L.pxCal||1);
+    if(L.pxCal||L.pxManual){
+      const how=!px&&L.pxProvisional&&!L.pxCal?"임시값 — 교정 전":!px&&L.pxProvisional?"알려진 d 로 정함":!px?"직접 입력":`교정 ×${L.pxCal.toFixed(4)}`;
+      pxTxt+=` <span class="muted">· 격자 측정 ${!px&&L.pxProvisional&&!L.pxCal?"":`<b>${fmtLen(latPxNm*1e-9)}</b> `}(${how})</span>`;
+    } else if(!px&&state.view!=="lattice"){ pxTxt+=` <a href="#" id="provToLat">격자 탭에서 정하기</a>`; }
+    bits.push(`<span class="prov-px ${cls}">${pxTxt}</span>`);
+  }
+  const cnt=[]; if(nI) cnt.push(`이미지 ${nI}`); if(nS) cnt.push(`스펙트럼 ${nS}`); if(nSI) cnt.push(`EDS SI ${nSI}`);
+  bits.push(`<span class="muted">${cnt.join(" · ")||"데이터셋 없음"}</span>`);
+  el.innerHTML=bits.join('<span class="prov-sep"></span>');
+  const a=document.getElementById("provToLat");
+  if(a) a.onclick=e=>{ e.preventDefault(); state._viewUser="lattice"; go("lattice"); };
 }
 
 /* ---------------- 파일 사이드바 ---------------- */
@@ -34023,9 +34092,9 @@ function renderImage(root){
           <svg class="ov" id="ov"></svg>
           <div class="sbar" id="sbar" style="display:none"><div class="lbl"></div><div class="bar"></div></div>
         </div>
-        <div class="card" style="margin-top:12px" id="measCard"></div>
       </div>
       <div class="ctrls">
+        <div class="card" id="measCard"></div>
         <div class="card">
           <h3 style="font-size:13px;margin-bottom:10px">표시</h3>
           <div class="crow"><span>최소</span><input type="range" id="rLo" min="0" max="1000"><b id="vLo"></b></div>
@@ -36818,9 +36887,9 @@ function latState(){
   const L=state.lat;
   if(key!==L.imgKey){
     const byImg=state.latByImg||(state.latByImg={});
-    if(L.imgKey!=null) byImg[L.imgKey]={cx:L.cx, cy:L.cy, spots:L.spots, pxCal:L.pxCal, calibNote:L.calibNote};
+    if(L.imgKey!=null) byImg[L.imgKey]={cx:L.cx, cy:L.cy, spots:L.spots, pxCal:L.pxCal, calibNote:L.calibNote, pxManual:L.pxManual, pxProvisional:L.pxProvisional};
     const saved=key!=null?byImg[key]:null;
-    Object.assign(L, saved||{cx:null, cy:null, spots:[], pxCal:null, calibNote:""});
+    Object.assign(L, saved||{cx:null, cy:null, spots:[], pxCal:null, calibNote:"", pxManual:null, pxProvisional:false});
     L.imgKey=key;
     LATFFT=null;
   }
@@ -36830,7 +36899,7 @@ let LATFFT=null;   // {key, P, roi}
 
 function latPx(img){
   const L=latState();
-  const base=img.px&&img.px.x>0 ? img.px.x*1e9 : null;   // nm/px
+  const base=img.px&&img.px.x>0 ? img.px.x*1e9 : (L.pxManual>0 ? L.pxManual : null);   // nm/px (파일값이 없으면 직접 정한 값)
   if(base==null) return null;
   return L.pxCal ? base*L.pxCal : base;
 }
@@ -36854,7 +36923,12 @@ function latEnsure(){
   const P=hrPower(roi.buf,N,px,L.win);
   LATFFT={key,P,roi,N,px,img};
   /* 화소 크기가 바뀌면 이미 찍은 스폿의 d 도 다시 계산해야 한다 */
-  L.spots=L.spots.map(sp=>{ const m=hrMeasure(P,sp.x,sp.y,L.pickR); return m?Object.assign({},sp,{m}):sp; });
+  { const np=L.spots.length?hrNormPower(P):null;
+    L.spots=L.spots.map(sp=>{ const m=hrMeasure(P,sp.x,sp.y,L.pickR); if(!m) return sp;
+      /* 처음 잰 규칙 그대로: 클릭 스폿은 정밀 위치(m.a), 자동 스폿은 국소 최대 화소(sp.x,sp.y) */
+      const q=sp.pick==="click"?m.a:sp;
+      m.snrN=np[Math.min(N-1,Math.round(q.y))*N+Math.min(N-1,Math.round(q.x))];
+      return Object.assign({},sp,{m}); }); }
   return LATFFT;
 }
 function latDrawReal(cv,F){
@@ -36954,13 +37028,35 @@ function renderLattice(root){
   const L=latState(), rec=curRec();
   const img0=loadImageData();
   if(!img0){ root.innerHTML='<div class="card"><div class="note">이 파일에는 이미지가 없습니다.</div></div>'; return; }
-  const pxBase=img0.px&&img0.px.x>0?img0.px.x*1e9:null;
-  if(pxBase==null){ root.innerHTML='<div class="card"><div class="note warn"><b>화소 크기가 파일에 없습니다.</b> d-spacing 은 화소 크기 없이는 계산할 수 없습니다 — 배율 정보가 있는 원본 파일을 여세요.</div></div>'; return; }
+  const pxFile=img0.px&&img0.px.x>0?img0.px.x*1e9:null;
+  const pxBase=pxFile!=null?pxFile:(L.pxManual>0?L.pxManual:null);
+  if(pxBase==null){
+    root.innerHTML=`<div class="card latnopx"><h3>화소 크기가 파일에 없습니다</h3>
+      <div class="muted" style="margin-bottom:12px">d 를 재려면 화소 크기가 필요합니다. 배율 정보가 있는 원본(.dm3·.emd)이 있으면 그 파일을 여는 것이 가장 정확합니다.</div>
+      <div class="latnopx-opts">
+        <div class="latnopx-opt"><b>알려진 d 로 정하기</b>
+          <div class="muted">FFT 에서 격자면 하나를 찍고 그 면의 d(예: Au(111) 2.355 Å)를 넣으면 화소 크기가 정해집니다.</div>
+          <button class="btn sm primary" id="latProv">시작</button></div>
+        <div class="latnopx-opt"><b>화소 크기를 안다</b>
+          <div class="row" style="gap:6px;align-items:center;margin-top:6px"><input type="number" id="latPxIn" class="mono" style="width:110px" min="0" step="0.01" placeholder="예: 12.5"><span class="muted">pm/px</span>
+          <button class="btn sm" id="latPxGo">적용</button></div></div>
+      </div></div>`;
+    $("#latProv").onclick=()=>{ L.pxManual=0.01; L.pxProvisional=true; L.pxCal=null; L.calibNote=""; LATFFT=null; renderView();
+      toast("FFT 에서 스폿을 찍은 뒤 아래 '배율 교정'에 알려진 d 를 넣으세요","ok"); };
+    $("#latPxGo").onclick=()=>{ const v=num($("#latPxIn").value,null);
+      if(!(v>0)){ toast("화소 크기를 pm 단위 양수로 넣으세요","err"); return; }
+      L.pxManual=v/1000; L.pxProvisional=false; L.pxCal=null; L.calibNote=""; LATFFT=null; renderView(); };
+    return;
+  }
+  const provisional=pxFile==null&&L.pxProvisional&&!L.pxCal;
   const F=latEnsure();
   if(!F){ root.innerHTML='<div class="card"><div class="note warn">FFT 를 준비하지 못했습니다.</div></div>'; return; }
   /* 화소 크기가 어디서 왔는지 — d 값 전체가 여기에 걸려 있으므로 반드시 밝힌다 */
   const imNow=rec.images[state.curImage]||{};
   const provenance=(()=>{
+    if(pxFile==null) return provisional
+      ? {kind:"manual", ok:false, txt:`<b>임시값</b> — 파일에 없어 FFT 로 정하는 중입니다. 아래 <b>배율 교정</b>에서 알려진 d 를 적용하기 전까지 d 절대값은 의미가 없습니다 (사잇각·d 비는 유효).`}
+      : {kind:"manual", ok:true, txt:L.pxProvisional?`알려진 d 로 정함 — ${esc(L.calibNote||"")}`:`직접 입력 ${(L.pxManual*1000).toFixed(3)} pm/px`};
     if(imNow.gatan) return imNow.gatan.ok
       ? {kind:"tiff", ok:true, txt:`TIFF 에는 없어 <b>Gatan 태그에서 되짚음</b> — ${esc(imNow.gatan.how)}
            <span class="muted">(카메라 화소 출처: ${esc(TIFF_CAMERAS[Object.keys(TIFF_CAMERAS).find(k=>(imNow.gatan.cam||"").toUpperCase().includes(k.toUpperCase()))]?.src||"미상")})</span>`}
@@ -37004,7 +37100,7 @@ function renderLattice(root){
   root.appendChild(h(`<div>
     <div class="tiles">
       <div class="tile accent"><div class="v">${(px*1000).toFixed(2)} pm</div><div class="k">화소 크기</div>
-        <div class="s">${L.pxCal?`교정 ×${L.pxCal.toFixed(5)}`:"파일 메타데이터"}</div></div>
+        <div class="s">${provisional?"임시값 — 교정 필요":pxFile==null&&L.pxProvisional?"알려진 d 로 정함":L.pxCal?`교정 ×${L.pxCal.toFixed(5)}`:pxFile==null?"직접 입력":"파일 메타데이터"}</div></div>
       <div class="tile"><div class="v">${F.N}²</div><div class="k">FFT 영역</div><div class="s">${(F.N*px).toFixed(1)} nm</div></div>
       <div class="tile"><div class="v">${dg.toFixed(4)}</div><div class="k">역공간 눈금 Δg [nm⁻¹]</div>
         <div class="s">1/(N·px)</div></div>
@@ -37033,6 +37129,7 @@ function renderLattice(root){
       </div>
     </div>
 
+    <div class="latgrid"><div class="latmain">
     <div class="card">
       <div class="row" style="gap:14px;align-items:flex-start;flex-wrap:wrap">
         <div><div class="muted" style="margin-bottom:4px">실공간 — 클릭해서 영역 이동</div>
@@ -37048,12 +37145,14 @@ function renderLattice(root){
       </div>
     </div>
 
+    </div><div class="latside">
     <div class="card">
       <h3>측정값 <span class="hint">d = 1/|g| · Friedel 짝을 함께 재서 중심 오차를 상쇄</span>
         <span style="flex:1"></span>
         <button class="btn sm" id="latCsv">CSV</button>
         <button class="btn sm" id="latPng">PNG 저장</button></h3>
-      ${rows?`<div class="tblwrap"><table class="tbl"><thead><tr>
+      ${provisional?`<div class="note warn" style="margin-bottom:8px"><b>임시 화소 크기</b> — d 열은 아직 의미가 없습니다. 아래 배율 교정에서 알려진 d 를 적용하세요.</div>`:""}
+      ${rows?`<div class="tblwrap"><table class="tbl latmeas"><thead><tr>
         <th class="l">#</th><th>d [Å]</th><th>d [nm]</th><th>|g| [nm⁻¹]</th><th title="화면 기준 반시계">각 [°]</th><th>|g| [px]</th><th>Friedel</th><th title="가로·세로 축에 붙은 스폿은 아티팩트일 수 있습니다">주의</th><th title="같은 반지름의 배경 중앙값 대비 몇 배인가">배경대비</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table></div>`
       :`<div class="note">FFT 를 클릭해 스폿을 고르세요.</div>`}
@@ -37094,6 +37193,7 @@ function renderLattice(root){
              여기서 교정하세요 — 하지 않았다면 <b>d 의 절대값에 1~2% 계통오차</b>가 있다고 보고하는 것이 정직합니다.`}
       </div>
     </div>
+    </div></div>
   </div>`));
 
   const cvR=$("#latReal"), cvF=$("#latFFT"), cvI=$("#latInv");
@@ -37112,7 +37212,7 @@ function renderLattice(root){
     { const np=F._np||(F._np=hrNormPower(F.P));
       m.snrN=np[Math.min(F.N-1,Math.round(m.a.y))*F.N+Math.min(F.N-1,Math.round(m.a.x))]; }
     if(m.gpx<3){ toast("중심(DC)에 너무 가깝습니다","warn"); return; }
-    L.spots.push({x,y,m,on:true}); renderView(); };
+    L.spots.push({x,y,m,on:true,pick:"click"}); renderView(); };
 
   $("#latImg").onchange=e=>{ state.curImage=+e.target.value; IMG.cache=null; LATFFT=null; L.cx=null; L.spots=[]; renderView(); };
   $("#latN").onchange=e=>{ L.N=+e.target.value; L.spots=[]; renderView(); };
@@ -37145,7 +37245,7 @@ function renderLattice(root){
     LATFFT=null; renderView();
     toast(`화소 크기를 ${((f-1)*100).toFixed(2)}% 보정했습니다`,"ok");
   };
-  $("#latCalRst").onclick=()=>{ L.pxCal=null; L.calibNote=""; LATFFT=null; renderView(); };
+  $("#latCalRst").onclick=()=>{ L.pxCal=null; L.calibNote=""; if(pxFile==null){ L.pxManual=null; L.pxProvisional=false; } LATFFT=null; renderView(); };
 
   $("#latCsv").onclick=()=>{
     const r=[["#","d_A","d_nm","g_1_per_nm","angle_deg","g_px","friedel","snr",
