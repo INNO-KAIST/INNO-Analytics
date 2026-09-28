@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#33202f">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
 <title>INNO Analytics — STEM / EDS</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='bg' cx='0.5' cy='0.42' r='0.72'><stop offset='0' stop-color='%23134E4A'/><stop offset='1' stop-color='%23071014'/></radialGradient><linearGradient id='sh' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2334D399'/><stop offset='1' stop-color='%2322D3EE'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23bg)'/><path d='M18 74 L36 42 L50 60 L62 30 L82 74 Z' fill='url(%23sh)' opacity='0.92'/><circle cx='62' cy='30' r='6' fill='%23F0FDFA'/></svg>">
 <script>/* theme boot (FOUC 방지) */
@@ -12,29 +14,11 @@ if(t!=="light"&&t!=="dark"){t=(window.matchMedia&&window.matchMedia("(prefers-co
 document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","light");}})();</script>
 <style>
 /* ============ INNO Analytics — STEM/EDS Analysis Platform ============ */
-:root{
-  color-scheme:light;
-  --bg:#F8FAFC; --card:#FFFFFF; --line:#E2E8F0; --line2:#CBD5E1;
-  --ink:#0F172A; --ink2:#334155; --sub:#475569; --muted:#64748B;
-  --primary:#2563EB; --primary-strong:#1D4ED8; --primary-soft:#DBEAFE;
-  --ok:#059669; --ok-soft:#DCFCE7; --warn:#D97706; --warn-soft:#FEF3C7;
-  --risk:#DC2626; --risk-soft:#FEE2E2; --chip:#F1F5F9;
-  --field:#FFFFFF; --hover:#E2E8F0; --rowhover:#F1F5F9;
-  --stage:#0F172A;
-  --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 12px rgba(15,23,42,.05);
-  --r:12px; --r-s:8px;
-}
-html[data-theme="dark"]{
-  color-scheme:dark;
-  --bg:#0B1220; --card:#111A2E; --line:#1E293B; --line2:#334155;
-  --ink:#E5EAF2; --ink2:#CBD5E1; --sub:#94A3B8; --muted:#8497AE;
-  --primary:#60A5FA; --primary-strong:#3B82F6; --primary-soft:#17274A;
-  --ok:#10B981; --ok-soft:#0F3227; --warn:#F59E0B; --warn-soft:#3A2A12;
-  --risk:#F87171; --risk-soft:#3B1A1A; --chip:#1B2540;
-  --field:#0E1728; --hover:#26324A; --rowhover:#1A2542;
-  --stage:#05080F;
-  --shadow:0 1px 2px rgba(0,0,0,.45),0 6px 16px rgba(0,0,0,.35);
-}
+/* INNO suite tokens — 공통 틀 + Analytics 강조색(plum). 옛 변수명은 별칭 */
+:root{color-scheme:light;--page:#f5f6f3;--surface:#ffffff;--surface-2:#eef1ed;--surface-3:#e6eae5;--ink:#243433;--ink-2:#4a5a56;--muted:#62706b;--faint:#8b978f;--border:#dde3dc;--border-strong:#c9d3c8;--grid:#e4e8e2;--ok:#2a7141;--ok-soft:#e3f0e5;--warn:#8a5f0a;--warn-soft:#f7ecd3;--risk:#ab3f35;--risk-soft:#f6e1dd;--info:#2f5f9e;--info-soft:#e2eaf5;--scrim:rgba(20,32,30,.42);--shadow:0 1px 2px rgba(24,40,37,.05),0 6px 20px rgba(24,40,37,.06);--shadow-lg:0 24px 70px rgba(24,40,37,.18);--accent:#7a3f6e;--accent-strong:#62315a;--accent-soft:#f3e6ef;--focus:#a26b95;--chrome:#33202f;--chrome-mark:#e1b7d5;--on-accent:#ffffff;--toast-bg:#33202f;--toast-ink:#f1f4ef;--chrome-ink:#f1f4ef;--chrome-ink-2:rgba(241,244,239,.72);--chrome-line:rgba(255,255,255,.09);--chrome-soft:rgba(255,255,255,.08);--chrome-soft-2:rgba(255,255,255,.14);--font:"DM Sans","Noto Sans KR",system-ui,-apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;--mono:ui-monospace,"Cascadia Mono",Consolas,"D2Coding",monospace;}
+html[data-theme="dark"]{color-scheme:dark;--page:#1b2422;--surface:#232f2c;--surface-2:#2b3733;--surface-3:#33403b;--ink:#e3ebe2;--ink-2:#c3cfc5;--muted:#a3b0a6;--faint:#7f8c84;--border:#3a4841;--border-strong:#4d5d54;--grid:#33403b;--ok:#6cc68a;--ok-soft:#1f3a2a;--warn:#e3b04f;--warn-soft:#3a3018;--risk:#e8847a;--risk-soft:#3d2320;--info:#8fb3e6;--info-soft:#1f2d44;--scrim:rgba(5,12,10,.60);--shadow:0 1px 2px rgba(0,0,0,.30),0 8px 24px rgba(0,0,0,.28);--shadow-lg:0 24px 70px rgba(0,0,0,.50);--accent:#d7a0c8;--accent-strong:#e2b6d6;--accent-soft:#412a3c;--focus:#dcaacd;--chrome:#271823;--chrome-mark:#e1b7d5;--on-accent:#271823;--toast-bg:#e3ebe2;--toast-ink:#271823;--chrome-ink:#f1f4ef;--chrome-ink-2:rgba(241,244,239,.72);--chrome-line:rgba(255,255,255,.09);--chrome-soft:rgba(255,255,255,.08);--chrome-soft-2:rgba(255,255,255,.14);}
+:root{--bg:var(--page);--card:var(--surface);--line:var(--border);--line2:var(--border-strong);--ink2:var(--ink-2);--sub:var(--ink-2);--primary:var(--accent);--primary-strong:var(--accent-strong);--primary-soft:var(--accent-soft);--chip:var(--surface-2);--field:var(--surface);--hover:var(--surface-3);--rowhover:var(--surface-2);--fg:var(--ink);--r:10px;--r-s:7px;--stage:#101614}
+html[data-theme="dark"]{--stage:#0a0f0e}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;-webkit-font-smoothing:antialiased}
@@ -284,6 +268,119 @@ button.mapsw,span.mapsw{width:18px;height:18px;border-radius:5px;border:1px soli
   .main{padding-left:0}
 }
 
+
+/* ════════ INNO suite skin — Workspace 결 (2026-09-29) ════════
+   공통 틀은 다른 INNO 앱과 같고, 강조색만 Analytics 고유(plum).
+   이미지·맵·스펙트럼의 데이터 색(원소 팔레트, 컬러맵, 캔버스 오버레이)은 건드리지 않는다. */
+body{background:var(--page);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.55;font-synthesis:none}
+.mono,.tree{font-family:var(--mono)}
+.plot text{font-family:var(--font)}
+::selection{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+:where(button,a,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ── 상단 크롬 ── */
+.topbar{background:var(--chrome);color:var(--chrome-ink);box-shadow:0 0 0 100vmax var(--chrome);clip-path:inset(0 -100vmax);padding:13px 2px;margin-bottom:16px}
+.brand .logo{color:var(--chrome-ink);font-weight:700;font-size:18px;letter-spacing:.01em}
+.brand .logo em{color:var(--chrome-mark)}
+.brand .ver{color:var(--chrome-ink-2);letter-spacing:.03em}
+.copyright{color:var(--chrome-ink-2)}
+.topbar .chipbtn{background:var(--chrome-soft);border-color:var(--chrome-line);color:var(--chrome-ink);font-weight:500;min-height:30px}
+.topbar button.chipbtn:hover{background:var(--chrome-soft-2)}
+.topbar .chipbtn .dot{background:var(--chrome-ink-2)}
+.topbar .chipbtn.on .dot{background:#7fd49a}
+
+/* ── 사이드바(파일 목록) ── */
+.side{border-color:var(--border);border-radius:10px;box-shadow:var(--shadow)}
+.sidehead{color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-bottom-color:var(--border)}
+.sidehead .cnt{background:var(--surface-2);color:var(--ink-2);letter-spacing:0}
+.sidehead .btn{text-transform:none;letter-spacing:0}
+.sideitem:hover{background:var(--surface-2)}
+.sideitem.sel{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.sideitem.sel .n{color:var(--accent)}
+.sideitem .n{font-weight:600}
+.sideitem .kd{background:var(--surface-2);color:var(--ink-2);font-weight:700}
+.sidedrop{border-color:var(--border-strong);color:var(--muted)}
+.sidedrop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.sidetog{border-color:var(--border);color:var(--muted)}
+.side.collapsed + .sidetog{border-color:var(--border)}
+.sidetog:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ── 탭 ── */
+.nav{border-bottom:1px solid var(--border);gap:2px}
+.nav button{color:var(--ink-2);font-weight:500;padding:9px 15px 10px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:7px 7px 0 0}
+.nav button:hover:not(:disabled){color:var(--ink);background:var(--surface-2)}
+.nav button.active{color:var(--accent);font-weight:600;border-bottom-color:var(--accent)}
+.nav button:disabled{opacity:1;color:var(--faint)}
+.nav button .cnt{color:inherit;opacity:.75}
+
+/* ── 카드·표·배지 ── */
+.card{border-color:var(--border);border-radius:10px;padding:18px 20px}
+.card>h3{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+.note{background:var(--surface-2);border-color:var(--border);color:var(--ink-2);border-radius:8px}
+.note.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 30%,transparent);color:var(--ink)}
+.note.danger{background:var(--risk-soft);border-color:color-mix(in srgb,var(--risk) 30%,transparent);color:var(--ink)}
+.note.okay{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 30%,transparent);color:var(--ink)}
+label.f{color:var(--ink-2)}
+input[type=text],input[type=number],input[type=search],select,textarea{border-color:var(--border-strong);border-radius:7px}
+.btn{background:var(--surface);border-color:var(--border-strong);border-radius:7px;color:var(--ink);font-weight:600;min-height:34px}
+.btn:hover:not(:disabled){background:var(--surface-2)}
+.btn.primary,html[data-theme="dark"] .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.primary:hover:not(:disabled){background:var(--accent-strong);border-color:var(--accent-strong)}
+.btn.sm{min-height:28px}
+.btn.xs{min-height:24px;border-radius:6px}
+.seg{background:var(--surface-2);border-color:var(--border)}
+.seg button{color:var(--ink-2);font-weight:500}
+.seg button.active{background:var(--surface);color:var(--accent);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.tbl th{background:var(--surface-2);color:var(--ink-2);font-weight:600;border-bottom:1px solid var(--border-strong)}
+.tbl td{border-bottom-color:var(--grid)}
+.tblwrap{border-color:var(--border)}
+.badge{font-weight:600}
+.badge.info,html[data-theme="dark"] .badge.info{background:var(--info-soft);color:var(--info)}
+.badge.ok,[data-theme=dark] .badge.ok,html[data-theme="dark"] .badge.ok{background:var(--ok-soft);color:var(--ok)}
+.badge.warn,html[data-theme="dark"] .badge.warn{background:var(--warn-soft);color:var(--warn)}
+.badge.risk,html[data-theme="dark"] .badge.risk{background:var(--risk-soft);color:var(--risk)}
+.badge.gray{background:var(--surface-2);color:var(--ink-2)}
+.tile{border-color:var(--border);border-radius:10px}
+.tile .v{font-weight:700}
+.tile .k{color:var(--ink-2)}
+.tile.accent .v{color:var(--accent)}
+.dropzone{border-color:var(--border-strong);border-radius:10px}
+.dropzone:hover{border-color:var(--accent);background:var(--accent-soft)}
+.dropzone.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.fitem{border-color:var(--border)}
+.fitem:hover,.fitem.sel{border-color:var(--accent)}
+.fitem.sel{background:var(--accent-soft)}
+.stage{border-color:var(--border);border-radius:10px}
+.crow>span:first-child{color:var(--ink-2)}
+.plot{border-color:var(--border)}
+.tree .g{color:var(--accent)}
+
+/* ── 오버레이 ── */
+.overlay,[data-theme=dark] .overlay{background:var(--scrim)}
+.overlay .modal{border-color:var(--border);border-radius:12px;box-shadow:var(--shadow-lg)}
+.pickpop{border-color:var(--border);box-shadow:var(--shadow-lg)}
+#busy{background:var(--scrim)}
+#busy .box{box-shadow:var(--shadow-lg);font-weight:600}
+.spin{border-color:var(--border-strong);border-top-color:var(--accent)}
+.toast,html[data-theme="dark"] .toast{background:var(--toast-bg);color:var(--toast-ink);border:0;font-weight:500;box-shadow:var(--shadow-lg)}
+.toast.ok{background:var(--ok-soft);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 35%,transparent)}
+.toast.warn{background:var(--warn-soft);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
+.toast.err{background:var(--risk-soft);color:var(--risk);border:1px solid color-mix(in srgb,var(--risk) 35%,transparent)}
+
+@media (max-width:720px){
+  .brand .ver,.copyright{display:none}
+  .nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .nav::-webkit-scrollbar{display:none}
+  .nav button{white-space:nowrap;flex:none}
+}
+/* 좁은 화면: 파일 목록 토글을 왼쪽 아래 떠 있는 버튼으로 — 크롬·탭을 가리지 않게 */
+@media (max-width:900px){
+  .side{top:12px;bottom:12px;z-index:70}
+  .sidetog,.side.collapsed + .sidetog{top:auto;bottom:18px;width:44px;height:44px;border-radius:999px;border:1px solid var(--border-strong);
+    background:var(--surface);color:var(--accent);font-size:14px;box-shadow:var(--shadow-lg);z-index:72}
+}
 </style>
 </head>
 <body>
