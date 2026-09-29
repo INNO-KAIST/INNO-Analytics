@@ -38115,7 +38115,7 @@ const DEF = () => ({v:1,formula:"",cols:[],host:{key:null,name:"",w:360,src:"",e
   Emax:"auto",mode:"view",sel:null,warn:[],layers:[]});
 let S = load();
 function load(){
-  try{ const s=JSON.parse(localStorage.getItem(KEY)||"null"); if(s&&s.v===1) return Object.assign(DEF(),s,{mode:"view",sel:null}); }catch(e){}
+  try{ const s=JSON.parse(localStorage.getItem(KEY)||"null"); if(s&&s.v===1){ const o=Object.assign(DEF(),s,{mode:"view",sel:null}); /* 예전 판에서 루프를 여러 번 눌러 쌓인 똑같은 과정은 하나만 남긴다 */ const u=[]; (o.procs||[]).forEach(p=>{ if(!u.some(q=>sameProc(q,p))) u.push(p); }); o.procs=u; return o; } }catch(e){}
   return DEF();
 }
 function save(){ try{ const o=Object.assign({},S); delete o.sel; localStorage.setItem(KEY,JSON.stringify(o)); }catch(e){} }
@@ -38759,6 +38759,9 @@ function onPick(c,id){
   /* 다음 후보로 초점 */
   const f=ROOT.querySelector('.lvhit[tabindex="0"]'); if(f && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("lvhit")) f.focus();
 }
+function sameProc(a,b){ if(a.kind!==b.kind) return false;
+  if(a.kind==="ET") return a.d.c===b.d.c&&a.d.f===b.d.f&&a.d.t===b.d.t&&a.a.c===b.a.c&&a.a.f===b.a.f&&a.a.t===b.a.t;
+  return a.c===b.c&&a.f===b.f&&a.t===b.t&&(a.kind!=="PH"||(+a.nm||0)===(+b.nm||0)); }
 function delProc(u){ S.procs=S.procs.filter(p=>p.uid!==u); if(S.sel===u) S.sel=null; save(); rerender(); }
 
 /* ---------------- 툴팁 ---------------- */
@@ -38843,23 +38846,24 @@ function renderLasers(){
      ESA ${C.termHTML(r.M.t)}→${C.termHTML(r.U.t)} <span class="gr g${r.esa.grade}">${r.esa.gradeName}</span>${r.U.id!==r.H.id?` ⇝ ${C.termHTML(r.H.t)}`:""} ·
      CR ${C.termHTML(r.H.t)}+${C.termHTML(MODEL.cols[r.m.i].lv[0].t)}→${C.termHTML(r.X.t)}+${C.termHTML(r.Y.t)} <span class="gr g${r.cr.grade}">${r.cr.gradeName}</span>
      <div class="muted" style="margin-top:4px">준위 구조상 필요 조건만 점검 — 실제 눈사태 여부는 σ<sub>ESA</sub>/σ<sub>GSA</sub>, CR 속도(농도), 준안정 수명에 달림 (Joubert, Opt. Mater. 11, 181 (1999); Lee et al., Nature 589, 230 (2021)).</div>
-     <div class="row" style="margin-top:6px"><button class="btn sm" data-pa="${r.m.c.uid}|${r.nm}">도식에 루프 추가</button></div></div>`).join("")}`;
+     <div class="row" style="margin-top:6px">${S.procs.some(p=>p.grp==="pa:"+r.m.c.uid+"|"+r.nm)?`<button class="btn sm" data-parm="${r.m.c.uid}|${r.nm}">도식에서 이 루프 제거</button><span class="muted">도식에 있음</span>`:`<button class="btn sm" data-pa="${r.m.c.uid}|${r.nm}">도식에 루프 추가</button>`}</div></div>`).join("")}`;
   el.querySelectorAll(".ed-laser button").forEach(b=>b.onclick=()=>{ S.lasers.splice(+b.dataset.i,1); S.lasersUser=true; save(); rerender(); });
   const inp=$q(el,"#edLasIn");
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ const v=Math.round(+inp.value); if(v>=150&&v<=5000&&!S.lasers.includes(v)){ S.lasers.push(v); S.lasers.sort((a,b)=>a-b); S.lasersUser=true; save(); rerender(); } } });
   $q(el,"#edGsa").onchange=e=>{ S.show.gsa=e.target.checked; save(); rerender(); };
   el.querySelectorAll("button[data-pa]").forEach(b=>b.onclick=()=>{
     const [cu,nm]=b.dataset.pa.split("|"); const r=MODEL.pa.find(x=>x.m.c.uid===cu&&String(x.nm)===nm); if(!r) return;
-    const g=MODEL.byUid[cu].lv[0];
-    const add=o=>S.procs.push(Object.assign({uid:uid()},o));
+    const g=MODEL.byUid[cu].lv[0]; const grp="pa:"+cu+"|"+nm; let added=0, dup=0;
+    const add=o=>{ if(S.procs.some(q=>sameProc(q,o))){ dup++; return; } S.procs.push(Object.assign({uid:uid(),grp},o)); added++; };
     add({kind:"PH",c:cu,f:g.id,t:r.gsa.to.id,nm:+nm});
     if(r.gsa.to.cascade&&r.gsa.to.cascade!==r.gsa.to.id) add({kind:"MPR",c:cu,f:r.gsa.to.id,t:r.gsa.to.cascade});
     else if(r.gsa.to.id!==r.M.id) add({kind:"MPR",c:cu,f:r.gsa.to.id,t:r.M.id});
     add({kind:"PH",c:cu,f:r.M.id,t:r.U.id,nm:+nm});
     if(r.U.id!==r.H.id) add({kind:"MPR",c:cu,f:r.U.id,t:r.H.id});
     add({kind:"ET",d:{c:cu,f:r.H.id,t:r.X.id},a:{c:cu,f:g.id,t:r.Y.id},coop:false,type:null});
-    save(); rerender();
+    save(); rerender(); note(added?(`루프 과정 ${added}개를 추가했습니다`+(dup?` (이미 있던 ${dup}개는 건너뜀)`:"")):"이 루프의 과정은 이미 모두 도식에 있습니다");
   });
+  el.querySelectorAll("button[data-parm]").forEach(b=>b.onclick=()=>{ const grp="pa:"+b.dataset.parm; const n=S.procs.filter(p=>p.grp===grp).length; S.procs=S.procs.filter(p=>p.grp!==grp); if(S.sel&&!S.procs.some(p=>p.uid===S.sel)) S.sel=null; save(); rerender(); note(`루프 과정 ${n}개를 지웠습니다`); });
 }
 function procLabel(p){
   const L=m=>esc(C.ionLabel(m.c.ion));
@@ -38871,13 +38875,15 @@ function typeBadge(t){ const P=palette(); const c=P.T[t]||(t==="GSA"||t==="ESA"?
 function renderProcs(){
   const el=$q(ROOT,"#edProcCard"); if(!el) return;
   const ps=MODEL.procs;
-  el.innerHTML=`<h3>과정 <span class="hint">${ps.length}개</span></h3>`+(ps.length?`<table class="ed-tbl"><thead><tr><th>#</th><th>종류</th><th>과정</th><th class="num">ΔE</th><th>판정</th></tr></thead><tbody>`+
+  el.innerHTML=`<h3>과정 <span class="hint">${ps.length}개</span>${ps.length?'<button class="btn xs" id="edProcClr" style="margin-left:auto" title="도식에 넣은 과정을 모두 지운다 (준위·이온은 그대로)">모두 지우기</button>':""}</h3>`+(ps.length?`<table class="ed-tbl"><thead><tr><th>#</th><th>종류</th><th>과정</th><th class="num">ΔE</th><th>판정</th><th></th></tr></thead><tbody>`+
     ps.map(p=>{ const c=p.c; const dE=p.kind==="ET"?c.dE:(p.kind==="PH"&&c?c.dE:null);
       const gr=(p.kind==="ET"||p.kind==="PH")&&c?`<span class="gr g${c.grade}">${c.gradeName}</span>`:(p.kind==="PH"?'<span class="gr g4">광원 없음</span>':"");
-      return `<tr data-u="${p.p.uid}" class="${S.sel===p.p.uid?"sel":""}"><td>${p.n}</td><td>${typeBadge(p.type)}</td><td>${procLabel(p)}</td><td class="num">${dE==null?"":(dE>0?"+":"")+fmt(dE)}</td><td>${gr}</td></tr>`; }).join("")+
+      return `<tr data-u="${p.p.uid}" class="${S.sel===p.p.uid?"sel":""}"><td>${p.n}</td><td>${typeBadge(p.type)}</td><td>${procLabel(p)}</td><td class="num">${dE==null?"":(dE>0?"+":"")+fmt(dE)}</td><td>${gr}</td><td><button class="btn xs" data-pdel="${p.p.uid}" aria-label="과정 삭제" title="삭제">×</button></td></tr>`; }).join("")+
     `</tbody></table><div class="muted" style="margin-top:6px">ΔE = donor(또는 광자) − acceptor 전이 에너지 [cm⁻¹]. 양수면 남는 에너지를 포논으로 방출.</div>`:
     `<div class="muted">‘에너지 전달’·‘광흡수’·‘방출·이완’ 모드에서 준위를 차례로 누르거나, 아래 ‘경로 제안’에서 추가하세요.</div>`);
-  el.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ S.sel=tr.dataset.u; rerender(); });
+  el.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=e=>{ if(e.target.closest("button[data-pdel]")) return; S.sel=tr.dataset.u; rerender(); });
+  el.querySelectorAll("button[data-pdel]").forEach(b=>b.onclick=()=>delProc(b.dataset.pdel));
+  const clr=$q(el,"#edProcClr"); if(clr) clr.onclick=()=>{ if(!confirm(`도식의 과정 ${S.procs.length}개를 모두 지울까요? (준위·이온은 그대로)`)) return; S.procs=[]; S.sel=null; save(); rerender(); note("과정을 모두 지웠습니다"); };
 }
 function renderDetail(){
   const el=$q(ROOT,"#edDetCard"); if(!el) return;
@@ -39815,8 +39821,100 @@ function templateLee(){
   };
 }
 
+/* Tm³⁺ 5준위(³H₆ ³F₄ ³H₅ ³H₄ ¹G₄) / 6준위(+¹D₂) — 1064 nm 광자 사태.
+   값의 근거: Chen 2025(NaLuF₄:Tm 8준위 모델, SI Table 3; 프로젝트 검증노트 V4), Lee 2021(JO 복사율·Q 계수, SI Table S4–S7).
+   에너지 불일치(Carnall 무게중심·Stark 범위, Energy Diagram 데이터): GSA ³H₆→³H₅ 는 광자가 830–1250 cm⁻¹ 남는 포논 방출형,
+   ESA1 ³F₄→³F₂ 공명(창 안), ESA2 ³H₄→¹G₄ 는 440–1250 cm⁻¹ 남음, CR1 ³H₄+³H₆→³F₄+³F₄ 는 ≥670 cm⁻¹ 남음(포논 보조),
+   c2 ³H₄→³F₄ ⇒ ¹G₄→¹D₂ 는 창이 겹쳐 공명, ETU ³F₄+³F₄→³H₆+³H₄ 는 ≥670 cm⁻¹ 흡열. */
+function templateTm(level){
+  const six=level===6;
+  const lv=six?["3H6","3F4","3H5","3H4","1G4","1D2"]:["3H6","3F4","3H5","3H4","1G4"];
+  const N="NRE*c/100";   /* Tm 수밀도 [cm⁻³] — 전달 계수(cm³ s⁻¹) × 수밀도 = 정규화 점유 기준 속도 [s⁻¹] */
+  const procs=[
+    {type:"abs",sp:"Tm",from:"3H6",to:"3H5",sigma:"sG",note:"GSA ³H₆→³H₅ (포논 방출형, 비공명)"},
+    {type:"abs",sp:"Tm",from:"3F4",to:"3H4",sigma:"sE1",note:"ESA1 ³F₄→³F₂,₃ (공명) → ³H₄ 로 빠른 이완을 가정"},
+    {type:"abs",sp:"Tm",from:"3H4",to:"1G4",sigma:"sE2",note:"ESA2 ³H₄→¹G₄ (포논 방출형)"},
+    {type:"dec",sp:"Tm",from:"3F4",to:"3H6",k:"w2r+w2nr",note:"³F₄ 감쇠 (복사 + 시료별 비복사)"},
+    {type:"dec",sp:"Tm",from:"3H5",to:"3F4",k:"w35*(1-b51)",note:"³H₅ → ³F₄ (다포논, 빠름)"},
+    {type:"dec",sp:"Tm",from:"3H5",to:"3H6",k:"w35*b51",note:"³H₅ → ³H₆"},
+    {type:"dec",sp:"Tm",from:"3H4",to:"3H6",k:"(1-b32)*w3r",note:"³H₄→³H₆ 복사 (800 nm)"},
+    {type:"dec",sp:"Tm",from:"3H4",to:"3F4",k:"b32*w3r",note:"³H₄→³F₄ 복사 (1.47 µm)"},
+    {type:"dec",sp:"Tm",from:"3H4",to:"3H5",k:"w3nr",note:"³H₄ 비복사 (시료별) → ³H₅"},
+    {type:"dec",sp:"Tm",from:"1G4",to:"3H6",k:"0.30*w6",note:"¹G₄→³H₆ (475 nm)"},
+    {type:"dec",sp:"Tm",from:"1G4",to:"3F4",k:"0.10*w6",note:"¹G₄→³F₄ (650 nm)"},
+    {type:"dec",sp:"Tm",from:"1G4",to:"3H5",k:"0.45*w6",note:"¹G₄→³H₅ (780 nm)"},
+    {type:"dec",sp:"Tm",from:"1G4",to:"3H4",k:"0.15*w6",note:"¹G₄→³H₄ (+³F₂,₃ 경유 0.03)"},
+    {type:"et",d:["Tm","3H4","3F4"],a:["Tm","3H6","3F4"],W:`cCR*${N}`,scale:"none",note:"CR1 (³H₄,³H₆)→(³F₄,³F₄) — 사태 루프"},
+    {type:"et",d:["Tm","3F4","3H6"],a:["Tm","3F4","3H4"],W:`cUC23*${N}`,scale:"none",note:"ETU (³F₄,³F₄)→(³H₆,³H₄) — 흡열"},
+    {type:"et",d:["Tm","3F4","3H6"],a:["Tm","3F4","3H5"],W:`cUC22*${N}`,scale:"none",note:"ETU (³F₄,³F₄)→(³H₆,³H₅→³F₄) — 손실형"}];
+  if(six) procs.push(
+    {type:"et",d:["Tm","3H4","3F4"],a:["Tm","1G4","1D2"],W:`cCR2*${N}`,scale:"none",note:"CR2 (³H₄,¹G₄)→(³F₄,¹D₂) — 공명, 450 nm 경로"},
+    {type:"dec",sp:"Tm",from:"1D2",to:"3H6",k:"0.36*w7",note:"¹D₂→³H₆ (360 nm)"},
+    {type:"dec",sp:"Tm",from:"1D2",to:"3F4",k:"0.46*w7",note:"¹D₂→³F₄ (450 nm)"},
+    {type:"dec",sp:"Tm",from:"1D2",to:"3H5",k:"0.02*w7",note:"¹D₂→³H₅"},
+    {type:"dec",sp:"Tm",from:"1D2",to:"3H4",k:"0.15*w7",note:"¹D₂→³H₄ (+³F₂,₃ 경유 0.07)"},
+    {type:"dec",sp:"Tm",from:"1D2",to:"1G4",k:"0.01*w7",note:"¹D₂→¹G₄"});
+  /* 채널 가중치 = 기본값에서의 복사(방출) 속도 [s⁻¹] — 채널끼리 비율에만 의미가 있다 */
+  const ch=[{id:"800 nm (³H₄→³H₆)",terms:[["Tm","3H4",0.856*636.01]]},
+    {id:"475 nm (¹G₄→³H₆)",terms:[["Tm","1G4",0.30*2e4]]},
+    {id:"NIR 필터 (³H₄ 800 + ¹G₄→³H₅ 780)",terms:[["Tm","3H4",0.856*636.01],["Tm","1G4",0.45*2e4]]},
+    {id:"1.8 µm (³F₄)",terms:[["Tm","3F4",162.6]]}];
+  if(six) ch.splice(2,0,{id:"450 nm (¹D₂→³F₄)",terms:[["Tm","1D2",0.46*2e4]]},{id:"청색 450+475",terms:[["Tm","1D2",0.46*2e4],["Tm","1G4",0.30*2e4]]});
+  const params={
+    sG:{v:7e-25,lo:1e-28,hi:1e-21,unit:"cm²",src:"Chen 2025 SI Table 3 σ_GSA (Lee 2021: 6.0×10⁻²⁵)"},
+    sE1:{v:7e-21,lo:1e-24,hi:1e-18,unit:"cm²",src:"Chen 2025 σ_ESA1 (E/G=1; Lee 2021: 6.4×10⁻²¹)"},
+    sE2:{v:7e-22,lo:1e-25,hi:1e-19,unit:"cm²",src:"Chen 2025 σ_ESA2 = σ_ESA1/10"},
+    w2r:{v:162.6,lo:10,hi:1e4,unit:"s⁻¹",fixed:true,src:"Lee 2021 JO (SI Table S6)"},
+    w2nr:{v:40.65,lo:0.01,hi:1e6,unit:"s⁻¹",per:"sample",src:"자리표시: Lee 2021 Sample 4. ³F₄ 수명으로 시료마다 정할 것 (Chen 2025 NaLuF₄ 15 %: τ³F₄ 26 µs)"},
+    w35:{v:1e5,lo:1e3,hi:1e8,unit:"s⁻¹",fixed:true,src:"Chen 2025 w3 (³H₅ 전체 이완)"},
+    b51:{v:0.1,lo:0.01,hi:0.9,unit:"",fixed:true,src:"Chen 2025 b31 (³H₅→³H₆)"},
+    w3r:{v:636.01,lo:10,hi:1e5,unit:"s⁻¹",fixed:true,src:"Lee 2021 JO"},
+    b32:{v:0.144,lo:0.01,hi:0.9,unit:"",fixed:true,src:"Lee 2021 JO (³H₄→³F₄ 분기; ³H₅ 몫 포함)"},
+    w3nr:{v:87.32,lo:0.1,hi:1e7,unit:"s⁻¹",per:"sample",src:"자리표시: Lee 2021 Sample 4. ³H₄ 수명(저농도)으로 정할 것"},
+    w6:{v:2e4,lo:1e2,hi:1e7,unit:"s⁻¹",src:"Chen 2025 w6 (W=1); 분기 0.30/0.10/0.45/0.15 = Chen b6x"},
+    cCR:{v:5.4e-17,lo:1e-21,hi:1e-13,unit:"cm³ s⁻¹",src:"Chen 2025 c1 (CR=1, NaYF₄). NaLuF₄ 맞춤은 CR=6 → 3.2×10⁻¹⁶"},
+    cUC23:{v:5.1e-20,lo:1e-24,hi:1e-15,unit:"cm³ s⁻¹",src:"Lee 2021 a_inv=9.0 을 c=8 % 에서 환산 (kQ·c³/(c²+4.3²)/N_Tm)"},
+    cUC22:{v:1.45e-19,lo:1e-24,hi:1e-15,unit:"cm³ s⁻¹",src:"Lee 2021 a_uc=25.6 을 c=8 % 에서 환산"},
+    NRE:{v:1.42e22,lo:1e22,hi:2e22,unit:"cm⁻³",fixed:true,src:"β-NaLuF₄ 희토류 자리 밀도 1.5 f.u./105.9 Å³ (Chen 2025 Rietveld). NaYF₄ 는 1.37×10²²"}};
+  if(six){ params.cCR2={v:8e-18,lo:1e-22,hi:1e-14,unit:"cm³ s⁻¹",src:"Chen 2025 c2 (CR=1)"};
+    params.w7={v:2e4,lo:1e2,hi:1e7,unit:"s⁻¹",src:"Chen 2025 w7 (W=1); 분기 = Chen b7x"}; }
+  return {name:six?"Tm³⁺ 6준위 PA (³H₆–¹D₂, 1064 nm)":"Tm³⁺ 5준위 PA (³H₆–¹G₄, 1064 nm)",
+    spec:{species:[{id:"Tm",levels:lv,cvar:"c"}],procs,channels:ch},nm:1064,params,samples:[{id:"S1",vars:{c:15}}],
+    note:"Chen 2025 8준위 모델을 줄인 것: ³F₂,₃ 는 ³H₄ 로 즉시 이완(ESA1 도착점), "+(six?"¹I₆ 경로(c3)는 제외.":"¹D₂·¹I₆ 경로는 제외 — 450 nm 가 필요하면 6준위.")+" 전달 계수는 수밀도 평균장(W = c·N_Tm)."};
+}
+
+/* 유도량(예측값): 개별 매개변수보다 데이터가 잘 정하는 조합들.
+   - 흡수 속도 σ·φ(I_ref): 강도 환산 오차와 무관(명목 강도 기준)
+   - 전달 몫 η = W/(W + 공여 준위의 감쇠 합) (받개가 바닥 준위, 저여기 극한)
+   - 문턱 I_th(첫 채널 최대 기울기 위치), 2·I_th 에서 각 준위 점유 */
+function derived(B,theta,opt){
+  opt=opt||{}; const si=opt.si||0; const th=Float64Array.from(theta); const pr=B.problem; const M=B.M;
+  const env=envFor(B,th,si); const c=coeffs(M,env), x=molFrac(M,env);
+  const Is=[]; pr.samples[si].data.forEach(d=>{ if(d.I) Is.push(...d.I.filter(v=>v>0)); });
+  if(!Is.length) return [];
+  const lo=Math.min(...Is), hi=Math.max(...Is), Iref=opt.Iref||Math.sqrt(lo*hi), phi=Iref/photonEnergyJ(pr.nm);
+  const lvn=i=>M.lv[i].id; const out=[];
+  M.procs.forEach((p,k)=>{ if(p.type==="abs") out.push({key:"abs"+k,label:`흡수 속도 ${lvn(p.from)}→${lvn(p.to)} @ I_ref`,unit:"s⁻¹",v:c[k]*phi,calFree:true}); });
+  const decOut=i=>M.procs.reduce((a,p,k)=>a+(p.type==="dec"&&p.from===i?c[k]:0),0);
+  M.procs.forEach((p,k)=>{ if(p.type!=="et"||!M.lv[p.ai].ground) return; const f=p.scale==="x"?x[M.spOf[p.ai]]:1; const W=c[k]*f; const dsum=decOut(p.di);
+    out.push({key:"eta"+k,label:`전달 몫 ${lvn(p.di)}→${lvn(p.df)} ⇒ ${lvn(p.ai)}→${lvn(p.af)} (저여기)`,unit:"",v:W/(W+dsum)}); });
+  const chIdx=Math.max(0,opt.ch||0), ch=M.channels[chIdx];
+  if(ch){ const G=logGrid(lo,hi,80); const sw=sweep(M,env,G,1,pr.nm).n; const y=sw.map(n=>channelValue(M,ch,n)); const sl=slopes(G,y); let k=0; sl.forEach((v,i)=>{ if(v>sl[k]) k=i; });
+    const Ith=G[k]; out.push({key:"Ith",label:`문턱 I_th (${ch.id} 최대 기울기 위치)`,unit:"W/cm²",v:Ith,calNote:true});
+    out.push({key:"smax",label:`최대 기울기 s_max (${ch.id})`,unit:"",v:sl[k]});
+    const n2=sweep(M,env,[2*Ith],1,pr.nm).n[0]; M.lv.forEach((l,i)=>{ if(!l.ground&&n2[i]>1e-12) out.push({key:"pop"+i,label:`점유 ${l.sp} ${l.id} @ 2·I_th`,unit:"",v:n2[i]}); }); }
+  return out.map(q=>Object.assign(q,{Iref}));
+}
+function derivedIntervals(B,best,prof,thr,opt){
+  const b=derived(B,best.theta,opt); const ens=[];
+  (prof||[]).forEach(pf=>{ if(!pf) return; pf.pts.forEach(p=>{ if(p.chi2-best.chi2<=thr&&p.theta) ens.push(p.theta); }); });
+  const vals=ens.map(t=>{ try{ return derived(B,t,opt); }catch(e){ return null; } }).filter(Boolean);
+  return b.map(q=>{ const vs=vals.map(v=>{ const o=v.find(z=>z.key===q.key); return o?o.v:null; }).filter(v=>v>0&&isFinite(v)).concat(q.v>0?[q.v]:[]);
+    return Object.assign({},q,{lo:vs.length?Math.min(...vs):null,hi:vs.length?Math.max(...vs):null,n:vs.length}); });
+}
+
 const API={compileExpr,compile:m=>prep(compile(m)),coeffs,molFrac,steady,sweep,sensitivity,integrate,riseTime,decayTime,observe,
-  buildProblem,residuals,lm,multistart,profile,fim,eigSym,aicc,dofInfo,slopes,logGrid,photonEnergyJ,templateLee,envFor,chi2,thetaFromParams,mulberry,lhs,channelValue,adequacy,insight,slice2D,procRates};
+  buildProblem,residuals,lm,multistart,profile,fim,eigSym,aicc,dofInfo,slopes,logGrid,photonEnergyJ,templateLee,templateTm,envFor,chi2,thetaFromParams,mulberry,lhs,channelValue,adequacy,insight,slice2D,procRates,derived,derivedIntervals};
 root.DRE_CORE=API;
 if(typeof module!=="undefined") module.exports=API;
 })(typeof self!=="undefined"?self:(typeof window!=="undefined"?window:globalThis));
@@ -39948,7 +40046,7 @@ function chart(o){
   const X=v=>m.l+(o.xlog?(Math.log10(v)-Math.log10(x0))/(Math.log10(x1)-Math.log10(x0)):(v-x0)/(x1-x0))*pw;
   const Y=v=>m.t+ph-(o.ylog?(Math.log10(v)-Math.log10(y0))/(Math.log10(y1)-Math.log10(y0)):(v-y0)/(y1-y0))*ph;
   const g=[`<svg class="dre-chart" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.label||"그래프")}" preserveAspectRatio="xMidYMid meet"><rect x="0" y="0" width="${W}" height="${H}" fill="${P.bg}"/>`];
-  const tick=(lg,a,b,axis)=>{ const t=[]; if(lg){ for(let e=Math.floor(Math.log10(a));e<=Math.ceil(Math.log10(b));e++){ const v=Math.pow(10,e); if(v>=a*0.999&&v<=b*1.001) t.push(v); } if(t.length<3) for(let e=Math.floor(Math.log10(a));e<=Math.ceil(Math.log10(b));e++) [2,5].forEach(k=>{ const v=k*Math.pow(10,e); if(v>=a&&v<=b) t.push(v); }); }
+  const tick=(lg,a,b,axis)=>{ const t=[]; if(lg){ const e0=Math.floor(Math.log10(a)), e1=Math.ceil(Math.log10(b)), st=Math.max(1,Math.ceil((e1-e0)/10)); for(let e=e0;e<=e1;e++){ if((e-e0)%st) continue; const v=Math.pow(10,e); if(v>=a*0.999&&v<=b*1.001) t.push(v); } if(t.length<3) for(let e=Math.floor(Math.log10(a));e<=Math.ceil(Math.log10(b));e++) [2,5].forEach(k=>{ const v=k*Math.pow(10,e); if(v>=a&&v<=b) t.push(v); }); }
     else { const span=b-a, st=Math.pow(10,Math.floor(Math.log10(span/5))); const k=[1,2,5,10].find(k=>span/(k*st)<=(o.nt||7))*st; for(let v=Math.ceil(a/k)*k; v<=b+1e-12; v+=k) t.push(+v.toPrecision(10)); } return t.sort((p,q)=>p-q); };
   const lbl=(v,lg)=> lg? (Math.abs(Math.log10(v)%1)<1e-9? `10<tspan dy="-5" font-size="8">${Math.round(Math.log10(v))}</tspan>` : String(+v.toPrecision(2))) : String(+v.toPrecision(4));
   tick(o.xlog,x0,x1).forEach(v=>{ g.push(`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${m.t+ph}" stroke="${P.grid}"/><text x="${X(v)}" y="${m.t+ph+15}" font-size="10.5" text-anchor="middle" fill="${P.muted}">${lbl(v,o.xlog)}</text>`); });
@@ -39980,7 +40078,7 @@ function render(root){
   <div class="card dre-top">
     <h3>모델 <span class="hint" id="dreName"></span></h3>
     <div class="row">
-      <select class="dre-sel" id="dreTpl" aria-label="모델"><option value="">모델 바꾸기…</option><option value="lee">Tm³⁺ 3준위 PA — Lee et al. 2021</option><option value="ed">Energy Diagram 도식에서 가져오기</option></select>
+      <select class="dre-sel" id="dreTpl" aria-label="모델"><option value="">모델 바꾸기…</option><option value="lee">Tm³⁺ 3준위 PA — Lee et al. 2021</option><option value="tm5">Tm³⁺ 5준위 PA (³H₆–¹G₄) — Chen 2025·Lee 2021 값</option><option value="tm6">Tm³⁺ 6준위 PA (+¹D₂, 청색 450 nm)</option><option value="ed">Energy Diagram 도식에서 가져오기</option></select>
       <label class="dre-f">여기 λ <input type="number" id="dreNm" min="200" max="3000" step="1"> nm</label>
       <label class="dre-f">빔 <select class="dre-sel" id="dreBeam"><option value="peak">첨두 강도 (단일입자)</option><option value="gauss">가우시안 빔 적분 (앙상블)</option></select></label>
       <label class="dre-f">파워 단위 <select class="dre-sel" id="drePU">${Object.keys(PU).map(u=>`<option>${u}</option>`).join("")}</select></label>
@@ -40006,7 +40104,10 @@ function render(root){
     </div>
   </div>`;
   root.appendChild(w);
-  $q(w,"#dreTpl").onchange=e=>{ const v=e.target.value; e.target.value=""; if(v==="lee"){ if(!confirm("현재 모델·매개변수·데이터를 Lee 3준위 모델로 바꿉니다. 계속할까요?")) return; S=Object.assign(defState(),{pu:S.pu,simRange:S.simRange}); save(); rerender(); } else if(v==="ed"){ if(S.samples.some(s=>s.data.length)&&!confirm("데이터가 있는 현재 모델을 바꿉니다. 계속할까요?")) return; importFromED(); } };
+  $q(w,"#dreTpl").onchange=e=>{ const v=e.target.value; e.target.value=""; if(v==="lee"){ if(!confirm("현재 모델·매개변수·데이터를 Lee 3준위 모델로 바꿉니다. 계속할까요?")) return; S=Object.assign(defState(),{pu:S.pu,simRange:S.simRange}); save(); rerender(); } else if(v==="tm5"||v==="tm6"){ if(!confirm("현재 모델·매개변수·데이터를 "+(v==="tm5"?"Tm 5준위":"Tm 6준위")+" 모델로 바꿉니다. 계속할까요?")) return; const T=D.templateTm(v==="tm5"?5:6);
+      Object.values(T.params).forEach(p=>{ if(/^자리표시/.test(p.src||"")) p.placeholder=true; });
+      S=Object.assign(defState(),{template:v,name:T.name,spec:T.spec,nm:T.nm,params:T.params,samples:T.samples.map(q=>Object.assign({data:[]},q)),pu:S.pu,simRange:[1,1e4],modelNote:T.note}); save(); rerender(); }
+  else if(v==="ed"){ if(S.samples.some(s=>s.data.length)&&!confirm("데이터가 있는 현재 모델을 바꿉니다. 계속할까요?")) return; importFromED(); } };
   $q(w,"#dreNm").onchange=e=>{ const v=+e.target.value; if(v>0){ S.nm=v; S.result=null; save(); rerender(); } };
   $q(w,"#dreBeam").onchange=e=>{ S.beam=e.target.value; S.result=null; save(); rerender(); };
   $q(w,"#drePU").onchange=e=>{ const f=PU[S.pu]/PU[e.target.value]; S.simRange=S.simRange.map(v=>+(v*f).toPrecision(4)); S.pu=e.target.value; save(); rerender(); };
@@ -40134,7 +40235,8 @@ function panelData(el){
    <h4 class="dre-h4">데이터 넣기</h4>
    <div class="row"><select class="dre-sel" id="dreDType"><option value="scurve">S-curve (파워 · 신호)</option><option value="rise">상승 시간 (파워 · 시간 s)</option><option value="decay">감쇠 1/e 시간 (파워 · 시간 s)</option><option value="trace">시간 트레이스 (시간 s · 신호) — 진단 전용</option></select>
      <select class="dre-sel" id="dreDSmp">${S.samples.map((s,si)=>`<option value="${si}">${esc(s.id)}</option>`).join("")}</select>
-     <label class="dre-f"><input type="file" id="dreFile" accept=".csv,.txt,.tsv,.dat"></label></div>
+     <label class="dre-f"><input type="file" id="dreFile" accept=".csv,.txt,.tsv,.dat,.h5,.hdf5"></label></div>
+   <div class="muted">.h5 (ScopeFoundry power_scan · ni_daq_pulse_resp) 는 형식을 자동으로 알아보고 올림·내림·트레이스로 나눈다. 표 파일은 CSV·TSV·TXT·DAT.</div>
    <textarea id="drePaste" class="dre-ta" placeholder="또는 붙여넣기: 첫 열 파워, 다음 열 신호 (쉼표·탭·공백 구분, # 주석 무시, 결측 NaN)"></textarea>
    <div class="row"><button class="btn sm" id="dreParse">읽기</button><button class="btn sm" id="dreSynth" title="현재 매개변수로 참값을 아는 합성 데이터를 만든다 — 검증용">합성 데이터 만들기</button></div>
    <div id="dreMap"></div>`;
@@ -40144,10 +40246,88 @@ function panelData(el){
   el.querySelectorAll("button[data-delsmp]").forEach(b=>b.onclick=()=>{ if(!confirm("시료와 그 데이터를 삭제할까요?")) return; S.samples.splice(+b.dataset.delsmp,1); S.result=null; save(); rerender(); });
   $q(el,"#dreAddSmp").onclick=()=>{ const n=S.samples.length+1; const vars=Object.assign({},S.samples[0]&&S.samples[0].vars); S.samples.push({id:"S"+n,vars,data:[]}); save(); renderPanel(); };
   const readTxt=t=>{ PENDING=parseTable(t); if(!PENDING||PENDING.cols.length<2){ $q(el,"#dreMap").innerHTML='<div class="note warn">두 열 이상의 숫자 표가 필요합니다</div>'; return; } mapUI(el,chs); };
-  $q(el,"#dreFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>readTxt(r.result); r.readAsText(f); };
+  $q(el,"#dreFile").onchange=async e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return;
+    if(/\.(h5|hdf5)$/i.test(f.name)){ try{ const H=await readH5(f); h5UI(el,chs,H); }catch(err){ $q(el,"#dreMap").innerHTML=`<div class="note warn">${esc(f.name)}: ${esc(err.message||err)}</div>`; } e.target.value=""; return; }
+    const r=new FileReader(); r.onload=()=>readTxt(r.result); r.readAsText(f); };
   $q(el,"#dreParse").onclick=()=>readTxt($q(el,"#drePaste").value);
   $q(el,"#dreSynth").onclick=()=>synthUI(el,chs);
 }
+/* ---------- HDF5 원시 파일 (ScopeFoundry) ---------- */
+const H5PRESET=[["NIR · 950 DMSP · A_peak 1.2393 µm² (실측)",268.13],["Blue 450+475 · 600 DMSP · A_peak 0.8715 µm² (잠정·역산)",381.27],["직접 입력",null]];
+async function readH5(file){
+  if(typeof h5wasm==="undefined") throw new Error("HDF5 모듈이 없습니다");
+  await h5wasm.ready; const buf=new Uint8Array(await file.arrayBuffer());
+  try{ h5wasm.FS.mkdir("/work"); }catch(e){}
+  const vp="/work/dre_"+Date.now()+".h5"; h5wasm.FS.writeFile(vp,buf);
+  const f=new h5wasm.File(vp,"r");
+  const get=p=>{ try{ const d=f.get(p); return d&&d.value!=null?Array.from(d.value):null; }catch(e){ return null; } };
+  const attrs=p=>{ try{ const g=f.get(p); if(!g||!g.attrs) return {}; const o={}; Object.keys(g.attrs).forEach(k=>{ try{ o[k]=g.attrs[k].value; }catch(e){} }); return o; }catch(e){ return {}; } };
+  const out={name:file.name};
+  try{
+    const meas=(()=>{ try{ return f.get("measurement").keys(); }catch(e){ return []; } })();
+    out.stage=attrs("hardware/PI_xyz_stage/settings");
+    if(meas.includes("power_scan")){
+      const b="measurement/power_scan/"; const P=get(b+"apd_counter_powers"), R=get(b+"apd_counter_apd_count_rates"), W=get(b+"wheel_positions");
+      const d=f.get(b+"apd_counter_apd_count_rates_raw"); let raw=null; if(d){ const v=Array.from(d.value), sh=d.shape; raw=[]; for(let i=0;i<sh[0];i++) raw.push(v.slice(i*sh[1],(i+1)*sh[1])); }
+      if(!P||!R) throw new Error("power_scan 에 apd_counter_powers / apd_counter_apd_count_rates 가 없습니다");
+      const st=attrs(b+"settings"); let turn=P.length-1; if(W) for(let i=1;i<W.length;i++){ if(W[i]<W[i-1]-1e-9){ turn=i-1; break; } }
+      Object.assign(out,{kind:"scan",P:P.map(v=>v*1e3),R,raw,turn,sweep:st.power_wheel_sweep_type||"",reps:st.repetitions});
+    } else if(meas.includes("ni_daq_pulse_resp")){
+      const b="measurement/ni_daq_pulse_resp/"; const t=get(b+"times"), c=get(b+"counts"), v=get(b+"set_voltages");
+      if(!t||!c) throw new Error("ni_daq_pulse_resp 에 times / counts 가 없습니다");
+      const st=attrs(b+"settings"); const pm=attrs("hardware/power_meter_2/settings");
+      let on=-1,off=-1; if(v){ on=v.findIndex(x=>x>0); for(let i=v.length-1;i>=0;i--) if(v[i]>0){ off=i; break; } }
+      const med=[...c].sort((a,b)=>a-b)[c.length>>1]; const bad0=c[0]>100*Math.max(med,1);
+      Object.assign(out,{kind:"trace",t,c,on,off,bad0,fs:st.sampling_frequency,tHigh:st.t_high,tAcq:st.t_acquisition,PmW:pm.power!=null?pm.power*1e3:null});
+    } else throw new Error("지원하는 측정이 아닙니다 (measurement/"+meas.join(", ")+")");
+  } finally { try{ f.close(); }catch(e){} try{ h5wasm.FS.unlink(vp); }catch(e){} }
+  return out;
+}
+function h5UI(el,chs,H){
+  const m=$q(el,"#dreMap"); const pre=H5PRESET.map(([n,v],i)=>`<option value="${i}">${esc(n)}${v?` — ${v} kW/cm² per mW`:""}</option>`).join("");
+  const stg=H.stage&&H.stage.x_position!=null?` · 스테이지 (${(+H.stage.x_position).toFixed(1)}, ${(+H.stage.y_position).toFixed(1)}) µm`:"";
+  const conv=`<label class="dre-f">파워 환산 <select class="dre-sel" id="hPre">${pre}</select></label><label class="dre-f">kW/cm² per mW <input type="number" id="hK" step="any" value="${H5PRESET[0][1]}"></label>`;
+  if(H.kind==="scan"){
+    const n=H.P.length, nu=H.turn+1;
+    /* 파워 비례 배경 추정: 올림 가지 아래쪽 30 % (가장 큰 점프 이전) 직선 */
+    const lr=H.R.slice(0,nu).map((r,i)=>i?Math.abs(Math.log(Math.max(r,1)/Math.max(H.R[i-1],1))):0); let jk=nu; lr.forEach((v,i)=>{ if(v>Math.log(3)&&i<jk) jk=i; });
+    const idx=[...Array(Math.max(3,Math.floor(jk*0.9))).keys()].filter(i=>i<jk);
+    let a=0,b=0,sd=0; if(idx.length>=3){ const x=idx.map(i=>H.P[i]), y=idx.map(i=>H.R[i]); const mx=x.reduce((p,q)=>p+q,0)/x.length, my=y.reduce((p,q)=>p+q,0)/y.length; let sxy=0,sxx=0; x.forEach((v,i)=>{ sxy+=(v-mx)*(y[i]-my); sxx+=(v-mx)**2; }); b=sxx>0?sxy/sxx:0; a=my-b*mx; sd=Math.sqrt(y.reduce((p,q,i)=>p+(q-a-b*x[i])**2,0)/Math.max(1,y.length-2)); }
+    const cvHi=H.raw?H.raw.filter(r=>{ const m=r.reduce((p,q)=>p+q,0)/r.length; const s=Math.sqrt(r.reduce((p,q)=>p+(q-m)**2,0)/Math.max(1,r.length-1)); return m>0&&s/m>0.3; }).length:0;
+    m.innerHTML=`<div class="dre-map"><div><b>${esc(H.name)}</b> <span class="muted">— power scan ${n}점 (${esc(H.sweep||"")}${H.turn<n-1?`, 올림 ${nu} · 내림 ${n-nu}`:""}, 반복 ${H.reps||"?"})${stg}</span></div>
+      <div class="row">${conv}</div>
+      <div class="row"><label class="dre-f">채널 <select class="dre-sel" id="hCh">${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label>
+        <label class="dre-f">배경 = <input type="number" id="hA" step="any" value="${a.toFixed(1)}"> + <input type="number" id="hB" step="any" value="${b.toFixed(1)}"> × P[mW] cps</label>
+        <label class="dre-f">배경 σ <input type="number" id="hS" step="any" value="${Math.max(sd,1).toFixed(1)}"></label><label class="dre-f">곱잡음 <input type="number" id="hRel" step="0.01" value="0.05"></label></div>
+      <div class="row"><label class="dre-tog"><input type="checkbox" id="hCv" ${cvHi?"checked":""}> 반복 안에서 전환된 점 제외 (반복 변동계수 &gt; 0.3: ${cvHi}점)</label></div>
+      <div class="muted">배경은 올림 가지의 첫 큰 점프 이전 ${idx.length}점에 맞춘 직선이다(파워에 비례하는 누설·산란 포함). 뺀 값이 0 이하이면 절단 점(상한)으로 들어가고 버리지 않는다.</div>
+      <div class="row"><button class="btn sm primary" id="hOK">올림·내림 S-curve 추가</button></div></div>`;
+  } else {
+    const dt=H.t.length>1?H.t[1]-H.t[0]:0; const pre0=H.on>1?H.c.slice(H.bad0?1:0,H.on):[]; const bg=pre0.length?pre0.reduce((p,q)=>p+q,0)/pre0.length:0;
+    m.innerHTML=`<div class="dre-map"><div><b>${esc(H.name)}</b> <span class="muted">— 펄스 응답 ${H.t.length}점, ${dt?(dt*1e6).toFixed(0)+" µs 간격":""}, 켬 ${H.on>=0?(H.t[H.on]*1e3).toFixed(2)+" ms":"?"} · 끔 ${H.off>=0?(H.t[H.off]*1e3).toFixed(2)+" ms":"?"}${H.tAcq?` · 누적 ${H.tAcq} s`:""}${stg}</span></div>
+      ${H.bad0?'<div class="note warn">첫 샘플이 나머지의 100배 이상 — 카운터 누적값으로 보고 버립니다.</div>':""}
+      <div class="row">${conv}<label class="dre-f">파워 <input type="number" id="hP" step="any" value="${H.PmW!=null?H.PmW.toPrecision(4):""}"> mW</label></div>
+      <div class="note warn">파일의 파워는 측정 시점 파워미터 값이다. 펄스 중에 읽었다면 듀티 평균일 수 있으니 켬 구간 첨두 파워와 같은지 확인하세요.</div>
+      <div class="row"><label class="dre-f">채널 <select class="dre-sel" id="hCh">${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label><label class="dre-f">배경 (켜기 전 평균) <input type="number" id="hBg" step="any" value="${bg.toPrecision(3)}"></label></div>
+      <div class="row"><button class="btn sm primary" id="hOK">시간 트레이스 추가 (켬 구간, 진단 전용)</button></div></div>`;
+  }
+  const pr=$q(m,"#hPre"), kk=$q(m,"#hK"); pr.onchange=()=>{ const v=H5PRESET[+pr.value][1]; if(v!=null) kk.value=v; };
+  $q(m,"#hOK").onclick=()=>{
+    const si=+$q(el,"#dreDSmp").value, ch=$q(m,"#hCh").value, K=+kk.value*1e3; /* W/cm² per mW */
+    if(!(K>0)){ note("환산 계수를 넣으세요","warn"); return; }
+    const smp=S.samples[si];
+    if(H.kind==="scan"){ const A=+$q(m,"#hA").value||0, Bb=+$q(m,"#hB").value||0, sbg=+$q(m,"#hS").value||0, rel=+$q(m,"#hRel").value||0.05, cv=$q(m,"#hCv").checked;
+      const skip=i=>{ if(!cv||!H.raw) return false; const r=H.raw[i]; const mm=r.reduce((p,q)=>p+q,0)/r.length; const s=Math.sqrt(r.reduce((p,q)=>p+(q-mm)**2,0)/Math.max(1,r.length-1)); return mm>0&&s/mm>0.3; };
+      const mk=(a,b,dir)=>{ const I=[],y=[]; for(let i=a;i<=b;i++){ if(skip(i)||!(H.P[i]>0)) continue; I.push(H.P[i]*K); y.push(H.R[i]-(A+Bb*H.P[i])); } return {type:"scurve",ch,label:H.name+(dir<0?" 내림":" 올림"),I,y,sbg,k:3,relErr:rel,dir}; };
+      smp.data.push(mk(0,H.turn,1)); if(H.turn<H.P.length-1) smp.data.push(mk(H.turn+1,H.P.length-1,-1));
+      note("S-curve 를 추가했습니다"+(H.turn<H.P.length-1?" (올림·내림)":""));
+    } else { const P=+$q(m,"#hP").value; if(!(P>0)){ note("파워(mW)를 넣으세요","warn"); return; } const bg=+$q(m,"#hBg").value||0;
+      const a=Math.max(H.on,H.bad0?1:0), b=H.off>=0?H.off:H.t.length-1; const t=[],y=[]; for(let i=a;i<=b;i++){ t.push(H.t[i]-H.t[a]); y.push(H.c[i]-bg); }
+      smp.data.push({type:"trace",ch,label:H.name,I:[P*K],t,y}); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); }
+    PENDING=null; S.result=null; save(); rerender();
+  };
+}
+
 function mapUI(el,chs){
   const T=PENDING, m=$q(el,"#dreMap"); const type=$q(el,"#dreDType").value;
   const opt=T.header.map((h,j)=>`<option value="${j}">${esc(h)}</option>`).join("");
@@ -40271,7 +40451,8 @@ self.onmessage=ev=>{ const m=ev.data;
     let adequacy=null, insight=null; const fI=v=>(v/o.puF).toPrecision(3)+" "+o.pu;
     try{ adequacy=D.adequacy(B,best.theta,{fmtI:fI}); }catch(e){ adequacy={items:[{key:"A0",title:"적합성 검사",level:"warn",summary:"계산 실패: "+(e&&e.message||e)}],worst:"warn",verdict:"적합성 검사를 끝내지 못했습니다."}; }
     try{ insight=D.insight(B,best,ms,{thr}); }catch(e){ insight=null; }
-    self.postMessage({type:"result",adequacy,insight,free:B.free,ms:ms.map(r=>({chi2:r.chi2,theta:r.theta,conv:r.conv})),best,info,thr,prof,fim:ev2,scales,bestBySample,aicc:D.aicc(best.chi2,nTot,k),n:nTot,k,time:(Date.now()-t0)/1000});
+    let derived=null; try{ self.postMessage({type:"progress",phase:"예측값",done:0,total:1,best:best.chi2}); derived=D.derivedIntervals(B,best,prof,thr,{}); }catch(e){ derived=null; }
+    self.postMessage({type:"result",adequacy,insight,derived,free:B.free,ms:ms.map(r=>({chi2:r.chi2,theta:r.theta,conv:r.conv})),best,info,thr,prof,fim:ev2,scales,bestBySample,aicc:D.aicc(best.chi2,nTot,k),n:nTot,k,time:(Date.now()-t0)/1000});
   }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); }
 };})();`;
 }
@@ -40440,6 +40621,15 @@ function renderDiag(){
       b+=`<div class="note warn" style="margin-top:6px">데이터 범위 전체에서 몫이 1 % 미만인 과정: ${weak.map(q=>esc(q.n)).join(", ")}. 이 과정의 계수${free.length?`(${free.map(esc).join(", ")})`:""}는 이 데이터로 정해질 수 없다 — ‘비식별’ 판정이 나와도 이상한 것이 아니며, 물성으로 보고하면 안 된다.</div>`; }
     b+=`<div class="muted">몫 = 과정 속도(점유 × 계수 × 광자속) / 모든 과정 속도의 합. 문턱 부근에서 CR·ESA 몫이 커지고 GSA 몫이 작아지는 것이 광자 사태의 전형적 서명이다.</div>`;
     html+=sec("mech","⑤ 메커니즘","과정별 유량 분해",b,false); }
+  /* 예측값 */
+  if(R.derived&&R.derived.length){ const f=PU[S.pu]; const hasProf=R.prof&&R.prof.length;
+    const rowsD=R.derived.map(q=>{ const conv=q.unit==="W/cm²"; const sc=conv?1/f:1; const u=conv?S.pu:q.unit; const w=q.lo&&q.hi?Math.log10(q.hi/q.lo):null;
+      const gr=w==null||!hasProf?"":w<=0.1?'<span class="gr g0">결정됨</span>':w<=0.5?'<span class="gr g2">넓음</span>':'<span class="gr g3">퍼짐</span>';
+      return `<tr><td>${esc(q.label)}${q.calFree?' <span class="gr g2" title="명목 강도 기준 속도 — 강도 환산 오차가 σ 와 I 에서 상쇄된다">환산 무관</span>':""}${q.calNote?' <span class="muted" title="강도 환산 오차가 그대로 들어간다">환산 의존</span>':""}</td><td class="num">${sci(q.v*sc,4)} ${esc(u)}</td><td class="num">${q.lo!=null&&hasProf?`${sci(q.lo*sc,3)} – ${sci(q.hi*sc,3)}`:"—"}</td><td class="num">${w!=null&&hasProf?w.toFixed(3):"—"}</td><td>${gr}</td></tr>`; }).join("");
+    const b=`<div class="dre-tw"><table class="dre-tbl"><thead><tr><th>양</th><th class="num">최적</th><th class="num">95 % 범위 (프로파일 앙상블)</th><th class="num">폭 (decade)</th><th>판정</th></tr></thead><tbody>${rowsD}</tbody></table></div>
+      <div class="muted">범위 = 프로파일 경로 위에서 Δχ² ≤ 임계인 매개변수 집합 전부로 계산한 최소–최대${hasProf?"":" (프로파일을 켜야 계산된다)"}. I_ref = 데이터 파워 범위의 기하 평균(${sciTxt(R.derived[0].Iref/f,3)} ${esc(S.pu)}).
+      매개변수가 ‘비식별’이어도 이 양들은 좁게 정해지는 경우가 많다 — 합성 참값 시험(Lee 3준위, 강도 환산 오차 ±0.3 decade 포함)에서 S-curve + 저파워 감쇠 1점만으로 ESA 속도·CR 몫의 오차 중앙값이 0.01 decade 이하, σ_ESA 자체는 0.26 decade(환산 오차 그대로)였다. 보고할 때는 σ 대신 ‘명목 강도 기준 속도’를 쓰는 편이 정확하다.</div>`;
+    html+=sec("pred","⑦ 예측값 — 매개변수보다 잘 정해지는 양","흡수 속도 · 전달 몫 · 문턱 · 점유",b,false); }
   /* 6 잔차 */
   if(X){ const sets=X.sets.filter(s=>s.type==="scurve"); const f=PU[S.pu];
     const series=sets.map((st,k)=>{ const pts=X.pts.filter(p=>p.si===st.si&&p.di===st.di&&!p.cens); return {x:pts.map(p=>p.I/f),y:pts.map(p=>p.r),points:true,line:false,r:2.6,label:st.label,color:P.ser[k%6]}; }).filter(s=>s.x.length);
