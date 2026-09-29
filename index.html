@@ -635,6 +635,7 @@ body{word-break:keep-all}
 .dre .dre-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:11.5px;color:var(--ink2)}
 .dre .dre-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .dre .dre-adq table.dre-tbl td{font-size:12px}
+.dre .dre-hw{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink2)}
 
 /* 파일 열을 쓰지 않는 탭(Energy Diagram·DRE)에서는 숨기고 폭을 넘긴다 */
 #app.ed-on .side,#app.ed-on .sidetog{display:none!important}
@@ -40411,29 +40412,43 @@ function panelFit(el){
    <div class="row" style="margin-top:8px"><label class="dre-f">출발점 <input type="number" id="fS" value="${S.fit.starts}" min="1" max="1000"></label>
      <label class="dre-f">최대 반복 <input type="number" id="fM" value="${S.fit.maxit}" min="10" max="2000"></label>
      <label class="dre-f">seed <input type="number" id="fSeed" value="${S.fit.seed}"></label>
+     <label class="dre-f" title="0 = 자동 (코어 수 − 1, 최대 8)">워커 <input type="number" id="fW" value="${S.fit.workers||0}" min="0" max="16"> <span class="muted">(자동 ${Math.max(1,Math.min(8,((typeof navigator!=="undefined"&&navigator.hardwareConcurrency)||2)-1))})</span></label>
      <label class="dre-tog"><input type="checkbox" id="fP" ${S.fit.profile?"checked":""}> 프로파일 가능도</label>
      <label class="dre-f">±<input type="number" id="fSpan" value="${S.fit.span}" step="0.5" min="0.5" max="6"> decade · <input type="number" id="fN" value="${S.fit.npts}" min="5" max="41"> 점</label></div>
    <div class="row"><button class="btn primary" id="fRun" ${running||!nData||!nFree?"disabled":""}>피팅 시작</button><button class="btn" id="fStop" ${running?"":"disabled"}>중단</button><button class="btn" id="fAdq" ${running||!nData?"disabled":""} title="피팅 없이 지금 매개변수 값으로 모델이 데이터와 구조적으로 어긋나는지 검사">현재 값으로 적합성 검사</button></div>
    <div class="dre-prog" id="fProg" ${running?"":"hidden"}><div class="bar"><i id="fBar"></i></div><span id="fTxt"></span></div>
+   <div id="fHw" style="margin-top:6px">${hwHTML()}</div>
    <details class="dre-src"><summary>방법</summary><ul>
     <li>log₁₀ 매개변수 공간의 Latin hypercube 다중 출발 → Levenberg–Marquardt(상자 경계, 이득비 갱신). 기울기는 음함수 정리로 구한 정확한 감도.</li>
     <li>잔차 = (ln y − ln ŷ − ln s)/σ, σ² = 곱잡음² + (배경σ/y)². 배율 s 는 데이터셋마다 가중 평균으로 소거. 배경 k·σ 아래 점은 절단(상한) — 모델이 상한을 넘을 때만 벌점.</li>
     <li>전역해 도달 판정: 최적 χ² 에서 0.5 이내로 끝난 출발점의 비율(waterfall).</li>
     <li>95 % 구간: 프로파일 가능도(나머지를 다시 최적화) Δχ² ≤ 3.84·max(1, χ²/자유도). 구간 끝이 탐색 범위에 닿으면 ‘열림’ = 그 방향으로는 데이터가 값을 정하지 못함.</li></ul></details>`;
-  const upd=()=>{ S.fit={starts:+$q(el,"#fS").value||40,maxit:+$q(el,"#fM").value||150,seed:+$q(el,"#fSeed").value||1,profile:$q(el,"#fP").checked,span:+$q(el,"#fSpan").value||2,npts:+$q(el,"#fN").value||13}; save(); };
+  const upd=()=>{ S.fit={workers:Math.max(0,+$q(el,"#fW").value|0),starts:+$q(el,"#fS").value||40,maxit:+$q(el,"#fM").value||150,seed:+$q(el,"#fSeed").value||1,profile:$q(el,"#fP").checked,span:+$q(el,"#fSpan").value||2,npts:+$q(el,"#fN").value||13}; save(); };
   el.querySelectorAll("input").forEach(i=>i.onchange=upd);
   $q(el,"#fRun").onclick=()=>{ upd(); startFit(); };
   $q(el,"#fStop").onclick=()=>stopFit();
   $q(el,"#fAdq").onclick=()=>adequacyNow();
+  const hw=$q(el,"#fHwRe"); if(hw) hw.onclick=async()=>{ if(RUN) return; const src=workerSource(); if(!src) return; hw.disabled=true; hw.textContent="측정 중…"; try{ await calibrateHW(src); note("병렬 확장성을 다시 측정했습니다"); }catch(e){ note("측정 실패: "+e.message,"warn"); } renderPanel(); };
 }
 function workerSource(){
   const core=document.getElementById("dre-core-src");
   const src=core?core.textContent:null;
   if(!src) return null;
   return src+`
-;(function(){ const D=self.DRE_CORE; let stop=false;
+;(function(){ const D=self.DRE_CORE; let stop=false; const CACHE={pid:null,B:null};
+const getB=m=>{ if(m.pid&&CACHE.pid===m.pid&&CACHE.B) return CACHE.B; const B=D.buildProblem(m.problem); CACHE.pid=m.pid||null; CACHE.B=B; return B; };
+let BENCH=null;
 self.onmessage=ev=>{ const m=ev.data;
+  if(m.cmd==="start1"){ try{ const B=getB(m); const r=D.lm(B,Float64Array.from(m.theta),{maxit:m.maxit}); self.postMessage({type:"start1",r:{k:m.k,chi2:r.chi2,theta:Array.from(r.theta),it:r.it,nev:r.nev,conv:r.conv,why:r.why}}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
+  if(m.cmd==="slicerow"){ try{ const B=getB(m); const th=Float64Array.from(m.theta); const row=m.xs.map(x=>{ const t=Float64Array.from(th); t[m.j]=x; t[m.k]=m.y; try{ return D.chi2(D.residuals(B,t,false).r); }catch(e){ return NaN; } }); self.postMessage({type:"slicerow",b:m.b,row}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
+  if(m.cmd==="bench"){ /* 실제 DRE 연산(정상상태 스윕 + 감도)을 정해진 시간 동안 반복 — 처리량 측정 */
+    try{ if(!BENCH){ const T=D.templateLee(); const M=D.compile(T.spec); const env=Object.assign({},...Object.entries(T.params).map(([k,p])=>({[k]:p.v})),{c:8}); BENCH={M,env,I:D.logGrid(1e3,2e5,12)}; }
+      const t0=performance.now(); let n=0; while(performance.now()-t0<m.ms){ D.observe(BENCH.M,BENCH.env,BENCH.I,1,1064,0,{pnames:["sE","k31"]}); n++; }
+      self.postMessage({type:"bench",n,dt:performance.now()-t0}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
   if(m.cmd==="slice"){ try{ const B=D.buildProblem(m.problem); const sl=D.slice2D(B,m.theta,m.j,m.k,{n:17,spanJ:m.span,spanK:m.span,progress:(d,t)=>{ if(d%17===0) self.postMessage({type:"progress",done:d,total:t}); }}); self.postMessage({type:"slice",slice:sl}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
+  if(m.cmd==="starts"){ try{ const B=D.buildProblem(m.problem); const out=[]; m.list.forEach(q=>{ const r=D.lm(B,Float64Array.from(q.theta),{maxit:m.maxit}); out.push({k:q.k,chi2:r.chi2,theta:Array.from(r.theta),it:r.it,nev:r.nev,conv:r.conv,why:r.why}); self.postMessage({type:"tick",chi2:r.chi2}); }); self.postMessage({type:"starts",out}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
+  if(m.cmd==="profile"){ try{ const B=D.buildProblem(m.problem); const pr=D.profile(B,m.best,m.j,m.opt); self.postMessage({type:"profile",j:m.j,pr}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
+  if(m.cmd==="final"){ try{ self.postMessage({type:"result",...finalize(D.buildProblem(m.problem),m.ms,m.prof,m.opts,m.t0)}); }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); } return; }
   if(m.cmd!=="fit") return;
   try{
     const B=D.buildProblem(m.problem); const o=m.opts; const t0=Date.now();
@@ -40442,6 +40457,11 @@ self.onmessage=ev=>{ const m=ev.data;
     const prof=[];
     if(o.profile){ for(let j=0;j<B.free.length;j++){ self.postMessage({type:"progress",phase:"프로파일 "+B.free[j].key,done:j,total:B.free.length,best:best.chi2});
       prof.push(D.profile(B,best,j,{span:o.span,npts:o.npts,thr,maxit:Math.min(o.maxit,120)})); } }
+    self.postMessage({type:"result",...finalize(B,ms,prof,o,t0)});
+  }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); }
+};
+function finalize(B,ms,prof,o,t0){
+    const best=ms[0]; const info=D.dofInfo(B,best); const thr=3.84*info.s2;
     const ev2=D.fim(B,best.theta);
     const R=D.residuals(B,Float64Array.from(best.theta),false);
     const scales={}; B.problem.samples.forEach((s,si)=>s.data.forEach((d,di)=>{ if(d._fit&&d._fit.logS!=null) scales[si+"|"+di]=Math.exp(d._fit.logS); }));
@@ -40452,26 +40472,83 @@ self.onmessage=ev=>{ const m=ev.data;
     try{ adequacy=D.adequacy(B,best.theta,{fmtI:fI}); }catch(e){ adequacy={items:[{key:"A0",title:"적합성 검사",level:"warn",summary:"계산 실패: "+(e&&e.message||e)}],worst:"warn",verdict:"적합성 검사를 끝내지 못했습니다."}; }
     try{ insight=D.insight(B,best,ms,{thr}); }catch(e){ insight=null; }
     let derived=null; try{ self.postMessage({type:"progress",phase:"예측값",done:0,total:1,best:best.chi2}); derived=D.derivedIntervals(B,best,prof,thr,{}); }catch(e){ derived=null; }
-    self.postMessage({type:"result",adequacy,insight,derived,free:B.free,ms:ms.map(r=>({chi2:r.chi2,theta:r.theta,conv:r.conv})),best,info,thr,prof,fim:ev2,scales,bestBySample,aicc:D.aicc(best.chi2,nTot,k),n:nTot,k,time:(Date.now()-t0)/1000});
-  }catch(e){ self.postMessage({type:"error",msg:String(e&&e.message||e)}); }
-};})();`;
+    return {adequacy,insight,derived,free:B.free,ms:ms.map(r=>({chi2:r.chi2,theta:r.theta,conv:r.conv})),best,info,thr,prof,fim:ev2,scales,bestBySample,aicc:D.aicc(best.chi2,nTot,k),n:nTot,k,time:(Date.now()-t0)/1000,workers:o.workers||1};
+}
+})();`;
+}
+let POOL=[];
+const HWKEY="innoanalytics_dre_hw_v1";
+function hwInfo(){ const nav=typeof navigator!=="undefined"?navigator:{}; return {hc:nav.hardwareConcurrency||2, mem:nav.deviceMemory||null, ua:(nav.userAgentData&&nav.userAgentData.platform)||nav.platform||"", cores:null}; }
+function hwCal(){ try{ const c=JSON.parse(localStorage.getItem(HWKEY)||"null"); const h=hwInfo(); if(c&&c.hc===h.hc&&c.ua===h.ua) return c; }catch(e){} return null; }
+function nWorkers(){ const h=hwInfo(); const want=+S.fit.workers||0; if(want>0) return Math.min(32,want); const c=hwCal(); if(c&&c.best) return c.best; return Math.max(1,Math.min(8,h.hc-1)); }
+/* 확장성 측정: 워커 수 K 마다 같은 시간 동안 실제 DRE 연산을 돌려 처리량을 잰다.
+   논리 스레드 수만으로는 SMT·성능/효율 코어·전원 모드·다른 부하를 알 수 없어서 실측으로 고른다. */
+async function calibrateHW(src,onStep){
+  const h=hwInfo(); const hc=h.hc; const Ks=[...new Set([1,2,3,4,6,8,12,16,24,32].filter(k=>k<=hc).concat([Math.max(1,hc-1),hc]))].sort((a,b)=>a-b);
+  const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"})); const ws=[...Array(hc)].map(()=>new Worker(url)); URL.revokeObjectURL(url);
+  const bench=(w,ms)=>new Promise((res,rej)=>{ w.onmessage=ev=>{ const m=ev.data; if(m.type==="bench") res(m); else if(m.type==="error") rej(new Error(m.msg)); }; w.onerror=e=>rej(new Error(e.message||"")); w.postMessage({cmd:"bench",ms}); });
+  try{ await Promise.all(ws.map(w=>bench(w,60)));      /* 예열: 컴파일·JIT */
+    const rows=[]; for(const K of Ks){ const r=await Promise.all(ws.slice(0,K).map(w=>bench(w,350))); const thr=r.reduce((a,q)=>a+q.n/q.dt*1000,0); rows.push({K,thr}); onStep&&onStep(rows.length,Ks.length); }
+    const t1=rows[0].thr; rows.forEach(q=>{ q.speedup=q.thr/t1; q.eff=q.speedup/q.K; });
+    const top=Math.max(...rows.map(q=>q.thr)); const pick=rows.find(q=>q.thr>=0.95*top);       /* 최고의 95 % 안에서 가장 적은 워커 */
+    /* 물리 코어 추정: 효율(속도비/K)이 0.8 아래로 처음 떨어지기 직전의 K */
+    let phys=null; for(const q of rows){ if(q.eff>=0.8) phys=q.K; else break; }
+    const smt=phys&&hc>phys?(rows.find(q=>q.K===hc)||rows[rows.length-1]).thr/(rows.find(q=>q.K===phys)||rows[0]).thr:null;
+    const cal=Object.assign(h,{rows,best:Math.max(1,Math.min(pick.K,hc>1?hc-(pick.K===hc&&hc>2?1:0):1)),top,phys,smt,date:new Date().toISOString()});
+    try{ localStorage.setItem(HWKEY,JSON.stringify(cal)); }catch(e){}
+    return cal;
+  } finally { ws.forEach(w=>w.terminate()); }
+}
+function hwHTML(){
+  const h=hwInfo(), c=hwCal();
+  const base=`논리 스레드 ${h.hc}${h.mem?` · 메모리 ≥${h.mem} GB`:""}`;
+  if(!c) return `<div class="muted">${base} · 확장성 미측정 (첫 피팅 때 약 3–4초 측정)</div>`;
+  const P=palette(); const W=300,H=110, mx=Math.max(...c.rows.map(q=>q.speedup),1), kx=Math.max(...c.rows.map(q=>q.K));
+  const X=k=>36+(k-1)/(Math.max(1,kx-1))*(W-46), Y=v=>H-18-(v/mx)*(H-28);
+  const svg=`<svg class="dre-chart" viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="병렬 확장성"><rect width="${W}" height="${H}" fill="${P.bg}"/>
+    <line x1="${X(1)}" y1="${Y(1)}" x2="${X(Math.min(kx,mx))}" y2="${Y(Math.min(kx,mx))}" stroke="${P.muted}" stroke-dasharray="3 3"/>
+    <path d="${c.rows.map((q,i)=>(i?"L":"M")+X(q.K).toFixed(1)+" "+Y(q.speedup).toFixed(1)).join("")}" fill="none" stroke="${P.accent}" stroke-width="2"/>
+    ${c.rows.map(q=>`<circle cx="${X(q.K)}" cy="${Y(q.speedup)}" r="3" fill="${q.K===c.best?P.accent:P.bg}" stroke="${P.accent}"><title>워커 ${q.K}: ×${q.speedup.toFixed(2)} (효율 ${(100*q.eff).toFixed(0)} %)</title></circle>`).join("")}
+    <text x="${W/2}" y="${H-3}" font-size="9.5" text-anchor="middle" fill="${P.muted}">워커 수 (점선 = 이상적 선형)</text><text x="4" y="12" font-size="9.5" fill="${P.muted}">속도 ×${mx.toFixed(1)}</text></svg>`;
+  return `<div class="dre-hw"><div>${base} · 측정 최적 워커 <b>${c.best}</b> (×${(c.rows.find(q=>q.K===c.best)||{speedup:1}).speedup.toFixed(1)})${c.phys?` · 추정 물리 코어 ≈ ${c.phys}`:""}${c.smt?` · 추가 스레드(SMT·효율 코어) 이득 ×${c.smt.toFixed(2)}`:""} <button class="btn xs" id="fHwRe">다시 측정</button></div>${svg}
+    <div class="muted">측정 ${esc(c.date?new Date(c.date).toLocaleString():"")}. 브라우저는 논리 스레드 수만 알려 주므로, 물리 코어·SMT·성능/효율 코어·전원 모드는 처리량 곡선으로 추정한다(효율 ≥ 80 % 까지를 물리 코어로 간주). 다른 프로그램이 무거울 때 측정했다면 다시 측정.</div></div>`;
 }
 function startFit(){
   if(RUN) return;
   const src=workerSource(); if(!src){ note("Worker 원본을 찾지 못했습니다","warn"); return; }
-  let prob; try{ prob=problemOf(); D.buildProblem(JSON.parse(JSON.stringify(prob))); }catch(e){ note("피팅 준비 실패: "+e.message,"warn"); return; }
-  const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-  WORKER=new Worker(url); URL.revokeObjectURL(url);
-  RUN={t0:Date.now()}; renderPanel(); setProg("준비",0,1,null);
-  WORKER.onmessage=ev=>{ const m=ev.data;
-    if(m.type==="progress") setProg(m.phase,m.done,m.total,m.best);
-    else if(m.type==="result"){ m.at=Date.now(); S.result=m; S.useFit=true; RUN=null; WORKER.terminate(); WORKER=null; save(); rerender(); note(`피팅 완료 (${m.time.toFixed(1)} s)`); }
-    else if(m.type==="error"){ RUN=null; WORKER.terminate(); WORKER=null; renderPanel(); note("피팅 오류: "+m.msg,"warn"); }
-  };
-  WORKER.onerror=e=>{ RUN=null; try{ WORKER.terminate(); }catch(x){} WORKER=null; renderPanel(); note("Worker 오류: "+(e.message||""),"warn"); };
-  WORKER.postMessage({cmd:"fit",problem:prob,opts:Object.assign({},S.fit,{pu:S.pu,puF:PU[S.pu]})});
+  let prob, B; try{ prob=problemOf(); B=D.buildProblem(JSON.parse(JSON.stringify(prob))); }catch(e){ note("피팅 준비 실패: "+e.message,"warn"); return; }
+  RUN={t0:Date.now()}; renderPanel();
+  (async()=>{
+    if(!(+S.fit.workers>0)&&!hwCal()){ setProg("이 컴퓨터의 병렬 확장성 측정",0,1,null); try{ await calibrateHW(src,(d,t)=>RUN&&setProg("이 컴퓨터의 병렬 확장성 측정",d,t,null)); }catch(e){} if(!RUN) return; renderPanel(); }
+    runFit(src,prob,B);
+  })();
 }
-function stopFit(){ if(WORKER){ WORKER.terminate(); WORKER=null; } RUN=null; renderPanel(); note("피팅을 중단했습니다"); }
+function runFit(src,prob,B){
+  const o=Object.assign({},S.fit,{pu:S.pu,puF:PU[S.pu]}); const t0=Date.now(); RUN.t0=t0;
+  const n=Math.max(1,o.starts|0), rnd=D.mulberry(o.seed||12345);
+  const starts=[Array.from(D.thetaFromParams(B))].concat(D.lhs(n-1,B.free.length,rnd).map(u=>u.map((v,j)=>B.free[j].lo+v*(B.free[j].hi-B.free[j].lo))));
+  const K=Math.min(nWorkers(),starts.length); o.workers=K; const pid="p"+t0;
+  const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
+  POOL=[...Array(K)].map(()=>new Worker(url)); URL.revokeObjectURL(url); WORKER=POOL[0];
+  const fail=msg=>{ stopFit(true); note("피팅 오류: "+msg,"warn"); };
+  const call=(w,msg,kind)=>new Promise((res,rej)=>{ w.onmessage=ev=>{ const m=ev.data; if(m.type===kind) res(m); else if(m.type==="error") rej(new Error(m.msg)); }; w.onerror=e=>rej(new Error(e.message||"Worker 오류")); w.postMessage(msg); });
+  /* 동적 분배: 먼저 끝난 워커가 다음 일을 가져간다 (성능·효율 코어 혼재, 출발점마다 다른 계산량에 강함) */
+  const queue=async(items,mk,kind,onRes)=>{ let next=0; await Promise.all(POOL.map(async w=>{ while(RUN&&next<items.length){ const it=items[next++]; const m=await call(w,mk(it),kind); onRes(m,it); } })); };
+  const ms=[]; let best=Infinity; setProg(`다중 출발 · 워커 ${K}개`,0,starts.length,null);
+  queue(starts.map((t,k)=>({k,t})),it=>({cmd:"start1",pid,problem:prob,k:it.k,theta:it.t,maxit:o.maxit}),"start1",m=>{ ms.push(m.r); best=Math.min(best,m.r.chi2); if(RUN) setProg(`다중 출발 · 워커 ${K}개`,ms.length,starts.length,best); })
+  .then(async()=>{
+    if(!RUN) return;
+    ms.sort((a,b)=>a.chi2-b.chi2||a.k-b.k);
+    const bst=ms[0]; const info=D.dofInfo(B,bst); const thr=3.84*info.s2; const prof=[];
+    if(o.profile){ const P=B.free.length; let fin=0; setProg(`프로파일 · 워커 ${K}개`,0,P,bst.chi2);
+      await queue([...Array(P).keys()],j=>({cmd:"profile",problem:prob,best:bst,j,opt:{span:o.span,npts:o.npts,thr,maxit:Math.min(o.maxit,120)}}),"profile",m=>{ prof[m.j]=m.pr; fin++; if(RUN) setProg(`프로파일 · 워커 ${K}개`,fin,P,bst.chi2); }); }
+    if(!RUN) return;
+    setProg("적합성·상세 분석·예측값",0,1,bst.chi2);
+    const m=await call(POOL[0],{cmd:"final",problem:prob,ms,prof,opts:o,t0},"result");
+    m.at=Date.now(); S.result=m; S.useFit=true; RUN=null; POOL.forEach(w=>w.terminate()); POOL=[]; WORKER=null; save(); rerender(); note(`피팅 완료 (${m.time.toFixed(1)} s · 워커 ${K}개)`);
+  }).catch(e=>{ if(RUN) fail(e.message||String(e)); });
+}
+function stopFit(silent){ POOL.forEach(w=>{ try{ w.terminate(); }catch(e){} }); POOL=[]; if(WORKER){ try{ WORKER.terminate(); }catch(e){} WORKER=null; } RUN=null; renderPanel(); if(!silent) note("피팅을 중단했습니다"); }
 function setProg(phase,done,total,best){
   const p=$q(ROOT,"#fProg"); if(!p) return; p.hidden=false;
   $q(ROOT,"#fBar").style.width=Math.round(100*done/Math.max(1,total))+"%";
@@ -40658,11 +40735,15 @@ function sliceSVG(sl,R){
   g.push("</svg>"); return g.join(""); }
 function runSlice(j,k,span){
   if(j===k){ note("서로 다른 두 매개변수를 고르세요","warn"); return; } const R=S.result; if(!R) return;
-  const src=workerSource(); if(!src) return; const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"})); const w=new Worker(url); URL.revokeObjectURL(url);
-  const msg=$q(ROOT,"#slMsg"); if(msg) msg.textContent="계산 중…";
-  w.onmessage=ev=>{ const m=ev.data; if(m.type==="progress"){ const e=$q(ROOT,"#slMsg"); if(e) e.textContent=`${m.done}/${m.total}`; return; }
-    w.terminate(); if(m.type==="slice"){ S.insSlice=Object.assign(m.slice,{j,k,span,ver:R.time}); S.insOpen=Object.assign(S.insOpen||{},{land:true}); save(); renderDiag(); } else note("단면 계산 오류: "+m.msg,"warn"); };
-  w.postMessage({cmd:"slice",problem:problemOf(),theta:R.best.theta,j,k,span});
+  const src=workerSource(); if(!src) return; const n=17; const th=R.best.theta;
+  const xs=[...Array(n).keys()].map(i=>th[j]-span+2*span*i/(n-1)), ys=[...Array(n).keys()].map(i=>th[k]-span+2*span*i/(n-1));
+  const K=Math.min(nWorkers(),n); const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"})); const ws=[...Array(K)].map(()=>new Worker(url)); URL.revokeObjectURL(url);
+  const prob=problemOf(), pid="s"+Date.now(); const z=new Array(n); let next=0, done=0;
+  const msg=()=>$q(ROOT,"#slMsg"); if(msg()) msg().textContent=`계산 중… (워커 ${K}개)`;
+  const call=(w,m)=>new Promise((res,rej)=>{ w.onmessage=ev=>{ const d=ev.data; if(d.type==="slicerow") res(d); else if(d.type==="error") rej(new Error(d.msg)); }; w.onerror=e=>rej(new Error(e.message||"")); w.postMessage(m); });
+  Promise.all(ws.map(async w=>{ while(next<n){ const b=next++; const d=await call(w,{cmd:"slicerow",pid,problem:prob,theta:th,j,k,xs,y:ys[b],b}); z[d.b]=d.row; done++; const e=msg(); if(e) e.textContent=`${done}/${n} 행 · 워커 ${K}개`; } }))
+    .then(()=>{ ws.forEach(w=>w.terminate()); S.insSlice={xs,ys,z,j,k,span,ver:R.time}; S.insOpen=Object.assign(S.insOpen||{},{land:true}); save(); renderDiag(); })
+    .catch(e=>{ ws.forEach(w=>w.terminate()); note("단면 계산 오류: "+e.message,"warn"); });
 }
 function adequacyNow(){
   try{ const B=D.buildProblem(JSON.parse(JSON.stringify(problemOf()))); const f=PU[S.pu];
