@@ -40230,7 +40230,7 @@ function panelData(el){
    ${S.samples.map((s,si)=>`<div class="dre-smp"><div class="row"><b>시료 <input type="text" class="dre-sid" data-si="${si}" value="${esc(s.id)}" aria-label="시료 이름"></b>
      ${cvars.map(v=>`<label class="dre-f">${esc(v)} <input type="number" step="any" data-si="${si}" data-var="${esc(v)}" value="${s.vars&&s.vars[v]!=null?s.vars[v]:""}"> %</label>`).join("")}
      ${S.samples.length>1?`<button class="btn xs" data-delsmp="${si}">시료 삭제</button>`:""}</div>
-     ${s.data.length?`<table class="dre-tbl"><tbody>${s.data.map((d,di)=>`<tr><td>${d.type==="scurve"?"S-curve":d.type==="rise"?"상승 시간":d.type==="trace"?"시간 트레이스 (진단)":"감쇠 시간"}</td><td>${esc(d.ch)}</td><td>${d.type==="trace"?`${d.t.length}점 · ${sciTxt(d.I[0]/PU[S.pu],3)} ${esc(S.pu)}`:`${d.I.length}점 ${d.type==="scurve"?(d.dir<0?"· 내림":"· 올림"):""}`}</td><td class="muted">${d.type==="trace"?"피팅에 쓰지 않음 · 적합성 A6":d.type==="scurve"?`배경σ ${sciTxt(d.sbg||0,3)} · 곱잡음 ${Math.round((d.relErr||0.05)*100)}%`:`상대오차 ${Math.round((d.relErr||0.05)*100)}%`}</td><td><button class="btn xs" data-del="${si}|${di}" aria-label="데이터 삭제">×</button></td></tr>`).join("")}</tbody></table>`:'<div class="muted">데이터 없음</div>'}</div>`).join("")}
+     ${s.data.length?`<table class="dre-tbl"><tbody>${s.data.map((d,di)=>`<tr><td>${d.type==="scurve"?"S-curve":d.type==="rise"?"상승 시간":d.type==="trace"?"시간 트레이스 (진단)":"감쇠 시간"}</td><td>${esc(d.ch)}</td><td>${d.type==="trace"?`${d.t.length}점 · ${sciTxt(d.I[0]/PU[S.pu],3)} ${esc(S.pu)}`:`${d.I.length}점 ${d.type==="scurve"?(d.dir<0?"· 내림":"· 올림"):""}`}</td><td>${(()=>{ const L=calLabel(d); return `<span class="gr ${L.lvl==="ok"?"g0":"g3"}" title="${esc(L.txt)}">${L.lvl==="ok"?"보정됨":"보정 확인"}</span> <button class="btn xs" data-cal="${si}|${di}" title="${esc(L.txt)}">파워 보정</button>`; })()}</td><td class="muted">${d.type==="trace"?"피팅에 쓰지 않음 · 적합성 A6":d.type==="scurve"?`배경σ ${sciTxt(d.sbg||0,3)} · 곱잡음 ${Math.round((d.relErr||0.05)*100)}%`:`상대오차 ${Math.round((d.relErr||0.05)*100)}%`}</td><td><button class="btn xs" data-del="${si}|${di}" aria-label="데이터 삭제">×</button></td></tr>`).join("")}</tbody></table>`:'<div class="muted">데이터 없음</div>'}</div>`).join("")}
    <div class="row" style="margin-top:6px"><button class="btn sm" id="dreAddSmp">시료 추가</button> <span class="muted">농도 계열은 시료를 나눠 넣고, 비복사 손실만 '시료별'로 두면 식별성이 크게 오른다.</span></div>
    <hr class="dre-hr">
    <h4 class="dre-h4">데이터 넣기</h4>
@@ -40243,6 +40243,7 @@ function panelData(el){
    <div id="dreMap"></div>`;
   el.querySelectorAll(".dre-sid").forEach(i=>i.onchange=()=>{ const v=i.value.trim(); if(v&&!S.samples.some((s,k)=>s.id===v&&k!==+i.dataset.si)){ S.samples[+i.dataset.si].id=v; save(); } else i.value=S.samples[+i.dataset.si].id; });
   el.querySelectorAll("input[data-var]").forEach(i=>i.onchange=()=>{ const s=S.samples[+i.dataset.si]; s.vars=s.vars||{}; s.vars[i.dataset.var]=+i.value; S.result=null; save(); drawSim(); });
+  el.querySelectorAll("button[data-cal]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.cal.split("|").map(Number); calUI(el,si,di); const m=$q(el,"#dreMap"); if(m&&m.scrollIntoView) m.scrollIntoView({block:"nearest"}); });
   el.querySelectorAll("button[data-del]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.del.split("|").map(Number); S.samples[si].data.splice(di,1); S.result=null; save(); rerender(); });
   el.querySelectorAll("button[data-delsmp]").forEach(b=>b.onclick=()=>{ if(!confirm("시료와 그 데이터를 삭제할까요?")) return; S.samples.splice(+b.dataset.delsmp,1); S.result=null; save(); rerender(); });
   $q(el,"#dreAddSmp").onclick=()=>{ const n=S.samples.length+1; const vars=Object.assign({},S.samples[0]&&S.samples[0].vars); S.samples.push({id:"S"+n,vars,data:[]}); save(); renderPanel(); };
@@ -40253,6 +40254,94 @@ function panelData(el){
   $q(el,"#dreParse").onclick=()=>readTxt($q(el,"#drePaste").value);
   $q(el,"#dreSynth").onclick=()=>synthUI(el,chs);
 }
+/* ---------- 파워 보정 (데이터별) ----------
+   브라우저에 넣는 데이터는 대개 파워미터(PM) 읽음값이다. 원본은 d.raw 에 그대로 두고, 보정 d.cal 로 d.I(W/cm²)를 다시 만든다.
+   I[W/cm²] = P_PM[W] × C × 10⁸ / A_peak[µm²] × 추가배율   (피크 강도 2P/πw² 와 같다: A_peak = πw²/2)  */
+const PWU={"mW":1e-3,"W":1,"µW":1e-6,"nW":1e-9};
+const CALPRE=[{id:"nir950oil",name:"NIR · 950 DMSP · Oil",C:3.322959765878627,A:1.2393,src:"A_peak 직접 측정(γ=2.2 보정본)"},
+  {id:"blue600oil",name:"Blue 450+475 · 600 DMSP · Oil",C:3.322959765878627,A:0.8715,src:"잠정 — 기존 계산 역산값, 재측정 권장"}];
+const CALKEY="innoanalytics_dre_cal_v1";
+function calProfiles(){ let u=[]; try{ u=JSON.parse(localStorage.getItem(CALKEY)||"[]"); }catch(e){} return CALPRE.map(p=>Object.assign({builtin:true},p)).concat(u); }
+function saveCalProfile(p){ try{ const u=JSON.parse(localStorage.getItem(CALKEY)||"[]").filter(q=>q.name!==p.name); u.push(p); localStorage.setItem(CALKEY,JSON.stringify(u)); }catch(e){} }
+function calK(cal){ /* W/cm² per W */ if(!cal) return null; const x=+cal.extra||1; if(cal.kPerMW>0) return cal.kPerMW*1e6*x; if(cal.C>0&&cal.A>0) return 1e8*cal.C/cal.A*x; return null; }
+function wheelW(f,deg){ if(f.model==="nd") return f.a*Math.pow(10,-f.k*(deg-f.t0))+f.b; const r=(deg-f.t0)*Math.PI/180*(f.model==="hwp"?2:1); return f.a*Math.cos(r)**2+f.b; }
+function calcI(d){
+  if(!d.raw) return d.I;
+  const R=d.raw, c=d.cal||{};
+  if(R.kind==="intensity") return R.P.map(v=>v*PU[R.unit]*(+c.extra||1));
+  const k=calK(c); if(!k) return d.I;
+  const PW=(c.src==="wheel"&&c.wheelFit&&R.wheel)?R.wheel.map(t=>wheelW(c.wheelFit,t)):R.P.map(v=>v*PWU[R.unit]);
+  return PW.map(v=>v*k);
+}
+function applyCal(d,cal,confirmed){ d.cal=JSON.parse(JSON.stringify(cal)); d.calOK=!!confirmed; const I=calcI(d);
+  if(d.type==="scurve"||d.type==="trace"||d.type==="rise"||d.type==="decay"){ /* 양수·유한만 유지되도록 원본 인덱스 그대로 */ d.I=I; } }
+function calLabel(d){
+  if(!d.raw) return {txt:"강도 직접 입력",lvl:"ok"};
+  const c=d.cal||{}; const k=calK(c);
+  if(d.raw.kind==="intensity") return {txt:`강도 (${d.raw.unit})${(+c.extra||1)!==1?` ×${+c.extra}`:""}`,lvl:"ok"};
+  const nm=c.name||(c.kPerMW?`${c.kPerMW} kW/cm²/mW`:(c.C&&c.A?`C ${(+c.C).toFixed(3)} · A ${c.A} µm²`:"환산 없음"));
+  return {txt:`PM ${d.raw.unit} → ${nm}${c.src==="wheel"?" · 휠 각도 재구성":""}${(+c.extra||1)!==1?` · ×${+c.extra}`:""}${k?` (${(k/1e6).toPrecision(4)} kW/cm² per mW)`:""}`,lvl:d.calOK?"ok":"warn"};
+}
+/* 휠 모델 3종을 모두 맞추고 상대 rms 가 가장 작은 것을 고른다 (점 ≥ 3)
+   pol: a·cos²(θ−θ₀)+b (선형 편광자 회전) · hwp: a·cos²(2(θ−θ₀))+b (반파장판+편광자) · nd: a·10^(−k(θ−θ₀))+b (연속 ND 휠) */
+function fitWheel(pts){
+  if(pts.length<3) return null; const n=pts.length; const t0r=pts[0][0];
+  const lin=g=>{ let sxx=0,sx=0,sy=0,sxy=0; pts.forEach(([t,p])=>{ const x=g(t); sxx+=x*x; sx+=x; sy+=p; sxy+=x*p; }); const det=n*sxx-sx*sx; if(Math.abs(det)<1e-300) return null; const a=(n*sxy-sx*sy)/det, b=(sy-a*sx)/n; if(!(a>0)) return null;
+    const ss=pts.reduce((q,[t,p])=>q+Math.pow((p-(a*g(t)+b))/Math.max(Math.abs(p),1e-30),2),0); return {a,b,ss}; };
+  const cands=[];
+  for(const model of ["pol","hwp"]){ let best=null; for(let t0=-90;t0<90;t0+=0.25){ const m=model==="hwp"?2:1; const r=lin(t=>Math.cos((t-t0)*Math.PI/180*m)**2); if(r&&(!best||r.ss<best.ss)) best=Object.assign(r,{t0,model}); } if(best) cands.push(best); }
+  { let best=null; for(let lk=-4;lk<=0;lk+=0.01){ const k=Math.pow(10,lk); for(const sg of [1,-1]){ const r=lin(t=>Math.pow(10,-sg*k*(t-t0r))); if(r&&(!best||r.ss<best.ss)) best=Object.assign(r,{t0:t0r,k:sg*k,model:"nd"}); } } if(best) cands.push(best); }
+  if(!cands.length) return null; cands.sort((x,y)=>x.ss-y.ss); const w=cands[0]; w.rms=Math.sqrt(w.ss/n); w.alt=cands.slice(1).map(c=>({model:c.model,rms:Math.sqrt(c.ss/n)})); return w; }
+function calUI(el,si,di){
+  const m=$q(el,"#dreMap"); const d=S.samples[si].data[di]; const c=Object.assign({},d.cal||{}); const R=d.raw;
+  const profs=calProfiles(); const f=PU[S.pu];
+  if(!R){ /* 예전 데이터: 강도만 있다 → 배율만 */
+    m.innerHTML=`<div class="dre-map"><b>파워 보정 — ${esc(d.label||d.ch)}</b><div class="muted">이 데이터는 원본 파워 없이 강도만 저장돼 있다. 강도에 배율을 곱하는 것만 할 수 있다.</div>
+      <div class="row"><label class="dre-f">배율 <input type="number" id="cX" step="any" value="1"></label><button class="btn sm primary" id="cOK">적용</button></div></div>`;
+    $q(m,"#cOK").onclick=()=>{ const x=+$q(m,"#cX").value; if(!(x>0)) return; d.raw={kind:"intensity",unit:"W/cm²",P:d.I.slice()}; applyCal(d,{extra:x},true); S.result=null; save(); rerender(); note("배율을 적용했습니다"); }; return; }
+  const isP=R.kind==="power";
+  m.innerHTML=`<div class="dre-map"><b>파워 보정 — ${esc(d.label||d.ch)}</b>
+    <div class="muted">원본: ${isP?`파워미터 ${esc(R.unit)} (${sciTxt(Math.min(...R.P.filter(v=>v>0)),3)}–${sciTxt(Math.max(...R.P),3)})`:`강도 ${esc(R.unit)}`}${R.wheel?` · 휠 각도 ${R.wheel.length}점`:""}. 원본은 그대로 두고 강도만 다시 계산한다.</div>
+    ${isP?`<div class="row"><label class="dre-f">프로필 <select class="dre-sel" id="cPre"><option value="">(직접 입력)</option>${profs.map((p,i)=>`<option value="${i}" ${c.name===p.name?"selected":""}>${esc(p.name)}${p.builtin?"":" (저장됨)"}</option>`).join("")}</select></label></div>
+    <div class="row"><label class="dre-f" title="파워미터 읽음값 → 대물렌즈 뒤 시료면 파워의 비 (분배비·투과율 포함)">C (시료/PM) <input type="number" id="cC" step="any" value="${c.C||""}"></label>
+      <label class="dre-f" title="피크 강도 면적 A_peak = πw²/2 (w = 1/e² 반경). 빔 이미지 가우시안 피팅값">A_peak <input type="number" id="cA" step="any" value="${c.A||""}"> µm²</label>
+      <label class="dre-f" title="또는 w(1/e² 반경)로 입력하면 A_peak = πw²/2">w <input type="number" id="cW" step="any" value=""> µm</label>
+      <span class="muted">또는</span><label class="dre-f">직접 <input type="number" id="cKd" step="any" value="${c.kPerMW||""}"> kW/cm² per mW</label></div>`:""}
+    <div class="row"><label class="dre-f" title="예: 파워미터 파장 설정이 1064 가 아니었으면 R(λ_설정)/R(1064) — 광다이오드 응답도 비. 대물렌즈 투과율 등 추가 인자도 여기에">추가 배율 <input type="number" id="cX" step="any" value="${c.extra||1}"></label>
+      ${isP?`<label class="dre-f">PM 파장 설정 <input type="number" id="cLs" step="1" placeholder="1064"> nm → 응답도 R(설정)/R(1064) <input type="number" id="cRr" step="any" placeholder="비"></label>`:""}</div>
+    ${isP&&R.wheel?`<div class="row"><label class="dre-tog"><input type="checkbox" id="cWh" ${c.src==="wheel"?"checked":""}> 파워미터 기록 대신 휠 각도로 파워 재구성 (기록이 깨졌을 때)</label></div>
+      <div id="cWhBox" ${c.src==="wheel"?"":"hidden"}><div class="muted">P(θ) = a·cos²(θ−θ₀) + b 를 기준점(각도, ${esc(R.unit)})에 맞춘다. 같은 날 다른 파일의 정상 기록이나 손으로 잰 값을 넣는다. 이 데이터에서 믿을 만한 구간만 쓰려면 아래 버튼.</div>
+        <textarea id="cAnc" class="dre-ta" placeholder="각도, 파워(${esc(R.unit)}) — 한 줄에 하나, 3줄 이상">${c.anchors?c.anchors.map(p=>p.join(", ")).join("\n"):""}</textarea>
+        <div class="row"><button class="btn xs" id="cAuto">이 데이터의 PM 값 중 상위 구간으로 채우기</button><span class="muted" id="cFit"></span></div></div>`:""}
+    <div id="cPrev" class="muted"></div>
+    <div class="row"><button class="btn sm primary" id="cOne">이 데이터에 적용</button><button class="btn sm" id="cSmp">이 시료 전체</button><button class="btn sm" id="cAll">모든 데이터</button>
+      ${isP?`<label class="dre-f">프로필 이름 <input type="text" id="cNm" value="${esc(c.name&&!CALPRE.some(p=>p.name===c.name)?c.name:"")}" placeholder="예: 260702 NIR Oil"></label><button class="btn sm" id="cSave">프로필로 저장</button>`:""}</div></div>`;
+  const read=()=>{ const o={extra:+$q(m,"#cX").value||1};
+    if(isP){ const C=+$q(m,"#cC").value, A=+$q(m,"#cA").value, w=+$q(m,"#cW").value, kd=+$q(m,"#cKd").value, rr=+(($q(m,"#cRr")||{}).value||0);
+      if(kd>0) o.kPerMW=kd; else { o.C=C; o.A=A>0?A:(w>0?Math.PI*w*w/2:A); }
+      if(rr>0) o.extra*=rr;
+      const pr=$q(m,"#cPre").value; if(pr!==""){ const p=profs[+pr]; if(p&&Math.abs((p.C||0)-(o.C||0))<1e-9&&Math.abs((p.A||0)-(o.A||0))<1e-9) o.name=p.name; }
+      const wh=$q(m,"#cWh"); if(wh&&wh.checked){ o.src="wheel"; const pts=($q(m,"#cAnc").value||"").split(/\n/).map(l=>l.trim().split(/[,\s\t]+/).map(Number)).filter(a=>a.length>=2&&isFinite(a[0])&&isFinite(a[1])&&a[1]>0).map(a=>[a[0],a[1]]);
+        o.anchors=pts; const fw=fitWheel(pts.map(([t,p])=>[t,p*PWU[R.unit]])); o.wheelFit=fw?{a:fw.a,b:fw.b,t0:fw.t0,k:fw.k,model:fw.model,rms:fw.rms,alt:fw.alt}:null; } }
+    return o; };
+  const prev=()=>{ const o=read(); const tmp=Object.assign({},d,{cal:o}); const I=calcI(tmp).filter(v=>v>0&&isFinite(v)); const k=calK(o);
+    const fw=o.wheelFit; const fe=$q(m,"#cFit"); const MN={pol:"편광자 cos²(θ−θ₀)",hwp:"반파장판 cos²(2(θ−θ₀))",nd:"연속 ND 10^(−kθ)"}; if(fe) fe.textContent=o.src==="wheel"?(fw?`최적 모델 ${MN[fw.model]}, 상대 rms ${(100*fw.rms).toFixed(1)} %`+(fw.alt&&fw.alt.length?` (다른 모델: ${fw.alt.map(q=>MN[q.model]+" "+(100*q.rms).toFixed(1)+" %").join(", ")})`:"")+(fw.rms>0.05?" — 5 % 넘음, 기준점이나 모델을 확인":""):"기준점 3개 이상 필요"):"";
+    $q(m,"#cPrev").innerHTML=k||R.kind==="intensity"?`강도 범위 <b>${sciTxt(Math.min(...I)/f,3)} – ${sciTxt(Math.max(...I)/f,3)} ${esc(S.pu)}</b>${k?` · 환산 ${(k/1e6).toPrecision(4)} kW/cm² per mW`:""}${Math.max(...I)>1e9?' <span class="gr g4">비정상적으로 큼</span>':Math.min(...I)<1e-2?' <span class="gr g3">매우 작음 — 단위 확인</span>':""}`:'<span class="gr g3">C·A_peak 또는 환산 계수를 넣으세요</span>'; };
+  m.querySelectorAll("input,select,textarea").forEach(i=>i.addEventListener("input",prev));
+  const pre=$q(m,"#cPre"); if(pre) pre.onchange=()=>{ const p=profs[+pre.value]; if(p){ $q(m,"#cC").value=p.C; $q(m,"#cA").value=p.A; $q(m,"#cW").value=""; $q(m,"#cKd").value=""; } prev(); };
+  const wh=$q(m,"#cWh"); if(wh) wh.onchange=()=>{ $q(m,"#cWhBox").hidden=!wh.checked; prev(); };
+  const au=$q(m,"#cAuto"); if(au) au.onclick=()=>{ const pts=R.wheel.map((t,i)=>[t,R.P[i]]).filter(p=>p[1]>0); const mx=Math.max(...pts.map(p=>p[1])); $q(m,"#cAnc").value=pts.filter(p=>p[1]>=0.05*mx).map(p=>`${(+p[0]).toFixed(3)}, ${(+p[1]).toPrecision(5)}`).join("\n"); prev(); };
+  const go=scope=>{ const o=read(); if(R.kind==="power"&&!calK(o)){ note("환산 계수를 넣으세요","warn"); return; } if(o.src==="wheel"&&!o.wheelFit){ note("휠 기준점이 3개 이상 필요합니다","warn"); return; }
+    if(scope!=="one"){ const cnt=S.samples.reduce((a2,s2,a)=>a2+s2.data.filter(q=>q.raw&&q.raw.kind===R.kind&&(scope==="all"||a===si)).length,0); if(!confirm(`${cnt}개 데이터의 보정을 이 설정으로 바꿉니다${o.src==="wheel"?" (휠 재구성은 휠 각도가 있는 데이터에만)":" (다른 데이터에 걸어 둔 휠 재구성도 풀립니다)"}. 계속할까요?`)) return; }
+    const targets=[]; S.samples.forEach((s,a)=>s.data.forEach((q,b)=>{ if(scope==="one"?(a===si&&b===di):scope==="smp"?a===si:true) targets.push(q); }));
+    let n=0; targets.forEach(q=>{ if(!q.raw) return; if(q.raw.kind!==R.kind) return; const oo=Object.assign({},o); if(oo.src==="wheel"&&!q.raw.wheel) delete oo.src; applyCal(q,oo,true); n++; });
+    if(R.kind==="power"){ S.lastCal=Object.assign({},o); delete S.lastCal.anchors; delete S.lastCal.wheelFit; delete S.lastCal.src; }
+    S.result=null; save(); rerender(); note(`${n}개 데이터에 보정을 적용했습니다`); };
+  $q(m,"#cOne").onclick=()=>go("one"); $q(m,"#cSmp").onclick=()=>go("smp"); $q(m,"#cAll").onclick=()=>go("all");
+  const sv=$q(m,"#cSave"); if(sv) sv.onclick=()=>{ const o=read(); const nm=($q(m,"#cNm").value||"").trim(); if(!nm){ note("프로필 이름을 넣으세요","warn"); return; } if(!(o.C>0&&o.A>0)){ note("C 와 A_peak 가 있어야 저장합니다","warn"); return; } saveCalProfile({name:nm,C:o.C,A:o.A,src:"사용자 저장 "+new Date().toLocaleDateString()}); note("프로필을 저장했습니다"); calUI(el,si,di); };
+  prev();
+}
+
 /* ---------- HDF5 원시 파일 (ScopeFoundry) ---------- */
 const H5PRESET=[["NIR · 950 DMSP · A_peak 1.2393 µm² (실측)",268.13],["Blue 450+475 · 600 DMSP · A_peak 0.8715 µm² (잠정·역산)",381.27],["직접 입력",null]];
 async function readH5(file){
@@ -40272,7 +40361,7 @@ async function readH5(file){
       const d=f.get(b+"apd_counter_apd_count_rates_raw"); let raw=null; if(d){ const v=Array.from(d.value), sh=d.shape; raw=[]; for(let i=0;i<sh[0];i++) raw.push(v.slice(i*sh[1],(i+1)*sh[1])); }
       if(!P||!R) throw new Error("power_scan 에 apd_counter_powers / apd_counter_apd_count_rates 가 없습니다");
       const st=attrs(b+"settings"); let turn=P.length-1; if(W) for(let i=1;i<W.length;i++){ if(W[i]<W[i-1]-1e-9){ turn=i-1; break; } }
-      Object.assign(out,{kind:"scan",P:P.map(v=>v*1e3),R,raw,turn,sweep:st.power_wheel_sweep_type||"",reps:st.repetitions});
+      Object.assign(out,{kind:"scan",W,P:P.map(v=>v*1e3),R,raw,turn,sweep:st.power_wheel_sweep_type||"",reps:st.repetitions});
     } else if(meas.includes("ni_daq_pulse_resp")){
       const b="measurement/ni_daq_pulse_resp/"; const t=get(b+"times"), c=get(b+"counts"), v=get(b+"set_voltages");
       if(!t||!c) throw new Error("ni_daq_pulse_resp 에 times / counts 가 없습니다");
@@ -40319,12 +40408,15 @@ function h5UI(el,chs,H){
     const smp=S.samples[si];
     if(H.kind==="scan"){ const A=+$q(m,"#hA").value||0, Bb=+$q(m,"#hB").value||0, sbg=+$q(m,"#hS").value||0, rel=+$q(m,"#hRel").value||0.05, cv=$q(m,"#hCv").checked;
       const skip=i=>{ if(!cv||!H.raw) return false; const r=H.raw[i]; const mm=r.reduce((p,q)=>p+q,0)/r.length; const s=Math.sqrt(r.reduce((p,q)=>p+(q-mm)**2,0)/Math.max(1,r.length-1)); return mm>0&&s/mm>0.3; };
-      const mk=(a,b,dir)=>{ const I=[],y=[]; for(let i=a;i<=b;i++){ if(skip(i)||!(H.P[i]>0)) continue; I.push(H.P[i]*K); y.push(H.R[i]-(A+Bb*H.P[i])); } return {type:"scurve",ch,label:H.name+(dir<0?" 내림":" 올림"),I,y,sbg,k:3,relErr:rel,dir}; };
+      const pv=H5PRESET[+$q(m,"#hPre").value]; const cal=(pv&&pv[1]!=null&&Math.abs(+kk.value-pv[1])<1e-9)?(()=>{ const q=CALPRE[+$q(m,"#hPre").value]; return {name:q.name,C:q.C,A:q.A}; })():{kPerMW:+kk.value};
+      const mk=(a,b,dir)=>{ const I=[],y=[],Pr=[],Wh=[]; for(let i=a;i<=b;i++){ if(skip(i)||!(H.P[i]>0)) continue; I.push(H.P[i]*K); Pr.push(H.P[i]); if(H.W) Wh.push(H.W[i]); y.push(H.R[i]-(A+Bb*H.P[i])); }
+        const o={type:"scurve",ch,label:H.name+(dir<0?" 내림":" 올림"),I,y,sbg,k:3,relErr:rel,dir,raw:{kind:"power",unit:"mW",P:Pr,wheel:H.W?Wh:undefined}}; applyCal(o,cal,true); return o; };
       smp.data.push(mk(0,H.turn,1)); if(H.turn<H.P.length-1) smp.data.push(mk(H.turn+1,H.P.length-1,-1));
       note("S-curve 를 추가했습니다"+(H.turn<H.P.length-1?" (올림·내림)":""));
     } else { const P=+$q(m,"#hP").value; if(!(P>0)){ note("파워(mW)를 넣으세요","warn"); return; } const bg=+$q(m,"#hBg").value||0;
       const a=Math.max(H.on,H.bad0?1:0), b=H.off>=0?H.off:H.t.length-1; const t=[],y=[]; for(let i=a;i<=b;i++){ t.push(H.t[i]-H.t[a]); y.push(H.c[i]-bg); }
-      smp.data.push({type:"trace",ch,label:H.name,I:[P*K],t,y}); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); }
+      const pv=H5PRESET[+$q(m,"#hPre").value]; const cal=(pv&&pv[1]!=null&&Math.abs(+kk.value-pv[1])<1e-9)?{name:CALPRE[+$q(m,"#hPre").value].name,C:CALPRE[+$q(m,"#hPre").value].C,A:CALPRE[+$q(m,"#hPre").value].A}:{kPerMW:+kk.value};
+      const o={type:"trace",ch,label:H.name,I:[P*K],t,y,raw:{kind:"power",unit:"mW",P:[P]}}; applyCal(o,cal,true); smp.data.push(o); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); }
     PENDING=null; S.result=null; save(); rerender();
   };
 }
@@ -40347,11 +40439,12 @@ function mapUI(el,chs){
       if(!(P0>0)){ note("여기 파워를 넣으세요","warn"); return; } if(jt===jy){ note("시간 열과 신호 열이 같습니다","warn"); return; }
       const t=[],y=[]; T.cols[jt].forEach((tv,r)=>{ const v=T.cols[jy][r]; if(!isFinite(tv)||!isFinite(v)) return; if(tv<t0||tv>t1) return; t.push((tv-t0)*tu); y.push(v-bg); });
       if(t.length<20){ note("점이 너무 적습니다 (20 개 이상)","warn"); return; }
-      S.samples[si].data.push({type:"trace",ch:$q(m,"#mCh").value,label:T.header[jy],I:[P0],t,y});
+      const pu=$q(m,"#mPU").value; S.samples[si].data.push({type:"trace",ch:$q(m,"#mCh").value,label:T.header[jy],I:[P0],t,y,raw:{kind:"intensity",unit:pu,P:[+$q(m,"#mTP").value]},cal:{},calOK:true});
       PENDING=null; save(); rerender(); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); };
     return; }
   m.innerHTML=`<div class="dre-map"><div class="row"><label class="dre-f">파워 열 <select class="dre-sel" id="mI">${opt}</select></label>
-    <label class="dre-f">단위 <select class="dre-sel" id="mPU">${Object.keys(PU).map(u=>`<option ${u===S.pu?"selected":""}>${u}</option>`).join("")}</select></label></div>
+    <label class="dre-f">단위 <select class="dre-sel" id="mPU"><optgroup label="강도 (보정 끝남)">${Object.keys(PU).map(u=>`<option value="I|${u}">${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}" ${u==="mW"?"selected":""}>${u} (PM 읽음)</option>`).join("")}</optgroup></select></label></div>
+    <div class="muted">파워미터 값을 넣으면 원본을 그대로 두고, 마지막으로 쓴 보정(없으면 NIR 950 DMSP·Oil)을 임시로 걸어 둔다. 목록의 ‘파워 보정’에서 확인·수정한다.</div>
     ${T.header.map((h,j)=>j===0?"":`<div class="row"><label class="dre-f">열 “${esc(h)}” → 채널 <select class="dre-sel" data-col="${j}"><option value="">(사용 안 함)</option>${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label></div>`).join("")}
     ${type==="scurve"?`<div class="row"><label class="dre-f">배경(암) σ <input type="number" id="mSbg" step="any" value="0" title="배경을 뺀 신호의 잡음 표준편차. 이 값의 k배 아래 점은 버리지 않고 '상한'으로 쓴다(절단)"></label>
       <label class="dre-f">k <input type="number" id="mK" step="0.5" value="3"></label><label class="dre-f">곱잡음 <input type="number" id="mRel" step="0.01" value="0.05"></label>
@@ -40361,14 +40454,16 @@ function mapUI(el,chs){
     <div class="row"><button class="btn sm primary" id="mOK">추가</button><span class="muted">${T.n}행</span></div></div>`;
   const firstCh=m.querySelector('select[data-col="1"]'); if(firstCh&&chs.length) firstCh.value=chs[0];
   $q(m,"#mOK").onclick=()=>{
-    const si=+$q(el,"#dreDSmp").value, jI=+$q(m,"#mI").value, f=PU[$q(m,"#mPU").value];
+    const si=+$q(el,"#dreDSmp").value, jI=+$q(m,"#mI").value; const [uk,uu]=$q(m,"#mPU").value.split("|"); const f=uk==="I"?PU[uu]:1;
+    const defCal=S.lastCal||Object.assign({name:CALPRE[0].name},{C:CALPRE[0].C,A:CALPRE[0].A});
+    const wrap=(o,Praw)=>{ o.raw={kind:uk==="I"?"intensity":"power",unit:uu,P:Praw}; if(uk==="I"){ o.cal={}; o.calOK=true; } else { applyCal(o,defCal,false); } return o; };
     let added=0;
     m.querySelectorAll("select[data-col]").forEach(sel=>{
       if(!sel.value) return; const j=+sel.dataset.col; if(j===jI) return;
-      const I=[],y=[]; T.cols[jI].forEach((p,r)=>{ const v=T.cols[j][r]; if(isFinite(p)&&p>0&&!isNaN(v)){ I.push(p*f); y.push(v); } });
+      const I=[],y=[],Pr=[]; T.cols[jI].forEach((p,r)=>{ const v=T.cols[j][r]; if(isFinite(p)&&p>0&&!isNaN(v)){ I.push(p*f); Pr.push(p); y.push(v); } });
       if(!I.length) return;
-      if(type==="scurve") S.samples[si].data.push({type,ch:sel.value,label:T.header[j],I,y,sbg:+$q(m,"#mSbg").value||0,k:+$q(m,"#mK").value||3,relErr:+$q(m,"#mRel").value||0.05,dir:+$q(m,"#mDir").value});
-      else S.samples[si].data.push({type,ch:sel.value,label:T.header[j],I,t:y,relErr:+$q(m,"#mRel").value||0.05,frac:type==="rise"?(+$q(m,"#mFrac").value||0.95):undefined});
+      if(type==="scurve") S.samples[si].data.push(wrap({type,ch:sel.value,label:T.header[j],I,y,sbg:+$q(m,"#mSbg").value||0,k:+$q(m,"#mK").value||3,relErr:+$q(m,"#mRel").value||0.05,dir:+$q(m,"#mDir").value},Pr));
+      else S.samples[si].data.push(wrap({type,ch:sel.value,label:T.header[j],I,t:y,relErr:+$q(m,"#mRel").value||0.05,frac:type==="rise"?(+$q(m,"#mFrac").value||0.95):undefined},Pr));
       added++;
     });
     if(!added){ note("채널을 하나 이상 고르세요","warn"); return; }
@@ -40408,6 +40503,7 @@ function panelFit(el){
   const running=!!RUN;
   el.innerHTML=`${!nData?'<div class="note warn">데이터가 없습니다 — ‘시료·데이터’에서 넣거나 합성 데이터를 만드세요.</div>':""}
    <div class="muted">자유 매개변수 ${nFree}개 · 데이터셋 ${nData}개 (배율은 데이터셋마다 계층 소거)</div>
+   ${(()=>{ const u=S.samples.reduce((a,s)=>a+s.data.filter(d=>d.raw&&!d.calOK).length,0); return u?`<div class="note warn" style="margin-top:6px">파워 보정을 확인하지 않은 데이터 ${u}개 — 임시 보정(마지막 사용값 또는 NIR 950 DMSP·Oil)이 걸려 있다. σ·I_th 같은 절대값은 보정을 확인한 뒤에만 의미가 있다. ⑦의 ‘환산 무관’ 양은 영향이 없다. ‘시료·데이터’ 목록의 ‘파워 보정’에서 확인하세요.</div>`:""; })()}
    ${!hasKin&&nData?`<div class="note warn" style="margin-top:6px">시간 데이터(수명·상승 시간)가 없습니다. 검출 배율을 모르는 S-curve 만으로는 <b>모든 속도·단면적을 같은 배수로 바꾸는 방향</b>이 정해지지 않습니다 — 절대 속도 하나(예: 저농도 수명)를 고정하거나 감쇠·상승 시간을 넣으세요.</div>`:""}
    <div class="row" style="margin-top:8px"><label class="dre-f">출발점 <input type="number" id="fS" value="${S.fit.starts}" min="1" max="1000"></label>
      <label class="dre-f">최대 반복 <input type="number" id="fM" value="${S.fit.maxit}" min="10" max="2000"></label>
