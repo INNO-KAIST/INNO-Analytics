@@ -40567,6 +40567,11 @@ function allIssues(){ const L=[]; S.samples.forEach((s,si)=>s.data.forEach((d,di
 
 /* ---------- pulse 응답 CSV (Time, Counts, SetV, Power) ----------
    ScopeFoundry ni_daq_pulse_resp 를 CSV 로 내보낸 형식. 첫 행 Counts 는 카운터 누적값, Power 는 첫 행에만 있다. */
+/* 가져오기 형식별 마지막 단위 선택 (이 브라우저) */
+function unitMem(kind,v){ const K="innoanalytics_dre_unit_v1"; try{ const o=JSON.parse(localStorage.getItem(K)||"{}"); if(v===undefined) return o[kind]||null; o[kind]=v; localStorage.setItem(K,JSON.stringify(o)); }catch(e){} return null; }
+/* 파일 이름의 파워 표기(예: 8uW, 1.5mW)와 파일 안 값이 다르면 알린다 — 둘 중 하나는 보정된 값일 가능성 */
+function fileUnitHint(name,v){ const q=/(\d+(?:\.\d+)?)\s*(uW|µW|mW|nW|W)(?![a-z])/i.exec(name||""); if(!q||!isFinite(v)) return "";
+  return ` 파일 이름에는 <b>${esc(q[1]+" "+q[2].replace(/^u/i,"µ"))}</b>, 파일 안 첫 값은 <b>${sciTxt(v,3)}</b> — 이름은 측정 설정값, 파일 값은 보정된 값일 수 있다.`; }
 function isPulseTable(T){ const h=T.header.map(x=>String(x).toLowerCase()); return h.some(x=>/^time/.test(x))&&h.some(x=>/setv|set_v|set.?volt/.test(x)); }
 function pulseStats(t,c,on,off,bg){ const seg=[]; for(let i=on;i<=off;i++) seg.push(c[i]-bg); const n=seg.length; if(n<20) return null; const dt=(t[off]-t[on])/Math.max(1,n-1);
   const k=Math.max(1,Math.round(n/300)); const sm=seg.map((_,i)=>{ let s2=0,q=0; for(let j=Math.max(0,i-k);j<=Math.min(n-1,i+k);j++){ s2+=seg[j]; q++; } return s2/q; });
@@ -40580,16 +40585,19 @@ function pulseCsvUI(el,chs,T){ const m=$q(el,"#dreMap"); const h=T.header.map(x=
   const P0=jp>=0?T.cols[jp].find(x=>isFinite(x)):NaN; const pre=c.slice(s0,Math.max(s0,on)); const bg=pre.length?pre.reduce((a,b)=>a+b,0)/pre.length:0;
   const st=on>0&&off>on?pulseStats(t,c,on,off,bg):null; const post=off>0?c.slice(off+1):[];
   let tOffHalf=null; if(st&&post.length){ const i=post.findIndex(x=>x-bg<=0.5*st.fin); if(i>=0) tOffHalf=(i+1)*(st.dt||0); }
-  const nm=T.name||"pulse CSV"; const uopt=`<optgroup label="intensity (보정 끝남)">${Object.keys(PU).map(u=>`<option value="I|${u}" ${u===S.pu?"selected":""}>${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}">${u} (PM 읽음)</option>`).join("")}</optgroup>`;
+  const nm=T.name||"pulse CSV"; const lastU=unitMem("pulse")||("I|"+S.pu);
+  const uopt=`<optgroup label="intensity (보정 끝남 · 시료면)">${Object.keys(PU).map(u=>`<option value="I|${u}" ${"I|"+u===lastU?"selected":""}>${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}" ${"P|"+u===lastU?"selected":""}>${u} (PM 읽음)</option>`).join("")}</optgroup>`;
+  const hint=fileUnitHint(nm,P0);
   const slow=st&&st.t90!=null&&st.t90>10;
   m.innerHTML=`<div class="dre-map"><div><b>${esc(nm)}</b> <span class="muted">— pulse 응답 CSV ${T.n}행 · Δt ${st?sciTxt(st.dt,2)+" s":"?"} · on ${on>=0?sciTxt(t[on],3)+" s":"?"} · off ${off>=0?sciTxt(t[off],3)+" s":"?"}</span></div>
     ${bad0?`<div class="note warn">첫 행 Counts(${sciTxt(c[0],3)})는 나머지의 100배 이상 — 카운터 누적값으로 보고 버립니다. 이 값을 rise 시간으로 쓰면 안 됩니다.</div>`:""}
     ${st?`<div class="muted">배경(켜기 전) ${sciTxt(bg,3)} · plateau ${sciTxt(st.fin,3)} (bin 당) · rise t10 ${st.t10!=null?sciTxt(st.t10,2):"—"} s, t50 ${st.t50!=null?sciTxt(st.t50,2):"—"} s, t90 ${st.t90!=null?sciTxt(st.t90,2):"—"} s · 끈 뒤 절반까지 ${tOffHalf!=null?sciTxt(tOffHalf,2)+" s":"—"}</div>`:""}
     ${slow?`<div class="note warn">rise 가 ${sciTxt(st.t90,2)} s 에 걸쳐 오르고 끈 뒤에는 ${tOffHalf!=null?sciTxt(tOffHalf,2)+" s 안에":"빠르게"} 떨어진다 — 켤 때와 끌 때가 비대칭이다. 준위 수명(ms)으로 정해지는 정상상태 DRE 밖의 느린 변수일 수 있으므로 rise 제약으로 쓰지 말고 진단용 트레이스로만 넣는다.</div>`:""}
+    <div class="note" style="margin:6px 0">Power 열이 <b>보정이 끝난 시료면 intensity</b>인지 <b>파워미터 값</b>인지 데이터마다 다르다 — 단위에서 고른다 (마지막 선택을 기억한다).${hint}</div>
     <div class="row"><label class="dre-f">여기 파워 <input type="number" id="pP" step="any" value="${isFinite(P0)?P0:""}"></label><label class="dre-f">단위 <select class="dre-sel" id="pU">${uopt}</select></label>
       <label class="dre-f">채널 <select class="dre-sel" id="pCh">${chs.map(q=>`<option>${esc(q)}</option>`).join("")}</select></label><label class="dre-f">배경 <input type="number" id="pBg" step="any" value="${bg.toPrecision(3)}"></label></div>
     <div class="row"><button class="btn sm primary" id="pOK">시간 트레이스 추가 (on 구간, 진단 전용)</button><span class="muted">${off>on&&on>=0?`on 구간 ${off-on+1}점 → 최대 2000점으로 평균 묶음`:"SetV 로 on/off 를 찾지 못했습니다"}</span></div></div>`;
-  $q(m,"#pOK").onclick=()=>{ const si=+$q(el,"#dreDSmp").value, P=+$q(m,"#pP").value, [uk,uu]=$q(m,"#pU").value.split("|"), b=+$q(m,"#pBg").value||0;
+  $q(m,"#pOK").onclick=()=>{ const si=+$q(el,"#dreDSmp").value, P=+$q(m,"#pP").value, [uk,uu]=$q(m,"#pU").value.split("|"), b=+$q(m,"#pBg").value||0; unitMem("pulse",uk+"|"+uu);
     if(!(P>0)){ note("여기 파워를 넣으세요","warn"); return; } if(!(on>=0&&off>on)){ note("on/off 구간이 없습니다","warn"); return; }
     const tt=[],yy=[]; for(let i=on;i<=off;i++){ if(!isFinite(t[i])||!isFinite(c[i])) continue; tt.push(t[i]-t[on]); yy.push(c[i]-b); } const B=binTrace(tt,yy,2000);
     const o={type:"trace",ch:$q(m,"#pCh").value,label:nm,I:[uk==="I"?P*PU[uu]:P],t:B.t,y:B.y,raw:{kind:uk==="I"?"intensity":"power",unit:uu,P:[P]}};
@@ -40623,7 +40631,8 @@ function mapUI(el,chs){
   const interpRows=jInt>=0?T.txt[jInt].map(v=>/^(true|1|yes)$/i.test(v.trim())):null; const nInt=interpRows?interpRows.filter(Boolean).length:0;
   const kTurn=type==="scurve"?turnIdx(T.cols[jPow].filter((p,r)=>isFinite(p)&&p>0&&!(interpRows&&interpRows[r]))):-1;
   m.innerHTML=`<div class="dre-map">${T.name?`<div><b>${esc(T.name)}</b> <span class="muted">— ${T.n}행</span></div>`:""}<div class="row"><label class="dre-f">파워 열 <select class="dre-sel" id="mI">${T.header.map((h,j)=>`<option value="${j}" ${j===jPow?"selected":""}>${esc(h)}</option>`).join("")}</select></label>
-    <label class="dre-f">단위 <select class="dre-sel" id="mPU"><optgroup label="intensity (보정 끝남)">${Object.keys(PU).map(u=>`<option value="I|${u}">${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}" ${u==="mW"?"selected":""}>${u} (PM 읽음)</option>`).join("")}</optgroup></select></label></div>
+    <label class="dre-f">단위 <select class="dre-sel" id="mPU">${(()=>{ const lu=unitMem("table")||"P|mW"; return `<optgroup label="intensity (보정 끝남 · 시료면)">${Object.keys(PU).map(u=>`<option value="I|${u}" ${"I|"+u===lu?"selected":""}>${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}" ${"P|"+u===lu?"selected":""}>${u} (PM 읽음)</option>`).join("")}</optgroup>`; })()}</select></label></div>
+    <div class="muted">파워 열이 보정이 끝난 시료면 intensity 인지 파워미터 값인지는 데이터마다 다르다 — 확인해서 고른다 (마지막 선택을 기억한다).${fileUnitHint(T.name||"",T.cols[jPow].find(v=>isFinite(v)))}</div>
     <div class="muted">파워미터 값을 넣으면 원본을 그대로 두고, 마지막으로 쓴 보정(없으면 NIR 950 DMSP·Oil)을 임시로 걸어 둔다. 목록의 ‘파워 보정’에서 확인·수정한다.</div>
     ${T.header.map((h,j)=>j===jPow||(type==="scurve"&&(j===jSig||j===jInt))?"":`<div class="row"><label class="dre-f">열 “${esc(h)}” → 채널 <select class="dre-sel" data-col="${j}"><option value="">(사용 안 함)</option>${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label></div>`).join("")}
     ${type==="scurve"?`<div class="row"><label class="dre-f" title="점마다 다른 σ. 반복 측정 SD 라면 반복 수 n 으로 나눠 평균의 σ 로 쓴다">점별 σ 열 <select class="dre-sel" id="mSy"><option value="-1">(없음)</option>${T.header.map((h,j)=>`<option value="${j}" ${j===jSig?"selected":""}>${esc(h)}</option>`).join("")}</select></label>
@@ -40639,7 +40648,7 @@ function mapUI(el,chs){
     <div class="row"><button class="btn sm primary" id="mOK">추가</button><span class="muted">${T.n}행</span></div></div>`;
   const firstCh=m.querySelector('select[data-col="1"]'); if(firstCh&&chs.length) firstCh.value=chs[0];
   $q(m,"#mOK").onclick=()=>{
-    const si=+$q(el,"#dreDSmp").value, jI=+$q(m,"#mI").value; const [uk,uu]=$q(m,"#mPU").value.split("|"); const f=uk==="I"?PU[uu]:1;
+    const si=+$q(el,"#dreDSmp").value, jI=+$q(m,"#mI").value; const [uk,uu]=$q(m,"#mPU").value.split("|"); const f=uk==="I"?PU[uu]:1; unitMem("table",uk+"|"+uu);
     const defCal=S.lastCal||Object.assign({name:CALPRE[0].name},{C:CALPRE[0].C,A:CALPRE[0].A});
     const wrap=(o,Praw)=>{ o.raw={kind:uk==="I"?"intensity":"power",unit:uu,P:Praw}; if(uk==="I"){ o.cal={}; o.calOK=true; } else { applyCal(o,defCal,false); } return o; };
     let added=0;
