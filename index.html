@@ -40942,66 +40942,94 @@ function nnls(G,g){ const n=g.length, x=new Float64Array(n), P=new Array(n).fill
       let a=1; for(let j=0;j<n;j++) if(P[j]&&z[j]<=0) a=Math.min(a,x[j]/(x[j]-z[j])); for(let j=0;j<n;j++){ x[j]+=a*(z[j]-x[j]); if(P[j]&&x[j]<=1e-12*scale){ P[j]=false; x[j]=0; } } } }
   return x; }
 
-/* 실측: 선택 원소의 계열별 모형을 순 스펙트럼에 NNLS 로 맞춘다 */
+/* 쓰는 계열: 본체 규칙(famAllowed)을 바탕으로 한다 — K 외 계열은 주선 ≥ 0.8 keV, M 은 Z≥57.
+   그 아래 계열은 형광수율이 사실상 0이라 실측 봉우리를 만들지 못하고 모형 오차만 흡수한다(본체 주석의 Ar L·V L 사례). */
+function famOK(el,fam,Emin,Emax){ const r=XRL[el]; if(!r||!r.lines[fam]) return false;
+  const pr=r.lines[fam].reduce((m,l)=>l[2]>m[2]?l:m,r.lines[fam][0]); if(pr[1]<Emin||pr[1]>Emax) return false;
+  /* 사용자가 직접 고른 원소이므로 본체 자동 식별보다 한 단계 넓힌다: L 은 Z≥20 이고 주선 ≥ 0.8 keV 이면 쓴다.
+     실측 파일(Ni 그리드)에서 Ni Lα(0.851)를 빼면 0.8–1.2 keV 에 설명되지 않는 counts 가 남았다. */
+  const z=r.z||0; if(fam==="K") return true; if(pr[1]<0.8) return false; return fam==="L"?z>=20:z>=57; }
+
+/* 실측: 본체와 같은 선 모양(elementProfile — Gaussian + 저에너지 불완전 전하수집 꼬리)으로
+   선택 원소의 계열별 열을 만들어, SNIP 배경을 뺀 스펙트럼에 NNLS 로 맞춘다.
+   꼬리 크기 tau 는 잔차에서 재고(본체 estimateTau 와 같은 방식) 한 번 더 푼다. */
 function fitMeasured(S,els,fw,Emin,Emax){
-  const bg=specBackground(S.y,S,fw); const disp=(S.cal&&S.cal.disp?S.cal.disp:5)/1000;
+  const snip=specBackground(S.y,S,fw);
   const ch=[]; for(let i=0;i<S.nch;i++) if(S.E[i]>=Emin&&S.E[i]<=Emax&&i>=(S.i0|0)) ch.push(i);
-  const cols=[]; els.forEach(el=>{ const fams={}; linesOf(el,Emin-0.2,Emax+0.2).forEach(l=>(fams[l.fam]=fams[l.fam]||[]).push(l));
-    for(const f in fams) if(fams[f].some(l=>l.e>=Emin&&l.e<=Emax)) cols.push({el,fam:f,lines:fams[f]}); });
-  /* SNIP 은 연속선을 조금 낮게 잡는 경향이 있다(합성 시험에서 5–40 %). 남은 연속선을 원소 열이 흡수하지 않도록
-     넓은 삼각(hat) 기저를 음이 아닌 배경 보정 열로 함께 맞춘다. 마디 간격 ≥ 4·FWHM 이라 피크와 구별된다. */
-  const kn=[]; { let e=Emin; while(e<Emax){ kn.push(e); e+=Math.max(0.2,4*fwhmAt(e*1000,fw)/1000,0.15*e); } kn.push(Emax); }
+  const cols=[]; els.forEach(el=>{ for(const fam in (XRL[el]||{lines:{}}).lines){ if(!famOK(el,fam,Emin,Emax)) continue;
+    const pr=elementProfile(S,el,fam,fw,[Emin,Emax]); if(pr) cols.push({el,fam,pr}); } });
   const nEl=cols.length;
-  kn.forEach((k,j)=>cols.push({hat:true,j,k,lo:kn[j-1]!=null?kn[j-1]:k,hi:kn[j+1]!=null?kn[j+1]:k}));
-  const X=cols.map(c=>c.hat?ch.map(i=>{ const e=S.E[i]; if(e<=c.lo||e>=c.hi) return (e===c.k)?1:0; return e<=c.k?(c.k===c.lo?1:(e-c.lo)/(c.k-c.lo)):(c.hi===c.k?1:(c.hi-e)/(c.hi-c.k)); }):ch.map(i=>{ let v=0; for(const l of c.lines){ const s=sigAt(l.e,fw), d=(S.E[i]-l.e)/s; if(Math.abs(d)<6) v+=l.rel*Math.exp(-0.5*d*d)/(s*Math.sqrt(2*Math.PI))*disp; } return v; }));
-  const w=ch.map(i=>1/Math.max(1,S.y[i])), net=ch.map(i=>S.y[i]-bg[i]);
-  const n=cols.length, G=[...Array(n)].map(()=>new Array(n).fill(0)), g=new Array(n).fill(0);
-  for(let a=0;a<n;a++){ for(let b=a;b<n;b++){ let s=0; const xa=X[a],xb=X[b]; for(let k=0;k<ch.length;k++) s+=xa[k]*xb[k]*w[k]; G[a][b]=G[b][a]=s; }
-    let s=0; for(let k=0;k<ch.length;k++) s+=X[a][k]*w[k]*net[k]; g[a]=s; }
-  const A=n?nnls(G,g):[];
-  const model=new Float64Array(S.nch), bg2=Float64Array.from(bg);
-  cols.forEach((c,a)=>{ c.A=A[a]; ch.forEach((i,k)=>{ if(c.hat) bg2[i]+=A[a]*X[a][k]; else model[i]+=A[a]*X[a][k]; }); });
-  return {bg:bg2,snip:bg,cols:cols.slice(0,nEl),model,ch};
+  /* SNIP 은 연속선을 낮게 잡는 경향이 있다(실측 파일: 9–11 keV 에서 0, 6–7 keV 에서 필요량의 2 %).
+     남은 연속선을 원소 열이 흡수하지 않도록 넓은 삼각(hat) 기저를 음이 아닌 배경 보정 열로 함께 맞춘다.
+     마디 간격 ≥ 4·FWHM 이라 피크와 구별된다. */
+  const kn=[]; { let e=Emin; while(e<Emax){ kn.push(e); e+=Math.max(0.2,4*fwhmAt(e*1000,fw)/1000,0.15*e); } kn.push(Emax); }
+  const hats=kn.map((k,j)=>{ const lo=kn[j-1]!=null?kn[j-1]:k, hi=kn[j+1]!=null?kn[j+1]:k;
+    return ch.map(i=>{ const e=S.E[i]; if(e<=k) return lo===k?1:(e<=lo?0:(e-lo)/(k-lo)); return hi===k?1:(e>=hi?0:(hi-e)/(hi-k)); }); });
+  const w=ch.map(i=>1/Math.max(1,S.y[i])), net=ch.map(i=>S.y[i]-snip[i]);
+  const solve=tau=>{ const X=cols.map(c=>ch.map(i=>c.pr.prof[i]+(tau&&c.pr.dtail?tau*c.pr.dtail[i]:0))).concat(hats);
+    const n=X.length, G=[...Array(n)].map(()=>new Array(n).fill(0)), g=new Array(n).fill(0);
+    for(let a=0;a<n;a++){ const xa=X[a]; for(let b=a;b<n;b++){ const xb=X[b]; let t=0; for(let k=0;k<ch.length;k++) t+=xa[k]*xb[k]*w[k]; G[a][b]=G[b][a]=t; }
+      let t=0; for(let k=0;k<ch.length;k++) t+=xa[k]*w[k]*net[k]; g[a]=t; }
+    return {X,A:nnls(G,g)}; };
+  let tau=0, R=solve(0);
+  for(let pass=0;pass<2;pass++){      /* 잔차가 요구하는 꼬리 증분 */
+    const m=ch.map((i,k)=>cols.reduce((s,c,a)=>s+(c.pr.dtail?R.A[a]*c.pr.dtail[i]:0),0));
+    const f=ch.map((i,k)=>R.X.reduce((s,x,a)=>s+R.A[a]*x[k],0));
+    let num=0,den=0; ch.forEach((i,k)=>{ num+=w[k]*(net[k]-f[k])*m[k]; den+=w[k]*m[k]*m[k]; });
+    if(!(den>0)||num*num/den<9) break;
+    const nt=Math.max(0,Math.min(2,tau+num/den)); if(Math.abs(nt-tau)<0.02) break; tau=nt; R=solve(tau); }
+  const bg=Float64Array.from(snip), comps=[], model=new Float64Array(S.nch);
+  cols.forEach((c,a)=>{ const arr=new Float64Array(S.nch); ch.forEach((i,k)=>{ arr[i]=R.A[a]*R.X[a][k]; model[i]+=arr[i]; }); comps.push({el:c.el,fam:c.fam,A:R.A[a],arr}); });
+  hats.forEach((hx,h)=>{ const a=nEl+h; ch.forEach((i,k)=>bg[i]+=R.A[a]*hx[k]); });
+  return {bg,snip,comps,cols:comps,model,ch,tau};
+}
+
+/* 모형: 가상 채널(5 eV) 위에 계열별 Gaussian 을 그린다 */
+function modelComps(els,fw,Emin,Emax,kV,comp){
+  const disp=0.005, n=Math.ceil((Emax+0.6)/disp), E=Float64Array.from({length:n},(_,i)=>i*disp);
+  const comps=[]; els.forEach(el=>{ for(const fam in (XRL[el]||{lines:{}}).lines){ if(!famOK(el,fam,Emin,Emax)) continue;
+    const Y=comp.c[el]*famYield(el,fam,kV); if(!(Y>0)) continue; const arr=new Float64Array(n);
+    XRL[el].lines[fam].forEach(([nm,e,rel])=>{ if(rel<0.01) return; const I=Y*rel*detEff(e), sg=sigAt(e,fw); const c0=Math.round(e/disp), wv=Math.ceil(6*sg/disp);
+      for(let i=Math.max(0,c0-wv);i<=Math.min(n-1,c0+wv);i++){ const d=(E[i]-e)/sg; arr[i]+=I*Math.exp(-0.5*d*d)/(sg*Math.sqrt(2*Math.PI))*disp; } });
+    comps.push({el,fam,A:Y,arr}); } });
+  const mx=Math.max(1e-300,...comps.map(c=>Math.max(...c.arr))); const k=NOM/(mx*Math.sqrt(2*Math.PI)*sigAt(1,fw)/disp);
+  comps.forEach(c=>{ for(let i=0;i<n;i++) c.arr[i]*=k; c.A*=k; });
+  return {E,n,comps,disp};
 }
 
 function compute(opt){
-  const {els,fw,emax,kV,compTxt,S}=opt; const Emin=Math.max(0.15,S?S.E[S.i0|0]||0.15:0.15);
-  const L=[]; let mode, comp=null, fit=null;
-  if(S){ mode="measured"; fit=fitMeasured(S,els,fw,Emin,emax);
-    fit.cols.forEach(c=>c.lines.forEach(l=>L.push(Object.assign({},l,{I:c.A*l.rel})))); }
-  else { mode="model"; comp=parseComp(compTxt,els);
-    els.forEach(el=>linesOf(el,Emin-0.2,emax+0.2).forEach(l=>L.push(Object.assign({},l,{I:comp.c[el]*famYield(el,l.fam,kV)*l.rel*detEff(l.e)}))));
-    const mx=Math.max(1e-300,...L.map(l=>l.I)); L.forEach(l=>l.I*=NOM/mx); }
-  const winSum=(a,b,arr)=>{ if(!S||!arr) return 0; let s=0; for(let i=0;i<S.nch;i++) if(S.E[i]>=a&&S.E[i]<b) s+=arr[i]; return s; };
-  const res=S?Float64Array.from(S.y,(v,i)=>v-fit.bg[i]-fit.model[i]):null;
+  const {els,fw,emax,kV,compTxt,S}=opt; const Emin=Math.max(0.15,S?(S.E[S.i0|0]||0.15):0.15,S&&S.cal&&S.cal.beginE?S.cal.beginE/1000:0);
+  let mode, comp=null, fit=null, grid;
+  if(S){ mode="measured"; fit=fitMeasured(S,els,fw,Emin,emax); grid={E:S.E,n:S.nch,comps:fit.comps,bg:fit.bg,y:S.y}; }
+  else { mode="model"; comp=parseComp(compTxt,els); const M=modelComps(els,fw,Emin,emax,kV,comp); grid={E:M.E,n:M.n,comps:M.comps,bg:null,y:null}; }
+  const sumWin=(arr,a,b)=>{ let s=0; const E=grid.E; for(let i=0;i<grid.n;i++) if(E[i]>=a&&E[i]<b) s+=arr[i]; return s; };
+  /* 선 목록(이름·에너지·세기) — 후보 window 를 만들고 이름 붙이는 데 쓴다 */
+  const L=[]; grid.comps.forEach(c=>XRL[c.el].lines[c.fam].forEach(([nm,e,rel])=>{ if(e>=Emin-0.05&&e<=emax+0.05&&rel>=0.01) L.push({el:c.el,fam:c.fam,nm,e,rel,I:c.A*rel}); }));
   const out=els.map(el=>{
-    const own=L.filter(l=>l.el===el), cands=[];
-    const pool=own.filter(l=>l.e>=Emin&&l.e<=emax&&l.I>0).sort((x,y)=>x.e-y.e), groups=[];
-    pool.forEach(l=>{ const g=groups[groups.length-1]; if(g&&g.fam===l.fam&&(l.e-g.ls[g.ls.length-1].e)*1000<0.5*fwhmAt(l.e*1000,fw)) g.ls.push(l); else groups.push({fam:l.fam,ls:[l]}); });
-    groups.map(g=>{ const I=g.ls.reduce((a,m)=>a+m.I,0), rel=g.ls.reduce((a,m)=>a+m.rel,0); const main=g.ls.slice().sort((x,y)=>y.I-x.I)[0];
+    const own=L.filter(l=>l.el===el&&l.I>0&&l.e>=Emin&&l.e<=emax).sort((x,y)=>x.e-y.e), groups=[];
+    own.forEach(l=>{ const g=groups[groups.length-1]; if(g&&g.fam===l.fam&&(l.e-g.ls[g.ls.length-1].e)*1000<0.5*fwhmAt(l.e*1000,fw)) g.ls.push(l); else groups.push({fam:l.fam,ls:[l]}); });
+    const cands=groups.map(g=>{ const I=g.ls.reduce((a,m)=>a+m.I,0), rel=g.ls.reduce((a,m)=>a+m.rel,0); const main=g.ls.slice().sort((x,y)=>y.I-x.I)[0];
       const major=g.ls.filter(m=>m.I>=0.1*main.I).sort((x,y)=>y.I-x.I);
       return {el,fam:g.fam,nm:major.map(m=>m.nm).join("+"),e:g.ls.reduce((a,m)=>a+m.e*m.I,0)/I,rel,I}; })
-    .filter(l=>l.rel>=0.1).forEach(l=>{
+    .filter(l=>l.rel>=0.1).map(l=>{
       const h=WIN*fwhmAt(l.e*1000,fw)/1000, a=l.e-h, b=l.e+h; let Sg=0; const Bf={};
-      L.forEach(m=>{ if(!(m.I>0)) return; const f=m.I*gfrac(m.e,sigAt(m.e,fw),a,b); if(f<=0) return; if(m.el===el) Sg+=f; else { const k=m.el+" "+m.fam; Bf[k]=(Bf[k]||0)+f; } });
-      const Bint=Object.values(Bf).reduce((x,y)=>x+y,0), Bbg=S?Math.max(0,winSum(a,b,fit.bg)):0;
+      grid.comps.forEach(c=>{ const v=sumWin(c.arr,a,b); if(!(v>0)) return; if(c.el===el) Sg+=v; else Bf[c.el+" "+c.fam]=(Bf[c.el+" "+c.fam]||0)+v; });
+      const Bint=Object.values(Bf).reduce((x,y)=>x+y,0), Bbg=grid.bg?Math.max(0,sumWin(grid.bg,a,b)):0;
       let sys=0; for(const k in Bf) sys+=Math.pow(DELTA[k.split(" ")[1]]*Bf[k],2);
-      const v=Sg+Bint+Bbg+sys+Math.pow(DBG*Bbg,2), err=Sg>0?Math.sqrt(v)/Sg:Infinity;
+      const err=Sg>0?Math.sqrt(Sg+Bint+Bbg+sys+Math.pow(DBG*Bbg,2))/Sg:Infinity;
       const top=Object.entries(Bf).sort((x,y)=>y[1]-x[1])[0];
-      /* 원소별 가장 겹치는 선 이름 */
       let topLine=null; if(top){ const [te,tf]=top[0].split(" "); let best=0; L.forEach(m=>{ if(m.el===te&&m.fam===tf){ const f=m.I*gfrac(m.e,sigAt(m.e,fw),a,b); if(f>best){ best=f; topLine=m; } } }); }
-      const resid=S?winSum(a,b,res):0;
-      cands.push({line:l,a,b,S:Sg,Bint,Bbg,Bf,err,purity:Sg/(Sg+Bint),pb:Bbg>0?Sg/Bbg:null,top:top?{key:top[0],frac:top[1]/(Sg+Bint),line:topLine}:null,
-        unexpl:S&&resid>3*Math.sqrt(Math.max(1,Sg+Bint+Bbg))&&resid>0.1*Sg?resid:0});
-    });
+      let unexpl=0; if(grid.y){ const r=sumWin(grid.y,a,b)-Bbg-Sg-Bint; if(r>3*Math.sqrt(Math.max(1,Sg+Bint+Bbg))&&r>0.1*Sg) unexpl=r; }
+      return {line:l,a,b,S:Sg,Bint,Bbg,Bf,err,purity:Sg/(Sg+Bint),pb:Bbg>0?Sg/Bbg:null,top:top?{key:top[0],frac:top[1]/(Sg+Bint),line:topLine}:null,unexpl};
+    }).filter(c=>c.S>0);
     cands.sort((x,y)=>x.err-y.err);
     const best=cands[0]||null; let alt=null;
     if(best){ alt=cands.find(c=>c.line.fam!==best.line.fam)||cands.find(c=>c!==best)||null; }
     const famUnsure=mode==="model"&&best&&alt&&alt.line.fam!==best.line.fam&&alt.err/best.err<3;
-    const noSignal=mode==="measured"&&!best;
-    return {el,best,alt,cands,famUnsure,noSignal};
+    const close=mode==="measured"&&best&&alt&&alt.err/best.err<1.25;
+    return {el,best,alt,cands,famUnsure,close,noSignal:mode==="measured"&&!best};
   });
-  return {mode,Emin,emax,fw,kV,comp,out,fit,L,S};
+  return {mode,Emin,emax,fw,kV,comp,out,fit,L,S,grid};
 }
 
 /* ---------------- 화면 ---------------- */
@@ -41010,20 +41038,17 @@ const badge=c=>c.purity>=0.9?'<span class="badge ok">clean</span>':c.purity>=0.6
 const G1=n=>n.replace(/^(K|L|M)([a-z])(\d?)$/,(m,f,g,d)=>f+({a:"α",b:"β",g:"γ",l:"ℓ",n:"η"}[g]||g)+d);
 const lname=l=>{ const ps=l.nm.split("+").map(G1); if(ps.length>1){ const pre=ps[0].replace(/\d+$/,""); if(ps.every(q=>q.replace(/\d+$/,"")===pre)) return `${l.el} ${pre}${ps.map(q=>q.slice(pre.length)||"").join(",")}`; } return `${l.el} ${ps.join("+")}`; };
 function spark(R,c){
-  const fw=R.fw, L=R.L, S=R.S, l=c.line; const H=fwhmAt(l.e*1000,fw)/1000, lo=l.e-3*H, hi=l.e+3*H, W=150, Hh=42, N=90;
-  const xs=[...Array(N)].map((_,k)=>lo+(hi-lo)*k/(N-1)); const disp=S?(S.cal.disp||5)/1000:H/20;
-  const dens=(m,x)=>{ const s=sigAt(m.e,fw), d=(x-m.e)/s; return Math.abs(d)>6?0:m.I*Math.exp(-0.5*d*d)/(s*Math.sqrt(2*Math.PI))*disp; };
-  const at=(arr,x)=>{ if(!S||!arr) return 0; let i=Math.round((x*1000-S.cal.off)/S.cal.disp); i=Math.max(0,Math.min(S.nch-1,i)); return arr[i]; };
-  const bgv=xs.map(x=>S?Math.max(0,at(R.fit.bg,x)):0), oth=xs.map(x=>L.reduce((s,m)=>m.el!==l.el?s+dens(m,x):s,0)), own=xs.map(x=>L.reduce((s,m)=>m.el===l.el?s+dens(m,x):s,0));
-  const dat=S?xs.map(x=>at(S.y,x)):null;
-  const top=Math.max(1e-9,...xs.map((_,k)=>bgv[k]+oth[k]+own[k]),...(dat||[0]));
-  const X=x=>((x-lo)/(hi-lo)*W).toFixed(1), Y=v=>(Hh-2-(v/top)*(Hh-6)).toFixed(1);
+  const fw=R.fw, g=R.grid, l=c.line; const H=fwhmAt(l.e*1000,fw)/1000, lo=l.e-3*H, hi=l.e+3*H, W=120, Hh=40;
+  const idx=[]; for(let i=0;i<g.n;i++) if(g.E[i]>=lo&&g.E[i]<=hi) idx.push(i); if(idx.length<3) return "";
+  const own=idx.map(i=>g.comps.reduce((s,q)=>q.el===l.el?s+q.arr[i]:s,0)), oth=idx.map(i=>g.comps.reduce((s,q)=>q.el!==l.el?s+q.arr[i]:s,0)), bgv=idx.map(i=>g.bg?Math.max(0,g.bg[i]):0), dat=g.y?idx.map(i=>g.y[i]):null;
+  const top=Math.max(1e-9,...idx.map((_,k)=>bgv[k]+oth[k]+own[k]),...(dat||[0]));
+  const xs=idx.map(i=>g.E[i]), N=xs.length, X=x=>((x-lo)/(hi-lo)*W).toFixed(1), Y=v=>(Hh-2-(v/top)*(Hh-6)).toFixed(1);
   const area=(base,add)=>"M"+xs.map((x,k)=>X(x)+" "+Y(base[k]+add[k])).join("L")+"L"+xs.slice().reverse().map((x,k)=>X(x)+" "+Y(base[N-1-k])).join("L")+"Z";
-  const zero=xs.map(()=>0), b1=bgv, b2=bgv.map((v,k)=>v+oth[k]);
+  const zero=xs.map(()=>0), b2=bgv.map((v,k)=>v+oth[k]);
   return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}" role="img" aria-label="${esc(lname(l))} window" style="display:block">
     <rect x="${X(c.a)}" y="0" width="${(X(c.b)-X(c.a)).toFixed(1)}" height="${Hh}" style="fill:var(--accent-soft)"/>
-    ${S?`<path d="${area(zero,bgv)}" style="fill:var(--grid)"/>`:""}
-    <path d="${area(b1,oth)}" style="fill:var(--warn);opacity:.55"/>
+    ${g.bg?`<path d="${area(zero,bgv)}" style="fill:var(--grid)"/>`:""}
+    <path d="${area(bgv,oth)}" style="fill:var(--warn);opacity:.55"/>
     <path d="${area(b2,own)}" style="fill:var(--accent);opacity:.75"/>
     ${dat?`<path d="M${xs.map((x,k)=>X(x)+" "+Y(dat[k])).join("L")}" style="fill:none;stroke:var(--ink-2);stroke-width:1"/>`:""}
     <line x1="${X(l.e)}" x2="${X(l.e)}" y1="0" y2="${Hh}" style="stroke:var(--accent-strong);stroke-width:1;stroke-dasharray:2 2"/></svg>`;
@@ -41036,18 +41061,19 @@ function candRow(c,R,rank){ const l=c.line; return `<tr>
   <td>${badge(c)}</td></tr>`; }
 function html(R){
   const meas=R.mode==="measured";
-  const head=meas?`<b>실측 스펙트럼 기반</b> — 선택 원소의 계열별 Gaussian 모형을 배경(SNIP) 뺀 스펙트럼에 NNLS 로 맞춘 counts 를 씁니다.`
+  const head=meas?`<b>실측 스펙트럼 기반</b> — 선택 원소의 계열별 선 모양(Gaussian + 저에너지 꼬리, 본체와 같은 모형)을 배경(SNIP + 보정) 뺀 스펙트럼에 NNLS 로 맞춘 counts 를 씁니다.${R.fit&&R.fit.tau?` 꼬리 크기 τ = ${R.fit.tau.toFixed(2)}.`:""}`
     :`<b>모형 기반</b> — 스펙트럼 파일이 없어 이론 intensity 로 계산했습니다. 조성 ${R.comp.any?"입력값":"<b>미입력(모두 같은 원자비)</b>"}, ${R.kV} kV.
       파일을 열면 실측 counts 로 자동 대체됩니다.`;
   const rows=R.out.map(o=>{
     if(!o.best) return `<tr><td class="l"><b>${esc(o.el)}</b></td><td class="l" colspan="${meas?7:6}"><span class="muted">${o.noSignal?"맞춘 신호가 없습니다 — 이 스펙트럼에서 검출되지 않거나 범위 밖입니다":"범위 안에 쓸 만한 라인이 없습니다"}</span></td></tr>`;
     const c=o.best, l=c.line, a=o.alt;
     const notes=[]; if(o.famUnsure) notes.push(`<span class="badge info" title="K/L/M 계열 사이 intensity 비는 모형 오차가 커서, 차이가 3배 안쪽이면 실측으로 확인해야 합니다">계열 선택은 실측 확인</span>`);
+    if(o.close) notes.push(`<span class="badge info" title="차선의 예상 상대오차가 25 % 안쪽으로 가깝습니다 — 둘 다 쓸 만합니다">차선과 비슷</span>`);
     if(c.err>0.5) notes.push(`<span class="badge risk" title="예상 상대오차가 50 %를 넘습니다 — 계수 시간을 늘리거나 ROI 를 넓히세요">${meas?"이 스펙트럼으론 신호 부족":"신호 부족"}</span>`);
-    if(c.unexpl) notes.push(`<span class="badge warn" title="모형이 설명하지 못한 counts 가 window 안에 있습니다">window 에 미선택 원소 신호?</span>`);
-    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인">M 계열</span>`);
+    if(c.unexpl) notes.push(`<span class="badge warn" title="모형(선택 원소 + 배경)이 설명하지 못한 counts 가 window 안에 3σ 이상, 신호의 10 % 이상 남았습니다. 원인 후보: 목록에 없는 원소, 선 모양 차이(특히 M 계열 상대세기), escape·sum peak">window 잔차 큼</span>`);
+    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인하세요${o.alt&&o.alt.line.fam==="L"?` (차선 ${esc(lname(o.alt.line))})`:""}">M 계열</span>`);
     return `<tr><td class="l"><b>${esc(o.el)}</b></td>
-      <td class="l"><b>${esc(lname(l))}</b> <span class="muted">${l.e.toFixed(3)} keV</span><br>${badge(c)} ${notes.join(" ")}</td>
+      <td class="l" style="max-width:220px;white-space:normal"><b>${esc(lname(l))}</b> <span class="muted">${l.e.toFixed(3)} keV</span><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">${badge(c)} ${notes.join(" ")}</div></td>
       <td class="num">${pct(c.err)}</td><td class="num">${pct(c.purity)}</td>
       ${meas?`<td class="num">${Math.round(c.S).toLocaleString()}${c.pb!=null?`<br><span class="muted">P/B ${c.pb.toFixed(c.pb<10?1:0)}</span>`:""}</td>`:""}
       <td class="l">${c.top&&c.top.frac>=0.01?`${esc(c.top.line?lname(c.top.line):c.top.key)}<br><span class="muted">window 의 ${pct(c.top.frac)}</span>`:'<span class="muted">없음</span>'}</td>
