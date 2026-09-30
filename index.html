@@ -580,6 +580,16 @@ body{word-break:keep-all}
 .ed input[type=checkbox]{width:auto;margin:0}
 .ed .ed-tools select.ed-sel{padding:5px 6px;font-size:12.5px}
 .ed svg.m-et .proc,.ed svg.m-ph .proc,.ed svg.m-em .proc{pointer-events:none}
+/* 이온 간 상호작용 */
+.ed .ed-int-dir{margin:6px 0 10px}
+.ed .ed-int-dir .h{font-size:12.5px;margin-bottom:4px}
+.ed table.ed-int th,.ed table.ed-int td{font-size:11.5px;padding:3px 6px;text-align:center;white-space:nowrap}
+.ed table.ed-int tbody th{text-align:left;font-weight:600}
+.ed table.ed-int td.sel{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+.ed .ed-int-c{background:none;border:0;padding:0;cursor:pointer;font:inherit;color:inherit}
+.ed .ed-int-c:focus-visible{outline:2px solid var(--focus);border-radius:4px}
+.ed label.ed-f{display:inline-flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--muted)}
+.ed label.ed-f input{width:130px}
 
 /* ============ INNO Analytics — DRE ============ */
 .dre .dre-top .row{gap:12px}
@@ -38014,6 +38024,39 @@ function suggestET(cols,levelsByCol,ctx,opt){
   return out.slice(0,opt.limit||60);
 }
 
+/* ---------- 이온 간 상호작용 (서로 다른 이온) ----------
+   서로 다른 두 이온 A, B 에 대해 A 의 여기 준위(donor)가 B 의 바닥·metastable 준위(acceptor)를 올리는 모든 조합을
+   에너지 불일치로 분류한다. 양방향(A→B, B→A: back transfer 포함)을 모두 본다.
+   정량하는 것: Stark 창 간격 δ, 필요한 포논 수 N = δ/ħω, endothermic 이면 detailed balance exp(−δ/kT).
+   정량하지 않는 것: 두 전이의 세기(스펙트럼 겹침의 크기 = JO 선세기·선모양)와 이온 간 거리 분포.
+   이 둘이 절대 속도를 몇 자릿수씩 바꾸므로(예: Yb→Tm 은 δ≈1,600 cm⁻¹ 로 비공명인데도 효율적) 여기서 내는 값은 확률이 아니다.
+   절대 확률은 측정된 microparameter C_DA 가 있을 때만 forsterEff 로 계산한다. */
+function interIon(cols,levelsByCol,ctx,opt){
+  opt=opt||{}; const Emax=opt.Emax||1e9, maxGrade=opt.maxGrade==null?4:opt.maxGrade; const hw=ctx.hw||null, kT=KT_PER_K*(ctx.T||295);
+  const out=[];
+  cols.forEach((cd,i)=>cols.forEach((ca,j)=>{
+    if(i===j||cd.ion===ca.ion) return;
+    const LD=levelsByCol[i], LA=levelsByCol[j];
+    const donors=LD.filter(L=>!L.ground&&(L.regime==="rad"||L.regime==="mixed"||L.kind==="band")&&L.E<=Emax);
+    const accStart=LA.filter(L=>L.ground||L.regime==="rad");
+    donors.forEach(Di=>LD.forEach(Df=>{ if(Df.E>=Di.E-200) return;
+      accStart.forEach(Ai=>LA.forEach(Af=>{ if(Af.E<=Ai.E+200||Af.E>Emax) return;
+        const c=classifyET({d:{ion:cd.ion,from:Di,to:Df},a:{ion:ca.ion,from:Ai,to:Af}},ctx); if(c.grade>maxGrade) return;
+        out.push({di:i,ai:j,Di,Df,Ai,Af,c,N:hw?c.delta/hw:null,boltz:c.endo?Math.exp(-c.delta/kT):1}); })); }));
+  }));
+  /* 같은 (donor 출발, acceptor 출발) 칸 안에서는 δ 가 작은 순 */
+  out.sort((a,b)=>a.c.delta-b.c.delta||Math.abs(a.c.dE)-Math.abs(b.c.dE));
+  return out;
+}
+/* Förster 정적 평균 (dipole–dipole, acceptor 무작위 분포, donor 간 이동 없음):
+   R0⁶ = C_DA·τ_D, c0 = 3/(2π^{3/2} R0³), γ = (√π/2)·N_A/c0, 전달 효율 η = √π γ e^{γ²} erfc(γ).
+   Förster, Z. Naturforsch. 4a, 321 (1949); Inokuti & Hirayama, J. Chem. Phys. 43, 1978 (1965). */
+function erfcx(x){ if(x<0) return 2*Math.exp(x*x)-erfcx(-x);
+  if(x<2){ const t=1/(1+0.5*x); const y=t*Math.exp(-x*x-1.26551223+t*(1.00002368+t*(0.37409196+t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*(-1.13520398+t*(1.48851587+t*(-0.82215223+t*0.17087277))))))))); return y*Math.exp(x*x); }
+  let f=x; for(let k=60;k>=1;k--) f=x+(k/2)/f; return 1/(Math.sqrt(Math.PI)*f); }
+function forsterEff(CDA,tauD,NA){ if(!(CDA>0&&tauD>0&&NA>0)) return null; const R0=Math.pow(CDA*tauD,1/6); const c0=3/(2*Math.pow(Math.PI,1.5)*R0*R0*R0);
+  const g=Math.sqrt(Math.PI)/2*NA/c0; return {R0,c0,gamma:g,eta:Math.sqrt(Math.PI)*g*erfcx(g)}; }
+
 /* ---------- 파장 → 색 (가시광은 스펙트럼 색, UV·NIR·IR 은 구분 색) ---------- */
 function wlColor(nm,dark){
   let r=0,g=0,b=0;
@@ -38091,7 +38134,7 @@ function defaultLasers(ionKeys){
 
 const API={nm2cm,cm2nm,cm2eV,KT_PER_K,CM_PER_EV,IONS,OX,INACTIVE,HOSTS,ANION_PH,ionKey,ionLabel,sup,
   normalize,parseComposition,parseDopants,parseFormula:parseFormulaFull,findHost,canonicalFormula,
-  tsEval,levelsFor,annotate,gapInfo,win,gradeOf,GRADES,GRADE_EN,classifyET,classifyPhoton,photonCandidates,paLoops,
+  tsEval,levelsFor,annotate,gapInfo,win,gradeOf,GRADES,GRADE_EN,classifyET,classifyPhoton,interIon,forsterEff,erfcx,photonCandidates,paLoops,
   suggestET,wlColor,bandName,curatedFor,dMain,defaultLasers,termHTML,termText,escHTML,TYPE_INFO,SENSITIZERS,P_MPR,P_RAD};
 root.ED_CORE=API;
 if(typeof module!=="undefined") module.exports=API;
@@ -38344,6 +38387,7 @@ function render(root){
       <div class="card" id="edLasCard"></div>
       <div class="card" id="edProcCard"></div>
       <div class="card ed-det" id="edDetCard"></div>
+      <div class="card" id="edIntCard" hidden></div>
       <div class="card" id="edSugCard"></div>
       <div class="card" id="edSrcCard"></div>
     </div>
@@ -38356,7 +38400,7 @@ function rerender(){
   if(!ROOT||!ROOT.isConnected) return;
   buildModel();
   renderChips(); renderHost(); renderWarn(); renderTools(); drawSVG(); renderLegend();
-  renderLasers(); renderProcs(); renderDetail(); renderSug(); renderSrc(); renderPrompt();
+  renderLasers(); renderProcs(); renderDetail(); renderInter(); renderSug(); renderSrc(); renderPrompt();
 }
 
 /* ---------------- 상단 ---------------- */
@@ -38966,6 +39010,56 @@ function renderSug(){
 function runSug(){
   const M=MODEL; SUGSIG=sugSig(); SUG=C.suggestET(M.cols.map(m=>m.c),M.cols.map(m=>m.lv),M.cx,{Emax:M.Emax,limit:80,maxGrade:2});
 }
+/* ---------- 이온 간 상호작용 (서로 다른 이온이 2종 이상일 때) ---------- */
+let INT_SEL=null, INT_MAXN=6;
+function renderInter(){
+  const el=$q(ROOT,"#edIntCard"); if(!el) return; const M=MODEL;
+  const ions=[...new Set(M.cols.map(m=>m.c.ion))]; if(ions.length<2){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false;
+  const all=C.interIon(M.cols.map(m=>m.c),M.cols.map(m=>m.lv),M.cx,{Emax:40000,maxGrade:4});   /* 도식 축 상한과 무관하게 40,000 cm⁻¹ 까지 본다 */
+  const hw=M.cx.hw, T=M.cx.T||295; const keep=all.filter(x=>x.N==null||x.N<=INT_MAXN);
+  /* 방향별 행렬: 행 = donor 출발 준위, 열 = acceptor 출발 준위, 칸 = δ 가 가장 작은 조합 */
+  const dirs={}; keep.forEach(x=>{ const k=x.di+">"+x.ai; (dirs[k]=dirs[k]||[]).push(x); });
+  const cell=x=>`<span class="gr g${x.c.grade}">${x.N!=null?(x.c.delta?`N ${fmt(x.N,1)}`:"공명"):esc(x.c.gradeName)}</span>${x.c.endo?`<span class="muted"> ↑${x.boltz.toExponential(0)}</span>`:""}`;
+  const mats=Object.entries(dirs).map(([k,L])=>{ const [di,ai]=k.split(">").map(Number); const md=M.cols[di], ma=M.cols[ai];
+    const rows=[...new Map(L.map(x=>[x.Di.id,x.Di])).values()].sort((a,b)=>b.E-a.E), cols=[...new Map(L.map(x=>[x.Ai.id,x.Ai])).values()].sort((a,b)=>a.E-b.E);
+    const best=(r,c)=>L.filter(x=>x.Di.id===r.id&&x.Ai.id===c.id)[0];
+    return `<div class="ed-int-dir"><div class="h"><b>${esc(C.ionLabel(md.c.ion))}</b> → <b>${esc(C.ionLabel(ma.c.ion))}</b> <span class="muted">donor 여기 준위(행)가 acceptor 준위(열)를 올린다${L.some(x=>x.c.type==="BET")?" · back transfer 포함":""}</span></div>
+      <div class="tblwrap"><table class="ed-tbl ed-int"><thead><tr><th>${esc(C.ionLabel(md.c.ion))} donor ∖ ${esc(C.ionLabel(ma.c.ion))} acceptor</th>${cols.map(c=>`<th>${C.termHTML(c.t)}${c.ground?' <span class="muted">(바닥)</span>':""}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r=>`<tr><th>${C.termHTML(r.t)} <span class="muted">${fmt(r.E)}</span></th>${cols.map(c=>{ const x=best(r,c); return x?`<td class="${INT_SEL===k+"|"+r.id+"|"+c.id?"sel":""}"><button class="ed-int-c" data-int="${k}|${r.id}|${c.id}" title="${esc(`${C.ionLabel(md.c.ion)} ${x.Di.t}→${x.Df.t} ⇒ ${C.ionLabel(ma.c.ion)} ${x.Ai.t}→${x.Af.t} · ${x.c.type} · δ ${Math.round(x.c.delta)} cm⁻¹`)}">${cell(x)}</button></td>`:`<td class="muted">—</td>`; }).join("")}</tr>`).join("")}</tbody></table></div></div>`; }).join("");
+  /* 선택한 칸(없으면 전체 상위)의 조합 목록 */
+  let list=keep, cap="δ 가 작은 순 상위 12";
+  if(INT_SEL){ const [k,r,c]=INT_SEL.split("|"); const [di,ai]=k.split(">").map(Number); list=keep.filter(x=>x.di===di&&x.ai===ai&&x.Di.id===r&&x.Ai.id===c); cap="선택한 칸의 모든 조합"; }
+  const items=list.slice(0,INT_SEL?40:12).map(x=>{ const md=M.cols[x.di], ma=M.cols[x.ai]; return `<div class="it">${typeBadge(x.c.type)}<div class="tx">${esc(C.ionLabel(md.c.ion))} ${C.termHTML(x.Di.t)}→${C.termHTML(x.Df.t)} ⇒ ${esc(C.ionLabel(ma.c.ion))} ${C.termHTML(x.Ai.t)}→${C.termHTML(x.Af.t)}
+      <div class="mt"><span class="gr g${x.c.grade}">${esc(x.c.gradeName)}</span> δ ${fmt(x.c.delta)} cm⁻¹${x.N!=null?` · 포논 ${fmt(x.N,1)}개`:""} · ΔE ${x.c.dE>0?"+":""}${fmt(x.c.dE)}${x.c.endo?` · endothermic, detailed balance ×${x.boltz.toExponential(1)} (${T} K)`:""}</div></div>
+      <button class="btn sm" data-intadd="${all.indexOf(x)}" aria-label="도식에 추가">＋</button></div>`; }).join("");
+  const accC=(()=>{ const m=M.cols.find(q=>q.c.ion!==M.cols[0].c.ion); const v=m&&(m.c.conc||[]).find(q=>q!=null); return v!=null?v:""; })();
+  const nre=/Lu/.test(S.host&&S.host.name||"")?1.42e22:/Y/.test(S.host&&S.host.name||"")?1.37e22:"";
+  el.innerHTML=`<h3>이온 간 상호작용 <span class="hint">서로 다른 이온 사이 · 필요 포논 수 ≤ <select class="ed-sel" id="edIntN">${[2,4,6,8].map(n=>`<option ${n===INT_MAXN?"selected":""}>${n}</option>`).join("")}</select></span></h3>
+    ${mats||`<div class="muted">포논 ${INT_MAXN}개 안쪽의 조합이 없습니다.</div>`}
+    <div class="muted" style="margin:6px 0 4px">칸 = 그 두 준위 사이에서 에너지가 가장 잘 맞는 조합. N = Stark 창 간격 δ / ħω${hw?` (ħω ${fmt(hw)} cm⁻¹)`:""}, ↑ = endothermic(포논 흡수)의 detailed balance 인자. 칸을 누르면 아래에 모든 조합이 나온다.</div>
+    <div class="ed-sug"><div class="muted" style="margin-bottom:4px">${cap}${INT_SEL?` <button class="btn xs" id="edIntClr">전체 보기</button>`:""}</div>${items||'<div class="muted">없음</div>'}</div>
+    <details class="ed-src" style="margin-top:8px"><summary>확률로 읽을 수 있나 — 절대 전달 확률 계산</summary>
+      <div class="muted" style="margin:6px 0">위 표는 <b>에너지 조건만</b> 본 상대 순위다. 실제 전달 속도는 (1) 두 전이의 선세기와 선모양의 겹침, (2) 이온 간 거리 분포에 각각 수 자릿수씩 좌우되는데, 이 둘은 준위 에너지만으로 정해지지 않는다.
+        예: Yb→Tm ³H₆→³H₅ 는 δ 가 1,000 cm⁻¹ 를 넘는 phonon-assisted 전달인데도 실측에서 효율적이다. 그래서 여기서 '확률'을 내면 신뢰도가 낮다.
+        측정된(또는 문헌의 같은 호스트) microparameter C<sub>DA</sub> 가 있으면 아래에서 정적 Förster 평균으로 전달 효율을 계산한다.</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px"><label class="ed-f">C<sub>DA</sub> [cm⁶ s⁻¹] <input type="number" id="edCda" step="any" placeholder="예: 1e-40"></label>
+        <label class="ed-f">donor 고유 수명 τ<sub>D</sub> [ms] <input type="number" id="edTauD" step="any" placeholder="acceptor 없는 시료"></label>
+        <label class="ed-f">acceptor 농도 [%] <input type="number" id="edNApct" step="any" value="${accC}"></label>
+        <label class="ed-f">양이온 자리 밀도 [cm⁻³] <input type="number" id="edNsite" step="any" value="${nre}" placeholder="예: NaYF₄ 1.37e22"></label></div>
+      <div id="edFr" class="muted" style="margin-top:6px"></div>
+      <div class="muted" style="margin-top:4px">식: R₀⁶ = C<sub>DA</sub>·τ<sub>D</sub>, c₀ = 3/(2π<sup>3/2</sup>R₀³), γ = (√π/2)·N<sub>A</sub>/c₀, η = √π γ e<sup>γ²</sup> erfc γ — dipole–dipole, acceptor 무작위 분포, donor 간 이동 없음 (Förster 1949; Inokuti & Hirayama 1965). Yb³⁺ 처럼 donor 간 energy migration 이 빠르면 이 값은 <b>하한</b>이다.</div>
+    </details>`;
+  $q(el,"#edIntN").onchange=e=>{ INT_MAXN=+e.target.value; INT_SEL=null; renderInter(); };
+  el.querySelectorAll("button[data-int]").forEach(b=>b.onclick=()=>{ INT_SEL=INT_SEL===b.dataset.int?null:b.dataset.int; renderInter(); });
+  const clr=$q(el,"#edIntClr"); if(clr) clr.onclick=()=>{ INT_SEL=null; renderInter(); };
+  el.querySelectorAll("button[data-intadd]").forEach(b=>b.onclick=()=>{ const x=all[+b.dataset.intadd]; const md=M.cols[x.di], ma=M.cols[x.ai];
+    const p={uid:uid(),kind:"ET",d:{c:md.c.uid,f:x.Di.id,t:x.Df.id},a:{c:ma.c.uid,f:x.Ai.id,t:x.Af.id},coop:false,type:null};
+    if(S.procs.some(q=>q.kind==="ET"&&sameProc(q,p))) return; S.procs.push(p); S.sel=p.uid; save(); rerender(); });
+  const calc=()=>{ const Cda=+$q(el,"#edCda").value, tau=+$q(el,"#edTauD").value/1e3, pct=+$q(el,"#edNApct").value, ns=+$q(el,"#edNsite").value; const o=$q(el,"#edFr");
+    if(!(Cda>0&&tau>0&&pct>0&&ns>0)){ o.textContent="네 값을 모두 넣으면 계산합니다."; return; } const r=C.forsterEff(Cda,tau,pct/100*ns);
+    o.innerHTML=`R₀ = <b>${fmt(r.R0*1e7,2)} nm</b> · c₀ = ${r.c0.toExponential(2)} cm⁻³ · γ = ${fmt(r.gamma,3)} · 전달 효율 η = <b>${fmt(100*r.eta,1)} %</b> · 평균 전달 속도 ≈ η/((1−η)τ<sub>D</sub>) = ${r.eta<1?(r.eta/((1-r.eta)*tau)).toExponential(2):"∞"} s⁻¹`; };
+  ["#edCda","#edTauD","#edNApct","#edNsite"].forEach(id=>$q(el,id).oninput=calc); calc();
+}
 function renderSrc(){
   const el=$q(ROOT,"#edSrcCard"); if(!el) return; const R=window.ED_DATA.refs;
   el.innerHTML=`<details class="ed-src"><summary>데이터 출처와 가정</summary><ul>
@@ -39457,10 +39551,11 @@ function residuals(B,theta,wantJ){
       const chIdx=B.M.channels.findIndex(c=>c.id===d.ch); if(chIdx<0) throw new Error("채널 없음: "+d.ch);
       if(d.type==="scurve"){
         const o=observe(B.M,env,d.I,d.dir||1,pr.nm,chIdx,{beam:pr.beam,pnames:wantJ?names:null}); fails+=o.fails;
-        const rel=d.relErr||0.05, sbg=d.sbg||0, kc=d.k==null?3:d.k;
-        /* 가중치: σ_ln² = rel² + (sbg/y)² ; censored: y ≤ k·sbg */
-        const cens=d.y.map(v=>!(v>kc*sbg)||!(v>0));
-        const sig=d.y.map((v,i)=>cens[i]?Math.sqrt(rel*rel+0.25):Math.sqrt(rel*rel+Math.pow(sbg/v,2)));
+        const rel=d.relErr||0.05, kc=d.k==null?3:d.k;
+        /* 가중치: σ_ln² = rel² + (s_i/y)², s_i = √(배경σ² + 점별σ²) ; censored: y ≤ k·s_i */
+        const sA=d.y.map((v,i)=>sAbs(d,i));
+        const cens=d.y.map((v,i)=>!(v>kc*sA[i])||!(v>0));
+        const sig=d.y.map((v,i)=>cens[i]?Math.sqrt(rel*rel+0.25):Math.sqrt(rel*rel+Math.pow(sA[i]/v,2)));
         const lm=o.y.map(v=>Math.log(Math.max(v,1e-300)));
         let sw=0, sl=0; d.y.forEach((v,i)=>{ if(cens[i]) return; const w=1/(sig[i]*sig[i]); sw+=w; sl+=w*(Math.log(v)-lm[i]); });
         const logS= sw>0 ? sl/sw : 0;
@@ -39470,7 +39565,7 @@ function residuals(B,theta,wantJ){
           mean=new Float64Array(P); d.y.forEach((v,i)=>{ if(cens[i]) return; const w=1/(sig[i]*sig[i]); for(let j=0;j<P;j++) mean[j]+=w*dlm[i][j]/sw; }); }
         d.y.forEach((v,i)=>{
           if(cens[i]){
-            const L=Math.max(kc*sbg,1e-300), pred=lm[i]+logS;
+            const L=Math.max(kc*sA[i],1e-300), pred=lm[i]+logS;
             const rr=pred>Math.log(L)?(pred-Math.log(L))/sig[i]:0; r.push(rr); info.push({si,di,i,cens:true});
             if(wantJ){ const g=new Float64Array(P); if(rr!==0) for(let j=0;j<P;j++) g[j]=(dlm[i][j]-mean[j])/sig[i]; J.push(g); }
           } else {
@@ -39616,6 +39711,8 @@ function linfit(x,y){ const n=x.length; let sx=0,sy=0; for(let i=0;i<n;i++){ sx+
   const b=sxy/sxx, a=my-b*mx; let ss=0; for(let i=0;i<n;i++) ss+=(y[i]-a-b*x[i])**2; return {b,a,sxx,se:n>2?Math.sqrt(ss/(n-2)/sxx):Infinity}; }
 function interpLL(X,Y,x){ /* log-log 선형 보간, 범위 밖·비양수 null */ if(x<X[0]||x>X[X.length-1]) return null; let k=0; while(k<X.length-2&&X[k+1]<x) k++;
   const a=Y[k],b=Y[k+1]; if(!(a>0)||!(b>0)) return null; const f=Math.log(x/X[k])/Math.log(X[k+1]/X[k]||1); return {v:Math.exp(Math.log(a)+f*Math.log(b/a)),k}; }
+/* 점별 절대 σ: 배경 σ(sbg)와 점별 σ(sy, 예: 반복 SD/√n)를 합친다 */
+function sAbs(d,i){ const a=d.sbg||0, b=d.sy&&isFinite(d.sy[i])?d.sy[i]:0; return Math.sqrt(a*a+b*b); }
 function adequacy(B,theta,opt){
   opt=opt||{}; const fmtI=opt.fmtI||(v=>v.toExponential(2)+" W/cm²");
   const th=Float64Array.from(theta); const pr=B.problem; const items=[];
@@ -39628,9 +39725,9 @@ function adequacy(B,theta,opt){
     detail:s2>2?"잡음 모델(multiplicative noise·배경σ)이 맞다면 모델이 데이터를 설명하지 못한다는 뜻이다. 잡음을 과소 입력했을 가능성도 함께 확인할 것.":"입력한 잡음 수준과 맞는다."});
   /* 데이터셋별 정리 */
   const sets=[]; pr.samples.forEach((smp,si)=>smp.data.forEach((d,di)=>{ if(d.type!=="scurve"||!d._fit) return;
-    const rel=d.relErr||0.05, sbg=d.sbg||0, kc=d.k==null?3:d.k;
+    const rel=d.relErr||0.05, kc=d.k==null?3:d.k;
     const idx=[...d.I.keys()].sort((a,b)=>d.I[a]-d.I[b]);
-    const pts=idx.map(i=>({I:d.I[i],y:d.y[i],m:d._fit.model[i],cens:!(d.y[i]>kc*sbg)||!(d.y[i]>0),sig:Math.sqrt(rel*rel+(d.y[i]>0?Math.pow(sbg/d.y[i],2):0.25))}));
+    const pts=idx.map(i=>{ const sa=sAbs(d,i); return {I:d.I[i],y:d.y[i],m:d._fit.model[i],cens:!(d.y[i]>kc*sa)||!(d.y[i]>0),sig:Math.sqrt(rel*rel+(d.y[i]>0?Math.pow(sa/d.y[i],2):0.25))}; });
     sets.push({si,di,d,pts,rel,chIdx:B.M.channels.findIndex(c=>c.id===d.ch),logS:d._fit.logS,label:`${smp.id} · ${d.ch} · ${d.dir<0?"down":"up"}`}); }));
   /* A2 residual 구조: 부호 연속(runs) 시험 */
   { const res=[]; let worst=null, lvl="ok";
@@ -39641,12 +39738,14 @@ function adequacy(B,theta,opt){
       const n=np+nm, mu=2*np*nm/n+1, va=2*np*nm*(2*np*nm-n)/(n*n*(n-1)); const z=(runs-mu)/Math.sqrt(va);
       /* 가장 어긋난 5점 구간 */
       let best=null; for(let i=0;i+5<=r.length;i++){ const m=r.slice(i,i+5).reduce((a,b)=>a+b,0)/5; if(!best||Math.abs(m)>Math.abs(best.m)) best={m,a:u[i].I,b:u[i+4].I}; }
-      res.push({S,z,runs,mu,best}); if(z<-3) lvl="fail"; else if(z<-2&&lvl==="ok") lvl="warn";
+      res.push({S,z,runs,mu,best}); if(z<-3) lvl="fail"; else if((z<-2||z>3)&&lvl==="ok") lvl="warn";
       if(best&&(!worst||Math.abs(best.m)>Math.abs(worst.best.m))) worst={S,best}; });
-    if(res.length){ const zmin=Math.min(...res.map(q=>q.z));
+    if(res.length){ const zmin=Math.min(...res.map(q=>q.z)), zmax=Math.max(...res.map(q=>q.z)), hiZ=res.filter(q=>q.z>3);
       items.push({key:"A2",title:"residual의 계통적 구조",level:lvl,
-        summary:isFinite(zmin)?`부호 연속 시험 최저 z = ${zmin.toFixed(1)}`:"한 데이터셋의 residual이 모두 같은 부호",
-        detail:(lvl==="ok"?"residual이 무작위에 가깝다.":"residual이 파워를 따라 무리 지어 같은 부호를 낸다 — 잡음이 아니라 곡선 모양이 다르다는 흔적.")+(worst?` 가장 어긋난 구간: ${worst.S.label}, ${fmtI(worst.best.a)} – ${fmtI(worst.best.b)} (평균 residual ${worst.best.m.toFixed(1)}σ).`:""),
+        summary:isFinite(zmin)?`부호 연속 시험 z = ${zmin.toFixed(1)}${zmax>zmin+0.05?` … ${zmax.toFixed(1)}`:""}`:"한 데이터셋의 residual이 모두 같은 부호",
+        detail:(zmin<-2?"residual이 파워를 따라 무리 지어 같은 부호를 낸다 — 잡음이 아니라 곡선 모양이 다르다는 흔적. ":"")+
+          (hiZ.length?`부호가 우연보다 훨씬 자주 바뀐다(z > 3: ${hiZ.map(q=>q.S.label).join(", ")}) — 같은 파워에서 값이 다른 두 집단(예: up·down 을 한 데이터셋에 넣음, 반복 측정이 어긋남)이 번갈아 섞였을 때 나타난다. `:"")+
+          (lvl==="ok"?"residual이 무작위에 가깝다.":"")+(worst?` 가장 어긋난 구간: ${worst.S.label}, ${fmtI(worst.best.a)} – ${fmtI(worst.best.b)} (평균 residual ${worst.best.m.toFixed(1)}σ).`:""),
         rows:res.map(q=>({set:q.S.label,z:q.z}))}); }
     else items.push({key:"A2",title:"residual의 계통적 구조",level:"na",summary:"점 10개 이상인 S-curve 없음"}); }
   /* A3 구간별 모양 비교: 같은 파워 구간에서 실측 국소 log-기울기 vs 모델 */
@@ -39698,8 +39797,8 @@ function adequacy(B,theta,opt){
     /* A5 중간값 */
     let nInt=0, where=[];
     sets.forEach(S=>{ const env=envFor(B,th,S.si); const other=observe(B.M,env,S.d.I,-(S.d.dir||1),pr.nm,S.chIdx,{beam:pr.beam}).y; const e=Math.exp(S.logS);
-      const sbg=S.d.sbg||0, kc=S.d.k==null?3:S.d.k;
-      S.d.I.forEach((I,i)=>{ const y=S.d.y[i]; if(!(y>kc*sbg)||!(y>0)) return; const a=S.d._fit.model[i], b=other[i]*e; if(!(a>0&&b>0)) return;
+      const kc=S.d.k==null?3:S.d.k;
+      S.d.I.forEach((I,i)=>{ const y=S.d.y[i], sbg=sAbs(S.d,i); if(!(y>kc*sbg)||!(y>0)) return; const a=S.d._fit.model[i], b=other[i]*e; if(!(a>0&&b>0)) return;
         const lo=Math.max(Math.min(a,b),kc*sbg), hi=Math.max(a,b); if(hi/lo<3) return; const sg=3*Math.sqrt(S.rel*S.rel+Math.pow(sbg/y,2));
         if(Math.log(y/lo)>sg&&Math.log(hi/y)>sg){ nInt++; where.push(I); } }); });
     items.push({key:"A5",title:"두 branch 사이의 중간값",level:nInt>=2?"fail":nInt?"warn":"ok",summary:`${nInt}점`,
@@ -40222,7 +40321,8 @@ function parseTable(txt){
   let header=null; if(!rows[0].every(isNum)){ header=rows.shift(); }
   const nc=Math.max(...rows.map(r=>r.length));
   const cols=[...Array(nc).keys()].map(j=>rows.map(r=>r[j]==null||r[j]===""||/^nan$/i.test(r[j])?NaN:+r[j]));
-  return {header:header||cols.map((_,j)=>"열 "+(j+1)),cols,n:rows.length};
+  const strs=[...Array(nc).keys()].map(j=>rows.map(r=>r[j]==null?"":String(r[j])));
+  return {header:header||cols.map((_,j)=>"열 "+(j+1)),cols,txt:strs,n:rows.length};
 }
 let PENDING=null;
 function panelData(el){
@@ -40232,7 +40332,7 @@ function panelData(el){
    ${S.samples.map((s,si)=>`<div class="dre-smp"><div class="row"><b>시료 <input type="text" class="dre-sid" data-si="${si}" value="${esc(s.id)}" aria-label="시료 이름"></b>
      ${cvars.map(v=>`<label class="dre-f">${esc(v)} <input type="number" step="any" data-si="${si}" data-var="${esc(v)}" value="${s.vars&&s.vars[v]!=null?s.vars[v]:""}"> %</label>`).join("")}
      ${S.samples.length>1?`<button class="btn xs" data-delsmp="${si}">시료 삭제</button>`:""}</div>
-     ${s.data.length?`<table class="dre-tbl"><tbody>${s.data.map((d,di)=>`<tr><td>${d.type==="scurve"?"S-curve":d.type==="rise"?"상승 시간":d.type==="trace"?"시간 트레이스 (진단)":"감쇠 시간"}</td><td>${esc(d.ch)}</td><td>${d.type==="trace"?`${d.t.length}점 · ${sciTxt(d.I[0]/PU[S.pu],3)} ${esc(S.pu)}`:`${d.I.length}점 ${d.type==="scurve"?(d.dir<0?"· down":"· up"):""}`}</td><td>${(()=>{ const L=calLabel(d); return `<span class="gr ${L.lvl==="ok"?"g0":"g3"}" title="${esc(L.txt)}">${L.lvl==="ok"?"보정됨":"보정 확인"}</span> <button class="btn xs" data-cal="${si}|${di}" title="${esc(L.txt)}">파워 보정</button>`; })()}</td><td class="muted">${d.type==="trace"?"피팅에 쓰지 않음 · 적합성 A6":d.type==="scurve"?`배경σ ${sciTxt(d.sbg||0,3)} · multiplicative noise ${Math.round((d.relErr||0.05)*100)}%`:`상대오차 ${Math.round((d.relErr||0.05)*100)}%`}</td><td><button class="btn xs" data-del="${si}|${di}" aria-label="데이터 삭제">×</button></td></tr>`).join("")}</tbody></table>`:'<div class="muted">데이터 없음</div>'}</div>`).join("")}
+     ${s.data.length?`<table class="dre-tbl"><tbody>${s.data.map((d,di)=>`<tr><td>${d.type==="scurve"?"S-curve":d.type==="rise"?"상승 시간":d.type==="trace"?"시간 트레이스 (진단)":"감쇠 시간"}</td><td>${esc(d.ch)}</td><td>${d.type==="trace"?`${d.t.length}점 · ${sciTxt(d.I[0]/PU[S.pu],3)} ${esc(S.pu)}`:`${d.I.length}점 ${d.type==="scurve"?(d.dir<0?"· down":"· up"):""}`}</td><td>${(()=>{ const L=calLabel(d); return `<span class="gr ${L.lvl==="ok"?"g0":"g3"}" title="${esc(L.txt)}">${L.lvl==="ok"?"보정됨":"보정 확인"}</span> <button class="btn xs" data-cal="${si}|${di}" title="${esc(L.txt)}">파워 보정</button>`; })()}</td><td class="muted">${d.type==="trace"?"피팅에 쓰지 않음 · 적합성 A6":d.type==="scurve"?`배경σ ${sciTxt(d.sbg||0,3)} · multiplicative noise ${Math.round((d.relErr||0.05)*100)}%`:`상대오차 ${Math.round((d.relErr||0.05)*100)}%`}</td><td><button class="btn xs" data-del="${si}|${di}" aria-label="데이터 삭제">×</button></td></tr>${issuesRow(d,si,di)}`).join("")}</tbody></table>`:'<div class="muted">데이터 없음</div>'}</div>`).join("")}
    <div class="row" style="margin-top:6px"><button class="btn sm" id="dreAddSmp">시료 추가</button> <span class="muted">농도 계열은 시료를 나눠 넣고, 비복사 손실만 '시료별'로 두면 identifiability이 크게 오른다.</span></div>
    <hr class="dre-hr">
    <h4 class="dre-h4">데이터 넣기</h4>
@@ -40246,13 +40346,15 @@ function panelData(el){
   el.querySelectorAll(".dre-sid").forEach(i=>i.onchange=()=>{ const v=i.value.trim(); if(v&&!S.samples.some((s,k)=>s.id===v&&k!==+i.dataset.si)){ S.samples[+i.dataset.si].id=v; save(); } else i.value=S.samples[+i.dataset.si].id; });
   el.querySelectorAll("input[data-var]").forEach(i=>i.onchange=()=>{ const s=S.samples[+i.dataset.si]; s.vars=s.vars||{}; s.vars[i.dataset.var]=+i.value; S.result=null; save(); drawSim(); });
   el.querySelectorAll("button[data-cal]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.cal.split("|").map(Number); calUI(el,si,di); const m=$q(el,"#dreMap"); if(m&&m.scrollIntoView) m.scrollIntoView({block:"nearest"}); });
+  el.querySelectorAll("button[data-fix]").forEach(b=>b.onclick=()=>{ const [si,di,act]=b.dataset.fix.split("|"); fixData(el,+si,+di,act); });
   el.querySelectorAll("button[data-del]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.del.split("|").map(Number); S.samples[si].data.splice(di,1); S.result=null; save(); rerender(); });
   el.querySelectorAll("button[data-delsmp]").forEach(b=>b.onclick=()=>{ if(!confirm("시료와 그 데이터를 삭제할까요?")) return; S.samples.splice(+b.dataset.delsmp,1); S.result=null; save(); rerender(); });
   $q(el,"#dreAddSmp").onclick=()=>{ const n=S.samples.length+1; const vars=Object.assign({},S.samples[0]&&S.samples[0].vars); S.samples.push({id:"S"+n,vars,data:[]}); save(); renderPanel(); };
-  const readTxt=t=>{ PENDING=parseTable(t); if(!PENDING||PENDING.cols.length<2){ $q(el,"#dreMap").innerHTML='<div class="note warn">두 열 이상의 숫자 표가 필요합니다</div>'; return; } mapUI(el,chs); };
+  const readTxt=(t,name)=>{ PENDING=parseTable(t); if(!PENDING||PENDING.cols.length<2){ $q(el,"#dreMap").innerHTML='<div class="note warn">두 열 이상의 숫자 표가 필요합니다</div>'; return; }
+    PENDING.name=name||""; if(isPulseTable(PENDING)){ pulseCsvUI(el,chs,PENDING); return; } mapUI(el,chs); };
   $q(el,"#dreFile").onchange=async e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return;
     if(/\.(h5|hdf5)$/i.test(f.name)){ try{ const H=await readH5(f); h5UI(el,chs,H); }catch(err){ $q(el,"#dreMap").innerHTML=`<div class="note warn">${esc(f.name)}: ${esc(err.message||err)}</div>`; } e.target.value=""; return; }
-    const r=new FileReader(); r.onload=()=>readTxt(r.result); r.readAsText(f); };
+    const r=new FileReader(); r.onload=()=>readTxt(r.result,f.name); r.readAsText(f); e.target.value=""; };
   $q(el,"#dreParse").onclick=()=>readTxt($q(el,"#drePaste").value);
   $q(el,"#dreSynth").onclick=()=>synthUI(el,chs);
 }
@@ -40423,6 +40525,78 @@ function h5UI(el,chs,H){
   };
 }
 
+/* ---------- 데이터 점검 ----------
+   모델에 넣기 전에 잡을 수 있는 입력 실수를 데이터마다 검사한다. level: err(피팅 막음) · warn(표시) · info.
+   실제로 겪은 사례(2026-09-30): up·down 을 한 데이터셋에 넣음, pulse CSV 첫 행의 카운터 누적값이 rise 시간으로 들어감,
+   배경을 빼지 않은 채 배경σ=0, 보간 행 포함. */
+function turnIdx(I){ const n=I.length; if(n<8) return -1; let k=0; for(let i=1;i<n;i++) if(I[i]>I[k]) k=i;
+  if(k<3||k>n-4) return -1; let ub=0,db=0; for(let i=1;i<=k;i++) if(I[i]<I[i-1]*0.98) ub++; for(let i=k+1;i<n;i++) if(I[i]>I[i-1]*1.02) db++;
+  if(ub>0.1*k||db>0.1*(n-k)) return -1; if(Math.min(...I.slice(k+1))>0.7*I[k]) return -1; return k; }
+/* 배경 추정: 파워 순으로 낮은 쪽 점들의 중앙값·MAD 로 바닥을 잡고, 바닥 안쪽 점에 (상수 + 파워 비례) 직선을 맞춘다 */
+function bgEstimate(I,y){ const idx=[...I.keys()].filter(i=>isFinite(y[i])&&I[i]>0).sort((a,b)=>I[a]-I[b]); if(idx.length<8) return null;
+  const m0=Math.max(5,Math.floor(idx.length*0.15)), base=idx.slice(0,m0).map(i=>y[i]).sort((a,b)=>a-b); const med=base[base.length>>1];
+  const mad=[...base].map(v=>Math.abs(v-med)).sort((a,b)=>a-b)[base.length>>1]*1.4826||Math.max(1,Math.sqrt(Math.abs(med)));
+  const use=[]; for(const i of idx){ if(y[i]>med+6*mad&&use.length>=m0) break; use.push(i); } if(use.length<5) return null;
+  const x=use.map(i=>I[i]), v=use.map(i=>y[i]); const mx=x.reduce((p,q)=>p+q,0)/x.length, my=v.reduce((p,q)=>p+q,0)/v.length; let sxy=0,sxx=0; x.forEach((q,k)=>{ sxy+=(q-mx)*(v[k]-my); sxx+=(q-mx)**2; });
+  let b=sxx>0?sxy/sxx:0; if(b<0) b=0; const a=my-b*mx; const sd=Math.sqrt(v.reduce((p,q,k)=>p+(q-a-b*x[k])**2,0)/Math.max(1,v.length-2));
+  return {a,b,mean:my,sd:Math.max(sd,1e-9),n:use.length,Imax:x[x.length-1]}; }
+function dataIssues(d){ const out=[];
+  if(d.type==="scurve"){ const k=turnIdx(d.I); if(k>=0&&!d.split) out.push({lvl:"err",code:"mix",txt:`파워가 ${fmtIu(d.I[k])} 까지 올랐다가 다시 내려간다 — up(${k+1}점)·down(${d.I.length-k-1}점)이 한 데이터셋에 섞여 있다. 정상상태 모델은 한 방향 branch 만 설명하므로 나눠야 한다.`,fix:"split",fixTxt:"up·down 나누기"});
+    const e=d.bgSub?null:bgEstimate(d.I,d.y);
+    if(e&&e.n>=5&&e.mean>e.sd&&e.mean/(e.sd/Math.sqrt(e.n))>5) out.push({lvl:"warn",code:"bg",txt:`낮은 파워 ${e.n}점의 바닥 평균이 ${sciTxt(e.mean,3)} (점 간 SD ${sciTxt(e.sd,2)}) 로 0 이 아니다 — 배경을 빼지 않은 것으로 보인다${!(d.sbg>0)&&!d.sy?`. 배경σ 도 0 이라 바닥 근처 점의 σ 가 multiplicative noise(${Math.round((d.relErr||0.05)*100)} %)만으로 과소평가된다`:""}. 모델은 배경까지 신호로 설명하려 한다.`,fix:"bg",fixTxt:"배경 추정·빼기"});
+    if(d.bgSub) out.push({lvl:"info",code:"bgdone",txt:`배경 ${sciTxt(d.bgSub.a,3)} + ${sciTxt(d.bgSub.b,2)}·I 를 뺐다 (바닥 ${d.bgSub.n}점, σ ${sciTxt(d.sbg,2)}).`,fix:"bgundo",fixTxt:"되돌리기"});
+    if(d.nInterp) out.push({lvl:"info",code:"interp",txt:`보간 행 ${d.nInterp}개를 뺐다.`}); }
+  if(d.type==="rise"||d.type==="decay"){ const bad=d.t.map((t,i)=>i).filter(i=>!(d.t[i]>1e-9&&d.t[i]<1e4));
+    if(bad.length) out.push({lvl:"err",code:"t",txt:`시간 값 ${bad.length}개가 1 ns–10⁴ s 밖이다 (예: ${sciTxt(d.t[bad[0]],3)} s). 카운터 누적값이나 단위가 잘못 들어온 것으로 보인다 — pulse 응답 파일은 '시간 트레이스'로 넣는다.`,fix:"del",fixTxt:"이 데이터 삭제"}); }
+  return out; }
+function fmtIu(W){ return sciTxt(W/PU[S.pu],3)+" "+S.pu; }
+function issuesRow(d,si,di){ const L=dataIssues(d); if(!L.length) return ""; return `<tr class="dre-iss"><td colspan="6">${L.map(q=>`<div class="note ${q.lvl==="err"?"warn":q.lvl==="warn"?"warn":""}" style="margin:2px 0;padding:6px 8px">${q.lvl==="err"?"<b>피팅 전 고칠 것</b> — ":q.lvl==="warn"?"<b>확인</b> — ":""}${esc(q.txt)} ${q.fix?`<button class="btn xs" data-fix="${si}|${di}|${q.fix}">${esc(q.fixTxt)}</button>`:""}</div>`).join("")}</td></tr>`; }
+const sliceD=(d,a,b,dir)=>{ const o=JSON.parse(JSON.stringify(d)); const cut=v=>Array.isArray(v)?v.slice(a,b):v; o.I=cut(d.I); o.y=cut(d.y); if(d.sy) o.sy=cut(d.sy); if(d.yRaw) o.yRaw=cut(d.yRaw);
+  if(o.raw){ o.raw.P=cut(d.raw.P); if(d.raw.wheel) o.raw.wheel=cut(d.raw.wheel); } o.dir=dir; o.split=true; o.label=(d.label||d.ch)+(dir<0?" down":" up"); delete o._fit; return o; };
+function splitUpDown(d){ const k=turnIdx(d.I); if(k<0) return null; return [sliceD(d,0,k+1,1),sliceD(d,k+1,d.I.length,-1)]; }
+function subtractBg(d,e){ if(!e) return false; if(!d.yRaw) d.yRaw=d.y.slice(); d.y=d.yRaw.map((v,i)=>v-(e.a+e.b*d.I[i])); d.bgSub={a:e.a,b:e.b,unit:"W/cm²",n:e.n}; d.sbg=e.sd; return true; }
+function fixData(el,si,di,act){ const smp=S.samples[si], d=smp.data[di]; if(!d) return;
+  if(act==="split"){ const r=splitUpDown(d); if(!r){ note("전환점을 찾지 못했습니다","warn"); return; } smp.data.splice(di,1,r[0],r[1]); note(`up ${r[0].I.length}점 · down ${r[1].I.length}점으로 나눴습니다`); }
+  else if(act==="bg"){ /* up branch(또는 전체)의 바닥으로 추정해 같은 시료의 같은 원본에서 온 데이터에 함께 쓴다 */
+    const e=bgEstimate(d.I,d.yRaw||d.y); if(!subtractBg(d,e)){ note("배경을 추정하지 못했습니다","warn"); return; }
+    note(`배경 ${sciTxt(e.a,3)} + ${sciTxt(e.b,2)}·I 를 뺐습니다 (σ ${sciTxt(e.sd,2)}, ${e.n}점). 0 이하가 된 점은 censored 로 들어갑니다.`); }
+  else if(act==="del"){ smp.data.splice(di,1); note("삭제했습니다"); }
+  else if(act==="bgundo"){ if(d.yRaw){ d.y=d.yRaw.slice(); delete d.yRaw; delete d.bgSub; d.sbg=0; note("배경 빼기를 되돌렸습니다"); } }
+  S.result=null; save(); rerender(); }
+function allIssues(){ const L=[]; S.samples.forEach((s,si)=>s.data.forEach((d,di)=>dataIssues(d).forEach(q=>L.push(Object.assign({si,di,sid:s.id,ch:d.ch},q))))); return L; }
+
+/* ---------- pulse 응답 CSV (Time, Counts, SetV, Power) ----------
+   ScopeFoundry ni_daq_pulse_resp 를 CSV 로 내보낸 형식. 첫 행 Counts 는 카운터 누적값, Power 는 첫 행에만 있다. */
+function isPulseTable(T){ const h=T.header.map(x=>String(x).toLowerCase()); return h.some(x=>/^time/.test(x))&&h.some(x=>/setv|set_v|set.?volt/.test(x)); }
+function pulseStats(t,c,on,off,bg){ const seg=[]; for(let i=on;i<=off;i++) seg.push(c[i]-bg); const n=seg.length; if(n<20) return null; const dt=(t[off]-t[on])/Math.max(1,n-1);
+  const k=Math.max(1,Math.round(n/300)); const sm=seg.map((_,i)=>{ let s2=0,q=0; for(let j=Math.max(0,i-k);j<=Math.min(n-1,i+k);j++){ s2+=seg[j]; q++; } return s2/q; });
+  const tail=Math.max(3,Math.floor(n*0.05)); const fin=sm.slice(-tail).reduce((a,b)=>a+b,0)/tail; const tf=f=>{ const i=sm.findIndex(v=>v>=f*fin); return i<0?null:i*dt; };
+  return {fin,t10:tf(0.1),t50:tf(0.5),t90:tf(0.9),dt,dur:(n-1)*dt}; }
+function binTrace(t,y,maxN){ const n=t.length; if(n<=maxN) return {t,y}; const k=Math.ceil(n/maxN), T=[],Y=[]; for(let i=0;i<n;i+=k){ let st=0,sy=0,q=0; for(let j=i;j<Math.min(n,i+k);j++){ st+=t[j]; sy+=y[j]; q++; } T.push(st/q); Y.push(sy/q); } return {t:T,y:Y}; }
+function pulseCsvUI(el,chs,T){ const m=$q(el,"#dreMap"); const h=T.header.map(x=>String(x).toLowerCase());
+  const jt=h.findIndex(x=>/^time/.test(x)), jv=h.findIndex(x=>/setv|set_v|set.?volt/.test(x)), jc=h.findIndex(x=>/count|signal|apd/.test(x)), jp=h.findIndex(x=>/power|intens/.test(x));
+  const t=T.cols[jt], c=T.cols[jc>=0?jc:1], v=T.cols[jv]; const med=[...c.slice(1)].filter(isFinite).sort((a,b)=>a-b); const md=med[med.length>>1]||0;
+  const bad0=c[0]>100*Math.max(md,1); const s0=bad0?1:0; let on=-1,off=-1; for(let i=s0+1;i<v.length;i++) if(v[i]>0.5&&!(v[i-1]>0.5)){ on=i; break; } for(let i=v.length-1;i>on;i--) if(v[i]>0.5){ off=i; break; }
+  const P0=jp>=0?T.cols[jp].find(x=>isFinite(x)):NaN; const pre=c.slice(s0,Math.max(s0,on)); const bg=pre.length?pre.reduce((a,b)=>a+b,0)/pre.length:0;
+  const st=on>0&&off>on?pulseStats(t,c,on,off,bg):null; const post=off>0?c.slice(off+1):[];
+  let tOffHalf=null; if(st&&post.length){ const i=post.findIndex(x=>x-bg<=0.5*st.fin); if(i>=0) tOffHalf=(i+1)*(st.dt||0); }
+  const nm=T.name||"pulse CSV"; const uopt=`<optgroup label="intensity (보정 끝남)">${Object.keys(PU).map(u=>`<option value="I|${u}" ${u===S.pu?"selected":""}>${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}">${u} (PM 읽음)</option>`).join("")}</optgroup>`;
+  const slow=st&&st.t90!=null&&st.t90>10;
+  m.innerHTML=`<div class="dre-map"><div><b>${esc(nm)}</b> <span class="muted">— pulse 응답 CSV ${T.n}행 · Δt ${st?sciTxt(st.dt,2)+" s":"?"} · on ${on>=0?sciTxt(t[on],3)+" s":"?"} · off ${off>=0?sciTxt(t[off],3)+" s":"?"}</span></div>
+    ${bad0?`<div class="note warn">첫 행 Counts(${sciTxt(c[0],3)})는 나머지의 100배 이상 — 카운터 누적값으로 보고 버립니다. 이 값을 rise 시간으로 쓰면 안 됩니다.</div>`:""}
+    ${st?`<div class="muted">배경(켜기 전) ${sciTxt(bg,3)} · plateau ${sciTxt(st.fin,3)} (bin 당) · rise t10 ${st.t10!=null?sciTxt(st.t10,2):"—"} s, t50 ${st.t50!=null?sciTxt(st.t50,2):"—"} s, t90 ${st.t90!=null?sciTxt(st.t90,2):"—"} s · 끈 뒤 절반까지 ${tOffHalf!=null?sciTxt(tOffHalf,2)+" s":"—"}</div>`:""}
+    ${slow?`<div class="note warn">rise 가 ${sciTxt(st.t90,2)} s 에 걸쳐 오르고 끈 뒤에는 ${tOffHalf!=null?sciTxt(tOffHalf,2)+" s 안에":"빠르게"} 떨어진다 — 켤 때와 끌 때가 비대칭이다. 준위 수명(ms)으로 정해지는 정상상태 DRE 밖의 느린 변수일 수 있으므로 rise 제약으로 쓰지 말고 진단용 트레이스로만 넣는다.</div>`:""}
+    <div class="row"><label class="dre-f">여기 파워 <input type="number" id="pP" step="any" value="${isFinite(P0)?P0:""}"></label><label class="dre-f">단위 <select class="dre-sel" id="pU">${uopt}</select></label>
+      <label class="dre-f">채널 <select class="dre-sel" id="pCh">${chs.map(q=>`<option>${esc(q)}</option>`).join("")}</select></label><label class="dre-f">배경 <input type="number" id="pBg" step="any" value="${bg.toPrecision(3)}"></label></div>
+    <div class="row"><button class="btn sm primary" id="pOK">시간 트레이스 추가 (on 구간, 진단 전용)</button><span class="muted">${off>on&&on>=0?`on 구간 ${off-on+1}점 → 최대 2000점으로 평균 묶음`:"SetV 로 on/off 를 찾지 못했습니다"}</span></div></div>`;
+  $q(m,"#pOK").onclick=()=>{ const si=+$q(el,"#dreDSmp").value, P=+$q(m,"#pP").value, [uk,uu]=$q(m,"#pU").value.split("|"), b=+$q(m,"#pBg").value||0;
+    if(!(P>0)){ note("여기 파워를 넣으세요","warn"); return; } if(!(on>=0&&off>on)){ note("on/off 구간이 없습니다","warn"); return; }
+    const tt=[],yy=[]; for(let i=on;i<=off;i++){ if(!isFinite(t[i])||!isFinite(c[i])) continue; tt.push(t[i]-t[on]); yy.push(c[i]-b); } const B=binTrace(tt,yy,2000);
+    const o={type:"trace",ch:$q(m,"#pCh").value,label:nm,I:[uk==="I"?P*PU[uu]:P],t:B.t,y:B.y,raw:{kind:uk==="I"?"intensity":"power",unit:uu,P:[P]}};
+    if(uk==="I"){ o.I=[P*PU[uu]]; o.cal={}; o.calOK=true; } else applyCal(o,S.lastCal||{name:CALPRE[0].name,C:CALPRE[0].C,A:CALPRE[0].A},false);
+    if(st) o.stats={t50:st.t50,t90:st.t90,offHalf:tOffHalf,plateau:st.fin,bg};
+    S.samples[si].data.push(o); PENDING=null; S.result=null; save(); rerender(); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); };
+}
 function mapUI(el,chs){
   const T=PENDING, m=$q(el,"#dreMap"); const type=$q(el,"#dreDType").value;
   const opt=T.header.map((h,j)=>`<option value="${j}">${esc(h)}</option>`).join("");
@@ -40444,14 +40618,23 @@ function mapUI(el,chs){
       const pu=$q(m,"#mPU").value; S.samples[si].data.push({type:"trace",ch:$q(m,"#mCh").value,label:T.header[jy],I:[P0],t,y,raw:{kind:"intensity",unit:pu,P:[+$q(m,"#mTP").value]},cal:{},calOK:true});
       PENDING=null; save(); rerender(); note("시간 트레이스를 추가했습니다 — 적합성 A6 에 쓰입니다"); };
     return; }
-  m.innerHTML=`<div class="dre-map"><div class="row"><label class="dre-f">파워 열 <select class="dre-sel" id="mI">${opt}</select></label>
+  const H=T.header.map(x=>String(x)); const jSig=H.findIndex(x=>/(^|_|\b)(std|sd|sigma|σ|err|error|unc)/i.test(x)); const jInt=H.findIndex(x=>/interp/i.test(x));
+  const jPow=Math.max(0,H.findIndex(x=>/power|intens|^p$|^p[_ ]/i.test(x))); const repN=(()=>{ const q=/rep(?:eat)?[_ ]?(\d+)/i.exec(T.name||""); return q?+q[1]:1; })();
+  const interpRows=jInt>=0?T.txt[jInt].map(v=>/^(true|1|yes)$/i.test(v.trim())):null; const nInt=interpRows?interpRows.filter(Boolean).length:0;
+  const kTurn=type==="scurve"?turnIdx(T.cols[jPow].filter((p,r)=>isFinite(p)&&p>0&&!(interpRows&&interpRows[r]))):-1;
+  m.innerHTML=`<div class="dre-map">${T.name?`<div><b>${esc(T.name)}</b> <span class="muted">— ${T.n}행</span></div>`:""}<div class="row"><label class="dre-f">파워 열 <select class="dre-sel" id="mI">${T.header.map((h,j)=>`<option value="${j}" ${j===jPow?"selected":""}>${esc(h)}</option>`).join("")}</select></label>
     <label class="dre-f">단위 <select class="dre-sel" id="mPU"><optgroup label="intensity (보정 끝남)">${Object.keys(PU).map(u=>`<option value="I|${u}">${u}</option>`).join("")}</optgroup><optgroup label="파워미터 파워 (보정 필요)">${Object.keys(PWU).map(u=>`<option value="P|${u}" ${u==="mW"?"selected":""}>${u} (PM 읽음)</option>`).join("")}</optgroup></select></label></div>
     <div class="muted">파워미터 값을 넣으면 원본을 그대로 두고, 마지막으로 쓴 보정(없으면 NIR 950 DMSP·Oil)을 임시로 걸어 둔다. 목록의 ‘파워 보정’에서 확인·수정한다.</div>
-    ${T.header.map((h,j)=>j===0?"":`<div class="row"><label class="dre-f">열 “${esc(h)}” → 채널 <select class="dre-sel" data-col="${j}"><option value="">(사용 안 함)</option>${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label></div>`).join("")}
-    ${type==="scurve"?`<div class="row"><label class="dre-f">배경(암) σ <input type="number" id="mSbg" step="any" value="0" title="배경을 뺀 신호의 잡음 표준편차. 이 값의 k배 아래 점은 버리지 않고 '상한'으로 쓴다(censored)"></label>
+    ${T.header.map((h,j)=>j===jPow||(type==="scurve"&&(j===jSig||j===jInt))?"":`<div class="row"><label class="dre-f">열 “${esc(h)}” → 채널 <select class="dre-sel" data-col="${j}"><option value="">(사용 안 함)</option>${chs.map(c=>`<option>${esc(c)}</option>`).join("")}</select></label></div>`).join("")}
+    ${type==="scurve"?`<div class="row"><label class="dre-f" title="점마다 다른 σ. 반복 측정 SD 라면 반복 수 n 으로 나눠 평균의 σ 로 쓴다">점별 σ 열 <select class="dre-sel" id="mSy"><option value="-1">(없음)</option>${T.header.map((h,j)=>`<option value="${j}" ${j===jSig?"selected":""}>${esc(h)}</option>`).join("")}</select></label>
+      <label class="dre-f">반복 n <input type="number" id="mRep" min="1" step="1" value="${repN}" title="파일 이름의 rep 숫자에서 읽었다"></label>
+      ${jInt>=0?`<label class="dre-tog"><input type="checkbox" id="mInt" checked> 보간 행 제외 (${esc(H[jInt])} = True: ${nInt}행)</label>`:""}</div>
+      <div class="row"><label class="dre-tog"><input type="checkbox" id="mSplit" ${kTurn>=0?"checked":""} ${kTurn>=0?"":"disabled"}> up·down 자동 분리 ${kTurn>=0?`(파워 최대 지점에서 전환: up ${kTurn+1} · down 나머지)`:"(전환 없음)"}</label>
+      <label class="dre-tog" title="낮은 파워 바닥(중앙값 ± 6·MAD 안쪽 점)에 상수 + 파워 비례 직선을 맞춰 빼고, 그 산포를 배경σ로 쓴다. 0 이하가 된 점은 censored"><input type="checkbox" id="mBgAuto" checked> 배경 자동 추정·빼기</label></div>
+      <div class="row"><label class="dre-f">배경(암) σ <input type="number" id="mSbg" step="any" value="0" title="배경을 뺀 신호의 잡음 표준편차. 이 값의 k배 아래 점은 버리지 않고 '상한'으로 쓴다(censored). 배경 자동 추정을 켜면 추정값으로 바뀐다"></label>
       <label class="dre-f">k <input type="number" id="mK" step="0.5" value="3"></label><label class="dre-f">multiplicative noise <input type="number" id="mRel" step="0.01" value="0.05"></label>
       <label class="dre-f">방향 <select class="dre-sel" id="mDir"><option value="1">up</option><option value="-1">down</option></select></label></div>
-      <div class="muted">신호는 <b>배경을 뺀 값</b>으로 넣습니다. 0 이나 음수는 censored 점(상한)으로 처리되고 버리지 않습니다 — 0 으로 바꿔 log 에 넣지 않습니다.</div>`:
+      <div class="muted">신호는 <b>배경을 뺀 값</b>이어야 합니다(자동 추정을 켜면 앱이 뺍니다). 0 이나 음수는 censored 점(상한)으로 처리되고 버리지 않습니다 — 0 으로 바꿔 log 에 넣지 않습니다.</div>`:
       `<div class="row"><label class="dre-f">상대오차 <input type="number" id="mRel" step="0.01" value="0.05"></label>${type==="rise"?`<label class="dre-f">도달 비율 <input type="number" id="mFrac" step="0.05" value="0.95"></label>`:""}</div>`}
     <div class="row"><button class="btn sm primary" id="mOK">추가</button><span class="muted">${T.n}행</span></div></div>`;
   const firstCh=m.querySelector('select[data-col="1"]'); if(firstCh&&chs.length) firstCh.value=chs[0];
@@ -40460,16 +40643,22 @@ function mapUI(el,chs){
     const defCal=S.lastCal||Object.assign({name:CALPRE[0].name},{C:CALPRE[0].C,A:CALPRE[0].A});
     const wrap=(o,Praw)=>{ o.raw={kind:uk==="I"?"intensity":"power",unit:uu,P:Praw}; if(uk==="I"){ o.cal={}; o.calOK=true; } else { applyCal(o,defCal,false); } return o; };
     let added=0;
+    const jSy=type==="scurve"?+$q(m,"#mSy").value:-1, nRep=Math.max(1,+(type==="scurve"?$q(m,"#mRep").value:1)||1), skipI=type==="scurve"&&$q(m,"#mInt")&&$q(m,"#mInt").checked&&interpRows;
+    const doSplit=type==="scurve"&&$q(m,"#mSplit").checked, doBg=type==="scurve"&&$q(m,"#mBgAuto").checked; const msgs=[];
     m.querySelectorAll("select[data-col]").forEach(sel=>{
       if(!sel.value) return; const j=+sel.dataset.col; if(j===jI) return;
-      const I=[],y=[],Pr=[]; T.cols[jI].forEach((p,r)=>{ const v=T.cols[j][r]; if(isFinite(p)&&p>0&&!isNaN(v)){ I.push(p*f); Pr.push(p); y.push(v); } });
+      const I=[],y=[],Pr=[],sy=[]; let nI=0; T.cols[jI].forEach((p,r)=>{ const v=T.cols[j][r]; if(skipI&&interpRows[r]){ nI++; return; } if(isFinite(p)&&p>0&&!isNaN(v)){ I.push(p*f); Pr.push(p); y.push(v); if(jSy>=0) sy.push(T.cols[jSy][r]/Math.sqrt(nRep)); } });
       if(!I.length) return;
-      if(type==="scurve") S.samples[si].data.push(wrap({type,ch:sel.value,label:T.header[j],I,y,sbg:+$q(m,"#mSbg").value||0,k:+$q(m,"#mK").value||3,relErr:+$q(m,"#mRel").value||0.05,dir:+$q(m,"#mDir").value},Pr));
+      if(type==="scurve"){ let d=wrap({type,ch:sel.value,label:T.header[j],I,y,sbg:+$q(m,"#mSbg").value||0,k:+$q(m,"#mK").value||3,relErr:+$q(m,"#mRel").value||0.05,dir:+$q(m,"#mDir").value},Pr);
+        if(jSy>=0){ d.sy=sy; d.syNote=`${T.header[jSy]}/√${nRep}`; } if(nI) d.nInterp=nI;
+        let parts=[d]; if(doSplit){ const r=splitUpDown(d); if(r) parts=r; }
+        if(doBg){ const up=parts.find(q=>(q.dir||1)>0)||parts[0]; const e=bgEstimate(up.I,up.y); if(e){ parts.forEach(q=>subtractBg(q,e)); msgs.push(`배경 ${sciTxt(e.a,3)} + ${sciTxt(e.b,2)}·I (σ ${sciTxt(e.sd,2)})`); } else msgs.push("배경 추정 실패 — 입력값 그대로"); }
+        parts.forEach(q=>S.samples[si].data.push(q)); added+=parts.length-1; }
       else S.samples[si].data.push(wrap({type,ch:sel.value,label:T.header[j],I,t:y,relErr:+$q(m,"#mRel").value||0.05,frac:type==="rise"?(+$q(m,"#mFrac").value||0.95):undefined},Pr));
       added++;
     });
     if(!added){ note("채널을 하나 이상 고르세요","warn"); return; }
-    PENDING=null; S.result=null; save(); rerender(); note(`데이터 ${added}개 추가`);
+    PENDING=null; S.result=null; save(); rerender(); note(`데이터 ${added}개 추가${msgs.length?" · "+[...new Set(msgs)].join(" · "):""}`);
   };
 }
 function synthUI(el,chs){
@@ -40505,6 +40694,8 @@ function panelFit(el){
   const running=!!RUN;
   el.innerHTML=`${!nData?'<div class="note warn">데이터가 없습니다 — ‘시료·데이터’에서 넣거나 합성 데이터를 만드세요.</div>':""}
    <div class="muted">자유 매개변수 ${nFree}개 · 데이터셋 ${nData}개 (배율은 데이터셋마다 profiled out)</div>
+   ${(()=>{ const L=allIssues().filter(q=>q.lvl!=="info"); if(!L.length) return ""; const ne=L.filter(q=>q.lvl==="err").length;
+      return `<div class="note warn" style="margin-top:6px"><b>데이터 점검 ${L.length}건${ne?` (피팅 전에 고칠 것 ${ne})`:""}</b> — ${L.map(q=>`${esc(q.sid)} · ${esc(q.ch)}: ${esc(q.code==="mix"?"up·down 이 한 데이터셋에 섞임":q.code==="t"?"rise/decay 시간 값 비정상":q.code==="bg"?"배경을 빼지 않은 것으로 보임":q.code)}`).join(" / ")}. ‘시료·데이터’ 목록에서 바로 고칠 수 있다.</div>`; })()}
    ${(()=>{ const u=S.samples.reduce((a,s)=>a+s.data.filter(d=>d.raw&&!d.calOK).length,0); return u?`<div class="note warn" style="margin-top:6px">파워 보정을 확인하지 않은 데이터 ${u}개 — 임시 보정(마지막 사용값 또는 NIR 950 DMSP·Oil)이 걸려 있다. σ·I_th 같은 절대값은 보정을 확인한 뒤에만 의미가 있다. ⑦의 ‘환산 무관’ 양은 영향이 없다. ‘시료·데이터’ 목록의 ‘파워 보정’에서 확인하세요.</div>`:""; })()}
    ${!hasKin&&nData?`<div class="note warn" style="margin-top:6px">시간 데이터(수명·상승 시간)가 없습니다. 검출 배율을 모르는 S-curve 만으로는 <b>모든 속도·단면적을 같은 배수로 바꾸는 방향</b>이 정해지지 않습니다 — 절대 속도 하나(예: 저농도 수명)를 고정하거나 감쇠·상승 시간을 넣으세요.</div>`:""}
    <div class="row" style="margin-top:8px"><label class="dre-f">출발점 <input type="number" id="fS" value="${S.fit.starts}" min="1" max="1000"></label>
@@ -40628,6 +40819,7 @@ function hwHTML(){
 function startFit(){
   if(RUN) return;
   const src=workerSource(); if(!src){ note("Worker 원본을 찾지 못했습니다","warn"); return; }
+  { const E=allIssues().filter(q=>q.lvl==="err"); if(E.length){ note(`피팅 전에 고칠 데이터 ${E.length}건 — ‘시료·데이터’ 목록의 표시를 확인하세요: ${E.map(q=>`${q.sid} · ${q.ch}: ${q.code==="mix"?"up·down 섞임":q.code==="t"?"시간 값 비정상":q.code}`).join(" / ")}`,"warn"); return; } }
   let prob, B; try{ prob=problemOf(); B=D.buildProblem(JSON.parse(JSON.stringify(prob))); }catch(e){ note("피팅 준비 실패: "+e.message,"warn"); return; }
   RUN={t0:Date.now()}; renderPanel();
   (async()=>{
