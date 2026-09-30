@@ -36986,8 +36986,10 @@ function renderInterf(root){
       downloadText(r.map(v=>v.join(",")).join("\n"),"eds_interference.csv","text/csv");
     };
   };
-  $("#ifRun").onclick=run;
-  if(P.els.length>=2) run();
+  const _run=()=>{ run(); if(window.IF_SUG) IF_SUG.after(); };
+  $("#ifRun").onclick=_run;
+  if(window.IF_SUG) IF_SUG.setup(root);
+  if(P.els.length>=1) _run();
 }
 
 /* ============================================================
@@ -40886,6 +40888,222 @@ window.DRE_UI={render,rerender,_state:()=>S,_model:()=>MODEL,_sim:()=>SIM,_setSt
 })();
 </script>
 <!-- INNO-DRE:END -->
+<!-- INNO-IF:BEGIN js -->
+<script id="interf-suggest">
+/* INNO Analytics — 간섭 검사: 원소별 분석 라인 자동 제안
+   목표: 선택한 원소마다 intensity 는 크고 interference 는 작은 라인(= 적분 window)을 고른다.
+   판정량: 그 window 에서 원소 신호 S 를 얻을 때의 예상 상대오차
+     err = sqrt( S + ΣB_int + B_bg + Σ(δ_f·B_f)² + (δ_bg·B_bg)² ) / S
+     - 계수 통계(Poisson) + 겹친 선을 빼낼 때의 계통오차(line ratio 불확도 δ) + 배경 차감 오차
+     - interference 가 없으면 √S/S — intensity 가 클수록 작다. 겹치면 B 가 커져 커진다.
+   intensity 출처:
+     1) 스펙트럼 파일이 열려 있으면 실측 — 선택 원소의 계열별 Gaussian 모형을 NNLS 로 맞춘 계수(counts)
+     2) 없으면 모형 — 조성 × 이온화 단면적(Bethe, ln U / E_c) × 형광수율·branching(xraydb) × 검출효율(windowless Si)
+        계열 사이(K/L/M) 비교는 모형 오차가 커서, 차이가 3배 안쪽이면 '실측 확인'으로 표시한다. */
+(function(){
+"use strict";
+const YT={"Be":{"K":[111.5,2.2e-05,"K","Ka1"]},"B":{"K":[188.0,0.000466,"K","Ka1"]},"C":{"K":[284.2,0.000932,"K","Ka1"]},"N":{"K":[409.9,0.002064,"K","Ka1"]},"O":{"K":[543.1,0.003861,"K","Ka1"]},"F":{"K":[696.7,0.006124,"K","Ka1"]},"Ne":{"K":[870.2,0.010651,"K","Ka1"]},"Na":{"K":[1070.8,0.013984,"K","Ka1"]},"Mg":{"K":[1303.0,0.015203,"K","Ka1"],"L":[88.6,1.2e-05,"L1","Lb3"]},"Al":{"K":[1559.0,0.019502,"K","Ka1"],"L":[117.8,1.5e-05,"L1","Lb3"]},"Si":{"K":[1839.0,0.025347,"K","Ka1"],"L":[99.2,0.00038,"L3","Ll"]},"P":{"K":[2145.5,0.03273,"K","Ka1"],"L":[135.0,3.1e-05,"L3","Ll"]},"S":{"K":[2472.0,0.041648,"K","Ka1"],"L":[162.5,0.00026,"L3","Ll"]},"Cl":{"K":[2822.0,0.052093,"K","Ka1"],"L":[200.0,0.00024,"L3","Ll"]},"Ar":{"K":[3205.9,0.06406,"K","Ka1"],"L":[248.4,0.00022,"L3","Ll"]},"K":{"K":[3608.4,0.077545,"K","Ka1"],"L":[294.6,0.00027,"L3","Ll"]},"Ca":{"K":[4038.5,0.086083,"K","Ka1"],"L":[346.2,0.00033,"L3","Ll"]},"Sc":{"K":[4492.0,0.107224,"K","Ka1"],"L":[398.7,0.00084,"L3","Ll"]},"Ti":{"K":[4966.0,0.127681,"K","Ka1"],"L":[453.8,0.001217,"L3","La1"]},"V":{"K":[5465.0,0.147563,"K","Ka1"],"L":[512.1,0.00211,"L3","La1"]},"Cr":{"K":[5989.0,0.166852,"K","Ka1"],"L":[574.1,0.003003,"L3","La1"]},"Mn":{"K":[6539.0,0.185553,"K","Ka1"],"L":[638.7,0.004058,"L3","La1"]},"Fe":{"K":[7112.0,0.203669,"K","Ka1"],"L":[706.8,0.005114,"L3","La1"]},"Co":{"K":[7709.0,0.221205,"K","Ka1"],"L":[778.1,0.006345,"L3","La1"]},"Ni":{"K":[8333.0,0.238166,"K","Ka1"],"L":[852.7,0.00775,"L3","La1"]},"Cu":{"K":[8979.0,0.254557,"K","Ka1"],"L":[932.7,0.009243,"L3","La1"]},"Zn":{"K":[9659.0,0.270384,"K","Ka1"],"L":[1021.8,0.010144,"L3","La1"]},"Ga":{"K":[10367.0,0.28565,"K","Ka1"],"L":[1116.4,0.011037,"L3","La1"]},"Ge":{"K":[11103.0,0.300363,"K","Ka1"],"L":[1217.0,0.012776,"L3","La1"]},"As":{"K":[11867.0,0.314077,"K","Ka1"],"L":[1323.6,0.01366,"L3","La1"]},"Se":{"K":[12658.0,0.326655,"K","Ka1"],"L":[1433.9,0.015399,"L3","La1"]},"Br":{"K":[13474.0,0.338624,"K","Ka1"],"L":[1550.0,0.017143,"L3","La1"]},"Kr":{"K":[14326.0,0.35,"K","Ka1"],"L":[1678.4,0.018892,"L3","La1"],"M":[95.0,0.0027,"M4","Mz"]},"Rb":{"K":[15200.0,0.360794,"K","Ka1"],"L":[1804.0,0.020645,"L3","La1"],"M":[113.0,0.0027,"M4","Mz"]},"Sr":{"K":[16105.0,0.371017,"K","Ka1"],"L":[1940.0,0.0224,"L3","La1"],"M":[136.0,0.0027,"M4","Mz"]},"Y":{"K":[17038.0,0.381106,"K","Ka1"],"L":[2080.0,0.024146,"L3","La1"],"M":[157.7,0.0027,"M4","Mz"]},"Zr":{"K":[17998.0,0.390667,"K","Ka1"],"L":[2223.0,0.026732,"L3","La1"],"M":[181.1,0.0027,"M4","Mz"]},"Nb":{"K":[18986.0,0.40004,"K","Ka1"],"L":[2371.0,0.029332,"L3","La1"],"M":[205.0,0.00275,"M4","Mz"]},"Mo":{"K":[20000.0,0.408918,"K","Ka1"],"L":[2520.0,0.031933,"L3","La1"],"M":[231.1,0.0028,"M4","Mz"]},"Tc":{"K":[21044.0,0.41731,"K","Ka1"],"L":[2677.0,0.034534,"L3","La1"],"M":[257.6,0.00285,"M4","Mz"]},"Ru":{"K":[22117.0,0.425224,"K","Ka1"],"L":[2838.0,0.037134,"L3","La1"],"M":[284.2,0.0029,"M4","Mz"]},"Rh":{"K":[23220.0,0.432648,"K","Ka1"],"L":[3004.0,0.036469,"L3","La1"],"M":[311.9,0.002833,"M4","Mz"]},"Pd":{"K":[24350.0,0.439753,"K","Ka1"],"L":[3173.0,0.038405,"L3","La1"],"M":[340.5,0.002767,"M4","Mz"]},"Ag":{"K":[25514.0,0.44617,"K","Ka1"],"L":[3351.0,0.040334,"L3","La1"],"M":[374.0,0.0027,"M4","Mz"]},"Cd":{"K":[26711.0,0.452071,"K","Ka1"],"L":[3538.0,0.04303,"L3","La1"],"M":[411.9,0.0027,"M4","Mz"]},"In":{"K":[27940.0,0.457999,"K","Ka1"],"L":[3730.0,0.045716,"L3","La1"],"M":[451.4,0.0027,"M4","Mz"]},"Sn":{"K":[29200.0,0.463513,"K","Ka1"],"L":[3929.0,0.048395,"L3","La1"],"M":[493.2,0.0027,"M4","Mz"]},"Sb":{"K":[30491.0,0.468496,"K","Ka1"],"L":[4132.0,0.051826,"L3","La1"],"M":[528.2,0.0,"M5","Ma"]},"Te":{"K":[31814.0,0.473082,"K","Ka1"],"L":[4341.0,0.055251,"L3","La1"],"M":[573.0,0.0,"M5","Ma"]},"I":{"K":[33169.0,0.476899,"K","Ka1"],"L":[4557.0,0.058678,"L3","La1"],"M":[619.3,0.0,"M5","Ma"]},"Xe":{"K":[34561.0,0.480336,"K","Ka1"],"L":[4786.0,0.06285,"L3","La1"],"M":[676.4,0.0,"M5","Ma"]},"Cs":{"K":[35985.0,0.483405,"K","Ka1"],"L":[5012.0,0.067027,"L3","La1"],"M":[726.6,0.0,"M5","Ma"]},"Ba":{"K":[37441.0,0.486117,"K","Ka1"],"L":[5247.0,0.071214,"L3","La1"],"M":[780.5,0.0,"M5","Ma"]},"La":{"K":[38925.0,0.488483,"K","Ka1"],"L":[5483.0,0.07615,"L3","La1"],"M":[836.0,0.0,"M5","Ma"]},"Ce":{"K":[40443.0,0.490514,"K","Ka1"],"L":[5723.0,0.081102,"L3","La1"],"M":[883.8,0.001067,"M5","Ma"]},"Pr":{"K":[41991.0,0.492095,"K","Ka1"],"L":[5964.0,0.086077,"L3","La1"],"M":[928.8,0.002133,"M5","Ma"]},"Nd":{"K":[43569.0,0.493619,"K","Ka1"],"L":[6208.0,0.091093,"L3","La1"],"M":[980.4,0.0032,"M5","Ma"]},"Pm":{"K":[45184.0,0.495107,"K","Ka1"],"L":[6459.0,0.096125,"L3","La1"],"M":[1027.0,0.0041,"M5","Ma"]},"Sm":{"K":[46834.0,0.274111,"K","Ka2"],"L":[6716.0,0.101191,"L3","La1"],"M":[1083.4,0.005,"M5","Ma"]},"Eu":{"L":[6977.0,0.107022,"L3","La1"],"M":[1127.5,0.0059,"M5","Ma"]},"Gd":{"L":[7243.0,0.112892,"L3","La1"],"M":[1189.6,0.007075,"M5","Ma"]},"Tb":{"L":[7514.0,0.119533,"L3","La1"],"M":[1241.1,0.00825,"M5","Ma"]},"Dy":{"L":[7790.0,0.126948,"L3","La1"],"M":[1292.0,0.009425,"M5","Ma"]},"Ho":{"L":[8071.0,0.13295,"L3","La1"],"M":[1351.0,0.0106,"M5","Ma"]},"Er":{"L":[8358.0,0.14046,"L3","La1"],"M":[1409.0,0.012033,"M5","Ma"]},"Tm":{"L":[8648.0,0.147288,"L3","La1"],"M":[1468.0,0.013467,"M5","Ma"]},"Yb":{"L":[8944.0,0.159957,"L3","La1"],"M":[1528.0,0.0149,"M5","Ma"]},"Lu":{"L":[9244.0,0.160135,"L3","La1"],"M":[1589.0,0.016767,"M5","Ma"]},"Hf":{"L":[9561.0,0.166994,"L3","La1"],"M":[1662.0,0.018633,"M5","Ma"]},"Ta":{"L":[9881.0,0.174646,"L3","La1"],"M":[1735.0,0.0205,"M5","Ma"]},"W":{"L":[10207.0,0.182358,"L3","La1"],"M":[1809.0,0.0214,"M5","Ma"]},"Re":{"L":[10535.0,0.190837,"L3","La1"],"M":[1883.0,0.0223,"M5","Ma"]},"Os":{"L":[10871.0,0.199357,"L3","La1"],"M":[1960.0,0.0232,"M5","Ma"]},"Ir":{"L":[11215.0,0.20791,"L3","La1"],"M":[2040.0,0.024,"M5","Ma"]},"Pt":{"L":[11564.0,0.215783,"L3","La1"],"M":[2122.0,0.0248,"M5","Ma"]},"Au":{"L":[11919.0,0.221468,"L3","La1"],"M":[2206.0,0.0256,"M5","Ma"]},"Hg":{"L":[12284.0,0.22947,"L3","La1"],"M":[2295.0,0.027325,"M5","Ma"]},"Tl":{"L":[12658.0,0.238135,"L3","La1"],"M":[2389.0,0.02905,"M5","Ma"]},"Pb":{"L":[13035.0,0.246076,"L3","La1"],"M":[2484.0,0.030775,"M5","Ma"]},"Bi":{"L":[13419.0,0.253974,"L3","La1"],"M":[2580.0,0.0325,"M5","Ma"]},"Po":{"L":[13814.0,0.261825,"L3","La1"],"M":[2683.0,0.033733,"M5","Ma"]},"At":{"L":[14214.0,0.269621,"L3","La1"],"M":[2787.0,0.034967,"M5","Ma"]},"Rn":{"L":[14619.0,0.276688,"L3","La1"],"M":[2892.0,0.0362,"M5","Ma"]},"Fr":{"L":[15031.0,0.284372,"L3","La1"],"M":[3000.0,0.039575,"M5","Ma"]},"Ra":{"L":[15444.0,0.291996,"L3","La1"],"M":[3105.0,0.04295,"M5","Ma"]},"Ac":{"L":[15871.0,0.299567,"L3","La1"],"M":[3219.0,0.046325,"M5","Ma"]},"Th":{"L":[16300.0,0.307091,"L3","La1"],"M":[3332.0,0.0497,"M5","Ma"]},"Pa":{"L":[16733.0,0.314576,"L3","La1"],"M":[3442.0,0.053075,"M5","Ma"]},"U":{"L":[17166.0,0.32204,"L3","La1"],"M":[3552.0,0.05645,"M5","Ma"]}};   /* el → fam → [E_edge eV, ω·branching(주선), 초기준위, 주선] — xraydb 4.5.8 (Elam 2002) */
+const NS={K:2,L1:2,L2:2,L3:4,M1:2,M2:2,M3:4,M4:4,M5:6};
+const DELTA={K:0.03,L:0.05,M:0.15};        /* 겹친 선을 빼낼 때 쓰는 line ratio 의 상대 불확도 (M 은 DB 자체가 부정확) */
+const DBG=0.03;                            /* 배경 차감 상대 불확도 */
+const NOM=1e5;                             /* 모형 모드: 가장 밝은 선 = 1e5 counts 로 둔 명목 척도 */
+const WIN=0.6;                             /* 적분 window 반폭 = 0.6·FWHM(E) (±1.41σ, 선의 84 %) */
+
+function erf(x){ const s=x<0?-1:1; x=Math.abs(x); const t=1/(1+0.3275911*x);
+  const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x); return s*y; }
+const gfrac=(mu,sig,a,b)=>0.5*(erf((b-mu)/(sig*Math.SQRT2))-erf((a-mu)/(sig*Math.SQRT2)));
+function siMu(EeV){ const t=(typeof MACDB!=="undefined")&&MACDB.mac&&MACDB.mac.Si; if(!t) return null;
+  const X=t[0],Y=t[1]; if(EeV<=X[0]) return Y[0]; if(EeV>=X[X.length-1]) return Y[Y.length-1];
+  let i=1; while(X[i]<EeV) i++; const f=Math.log(EeV/X[i-1])/Math.log(X[i]/X[i-1]); return Math.exp(Math.log(Y[i-1])+f*Math.log(Y[i]/Y[i-1])); }
+/* windowless SDD: Si dead layer 0.1 µm 투과 × Si 450 µm 흡수 */
+function detEff(EkeV){ const m=siMu(EkeV*1000); if(m==null) return 1; const mr=m*2.33; return Math.exp(-mr*1e-5)*(1-Math.exp(-mr*0.045)); }
+function famYield(el,fam,kV){ const t=YT[el]&&YT[el][fam]; if(!t) return 0; const U=kV*1000/t[0]; if(!(U>1)) return 0; return (NS[t[2]]||2)*Math.log(U)/t[0]*t[1]; }
+const sigAt=(EkeV,fw)=>fwhmAt(EkeV*1000,fw)/2355;      /* keV */
+
+function linesOf(el,Emin,Emax){ const r=XRL[el], out=[]; if(!r) return out;
+  for(const fam in r.lines) for(const [nm,e,rel] of r.lines[fam]) if(e>=Emin&&e<=Emax&&rel>=0.01) out.push({el,fam,nm,e,rel});
+  return out; }
+function parseComp(txt,els){ const c={}; els.forEach(e=>c[e]=1); let any=false;
+  (txt||"").split(/[,;]+/).forEach(p=>{ const m=p.trim().match(/^([A-Za-z]{1,2})\s*[:=]?\s*([0-9.eE+-]+)$/); if(!m) return;
+    const el=m[1][0].toUpperCase()+m[1].slice(1).toLowerCase(); const v=+m[2]; if(el in c&&v>=0&&isFinite(v)){ c[el]=v; any=true; } });
+  return {c,any}; }
+
+/* 작은 NNLS (Lawson–Hanson, 정규방정식) */
+function nnls(G,g){ const n=g.length, x=new Float64Array(n), P=new Array(n).fill(false);
+  const solveP=()=>{ const idx=[...Array(n).keys()].filter(j=>P[j]); const m=idx.length; const A=idx.map(i=>idx.map(j=>G[i][j])), b=idx.map(i=>g[i]);
+    for(let k=0;k<m;k++){ let p=k; for(let r=k+1;r<m;r++) if(Math.abs(A[r][k])>Math.abs(A[p][k])) p=r; [A[k],A[p]]=[A[p],A[k]]; [b[k],b[p]]=[b[p],b[k]];
+      const d=A[k][k]||1e-300; for(let r=k+1;r<m;r++){ const f=A[r][k]/d; for(let c=k;c<m;c++) A[r][c]-=f*A[k][c]; b[r]-=f*b[k]; } }
+    const z=new Array(m).fill(0); for(let k=m-1;k>=0;k--){ let s=b[k]; for(let c=k+1;c<m;c++) s-=A[k][c]*z[c]; z[k]=s/(A[k][k]||1e-300); }
+    const out=new Float64Array(n); idx.forEach((j,k)=>out[j]=z[k]); return out; };
+  const grad=()=>{ const w=new Float64Array(n); for(let i=0;i<n;i++){ let s=g[i]; for(let j=0;j<n;j++) s-=G[i][j]*x[j]; w[i]=s; } return w; };
+  const scale=Math.max(1e-300,...g.map(Math.abs));
+  for(let it=0;it<3*n+10;it++){ const w=grad(); let jm=-1,wm=1e-10*scale; for(let j=0;j<n;j++) if(!P[j]&&w[j]>wm){ wm=w[j]; jm=j; } if(jm<0) break; P[jm]=true;
+    for(let inner=0;inner<3*n+10;inner++){ const z=solveP(); if([...Array(n).keys()].every(j=>!P[j]||z[j]>0)){ x.set(z); break; }
+      let a=1; for(let j=0;j<n;j++) if(P[j]&&z[j]<=0) a=Math.min(a,x[j]/(x[j]-z[j])); for(let j=0;j<n;j++){ x[j]+=a*(z[j]-x[j]); if(P[j]&&x[j]<=1e-12*scale){ P[j]=false; x[j]=0; } } } }
+  return x; }
+
+/* 실측: 선택 원소의 계열별 모형을 순 스펙트럼에 NNLS 로 맞춘다 */
+function fitMeasured(S,els,fw,Emin,Emax){
+  const bg=specBackground(S.y,S,fw); const disp=(S.cal&&S.cal.disp?S.cal.disp:5)/1000;
+  const ch=[]; for(let i=0;i<S.nch;i++) if(S.E[i]>=Emin&&S.E[i]<=Emax&&i>=(S.i0|0)) ch.push(i);
+  const cols=[]; els.forEach(el=>{ const fams={}; linesOf(el,Emin-0.2,Emax+0.2).forEach(l=>(fams[l.fam]=fams[l.fam]||[]).push(l));
+    for(const f in fams) if(fams[f].some(l=>l.e>=Emin&&l.e<=Emax)) cols.push({el,fam:f,lines:fams[f]}); });
+  /* SNIP 은 연속선을 조금 낮게 잡는 경향이 있다(합성 시험에서 5–40 %). 남은 연속선을 원소 열이 흡수하지 않도록
+     넓은 삼각(hat) 기저를 음이 아닌 배경 보정 열로 함께 맞춘다. 마디 간격 ≥ 4·FWHM 이라 피크와 구별된다. */
+  const kn=[]; { let e=Emin; while(e<Emax){ kn.push(e); e+=Math.max(0.2,4*fwhmAt(e*1000,fw)/1000,0.15*e); } kn.push(Emax); }
+  const nEl=cols.length;
+  kn.forEach((k,j)=>cols.push({hat:true,j,k,lo:kn[j-1]!=null?kn[j-1]:k,hi:kn[j+1]!=null?kn[j+1]:k}));
+  const X=cols.map(c=>c.hat?ch.map(i=>{ const e=S.E[i]; if(e<=c.lo||e>=c.hi) return (e===c.k)?1:0; return e<=c.k?(c.k===c.lo?1:(e-c.lo)/(c.k-c.lo)):(c.hi===c.k?1:(c.hi-e)/(c.hi-c.k)); }):ch.map(i=>{ let v=0; for(const l of c.lines){ const s=sigAt(l.e,fw), d=(S.E[i]-l.e)/s; if(Math.abs(d)<6) v+=l.rel*Math.exp(-0.5*d*d)/(s*Math.sqrt(2*Math.PI))*disp; } return v; }));
+  const w=ch.map(i=>1/Math.max(1,S.y[i])), net=ch.map(i=>S.y[i]-bg[i]);
+  const n=cols.length, G=[...Array(n)].map(()=>new Array(n).fill(0)), g=new Array(n).fill(0);
+  for(let a=0;a<n;a++){ for(let b=a;b<n;b++){ let s=0; const xa=X[a],xb=X[b]; for(let k=0;k<ch.length;k++) s+=xa[k]*xb[k]*w[k]; G[a][b]=G[b][a]=s; }
+    let s=0; for(let k=0;k<ch.length;k++) s+=X[a][k]*w[k]*net[k]; g[a]=s; }
+  const A=n?nnls(G,g):[];
+  const model=new Float64Array(S.nch), bg2=Float64Array.from(bg);
+  cols.forEach((c,a)=>{ c.A=A[a]; ch.forEach((i,k)=>{ if(c.hat) bg2[i]+=A[a]*X[a][k]; else model[i]+=A[a]*X[a][k]; }); });
+  return {bg:bg2,snip:bg,cols:cols.slice(0,nEl),model,ch};
+}
+
+function compute(opt){
+  const {els,fw,emax,kV,compTxt,S}=opt; const Emin=Math.max(0.15,S?S.E[S.i0|0]||0.15:0.15);
+  const L=[]; let mode, comp=null, fit=null;
+  if(S){ mode="measured"; fit=fitMeasured(S,els,fw,Emin,emax);
+    fit.cols.forEach(c=>c.lines.forEach(l=>L.push(Object.assign({},l,{I:c.A*l.rel})))); }
+  else { mode="model"; comp=parseComp(compTxt,els);
+    els.forEach(el=>linesOf(el,Emin-0.2,emax+0.2).forEach(l=>L.push(Object.assign({},l,{I:comp.c[el]*famYield(el,l.fam,kV)*l.rel*detEff(l.e)}))));
+    const mx=Math.max(1e-300,...L.map(l=>l.I)); L.forEach(l=>l.I*=NOM/mx); }
+  const winSum=(a,b,arr)=>{ if(!S||!arr) return 0; let s=0; for(let i=0;i<S.nch;i++) if(S.E[i]>=a&&S.E[i]<b) s+=arr[i]; return s; };
+  const res=S?Float64Array.from(S.y,(v,i)=>v-fit.bg[i]-fit.model[i]):null;
+  const out=els.map(el=>{
+    const own=L.filter(l=>l.el===el), cands=[];
+    const pool=own.filter(l=>l.e>=Emin&&l.e<=emax&&l.I>0).sort((x,y)=>x.e-y.e), groups=[];
+    pool.forEach(l=>{ const g=groups[groups.length-1]; if(g&&g.fam===l.fam&&(l.e-g.ls[g.ls.length-1].e)*1000<0.5*fwhmAt(l.e*1000,fw)) g.ls.push(l); else groups.push({fam:l.fam,ls:[l]}); });
+    groups.map(g=>{ const I=g.ls.reduce((a,m)=>a+m.I,0), rel=g.ls.reduce((a,m)=>a+m.rel,0); const main=g.ls.slice().sort((x,y)=>y.I-x.I)[0];
+      const major=g.ls.filter(m=>m.I>=0.1*main.I).sort((x,y)=>y.I-x.I);
+      return {el,fam:g.fam,nm:major.map(m=>m.nm).join("+"),e:g.ls.reduce((a,m)=>a+m.e*m.I,0)/I,rel,I}; })
+    .filter(l=>l.rel>=0.1).forEach(l=>{
+      const h=WIN*fwhmAt(l.e*1000,fw)/1000, a=l.e-h, b=l.e+h; let Sg=0; const Bf={};
+      L.forEach(m=>{ if(!(m.I>0)) return; const f=m.I*gfrac(m.e,sigAt(m.e,fw),a,b); if(f<=0) return; if(m.el===el) Sg+=f; else { const k=m.el+" "+m.fam; Bf[k]=(Bf[k]||0)+f; } });
+      const Bint=Object.values(Bf).reduce((x,y)=>x+y,0), Bbg=S?Math.max(0,winSum(a,b,fit.bg)):0;
+      let sys=0; for(const k in Bf) sys+=Math.pow(DELTA[k.split(" ")[1]]*Bf[k],2);
+      const v=Sg+Bint+Bbg+sys+Math.pow(DBG*Bbg,2), err=Sg>0?Math.sqrt(v)/Sg:Infinity;
+      const top=Object.entries(Bf).sort((x,y)=>y[1]-x[1])[0];
+      /* 원소별 가장 겹치는 선 이름 */
+      let topLine=null; if(top){ const [te,tf]=top[0].split(" "); let best=0; L.forEach(m=>{ if(m.el===te&&m.fam===tf){ const f=m.I*gfrac(m.e,sigAt(m.e,fw),a,b); if(f>best){ best=f; topLine=m; } } }); }
+      const resid=S?winSum(a,b,res):0;
+      cands.push({line:l,a,b,S:Sg,Bint,Bbg,Bf,err,purity:Sg/(Sg+Bint),pb:Bbg>0?Sg/Bbg:null,top:top?{key:top[0],frac:top[1]/(Sg+Bint),line:topLine}:null,
+        unexpl:S&&resid>3*Math.sqrt(Math.max(1,Sg+Bint+Bbg))&&resid>0.1*Sg?resid:0});
+    });
+    cands.sort((x,y)=>x.err-y.err);
+    const best=cands[0]||null; let alt=null;
+    if(best){ alt=cands.find(c=>c.line.fam!==best.line.fam)||cands.find(c=>c!==best)||null; }
+    const famUnsure=mode==="model"&&best&&alt&&alt.line.fam!==best.line.fam&&alt.err/best.err<3;
+    const noSignal=mode==="measured"&&!best;
+    return {el,best,alt,cands,famUnsure,noSignal};
+  });
+  return {mode,Emin,emax,fw,kV,comp,out,fit,L,S};
+}
+
+/* ---------------- 화면 ---------------- */
+const pct=v=>!isFinite(v)?"—":v<0.001?"<0.1 %":v<0.1?(100*v).toFixed(1)+" %":(100*v).toFixed(0)+" %";
+const badge=c=>c.purity>=0.9?'<span class="badge ok">clean</span>':c.purity>=0.6?'<span class="badge warn">overlap 보정</span>':'<span class="badge risk">deconvolution 필요</span>';
+const G1=n=>n.replace(/^(K|L|M)([a-z])(\d?)$/,(m,f,g,d)=>f+({a:"α",b:"β",g:"γ",l:"ℓ",n:"η"}[g]||g)+d);
+const lname=l=>{ const ps=l.nm.split("+").map(G1); if(ps.length>1){ const pre=ps[0].replace(/\d+$/,""); if(ps.every(q=>q.replace(/\d+$/,"")===pre)) return `${l.el} ${pre}${ps.map(q=>q.slice(pre.length)||"").join(",")}`; } return `${l.el} ${ps.join("+")}`; };
+function spark(R,c){
+  const fw=R.fw, L=R.L, S=R.S, l=c.line; const H=fwhmAt(l.e*1000,fw)/1000, lo=l.e-3*H, hi=l.e+3*H, W=150, Hh=42, N=90;
+  const xs=[...Array(N)].map((_,k)=>lo+(hi-lo)*k/(N-1)); const disp=S?(S.cal.disp||5)/1000:H/20;
+  const dens=(m,x)=>{ const s=sigAt(m.e,fw), d=(x-m.e)/s; return Math.abs(d)>6?0:m.I*Math.exp(-0.5*d*d)/(s*Math.sqrt(2*Math.PI))*disp; };
+  const at=(arr,x)=>{ if(!S||!arr) return 0; let i=Math.round((x*1000-S.cal.off)/S.cal.disp); i=Math.max(0,Math.min(S.nch-1,i)); return arr[i]; };
+  const bgv=xs.map(x=>S?Math.max(0,at(R.fit.bg,x)):0), oth=xs.map(x=>L.reduce((s,m)=>m.el!==l.el?s+dens(m,x):s,0)), own=xs.map(x=>L.reduce((s,m)=>m.el===l.el?s+dens(m,x):s,0));
+  const dat=S?xs.map(x=>at(S.y,x)):null;
+  const top=Math.max(1e-9,...xs.map((_,k)=>bgv[k]+oth[k]+own[k]),...(dat||[0]));
+  const X=x=>((x-lo)/(hi-lo)*W).toFixed(1), Y=v=>(Hh-2-(v/top)*(Hh-6)).toFixed(1);
+  const area=(base,add)=>"M"+xs.map((x,k)=>X(x)+" "+Y(base[k]+add[k])).join("L")+"L"+xs.slice().reverse().map((x,k)=>X(x)+" "+Y(base[N-1-k])).join("L")+"Z";
+  const zero=xs.map(()=>0), b1=bgv, b2=bgv.map((v,k)=>v+oth[k]);
+  return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}" role="img" aria-label="${esc(lname(l))} window" style="display:block">
+    <rect x="${X(c.a)}" y="0" width="${(X(c.b)-X(c.a)).toFixed(1)}" height="${Hh}" style="fill:var(--accent-soft)"/>
+    ${S?`<path d="${area(zero,bgv)}" style="fill:var(--grid)"/>`:""}
+    <path d="${area(b1,oth)}" style="fill:var(--warn);opacity:.55"/>
+    <path d="${area(b2,own)}" style="fill:var(--accent);opacity:.75"/>
+    ${dat?`<path d="M${xs.map((x,k)=>X(x)+" "+Y(dat[k])).join("L")}" style="fill:none;stroke:var(--ink-2);stroke-width:1"/>`:""}
+    <line x1="${X(l.e)}" x2="${X(l.e)}" y1="0" y2="${Hh}" style="stroke:var(--accent-strong);stroke-width:1;stroke-dasharray:2 2"/></svg>`;
+}
+function candRow(c,R,rank){ const l=c.line; return `<tr>
+  <td class="l"><b>${esc(lname(l))}</b> <span class="muted">${l.fam}</span></td><td class="num">${l.e.toFixed(3)}</td>
+  <td class="num">${R.mode==="measured"?Math.round(c.S).toLocaleString():pct(c.S/Math.max(1e-300,...R.out.filter(o=>o.el===l.el).flatMap(o=>o.cands.map(q=>q.S))))}</td>
+  <td class="num">${pct(c.purity)}</td><td class="num">${pct(c.err)}</td>
+  <td class="l">${c.top&&c.top.frac>=0.01?`${esc(c.top.line?lname(c.top.line):c.top.key)} <span class="muted">${pct(c.top.frac)}</span>`:'<span class="muted">—</span>'}</td>
+  <td>${badge(c)}</td></tr>`; }
+function html(R){
+  const meas=R.mode==="measured";
+  const head=meas?`<b>실측 스펙트럼 기반</b> — 선택 원소의 계열별 Gaussian 모형을 배경(SNIP) 뺀 스펙트럼에 NNLS 로 맞춘 counts 를 씁니다.`
+    :`<b>모형 기반</b> — 스펙트럼 파일이 없어 이론 intensity 로 계산했습니다. 조성 ${R.comp.any?"입력값":"<b>미입력(모두 같은 원자비)</b>"}, ${R.kV} kV.
+      파일을 열면 실측 counts 로 자동 대체됩니다.`;
+  const rows=R.out.map(o=>{
+    if(!o.best) return `<tr><td class="l"><b>${esc(o.el)}</b></td><td class="l" colspan="${meas?7:6}"><span class="muted">${o.noSignal?"맞춘 신호가 없습니다 — 이 스펙트럼에서 검출되지 않거나 범위 밖입니다":"범위 안에 쓸 만한 라인이 없습니다"}</span></td></tr>`;
+    const c=o.best, l=c.line, a=o.alt;
+    const notes=[]; if(o.famUnsure) notes.push(`<span class="badge info" title="K/L/M 계열 사이 intensity 비는 모형 오차가 커서, 차이가 3배 안쪽이면 실측으로 확인해야 합니다">계열 선택은 실측 확인</span>`);
+    if(c.err>0.5) notes.push(`<span class="badge risk" title="예상 상대오차가 50 %를 넘습니다 — 계수 시간을 늘리거나 ROI 를 넓히세요">${meas?"이 스펙트럼으론 신호 부족":"신호 부족"}</span>`);
+    if(c.unexpl) notes.push(`<span class="badge warn" title="모형이 설명하지 못한 counts 가 window 안에 있습니다">window 에 미선택 원소 신호?</span>`);
+    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인">M 계열</span>`);
+    return `<tr><td class="l"><b>${esc(o.el)}</b></td>
+      <td class="l"><b>${esc(lname(l))}</b> <span class="muted">${l.e.toFixed(3)} keV</span><br>${badge(c)} ${notes.join(" ")}</td>
+      <td class="num">${pct(c.err)}</td><td class="num">${pct(c.purity)}</td>
+      ${meas?`<td class="num">${Math.round(c.S).toLocaleString()}${c.pb!=null?`<br><span class="muted">P/B ${c.pb.toFixed(c.pb<10?1:0)}</span>`:""}</td>`:""}
+      <td class="l">${c.top&&c.top.frac>=0.01?`${esc(c.top.line?lname(c.top.line):c.top.key)}<br><span class="muted">window 의 ${pct(c.top.frac)}</span>`:'<span class="muted">없음</span>'}</td>
+      <td class="l">${a?`${esc(lname(a.line))} <span class="muted">${a.line.e.toFixed(3)}</span><br><span class="muted">오차 ${pct(a.err)} · purity ${pct(a.purity)}</span>`:'<span class="muted">—</span>'}</td>
+      <td>${spark(R,c)}</td></tr>`; }).join("");
+  const all=R.out.filter(o=>o.cands.length).map(o=>`<tr><th class="l" colspan="7" style="padding-top:10px">${esc(o.el)} — 후보 ${o.cands.length}개</th></tr>${o.cands.map((c,k)=>candRow(c,R,k)).join("")}`).join("");
+  return `<div class="card" id="ifSug"><h3>원소별 추천 라인 <span class="hint">예상 상대오차가 가장 작은 라인 = intensity 최대 · interference 최소의 절충</span>
+      <span style="flex:1"></span><button class="btn sm" id="ifSugCsv">CSV</button></h3>
+    <div class="note ${meas?"okay":"warn"}" style="margin-bottom:8px">${head}</div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">원소</th><th class="l">추천 라인</th><th title="계수 통계 + 겹친 선 차감 오차 + 배경 차감 오차${meas?"":" — 모형 모드는 가장 밝은 선 1e5 counts 로 둔 명목값"}">예상 상대오차${meas?"":" (명목)"}</th>
+      <th title="window 안 counts 중 이 원소 fraction">purity</th>${meas?"<th>counts (window)</th>":""}<th class="l">주 interference</th><th class="l">차선</th><th class="l">window</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="muted" style="font-size:12px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent);opacity:.75;border-radius:2px;vertical-align:-1px"></i> 그 원소</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--warn);opacity:.55;border-radius:2px;vertical-align:-1px"></i> 다른 원소 (interference)</span>
+      ${meas?`<span><i style="display:inline-block;width:10px;height:10px;background:var(--grid);border-radius:2px;vertical-align:-1px"></i> 배경</span><span>— 실측</span>`:""}
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent-soft);border-radius:2px;vertical-align:-1px"></i> 적분 window (±${WIN}·FWHM)</span><span>가로축 = 라인 ± 3·FWHM</span></div>
+    <details class="if-more" style="margin-top:8px"><summary>원소별 후보 전체 · 판정 방법</summary>
+      <div class="tblwrap" style="margin-top:6px"><table class="tbl"><thead><tr><th class="l">라인</th><th>E [keV]</th><th>${meas?"counts":"상대 intensity"}</th><th>purity</th><th>예상 상대오차</th><th class="l">주 interference</th><th>판정</th></tr></thead><tbody>${all}</tbody></table></div>
+      <ul class="muted" style="margin:8px 0 0 18px;font-size:12px;line-height:1.55">
+        <li>window = 라인 에너지 ± ${WIN}·FWHM(E) (선의 84 %). 그 안에서 원소 신호 S, 다른 원소 선 B<sub>int</sub>, 배경 B<sub>bg</sub> 를 셉니다.</li>
+        <li>예상 상대오차 = √(S + B<sub>int</sub> + B<sub>bg</sub> + Σ(δ·B<sub>f</sub>)² + (${DBG}·B<sub>bg</sub>)²) / S. δ(겹친 선을 빼낼 때의 line ratio 불확도) = K ${DELTA.K}, L ${DELTA.L}, M ${DELTA.M}.</li>
+        <li>purity ≥ 90 % clean · 60–90 % overlap 보정(다른 선으로 interferer 를 재서 빼기) · &lt; 60 % deconvolution(MLLS) 필요.</li>
+        <li>${meas?"실측 모드: counts 는 이 스펙트럼의 NNLS 계수입니다. 선택하지 않은 원소(그리드 Cu, 극편 Fe·Co, Si escape 등)가 있으면 목록에 넣어야 정확합니다.":`모형 모드: intensity ∝ 조성 × n<sub>s</sub>·ln(U)/E<sub>c</sub> (Bethe) × ω·branching (xraydb) × windowless Si 검출효율, 가장 밝은 선 = ${NOM.toExponential(0)} counts 로 둔 명목 척도. 같은 계열 안의 선 비교는 믿을 만하지만, K/L/M 계열 사이 비는 수 배까지 틀릴 수 있습니다.`}</li>
+        <li>escape·sum peak, 시료 자체 흡수는 넣지 않았습니다.${meas?" 약한 선과 0.6 keV 아래 선의 counts 는 배경 추정에 민감합니다(합성 시험에서 주성분 ±5 %, 2 % 미량 L 선 ±40 %).":""}</li></ul>
+    </details></div>`;
+}
+let LAST=null;
+function readOpts(){ const q=id=>document.getElementById(id); const P=state.spec;
+  const els=(q("ifEls").value||"").split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).map(s=>s[0].toUpperCase()+s.slice(1).toLowerCase()).filter(s=>XRL[s]);
+  const fw=+q("ifFwhm").value||P.fwhmMn||130, emax=+q("ifEmax").value||20, kV=+((q("ifKV")||{}).value)||200, compTxt=(q("ifComp")||{}).value||"";
+  P.ifComp=compTxt; P.ifKV=kV;
+  let S=null; try{ const B=interfBasis(); if(B.fromFile){ const rec=curRec(); S=(LASTSPEC&&LASTSPEC.sp&&rec.spectra.indexOf(LASTSPEC.sp)>=0)?LASTSPEC:loadSpectrum(); } }catch(e){ S=null; }
+  return {els,fw,emax,kV,compTxt,S}; }
+function setup(root){ const row=root.querySelector("#ifRun"); if(!row) return; const card=row.closest(".card"); const P=state.spec;
+  const d=document.createElement("div"); d.className="row"; d.style.cssText="gap:10px;align-items:flex-end;margin-top:8px";
+  d.innerHTML=`<label class="f" style="flex:1;min-width:240px" title="스펙트럼 파일이 없을 때만 씁니다. 파일이 열려 있으면 실측 counts 를 씁니다">조성 (선택 · 상대 원자비, 파일 없을 때만 사용)
+      <input type="text" id="ifComp" value="${esc(P.ifComp||"")}" placeholder="예: Na 1, Yb 0.78, Tm 0.02, Lu 0.2, F 4 — 비우면 같은 비율"></label>
+    <label class="f">가속전압 [kV]<input type="number" id="ifKV" class="mono" style="width:80px" value="${P.ifKV||200}" min="30" max="300" step="10"></label>`;
+  row.closest(".row").after(d); }
+function after(){ const out=document.getElementById("ifOut"); if(!out) return; const o=readOpts();
+  const old=[...out.childNodes]; out.innerHTML="";
+  if(!o.els.length){ old.forEach(n=>out.appendChild(n)); return; }
+  let R=null; try{ R=compute(o); }catch(e){ console.error(e); }
+  if(R){ out.insertAdjacentHTML("beforeend",html(R)); LAST=R;
+    const b=document.getElementById("ifSugCsv"); if(b) b.onclick=()=>{ const rows=[["element","line","family","E_keV","rel_err","purity","S","B_int","B_bg","top_interferer","alt_line","alt_rel_err","mode"]];
+      R.out.forEach(q=>{ const c=q.best; if(!c) return; rows.push([q.el,c.line.nm,c.line.fam,c.line.e,c.err.toFixed(4),c.purity.toFixed(4),c.S.toFixed(1),c.Bint.toFixed(1),c.Bbg.toFixed(1),c.top&&c.top.line?c.top.line.el+" "+c.top.line.nm:"",q.alt?q.alt.line.nm:"",q.alt?q.alt.err.toFixed(4):"",R.mode]); });
+      downloadText(rows.map(r=>r.join(",")).join("\n"),"eds_line_recommendation.csv","text/csv"); }; }
+  if(o.els.length<2) return;             /* 원소 하나면 겹침 목록이 없다 */
+  const det=document.createElement("details"); det.className="card if-all";
+  const h3=old.map(n=>n.querySelector&&n.querySelector("h3")).find(Boolean); const m=h3&&h3.textContent.match(/겹침\s*(\d+)건/);
+  det.innerHTML=`<summary style="cursor:pointer;font-weight:600">전체 겹침 목록 ${m?`(${m[1]}건)`:"(없음)"} <span class="muted" style="font-weight:400">— 모든 라인쌍의 ΔE/FWHM 판정</span></summary>`;
+  const inner=document.createElement("div"); inner.style.marginTop="8px"; old.forEach(n=>{ if(n.classList&&n.classList.contains("card")){ n.classList.remove("card"); n.style.padding="0"; n.style.border="0"; n.style.boxShadow="none"; } inner.appendChild(n); }); det.appendChild(inner); out.appendChild(det); }
+window.IF_SUG={setup,after,compute,_last:()=>LAST,_detEff:detEff,_famYield:famYield};
+})();
+</script>
+<!-- INNO-IF:END -->
 <script>window.INNO_UX = Object.assign({ apps: [{"name": "NanoLab", "desc": "합성 계획 · ICP", "url": "https://inno-kaist.github.io/INNO-NanoLab/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swnan%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%235a3526%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%233a241b%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swnan%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Cpath d=%22M27.5 13h9M29 13v12.2a14.5 14.5 0 1 0 6 0V13%22 stroke=%22%23e8b598%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M19.6 40.5a12.5 12.5 0 0 0 24.8 0z%22 fill=%22%23e8b598%22 opacity=%22.38%22/%3E%3Ccircle cx=%2232%22 cy=%2239.5%22 r=%225.2%22 fill=%22%23F4F6F1%22/%3E%3Ccircle cx=%2232%22 cy=%2239.5%22 r=%228.4%22 fill=%22none%22 stroke=%22%23F4F6F1%22 stroke-width=%221.8%22 opacity=%22.7%22/%3E%3C/svg%3E", "current": false}, {"name": "Prism", "desc": "광학 측정 데이터 분석", "url": "https://inno-kaist.github.io/INNO-Prism/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swpri%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23363263%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%2323213f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swpri%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Cpath d=%22M30 14 14.5 47h31z%22 stroke=%22%23bdb9ec%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M6 38.5 24.5 33%22 stroke=%22%23F4F6F1%22 stroke-width=%223.2%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M37.5 30.5 57 23%22 stroke=%22%23F4F6F1%22 stroke-width=%223.2%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M38.5 33.5 57 32.5%22 stroke=%22%23bdb9ec%22 stroke-width=%223.2%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M39.5 36.5 57 42%22 stroke=%22%23bdb9ec%22 stroke-width=%223.2%22 stroke-linecap=%22round%22 opacity=%22.55%22/%3E%3C/svg%3E", "current": false}, {"name": "Ledger", "desc": "측정 계획 · 이력", "url": "https://inno-kaist.github.io/INNO-Ledger/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swled%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%2323505c%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%2316323a%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swled%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Crect x=%2215%22 y=%2215%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%221%22/%3E%3Crect x=%2227%22 y=%2215%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%221%22/%3E%3Crect x=%2239%22 y=%2215%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%220.4%22/%3E%3Crect x=%2215%22 y=%2227%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%221%22/%3E%3Crect x=%2227%22 y=%2227%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%220.4%22/%3E%3Crect x=%2240.1%22 y=%2228.1%22 width=%227.8%22 height=%227.8%22 rx=%222%22 fill=%22none%22 stroke=%22%239fcad3%22 stroke-width=%222.2%22 opacity=%22.55%22/%3E%3Crect x=%2215%22 y=%2239%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%239fcad3%22 opacity=%220.4%22/%3E%3Crect x=%2227%22 y=%2239%22 width=%2210%22 height=%2210%22 rx=%222.6%22 fill=%22%23F4F6F1%22/%3E%3Crect x=%2240.1%22 y=%2240.1%22 width=%227.8%22 height=%227.8%22 rx=%222%22 fill=%22none%22 stroke=%22%239fcad3%22 stroke-width=%222.2%22 opacity=%22.55%22/%3E%3C/svg%3E", "current": false}, {"name": "Analytics", "desc": "STEM · EDS 분석", "url": "https://inno-kaist.github.io/INNO-Analytics/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swana%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234f3048%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%2333202f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swana%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Ccircle cx=%2232%22 cy=%2232%22 r=%2219%22 stroke=%22%23e1b7d5%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45%22 stroke=%22%23F4F6F1%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3C/svg%3E", "current": true}, {"name": "Scheduler", "desc": "장비 주간 스케줄", "url": "https://inno-kaist.github.io/INNO-Scheduler/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swsch%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23264466%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%231a2e42%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swsch%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Crect x=%2214%22 y=%2218%22 width=%2236%22 height=%2232%22 rx=%226%22 stroke=%22%23a9c7e5%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M14 27.5h36%22 stroke=%22%23a9c7e5%22 stroke-width=%224.5%22/%3E%3Cpath d=%22M24 12.5v9M40 12.5v9%22 stroke=%22%23a9c7e5%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Crect x=%2220.5%22 y=%2233%22 width=%228%22 height=%228%22 rx=%222%22 fill=%22%23a9c7e5%22 opacity=%22.45%22/%3E%3Crect x=%2234%22 y=%2233%22 width=%229.5%22 height=%229.5%22 rx=%222.4%22 fill=%22%23F4F6F1%22/%3E%3C/svg%3E", "current": false}, {"name": "RefAtlas", "desc": "연구실 문헌 지도", "url": "https://inno-refatlas.pages.dev/site/", "icon": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22swref%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%2328504a%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%231b3533%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23swref%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Cpath d=%22M32 31.5 17 19%22 stroke=%22%23a6c6ad%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 opacity=%22.6%22/%3E%3Cpath d=%22M32 31.5 47 16%22 stroke=%22%23a6c6ad%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 opacity=%22.6%22/%3E%3Cpath d=%22M32 31.5 48 46%22 stroke=%22%23a6c6ad%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 opacity=%22.6%22/%3E%3Cpath d=%22M32 31.5 17 46%22 stroke=%22%23a6c6ad%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 opacity=%22.6%22/%3E%3Cpath d=%22M47 16 48 46%22 stroke=%22%23a6c6ad%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 opacity=%22.6%22/%3E%3Ccircle cx=%2217%22 cy=%2219%22 r=%226%22 fill=%22%23a6c6ad%22/%3E%3Ccircle cx=%2247%22 cy=%2216%22 r=%225%22 fill=%22%23a6c6ad%22/%3E%3Ccircle cx=%2248%22 cy=%2246%22 r=%226.5%22 fill=%22%23a6c6ad%22/%3E%3Ccircle cx=%2217%22 cy=%2246%22 r=%224.6%22 fill=%22%23a6c6ad%22/%3E%3Ccircle cx=%2232%22 cy=%2231.5%22 r=%228%22 fill=%22%23F4F6F1%22/%3E%3C/svg%3E", "current": false}] }, {
   overlay: ".overlay", panel: ".modal", closeBtn: ".closex,[data-close]",
   clickables: [".sideitem", ".fitem", ".dropzone", ".sidedrop"],
