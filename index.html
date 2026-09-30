@@ -40508,7 +40508,9 @@ function panelFit(el){
    <div class="row" style="margin-top:8px"><label class="dre-f">출발점 <input type="number" id="fS" value="${S.fit.starts}" min="1" max="1000"></label>
      <label class="dre-f">최대 반복 <input type="number" id="fM" value="${S.fit.maxit}" min="10" max="2000"></label>
      <label class="dre-f">seed <input type="number" id="fSeed" value="${S.fit.seed}"></label>
-     <label class="dre-f" title="0 = 자동 (코어 수 − 1, 최대 8)">워커 <input type="number" id="fW" value="${S.fit.workers||0}" min="0" max="16"> <span class="muted">(자동 ${Math.max(1,Math.min(8,((typeof navigator!=="undefined"&&navigator.hardwareConcurrency)||2)-1))})</span></label>
+     <label class="dre-f" title="논리 스레드 중 피팅에 쓸 비율. 피팅 중에 바꿔도 곧바로 반영된다">CPU 사용 한도 <select id="fCpu">${CPU_OPTS.map(([v,l])=>`<option value="${v}" ${v===cpuPct()?"selected":""}>${l}</option>`).join("")}</select></label>
+     <label class="dre-f" title="0 = CPU 사용 한도와 측정 결과로 자동 결정">워커 <input type="number" id="fW" value="${S.fit.workers||0}" min="0" max="32"> <span class="muted">(0 = 자동)</span></label>
+     <span class="muted" id="fCpuN" style="flex-basis:100%">${cpuNote()}</span>
      <label class="dre-tog"><input type="checkbox" id="fP" ${S.fit.profile?"checked":""}> 프로파일 가능도</label>
      <label class="dre-f">±<input type="number" id="fSpan" value="${S.fit.span}" step="0.5" min="0.5" max="6"> decade · <input type="number" id="fN" value="${S.fit.npts}" min="5" max="41"> 점</label></div>
    <div class="row"><button class="btn primary" id="fRun" ${running||!nData||!nFree?"disabled":""}>피팅 시작</button><button class="btn" id="fStop" ${running?"":"disabled"}>중단</button><button class="btn" id="fAdq" ${running||!nData?"disabled":""} title="피팅 없이 지금 매개변수 값으로 모델이 데이터와 구조적으로 어긋나는지 검사">현재 값으로 적합성 검사</button></div>
@@ -40519,8 +40521,10 @@ function panelFit(el){
     <li>잔차 = (ln y − ln ŷ − ln s)/σ, σ² = 곱잡음² + (배경σ/y)². 배율 s 는 데이터셋마다 가중 평균으로 소거. 배경 k·σ 아래 점은 절단(상한) — 모델이 상한을 넘을 때만 벌점.</li>
     <li>전역해 도달 판정: 최적 χ² 에서 0.5 이내로 끝난 출발점의 비율(waterfall).</li>
     <li>95 % 구간: 프로파일 가능도(나머지를 다시 최적화) Δχ² ≤ 3.84·max(1, χ²/자유도). 구간 끝이 탐색 범위에 닿으면 ‘열림’ = 그 방향으로는 데이터가 값을 정하지 못함.</li></ul></details>`;
-  const upd=()=>{ S.fit={workers:Math.max(0,+$q(el,"#fW").value|0),starts:+$q(el,"#fS").value||40,maxit:+$q(el,"#fM").value||150,seed:+$q(el,"#fSeed").value||1,profile:$q(el,"#fP").checked,span:+$q(el,"#fSpan").value||2,npts:+$q(el,"#fN").value||13}; save(); };
+  const upd=()=>{ S.fit={cpu:+$q(el,"#fCpu").value||75,workers:Math.max(0,+$q(el,"#fW").value|0),starts:+$q(el,"#fS").value||40,maxit:+$q(el,"#fM").value||150,seed:+$q(el,"#fSeed").value||1,profile:$q(el,"#fP").checked,span:+$q(el,"#fSpan").value||2,npts:+$q(el,"#fN").value||13}; save(); };
   el.querySelectorAll("input").forEach(i=>i.onchange=upd);
+  const cpuCh=()=>{ upd(); const n=$q(el,"#fCpuN"); if(n) n.textContent=cpuNote(); if(RUN&&LIVE.pump){ LIVE.K=nWorkers(); LIVE.pump(); note(`CPU 한도 변경 → 워커 ${LIVE.K}개 (진행 중인 계산이 끝나는 대로 반영)`); } };
+  $q(el,"#fCpu").onchange=cpuCh; $q(el,"#fW").onchange=cpuCh;
   $q(el,"#fRun").onclick=()=>{ upd(); startFit(); };
   $q(el,"#fStop").onclick=()=>stopFit();
   $q(el,"#fAdq").onclick=()=>adequacyNow();
@@ -40576,7 +40580,17 @@ let POOL=[];
 const HWKEY="innoanalytics_dre_hw_v1";
 function hwInfo(){ const nav=typeof navigator!=="undefined"?navigator:{}; return {hc:nav.hardwareConcurrency||2, mem:nav.deviceMemory||null, ua:(nav.userAgentData&&nav.userAgentData.platform)||nav.platform||"", cores:null}; }
 function hwCal(){ try{ const c=JSON.parse(localStorage.getItem(HWKEY)||"null"); const h=hwInfo(); if(c&&c.hc===h.hc&&c.ua===h.ua) return c; }catch(e){} return null; }
-function nWorkers(){ const h=hwInfo(); const want=+S.fit.workers||0; if(want>0) return Math.min(32,want); const c=hwCal(); if(c&&c.best) return c.best; return Math.max(1,Math.min(8,h.hc-1)); }
+/* CPU 사용 한도: 논리 스레드의 cpu % 까지만 워커를 쓴다. 브라우저는 스레드 우선순위를 낮출 수 없으므로
+   '남겨 두는 스레드 수'로 다른 작업의 응답성을 지킨다. 한도 안에서는 측정된 최적 워커 수를 넘지 않는다. */
+const CPU_OPTS=[[100,"최대 (100 %)"],[90,"90 %"],[75,"균형 (75 %)"],[50,"여유 (50 %)"],[25,"백그라운드 (25 %)"]];
+function cpuPct(){ const v=+(S.fit&&S.fit.cpu); return v>0&&v<=100?v:75; }
+function capK(pct){ const hc=hwInfo().hc; return Math.max(1,Math.min(32,Math.floor(hc*pct/100+1e-9))); }
+function nWorkers(pct){ const h=hwInfo(); const want=+S.fit.workers||0; if(want>0) return Math.min(32,want); const cap=capK(pct==null?cpuPct():pct); const c=hwCal(); if(c&&c.best) return Math.min(cap,c.best); return Math.min(cap,Math.max(1,h.hc-1)); }
+/* 측정 곡선에서 K 워커의 처리량 / 최고 처리량 (선형 보간) */
+function speedAt(K){ const c=hwCal(); if(!c||!c.rows||!c.rows.length) return null; const r=c.rows, top=Math.max(...r.map(q=>q.thr)); if(K<=r[0].K) return r[0].thr*K/r[0].K/top;
+  for(let i=1;i<r.length;i++) if(K<=r[i].K){ const a=r[i-1],b=r[i],f=(K-a.K)/(b.K-a.K); return (a.thr+f*(b.thr-a.thr))/top; } return r[r.length-1].thr/top; }
+function cpuNote(){ const hc=hwInfo().hc, K=nWorkers(), sp=speedAt(K); return `워커 ${K}개 / 논리 스레드 ${hc} → CPU 약 ${Math.round(100*Math.min(1,K/hc))} %${sp!=null?` · 속도 최대의 ${Math.round(100*Math.min(1,sp))} %`:""}${+S.fit.workers>0?" (워커 수 직접 지정)":""}`; }
+const LIVE={K:1,pump:null};
 /* 확장성 측정: 워커 수 K 마다 같은 시간 동안 실제 DRE 연산을 돌려 처리량을 잰다.
    논리 스레드 수만으로는 SMT·성능/효율 코어·전원 모드·다른 부하를 알 수 없어서 실측으로 고른다. */
 async function calibrateHW(src,onStep){
@@ -40623,28 +40637,36 @@ function runFit(src,prob,B){
   const o=Object.assign({},S.fit,{pu:S.pu,puF:PU[S.pu]}); const t0=Date.now(); RUN.t0=t0;
   const n=Math.max(1,o.starts|0), rnd=D.mulberry(o.seed||12345);
   const starts=[Array.from(D.thetaFromParams(B))].concat(D.lhs(n-1,B.free.length,rnd).map(u=>u.map((v,j)=>B.free[j].lo+v*(B.free[j].hi-B.free[j].lo))));
-  const K=Math.min(nWorkers(),starts.length); o.workers=K; const pid="p"+t0;
-  const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-  POOL=[...Array(K)].map(()=>new Worker(url)); URL.revokeObjectURL(url); WORKER=POOL[0];
+  LIVE.K=Math.min(nWorkers(),starts.length); let K=LIVE.K; let Kmax=K; const pid="p"+t0;
+  const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"})); RUN.url=url;
+  POOL=[...Array(K)].map(()=>new Worker(url)); WORKER=POOL[0];
   const fail=msg=>{ stopFit(true); note("피팅 오류: "+msg,"warn"); };
   const call=(w,msg,kind)=>new Promise((res,rej)=>{ w.onmessage=ev=>{ const m=ev.data; if(m.type===kind) res(m); else if(m.type==="error") rej(new Error(m.msg)); }; w.onerror=e=>rej(new Error(e.message||"Worker 오류")); w.postMessage(msg); });
   /* 동적 분배: 먼저 끝난 워커가 다음 일을 가져간다 (성능·효율 코어 혼재, 출발점마다 다른 계산량에 강함) */
-  const queue=async(items,mk,kind,onRes)=>{ let next=0; await Promise.all(POOL.map(async w=>{ while(RUN&&next<items.length){ const it=items[next++]; const m=await call(w,mk(it),kind); onRes(m,it); } })); };
-  const ms=[]; let best=Infinity; setProg(`다중 출발 · 워커 ${K}개`,0,starts.length,null);
-  queue(starts.map((t,k)=>({k,t})),it=>({cmd:"start1",pid,problem:prob,k:it.k,theta:it.t,maxit:o.maxit}),"start1",m=>{ ms.push(m.r); best=Math.min(best,m.r.chi2); if(RUN) setProg(`다중 출발 · 워커 ${K}개`,ms.length,starts.length,best); })
+  /* LIVE.K(현재 CPU 한도)만큼만 동시에 돌린다. 한도를 낮추면 진행 중인 계산이 끝난 워커는 쉬고, 높이면 워커를 더 만든다.
+     결과는 출발점 번호·매개변수 번호로 정렬되므로 워커 수와 무관하게 같다. */
+  const queue=(items,mk,kind,onRes)=>new Promise((res,rej)=>{ let next=0,busy=0,done=0; const idle=POOL.slice(); let dead=false;
+    const pump=()=>{ if(dead) return; if(!RUN){ dead=true; return res(); }
+      while(busy<LIVE.K&&next<items.length){ let w=idle.pop(); if(!w){ if(POOL.length>=32) break; w=new Worker(url); POOL.push(w); }
+        const it=items[next++]; busy++; K=Math.max(busy,K); Kmax=Math.max(Kmax,busy);
+        call(w,mk(it),kind).then(m=>{ busy--; idle.push(w); if(dead) return; onRes(m,it); done++; if(done===items.length){ dead=true; res(); } else pump(); }).catch(e=>{ dead=true; rej(e); }); }
+      if(next>=items.length&&busy===0&&!dead){ dead=true; res(); } };
+    LIVE.pump=pump; pump(); });
+  const ms=[]; let best=Infinity; setProg(`다중 출발 · 워커 ${LIVE.K}개`,0,starts.length,null);
+  queue(starts.map((t,k)=>({k,t})),it=>({cmd:"start1",pid,problem:prob,k:it.k,theta:it.t,maxit:o.maxit}),"start1",m=>{ ms.push(m.r); best=Math.min(best,m.r.chi2); if(RUN) setProg(`다중 출발 · 워커 ${LIVE.K}개`,ms.length,starts.length,best); })
   .then(async()=>{
     if(!RUN) return;
     ms.sort((a,b)=>a.chi2-b.chi2||a.k-b.k);
     const bst=ms[0]; const info=D.dofInfo(B,bst); const thr=3.84*info.s2; const prof=[];
-    if(o.profile){ const P=B.free.length; let fin=0; setProg(`프로파일 · 워커 ${K}개`,0,P,bst.chi2);
-      await queue([...Array(P).keys()],j=>({cmd:"profile",problem:prob,best:bst,j,opt:{span:o.span,npts:o.npts,thr,maxit:Math.min(o.maxit,120)}}),"profile",m=>{ prof[m.j]=m.pr; fin++; if(RUN) setProg(`프로파일 · 워커 ${K}개`,fin,P,bst.chi2); }); }
+    if(o.profile){ const P=B.free.length; let fin=0; setProg(`프로파일 · 워커 ${LIVE.K}개`,0,P,bst.chi2);
+      await queue([...Array(P).keys()],j=>({cmd:"profile",problem:prob,best:bst,j,opt:{span:o.span,npts:o.npts,thr,maxit:Math.min(o.maxit,120)}}),"profile",m=>{ prof[m.j]=m.pr; fin++; if(RUN) setProg(`프로파일 · 워커 ${LIVE.K}개`,fin,P,bst.chi2); }); }
     if(!RUN) return;
     setProg("적합성·상세 분석·예측값",0,1,bst.chi2);
-    const m=await call(POOL[0],{cmd:"final",problem:prob,ms,prof,opts:o,t0},"result");
-    m.at=Date.now(); S.result=m; S.useFit=true; RUN=null; POOL.forEach(w=>w.terminate()); POOL=[]; WORKER=null; save(); rerender(); note(`피팅 완료 (${m.time.toFixed(1)} s · 워커 ${K}개)`);
+    o.workers=Kmax; const m=await call(POOL[0],{cmd:"final",problem:prob,ms,prof,opts:o,t0},"result");
+    m.at=Date.now(); S.result=m; S.useFit=true; URL.revokeObjectURL(url); RUN=null; LIVE.pump=null; POOL.forEach(w=>w.terminate()); POOL=[]; WORKER=null; save(); rerender(); note(`피팅 완료 (${m.time.toFixed(1)} s · 최대 워커 ${Kmax}개)`);
   }).catch(e=>{ if(RUN) fail(e.message||String(e)); });
 }
-function stopFit(silent){ POOL.forEach(w=>{ try{ w.terminate(); }catch(e){} }); POOL=[]; if(WORKER){ try{ WORKER.terminate(); }catch(e){} WORKER=null; } RUN=null; renderPanel(); if(!silent) note("피팅을 중단했습니다"); }
+function stopFit(silent){ LIVE.pump=null; if(RUN&&RUN.url) try{ URL.revokeObjectURL(RUN.url); }catch(e){} POOL.forEach(w=>{ try{ w.terminate(); }catch(e){} }); POOL=[]; if(WORKER){ try{ WORKER.terminate(); }catch(e){} WORKER=null; } RUN=null; renderPanel(); if(!silent) note("피팅을 중단했습니다"); }
 function setProg(phase,done,total,best){
   const p=$q(ROOT,"#fProg"); if(!p) return; p.hidden=false;
   $q(ROOT,"#fBar").style.width=Math.round(100*done/Math.max(1,total))+"%";
