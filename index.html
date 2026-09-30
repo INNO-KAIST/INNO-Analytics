@@ -39044,7 +39044,7 @@ window.ED_UI={render,rerender,_state:()=>S,_model:()=>MODEL,_applyFormula:(f)=>{
      앞 파워의 해에서 출발하므로 up/down 스윕이 실제 측정처럼 안정 branch를 따라가고, branch가 사라지면 점프한다.
    - 감도는 implicit function theorem(IFT): dn/dθ = −J⁻¹ ∂f/∂θ. f 가 과정 계수에 선형이라 ∂f/∂θ 는 정확하다.
    - 동역학은 L-안정 TR-BDF2 + 단계 배가 오차 제어.
-   - 피팅은 log10 매개변수, log 잔차, 데이터셋별 배율 profiled out, 검출 하한 아래 점은 censored 잔차.
+   - 피팅은 log10 매개변수, log residual, 데이터셋별 배율 profiled out, 검출 하한 아래 점은 censored residual.
    ============================================================ */
 (function(root){
 "use strict";
@@ -39445,7 +39445,7 @@ function envFor(B,theta,si){
   B.free.forEach((f,j)=>{ if(f.si===-1||f.si===si) env[f.nm]=Math.pow(10,theta[j]); });
   return env;
 }
-/* 잔차와 Jacobian. 배율은 데이터셋마다 profiled out(가중 평균) */
+/* residual과 Jacobian. 배율은 데이터셋마다 profiled out(가중 평균) */
 function residuals(B,theta,wantJ){
   const pr=B.problem, P=B.free.length, r=[], J=wantJ?[]:null, info=[];
   let fails=0;
@@ -39620,10 +39620,10 @@ function adequacy(B,theta,opt){
   opt=opt||{}; const fmtI=opt.fmtI||(v=>v.toExponential(2)+" W/cm²");
   const th=Float64Array.from(theta); const pr=B.problem; const items=[];
   const R=residuals(B,th,false);
-  /* A1 잔차 수준 */
+  /* A1 residual 수준 */
   const dof=Math.max(1,R.r.length-B.free.length-pr.samples.reduce((a,s)=>a+s.data.filter(d=>d.type==="scurve").length,0));
   const s2=chi2(R.r)/dof;
-  items.push({key:"A1",title:"잔차 크기",level:s2>5?"fail":s2>2?"warn":"ok",
+  items.push({key:"A1",title:"residual 크기",level:s2>5?"fail":s2>2?"warn":"ok",
     summary:`χ²/자유도 = ${s2.toFixed(2)}`,
     detail:s2>2?"잡음 모델(multiplicative noise·배경σ)이 맞다면 모델이 데이터를 설명하지 못한다는 뜻이다. 잡음을 과소 입력했을 가능성도 함께 확인할 것.":"입력한 잡음 수준과 맞는다."});
   /* 데이터셋별 정리 */
@@ -39632,7 +39632,7 @@ function adequacy(B,theta,opt){
     const idx=[...d.I.keys()].sort((a,b)=>d.I[a]-d.I[b]);
     const pts=idx.map(i=>({I:d.I[i],y:d.y[i],m:d._fit.model[i],cens:!(d.y[i]>kc*sbg)||!(d.y[i]>0),sig:Math.sqrt(rel*rel+(d.y[i]>0?Math.pow(sbg/d.y[i],2):0.25))}));
     sets.push({si,di,d,pts,rel,chIdx:B.M.channels.findIndex(c=>c.id===d.ch),logS:d._fit.logS,label:`${smp.id} · ${d.ch} · ${d.dir<0?"down":"up"}`}); }));
-  /* A2 잔차 구조: 부호 연속(runs) 시험 */
+  /* A2 residual 구조: 부호 연속(runs) 시험 */
   { const res=[]; let worst=null, lvl="ok";
     sets.forEach(S=>{ const u=S.pts.filter(p=>!p.cens); if(u.length<10) return;
       const r=u.map(p=>(Math.log(p.y)-Math.log(p.m))/p.sig); const sg=r.map(v=>v>=0);
@@ -39644,11 +39644,11 @@ function adequacy(B,theta,opt){
       res.push({S,z,runs,mu,best}); if(z<-3) lvl="fail"; else if(z<-2&&lvl==="ok") lvl="warn";
       if(best&&(!worst||Math.abs(best.m)>Math.abs(worst.best.m))) worst={S,best}; });
     if(res.length){ const zmin=Math.min(...res.map(q=>q.z));
-      items.push({key:"A2",title:"잔차의 계통적 구조",level:lvl,
-        summary:isFinite(zmin)?`부호 연속 시험 최저 z = ${zmin.toFixed(1)}`:"한 데이터셋의 잔차가 모두 같은 부호",
-        detail:(lvl==="ok"?"잔차가 무작위에 가깝다.":"잔차가 파워를 따라 무리 지어 같은 부호를 낸다 — 잡음이 아니라 곡선 모양이 다르다는 흔적.")+(worst?` 가장 어긋난 구간: ${worst.S.label}, ${fmtI(worst.best.a)} – ${fmtI(worst.best.b)} (평균 잔차 ${worst.best.m.toFixed(1)}σ).`:""),
+      items.push({key:"A2",title:"residual의 계통적 구조",level:lvl,
+        summary:isFinite(zmin)?`부호 연속 시험 최저 z = ${zmin.toFixed(1)}`:"한 데이터셋의 residual이 모두 같은 부호",
+        detail:(lvl==="ok"?"residual이 무작위에 가깝다.":"residual이 파워를 따라 무리 지어 같은 부호를 낸다 — 잡음이 아니라 곡선 모양이 다르다는 흔적.")+(worst?` 가장 어긋난 구간: ${worst.S.label}, ${fmtI(worst.best.a)} – ${fmtI(worst.best.b)} (평균 residual ${worst.best.m.toFixed(1)}σ).`:""),
         rows:res.map(q=>({set:q.S.label,z:q.z}))}); }
-    else items.push({key:"A2",title:"잔차의 계통적 구조",level:"na",summary:"점 10개 이상인 S-curve 없음"}); }
+    else items.push({key:"A2",title:"residual의 계통적 구조",level:"na",summary:"점 10개 이상인 S-curve 없음"}); }
   /* A3 구간별 모양 비교: 같은 파워 구간에서 실측 국소 log-기울기 vs 모델 */
   { const W=opt.win||5, flags=[]; let nWin=0;
     sets.forEach(S=>{ const u=S.pts.filter(p=>!p.cens);
@@ -39665,7 +39665,7 @@ function adequacy(B,theta,opt){
     flags.sort((p,q)=>Math.abs(q.z)-Math.abs(p.z)); const f=flags[0];
     items.push({key:"A3",title:"구간별 모양 비교 (모델 vs 실측)",level:!nWin?"na":flags.length>=2?"fail":flags.length?"warn":"ok",
       summary:!nWin?"비교할 연속 구간 없음":`${nWin}개 구간 중 ${flags.length}개 어긋남`,
-      detail:f?`가장 큰 차이: ${f.S.label}, ${fmtI(f.a)} – ${fmtI(f.b)} 에서 실측 국소 기울기 ${f.sd.toFixed(2)} ± ${f.se.toFixed(2)}, 모델 ${f.sm.toFixed(2)}. model class이 이 구간의 모양을 만들 수 없는지(예: bistable Tm 3준위의 upper branch 기울기 상한 ≈ 1, V4b) 확인할 것.`:"같은 파워 구간에서 모델과 실측의 기울기가 오차 안에서 같다. (PA 기울기 추정이 아니라 잔차 진단이다.)",
+      detail:f?`가장 큰 차이: ${f.S.label}, ${fmtI(f.a)} – ${fmtI(f.b)} 에서 실측 국소 기울기 ${f.sd.toFixed(2)} ± ${f.se.toFixed(2)}, 모델 ${f.sm.toFixed(2)}. model class이 이 구간의 모양을 만들 수 없는지(예: bistable Tm 3준위의 upper branch 기울기 상한 ≈ 1, V4b) 확인할 것.`:"같은 파워 구간에서 모델과 실측의 기울기가 오차 안에서 같다. (PA 기울기 추정이 아니라 residual 진단이다.)",
       rows:flags.slice(0,6).map(q=>({set:q.S.label,a:q.a,b:q.b,sd:q.sd,se:q.se,sm:q.sm}))}); }
   /* A4 up/down 정합 + A5 두 branch 사이의 중간값 */
   { const pairs=[]; sets.forEach(U=>{ if(U.d.dir<0) return; sets.forEach(Dn=>{ if(Dn.d.dir>=0||Dn.si!==U.si||Dn.d.ch!==U.d.ch) return; pairs.push([U,Dn]); }); });
@@ -40520,7 +40520,7 @@ function panelFit(el){
    <div id="fHw" style="margin-top:6px">${hwHTML()}</div>
    <details class="dre-src"><summary>방법</summary><ul>
     <li>log₁₀ 매개변수 공간의 Latin hypercube multi-start → Levenberg–Marquardt(box constraints, gain ratio 갱신). 기울기는 implicit function theorem로 구한 정확한 감도.</li>
-    <li>잔차 = (ln y − ln ŷ − ln s)/σ, σ² = multiplicative noise² + (배경σ/y)². 배율 s 는 데이터셋마다 가중 평균으로 profile out. 배경 k·σ 아래 점은 censored(상한) — 모델이 상한을 넘을 때만 벌점.</li>
+    <li>residual = (ln y − ln ŷ − ln s)/σ, σ² = multiplicative noise² + (배경σ/y)². 배율 s 는 데이터셋마다 가중 평균으로 profile out. 배경 k·σ 아래 점은 censored(상한) — 모델이 상한을 넘을 때만 벌점.</li>
     <li>global minimum 도달 판정: 최적 χ² 에서 0.5 이내로 끝난 출발점의 비율(waterfall).</li>
     <li>95 % 구간: profile likelihood(나머지를 다시 최적화) Δχ² ≤ 3.84·max(1, χ²/자유도). 구간 끝이 탐색 범위에 닿으면 ‘열림’ = 그 방향으로는 데이터가 값을 정하지 못함.</li></ul></details>`;
   const upd=()=>{ S.fit={cpu:+$q(el,"#fCpu").value||75,workers:Math.max(0,+$q(el,"#fW").value|0),starts:+$q(el,"#fS").value||40,maxit:+$q(el,"#fM").value||150,seed:+$q(el,"#fSeed").value||1,profile:$q(el,"#fP").checked,span:+$q(el,"#fSpan").value||2,npts:+$q(el,"#fN").value||13}; save(); };
@@ -40722,7 +40722,7 @@ function adequacyHTML(A,src){
   if(!A) return "";
   return `<div class="dre-adq"><div class="note ${A.worst==="fail"?"danger":A.worst==="warn"?"warn":""}"><b>모델 적합성:</b> ${esc(A.verdict)} <span class="muted">(${esc(src)})</span></div>
    <table class="dre-tbl"><tbody>${A.items.map(q=>`<tr><td style="width:34px" class="mono">${q.key}</td><td style="width:74px">${lvBadge(q.level)}</td><td><b>${esc(q.title)}</b> — ${esc(q.summary)}${q.detail?`<div class="muted" style="margin-top:2px">${esc(q.detail)}</div>`:""}</td></tr>`).join("")}</tbody></table>
-   <div class="muted" style="margin-top:4px">모든 항목은 같은 파워·시간에서 실측과 DRE 모델을 비교한 잔차 진단이다 (INNO Prism SegPA 의 s·I<sub>th</sub> 추정과 다른 것). ‘통과’는 모델이 옳다는 증명이 아니라, 찾을 수 있는 구조적 모순이 없다는 뜻이다.</div></div>`;
+   <div class="muted" style="margin-top:4px">모든 항목은 같은 파워·시간에서 실측과 DRE 모델을 비교한 residual 진단이다 (INNO Prism SegPA 의 s·I<sub>th</sub> 추정과 다른 것). ‘통과’는 모델이 옳다는 증명이 아니라, 찾을 수 있는 구조적 모순이 없다는 뜻이다.</div></div>`;
 }
 function renderDiag(){
   const el=$q(ROOT,"#dreDiag"); if(!el) return;
@@ -40749,7 +40749,7 @@ function renderDiag(){
     <div><span class="k">전역 최소</span>${lvBadge(glob)}<span>${succ}/${R.ms.length} 출발점이 최저 χ² 에 도달${ncl!=null?` · 다른 local minimum ${ncl}개 수준`:""}</span></div>
     <div><span class="k">identifiability</span>${lvBadge(cnt("g4")?"fail":cnt("g3")?"warn":"ok")}<span>결정됨 ${cnt("g0")} · 넓음 ${cnt("g2")} · 한쪽 열림 ${cnt("g3")} · non-identifiable ${cnt("g4")}</span></div>
     <div><span class="k">모델 적합성</span>${A?lvBadge(A.worst):lvBadge("na")}<span>${A?esc(A.items.filter(q=>q.level==="fail").map(q=>q.key).join(", ")||"구조적 모순 없음"):"—"}</span></div>
-    <div><span class="k">잔차 크기</span>${lvBadge(R.info.s2>5?"fail":R.info.s2>2?"warn":"ok")}<span>χ²/자유도 ${(R.best.chi2/R.info.dof).toFixed(2)}</span></div></div>`;
+    <div><span class="k">residual 크기</span>${lvBadge(R.info.s2>5?"fail":R.info.s2>2?"warn":"ok")}<span>χ²/자유도 ${(R.best.chi2/R.info.dof).toFixed(2)}</span></div></div>`;
   let html=pre+`<h3>피팅 결과 <span class="hint">χ² ${R.best.chi2.toFixed(2)} · 자유도 ${R.info.dof} · AICc ${R.aicc.toFixed(1)} · ${R.time.toFixed(1)} s</span></h3>${strip}
    ${A&&A.worst==="fail"?`<div class="note danger" style="margin-top:6px"><b>${esc(A.verdict)}</b> 아래 ‘모델 적합성’에서 이유를 확인하세요.</div>`:""}
    <table class="dre-tbl" style="margin-top:8px"><thead><tr><th>매개변수</th><th class="num">최적</th><th class="num">프로파일 95 %</th><th class="num" title="최적점 곡률(FIM⁻¹·s²)로 본 95 % 배수 구간 — 선형 근사">곡률 95 %</th><th>판정</th>${truth?'<th class="num">log₁₀(최적/참값)</th>':""}</tr></thead><tbody>${rows}</tbody></table>
@@ -40827,13 +40827,13 @@ function renderDiag(){
       <div class="muted">범위 = 프로파일 경로 위에서 Δχ² ≤ threshold인 매개변수 집합 전부로 계산한 최소–최대${hasProf?"":" (프로파일을 켜야 계산된다)"}. I_ref = 데이터 파워 범위의 기하 평균(${sciTxt(R.derived[0].Iref/f,3)} ${esc(S.pu)}).
       매개변수가 ‘non-identifiable’이어도 이 양들은 좁게 정해지는 경우가 많다 — 합성 참값 시험(Lee 3준위, intensity 환산 오차 ±0.3 decade 포함)에서 S-curve + 저파워 감쇠 1점만으로 ESA 속도·CR fraction의 오차 중앙값이 0.01 decade 이하, σ_ESA 자체는 0.26 decade(환산 오차 그대로)였다. 보고할 때는 σ 대신 ‘nominal intensity 기준 속도’를 쓰는 편이 정확하다.</div>`;
     html+=sec("pred","⑦ 예측값 — 매개변수보다 잘 정해지는 양","흡수 속도 · 전달 fraction · threshold · population",b,false); }
-  /* 6 잔차 */
+  /* 6 residual */
   if(X){ const sets=X.sets.filter(s=>s.type==="scurve"); const f=PU[S.pu];
     const series=sets.map((st,k)=>{ const pts=X.pts.filter(p=>p.si===st.si&&p.di===st.di&&!p.cens); return {x:pts.map(p=>p.I/f),y:pts.map(p=>p.r),points:true,line:false,r:2.6,label:st.label,color:P.ser[k%6]}; }).filter(s=>s.x.length);
     const rr=X.pts.filter(p=>!p.cens&&p.r!==0).map(p=>p.r).sort((a,b)=>a-b); const q=rr.map((_,i)=>normInv((i+0.5)/rr.length));
-    let b=`<div class="dre-grid2"><div>${series.length?chart({id:"rs",xlog:true,ylog:false,series,xlabel:`excitation intensity (${S.pu})`,ylabel:"잔차 (σ 단위)",w:420,h:250,legend:false,hlines:[{y:0},{y:3,label:"+3σ"},{y:-3,label:"−3σ"}]})+legendHTML(series.map(q=>[q.label,q.color])):""}<div class="muted">무리 지은 같은 부호 = 모양 차이(적합성 A2). 한 점만 튀면 전환 중인 점일 수 있다.</div></div>
-      <div>${rr.length>3?chart({id:"qq",xlog:false,ylog:false,series:[{x:q,y:rr,points:true,line:false,r:2.4,label:"잔차",color:P.accent},{x:[q[0],q[q.length-1]],y:[q[0],q[q.length-1]],label:"정규",color:P.muted,dash:"4 3"}],xlabel:"normal quantile",ylabel:"residual quantile",w:320,h:250,legend:false}):""}<div class="muted">정규 Q-Q: 직선을 따르면 잡음 모델이 맞다. 기울기 &gt; 1 이면 잡음 과소 입력 또는 모델 부족, 꼬리만 벗어나면 이상점.</div></div></div>`;
-    html+=sec("res","⑥ 잔차","파워별 잔차 · 정규 Q-Q",b,false); }
+    let b=`<div class="dre-grid2"><div>${series.length?chart({id:"rs",xlog:true,ylog:false,series,xlabel:`excitation intensity (${S.pu})`,ylabel:"residual (σ 단위)",w:420,h:250,legend:false,hlines:[{y:0},{y:3,label:"+3σ"},{y:-3,label:"−3σ"}]})+legendHTML(series.map(q=>[q.label,q.color])):""}<div class="muted">무리 지은 같은 부호 = 모양 차이(적합성 A2). 한 점만 튀면 전환 중인 점일 수 있다.</div></div>
+      <div>${rr.length>3?chart({id:"qq",xlog:false,ylog:false,series:[{x:q,y:rr,points:true,line:false,r:2.4,label:"residual",color:P.accent},{x:[q[0],q[q.length-1]],y:[q[0],q[q.length-1]],label:"정규",color:P.muted,dash:"4 3"}],xlabel:"normal quantile",ylabel:"residual quantile",w:320,h:250,legend:false}):""}<div class="muted">정규 Q-Q: 직선을 따르면 잡음 모델이 맞다. 기울기 &gt; 1 이면 잡음 과소 입력 또는 모델 부족, 꼬리만 벗어나면 이상점.</div></div></div>`;
+    html+=sec("res","⑥ residual","파워별 residual · 정규 Q-Q",b,false); }
   el.innerHTML=html;
   el.querySelectorAll("details.dre-ins").forEach(d=>d.addEventListener("toggle",()=>{ S.insOpen=S.insOpen||{}; S.insOpen[d.dataset.k]=d.open; save(); }));
   const pj=$q(el,"#insProfJ"); if(pj) pj.onchange=()=>{ S.insProfJ=+pj.value; save(); renderDiag(); };
@@ -40952,7 +40952,7 @@ function famOK(el,fam,Emin,Emax){ const r=XRL[el]; if(!r||!r.lines[fam]) return 
 
 /* 실측: 본체와 같은 선 모양(elementProfile — Gaussian + 저에너지 불완전 전하수집 꼬리)으로
    선택 원소의 계열별 열을 만들어, SNIP 배경을 뺀 스펙트럼에 NNLS 로 맞춘다.
-   꼬리 크기 tau 는 잔차에서 재고(본체 estimateTau 와 같은 방식) 한 번 더 푼다. */
+   꼬리 크기 tau 는 residual에서 재고(본체 estimateTau 와 같은 방식) 한 번 더 푼다. */
 function fitMeasured(S,els,fw,Emin,Emax){
   const snip=specBackground(S.y,S,fw);
   const ch=[]; for(let i=0;i<S.nch;i++) if(S.E[i]>=Emin&&S.E[i]<=Emax&&i>=(S.i0|0)) ch.push(i);
@@ -40972,7 +40972,7 @@ function fitMeasured(S,els,fw,Emin,Emax){
       let t=0; for(let k=0;k<ch.length;k++) t+=xa[k]*w[k]*net[k]; g[a]=t; }
     return {X,A:nnls(G,g)}; };
   let tau=0, R=solve(0);
-  for(let pass=0;pass<2;pass++){      /* 잔차가 요구하는 꼬리 증분 */
+  for(let pass=0;pass<2;pass++){      /* residual이 요구하는 꼬리 증분 */
     const m=ch.map((i,k)=>cols.reduce((s,c,a)=>s+(c.pr.dtail?R.A[a]*c.pr.dtail[i]:0),0));
     const f=ch.map((i,k)=>R.X.reduce((s,x,a)=>s+R.A[a]*x[k],0));
     let num=0,den=0; ch.forEach((i,k)=>{ num+=w[k]*(net[k]-f[k])*m[k]; den+=w[k]*m[k]*m[k]; });
@@ -41068,10 +41068,10 @@ function html(R){
     if(!o.best) return `<tr><td class="l"><b>${esc(o.el)}</b></td><td class="l" colspan="${meas?7:6}"><span class="muted">${o.noSignal?"맞춘 신호가 없습니다 — 이 스펙트럼에서 검출되지 않거나 범위 밖입니다":"범위 안에 쓸 만한 라인이 없습니다"}</span></td></tr>`;
     const c=o.best, l=c.line, a=o.alt;
     const notes=[]; if(o.famUnsure) notes.push(`<span class="badge info" title="K/L/M 계열 사이 intensity 비는 모형 오차가 커서, 차이가 3배 안쪽이면 실측으로 확인해야 합니다">계열 선택은 실측 확인</span>`);
-    if(o.close) notes.push(`<span class="badge info" title="차선의 예상 상대오차가 25 % 안쪽으로 가깝습니다 — 둘 다 쓸 만합니다">차선과 비슷</span>`);
+    if(o.close) notes.push(`<span class="badge info" title="alternative의 예상 상대오차가 25 % 안쪽으로 가깝습니다 — 둘 다 쓸 만합니다">alternative와 비슷</span>`);
     if(c.err>0.5) notes.push(`<span class="badge risk" title="예상 상대오차가 50 %를 넘습니다 — 계수 시간을 늘리거나 ROI 를 넓히세요">${meas?"이 스펙트럼으론 신호 부족":"신호 부족"}</span>`);
-    if(c.unexpl) notes.push(`<span class="badge warn" title="모형(선택 원소 + 배경)이 설명하지 못한 counts 가 window 안에 3σ 이상, 신호의 10 % 이상 남았습니다. 원인 후보: 목록에 없는 원소, 선 모양 차이(특히 M 계열 상대세기), escape·sum peak">window 잔차 큼</span>`);
-    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인하세요${o.alt&&o.alt.line.fam==="L"?` (차선 ${esc(lname(o.alt.line))})`:""}">M 계열</span>`);
+    if(c.unexpl) notes.push(`<span class="badge warn" title="모형(선택 원소 + 배경)이 설명하지 못한 counts 가 window 안에 3σ 이상, 신호의 10 % 이상 남았습니다. 원인 후보: 목록에 없는 원소, 선 모양 차이(특히 M 계열 상대세기), escape·sum peak">window residual 큼</span>`);
+    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인하세요${o.alt&&o.alt.line.fam==="L"?` (alternative ${esc(lname(o.alt.line))})`:""}">M 계열</span>`);
     return `<tr><td class="l"><b>${esc(o.el)}</b></td>
       <td class="l" style="max-width:220px;white-space:normal"><b>${esc(lname(l))}</b> <span class="muted">${l.e.toFixed(3)} keV</span><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">${badge(c)} ${notes.join(" ")}</div></td>
       <td class="num">${pct(c.err)}</td><td class="num">${pct(c.purity)}</td>
@@ -41084,7 +41084,7 @@ function html(R){
       <span style="flex:1"></span><button class="btn sm" id="ifSugCsv">CSV</button></h3>
     <div class="note ${meas?"okay":"warn"}" style="margin-bottom:8px">${head}</div>
     <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">원소</th><th class="l">추천 라인</th><th title="계수 통계 + 겹친 선 차감 오차 + 배경 차감 오차${meas?"":" — 모형 모드는 가장 밝은 선 1e5 counts 로 둔 명목값"}">예상 상대오차${meas?"":" (명목)"}</th>
-      <th title="window 안 counts 중 이 원소 fraction">purity</th>${meas?"<th>counts (window)</th>":""}<th class="l">주 interference</th><th class="l">차선</th><th class="l">window</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <th title="window 안 counts 중 이 원소 fraction">purity</th>${meas?"<th>counts (window)</th>":""}<th class="l">주 interference</th><th class="l">alternative</th><th class="l">window</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="font-size:12px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
       <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent);opacity:.75;border-radius:2px;vertical-align:-1px"></i> 그 원소</span>
       <span><i style="display:inline-block;width:10px;height:10px;background:var(--warn);opacity:.55;border-radius:2px;vertical-align:-1px"></i> 다른 원소 (interference)</span>
