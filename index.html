@@ -774,6 +774,45 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .xps-empty{padding:42px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
 .xps .pid-tbl td{font-size:11.5px}
 
+/* 대전 보정 줄 */
+.xps .xps-chg{flex-basis:100%;width:100%;min-width:0;max-width:100%;box-sizing:border-box;border-top:1px solid var(--line);padding-top:8px;margin-top:2px}
+.xps .xps-chg .bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.xps .xps-chg .lbl{font-size:12px;color:var(--muted);font-weight:700}
+.xps .xps-chg .smpn{font-weight:700;font-size:12.5px;color:var(--ink);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xps .chip{display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--line2);border-radius:999px;padding:3px 12px;font-size:12px;background:var(--surface);min-width:0;max-width:100%}
+.xps .chip b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.xps .chip .sub{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.xps .chip.ok{border-color:color-mix(in srgb,var(--ok) 45%,var(--line2));background:var(--ok-soft)}.xps .chip.ok b{color:var(--ok)}
+.xps .chip.wr{border-color:color-mix(in srgb,var(--warn) 50%,var(--line2));background:var(--warn-soft)}.xps .chip.wr b{color:var(--warn)}
+.xps .xps-chg .btn.on{background:var(--chip)}
+.xps .xps-chg .set{margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;background:var(--page)}
+.xps .xps-chg .set .r{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12.5px;min-width:0}
+.xps .xps-chg .set .r>*{min-width:0}
+.xps .xps-chg .set .k{width:84px;flex:none;color:var(--muted);font-size:12px;font-weight:600}
+.xps .xps-chg .set select{max-width:min(520px,100%);min-width:0;text-overflow:ellipsis}
+@media (max-width:600px){.xps .xps-chg .set .k{width:100%}.xps .xps-chg .set select{width:100%}}
+/* 목록의 시료 머리 */
+.xps .xps-list .smp>.h .snm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xps .xps-list .smp>.h .ren{border:none;background:none;color:var(--faint);cursor:pointer;font-size:12px;padding:0 2px}
+.xps .xps-list .smp>.h .ren:hover{color:var(--accent)}
+.xps .xps-list .smp>.h .badge{margin-left:auto}
+.xps .xps-list .smp>.h input{flex:1;min-width:0;width:auto}
+.xps .xps-list .smp>.ctx{font-size:10.5px;color:var(--faint);padding:0 4px 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xps .xps-steps{margin:10px 2px 0 18px;padding:0;font-size:11.5px;color:var(--muted);line-height:1.55}
+.xps .xps-steps li{margin-bottom:4px}
+/* 알림 줄 */
+.xps .xps-msg{margin-top:8px}
+.xps .xps-msg .cur{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);border-radius:9px;padding:6px 8px 6px 10px;font-size:12.5px;line-height:1.5;color:var(--ink);background:var(--surface)}
+.xps .xps-msg .cur .ic{flex:none;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;background:var(--info-soft);color:var(--info);margin-top:1px}
+.xps .xps-msg .cur.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}.xps .xps-msg .cur.ok .ic{background:var(--ok-soft);color:var(--ok)}
+.xps .xps-msg .cur.warn{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:var(--warn-soft)}.xps .xps-msg .cur.warn .ic{background:var(--warn);color:var(--surface)}
+.xps .xps-msg .cur .tx{flex:1;min-width:0}
+.xps .xps-msg .cur .x{border:none;background:none;color:var(--faint);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+.xps .xps-msg .old{margin-top:3px;font-size:11.5px;color:var(--muted)}
+.xps .xps-msg .old summary{cursor:pointer;font-size:11px}
+.xps .xps-msg .old div{padding:2px 0 2px 10px;border-left:2px solid var(--line)}
+.xps .xps-msg .old div.warn{border-left-color:var(--warn)}
+
 /* 파일 열을 쓰지 않는 탭(Energy Diagram·DRE·XPS — XPS 는 자체 파일 목록)에서는 숨기고 폭을 넘긴다 */
 #app.ed-on .side,#app.ed-on .sidetog{display:none!important}
 #app.ed-on .main{padding-left:0}
@@ -41520,10 +41559,21 @@ function sampleFromName(fn){
 }
 
 /* Avantage 경로 "…\\Experiment2\\X-Ray018 400um - FG  ON\\W1\\Group\\C1s Scan.VGD" → "W1" (Group 위 폴더 = 측정 지점/시료) */
+/* Avantage 원래 경로 → 측정 지점(점) 폴더 이름. 예: …\\W1\\Group\\C1s Scan.VGD → "W1" */
+function pathPoint(p){
+  const a=String(p||"").split(/[\\/]/).filter(Boolean); if(a.length<2) return "";
+  a.pop(); if(/^group$/i.test(a[a.length-1])) a.pop();
+  return a.length?a[a.length-1].replace(/\s+/g," "):"";
+}
+/* VGD 의 시료 키: 측정 지점 폴더 + 위로 세 단계(자료·실험·측정 조건) — 다른 실험의 같은 지점 이름(W1 등)이 한 시료로 합쳐지지 않게.
+   예: C:\\DATA\\K231213C\\Experiment2\\X-Ray018 400um - FG  ON\\W1\\Group\\C1s Scan.VGD → "K231213C / Experiment2 / X-Ray018 400um - FG ON / W1"
+   (표시: 이름 = 마지막 부분, 맥락 = 앞부분) */
 function pathSample(p){
   const a=String(p||"").split(/[\\/]/).filter(Boolean); if(a.length<2) return "";
   a.pop(); if(/^group$/i.test(a[a.length-1])) a.pop();
-  return a.length?a[a.length-1]:"";
+  let seg=a.filter(s=>!/^[a-z]:$/i.test(s)).map(s=>s.replace(/\s+/g," ").trim()).filter(Boolean);
+  seg=seg.slice(-4); if(seg.length>1&&/^data$/i.test(seg[0])) seg.shift();
+  return seg.join(" / ");
 }
 /* 스펙트럼 객체: be 는 오름차순 Float64Array, y 는 CPS. c = 1 CPS 당 count (모르면 null) */
 let _uid=0;
@@ -41910,7 +41960,7 @@ function avantageSheets(sheets,fileName){
     const unit=colName(ic);
     const w2=[]; if(!/counts\s*\/\s*s|cps/i.test(unit)) w2.push("세기 단위 '"+unit+"' — CPS 로 간주");
     const ext=Object.keys(others).length?{avantageCols:others}:null;
-    const pt=pathSample(path);
+    const pt=pathPoint(path);
     out.push(mkSpec({name:region,region,file:fileName,format:"Avantage XLS",hv,hvSrc:"Avantage 기본값 1486.68 (파일에 없음)",be,y,
       sample:String(fileName||"").replace(/^.*[\\/]/,"").replace(/\.xlsx?$/i,"")+(pt?" · "+pt:""),
       meta:{origPath:path,expDesc:desc,yUnit:unit,when,point:pt},warn:w2,extra:ext}));
@@ -41998,7 +42048,7 @@ async function readFile(name,u8,opt){
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,pathSample,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -43013,7 +43063,18 @@ const C=window.XPS_CORE, IO=window.XPS_IO;
 const LIB=()=>window.XPS_LIB||{core:{},scofield:{al:{},mg:{}},althermo1:{},auger:[],meta:{sources:{}}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $q=(r,s)=>r.querySelector(s), $a=(r,s)=>[...r.querySelectorAll(s)];
-const note=(m,k)=>{ try{ if(typeof toast==="function") toast(m,k); else console.log(m); }catch(e){} };
+/* 알림: XPS 화면이 있으면 그래프 아래 알림 줄(최근 것 + 이전 6 개), 없으면 앱의 toast. act = {label, fn} 이면 버튼 */
+let MSGS=[];
+const note=(m,k,act)=>{ try{ const el=ROOT&&ROOT.querySelector&&ROOT.querySelector("#xpsMsg");
+  if(el){ MSGS.unshift({m:String(m),k:k||"",act:act||null,t:Date.now()}); MSGS=MSGS.slice(0,7); drawMsg(); return; }
+  if(typeof toast==="function") toast(m,k); else console.log(m); }catch(e){} };
+function drawMsg(){ const el=ROOT&&$q(ROOT,"#xpsMsg"); if(!el) return; if(!MSGS.length){ el.innerHTML=""; el.hidden=true; return; } el.hidden=false;
+  const m=MSGS[0], old=MSGS.slice(1);
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="xpsMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="xpsMsgX" title="닫기">×</button></div>
+    ${old.length?`<details class="old"><summary>이전 알림 ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
+  $q(el,"#xpsMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); };
+  const b=$q(el,"#xpsMsgA"); if(b) b.onclick=()=>{ const f=m.act&&m.act.fn; m.act=null; drawMsg(); if(f) f(); };
+}
 const f=(v,d)=>v==null||!isFinite(v)?"—":(+v).toFixed(d==null?2:d);
 const g=(v,d)=>{ if(v==null||!isFinite(v)) return "—"; const a=Math.abs(v); if(a!==0&&(a<1e-3||a>=1e6)) return v.toExponential((d||3)-1); return (+v.toPrecision(d||4)).toLocaleString("en-US",{maximumFractionDigits:6}); };
 const pm=(v,s,d)=>v==null||!isFinite(v)?"—":`${f(v,d)}${s!=null&&isFinite(s)?` <span class="muted xs">± ${f(s,d)}</span>`:""}`;
@@ -43029,7 +43090,11 @@ function idb(){ return new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,
 async function dbGet(){ try{ const db=await idb(); return await new Promise(res=>{ const t=db.transaction(DBS,"readonly").objectStore(DBS).get("cur"); t.onsuccess=()=>res(t.result||null); t.onerror=()=>res(null); }); }catch(e){ return null; } }
 async function dbPut(v){ try{ const db=await idb(); await new Promise(res=>{ const t=db.transaction(DBS,"readwrite"); t.objectStore(DBS).put(v,"cur"); t.oncomplete=res; t.onerror=res; }); }catch(e){} }
 let _svT=null;
-function save(){ clearTimeout(_svT); _svT=setTimeout(()=>{ const o=Object.assign({},S); dbPut(JSON.parse(JSON.stringify(o,(k,v)=>ArrayBuffer.isView(v)?{__f64:Array.from(v)}:v))); },600); }
+const _snap=()=>JSON.parse(JSON.stringify(Object.assign({},S),(k,v)=>ArrayBuffer.isView(v)?{__f64:Array.from(v)}:v));
+function save(){ clearTimeout(_svT); _svT=setTimeout(()=>{ _svT=null; dbPut(_snap()); },600); }
+/* 탭을 닫거나 숨길 때 미뤄 둔 저장을 바로 */
+function flushSave(){ if(_svT){ clearTimeout(_svT); _svT=null; dbPut(_snap()); } }
+try{ window.addEventListener("pagehide",flushSave); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushSave(); }); }catch(e){}
 function revive(o){ return JSON.parse(JSON.stringify(o),(k,v)=>v&&typeof v==="object"&&Array.isArray(v.__f64)?Float64Array.from(v.__f64):v); }
 
 /* ---------------- 접근자 ---------------- */
@@ -43037,7 +43102,13 @@ const cur=()=>S.specs.find(s=>s.uid===S.sel)||null;
 const byUid=u=>S.specs.find(s=>s.uid===u)||null;
 function pr(sp){ sp=sp||cur(); if(!sp) return null; let p=S.proc[sp.uid]; if(!p){ p=S.proc[sp.uid]=defProc(sp); } return p; }
 function defProc(sp){ const sv=sp.reg&&sp.reg.kind==="survey"; return {lo:sp.be[0],hi:sp.be[sp.n-1],bg:{type:sv?"none":"smart",n:5,C:1643,D:0,u3:false,c0:null,k:null,s:0,cons:{s:{mode:"fixed"}}},comps:[],cons:{},result:null,hist:[],models:[],ver:0}; }
-function smpOf(sp){ const k=sp.sample||"(시료 이름 없음)"; if(!S.samples[k]) S.samples[k]={shift:0,target:284.8,refNote:""}; return S.samples[k]; }
+const NOSMP="(시료 이름 없음)";
+const SK=sp=>sp&&sp.sample||NOSMP;
+/* 시료 키 표시: "자료 / 실험 / 조건 / W1" → 이름 W1, 맥락 "자료 · 실험 · 조건" */
+function smpDisp(k){ const a=String(k||NOSMP).split(" / "); return {name:a[a.length-1],ctx:a.slice(0,-1).join(" · ")}; }
+function smpOf(sp){ const k=SK(sp); if(!S.samples[k]) S.samples[k]={shift:0,target:284.8,refNote:""}; return S.samples[k]; }
+const sampleSpecs=k=>S.specs.filter(s=>SK(s)===k);
+const isC1s=s=>!!(s&&s.reg&&s.reg.el==="C"&&s.reg.orb==="1s");
 const shOf=sp=>sp?smpOf(sp).shift||0:0;
 function slotFor(p){ const used=new Set(p.comps.map(c=>c.slot)); for(let i=0;i<SLOTS;i++) if(!used.has(i)) return i; return SLOTS; }
 const colorOf=c=>c.slot!=null&&c.slot<SLOTS?`var(--s${c.slot+1})`:"var(--faint)";
@@ -43048,19 +43119,23 @@ function touch(p){ p.ver=(p.ver||0)+1; if(p.result) p.result.stale=true; save();
    ============================================================ */
 async function loadFiles(list){
   const arr=[...list]; if(!arr.length) return;
-  let nNew=0; const errs=[], warns=[];
+  let nNew=0, nDup=0; const errs=[], warns=[];
+  // 이미 열린 같은 스펙트럼(같은 시료·영역·파일·형식·점 수·첫 BE·첫 세기)은 다시 넣지 않는다
+  const sig=s=>[SK(s),s.region,s.file,s.format,s.n,(+s.be[0]).toFixed(4),(+s.y[0]).toPrecision(8)].join("|");
+  const have=new Set(S.specs.map(sig)); const isDup=s=>{ const k=sig(s); if(have.has(k)) return true; have.add(k); return false; };
   for(const file of arr){
     try{
       const u8=new Uint8Array(await file.arrayBuffer());
       if(/\.json$/i.test(file.name)){ importProject(new TextDecoder().decode(u8)); continue; }
       const r=await IO.readFile(file.name,u8,{});
-      r.spectra.forEach(sp=>{ S.specs.push(sp); pr(sp); smpOf(sp); nNew++; if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
+      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++; if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
       if(r.tables&&r.tables.length) r.tables.forEach(t=>{ if(/peak/i.test(t.name)&&t.rows.length>1) warns.push(file.name+": Avantage '"+t.name+"' 표가 있습니다(정보 탭)"); });
     }catch(e){ errs.push(file.name+": "+(e.message||e)); }
   }
   if(nNew&&(!S.sel||!cur())) S.sel=S.specs[S.specs.length-nNew].uid;
   save(); rerender();
-  if(nNew) note(`스펙트럼 ${nNew}개를 읽었습니다`+(warns.length?` — 확인할 점 ${warns.length}건(정보 탭)`:""),"ok");
+  if(nNew) note(`스펙트럼 ${nNew}개를 읽었습니다`+(nDup?` (이미 열린 ${nDup}개는 건너뜀)`:"")+(warns.length?` — 확인할 점 ${warns.length}건(정보 탭)`:""),"ok");
+  else if(nDup) note(`이미 열려 있는 스펙트럼입니다 (${nDup}개) — 새로 넣지 않았습니다`);
   errs.forEach(e=>note(e,"warn"));
 }
 
@@ -43202,7 +43277,7 @@ function drawOverlay(host){
   o.push(`<rect class="ax" x="${ML}" y="${MT}" width="${pw}" height="${ph}" fill="none"/>`);
   series.forEach((s,k)=>{ let d=""; s.x.forEach((x,i)=>d+=(i?"L":"M")+X(x).toFixed(1)+","+Y(s.y[i]).toFixed(1)); o.push(`<path d="${d}" fill="none" stroke="var(--s${(k%SLOTS)+1})" stroke-width="1.6"/>`); });
   o.push(`<text class="al" x="${ML+pw/2}" y="${MT+ph+30}" text-anchor="middle">결합에너지 (eV, 시료별 대전 보정 적용)</text></svg>`);
-  host.innerHTML=o.join("")+`<div class="xps-legend">${series.map((s,k)=>`<span><i style="background:var(--s${(k%SLOTS)+1})"></i>${esc(s.sp.sample)} · ${esc(s.sp.region)}</span>`).join("")}</div>`;
+  host.innerHTML=o.join("")+`<div class="xps-legend">${series.map((s,k)=>`<span><i style="background:var(--s${(k%SLOTS)+1})"></i><span title="${esc(SK(s.sp))}">${esc(smpDisp(SK(s.sp)).name)}</span> · ${esc(s.sp.region)}</span>`).join("")}</div>`;
 }
 
 /* ---------------- 그래프 조작 ---------------- */
@@ -43255,7 +43330,7 @@ function hover(svg,tip,q){
    ============================================================ */
 function pushHist(p,why){ p.hist=p.hist||[]; p.hist.push({why,comps:C.clone(p.comps),cons:C.clone(p.cons),bg:C.clone(p.bg),lo:p.lo,hi:p.hi}); if(p.hist.length>25) p.hist.shift(); }
 function undo(){ const p=pr(); if(!p||!p.hist||!p.hist.length){ note("되돌릴 것이 없습니다","warn"); return; } const h=p.hist.pop(); p.comps=h.comps; p.cons=h.cons; p.bg=h.bg; p.lo=h.lo; p.hi=h.hi; touch(p); rerender(); note("되돌렸습니다: "+h.why); }
-function defName(sp,p,doublet){ const r=sp.reg||{}; const base=r.el?(r.el+" "+(r.orb||"")+(doublet||!ORB_J[(r.orb||"s").slice(-1)]?"":ORB_J[(r.orb||"s").slice(-1)][0])):"성분"; const n=p.comps.filter(c=>(c.name||"").startsWith(base)).length; return base+(n?" "+String.fromCharCode(65+n):""); }
+function defName(sp,p,doublet){ const r=sp.reg||{}; const base=r.el?(r.el+" "+(r.orb||"")+(doublet||!ORB_J[(r.orb||"s").slice(-1)]?"":ORB_J[(r.orb||"s").slice(-1)][0])):"성분"; const used=new Set(p.comps.map(c=>c.name||"")); if(!used.has(base)) return base; for(let i=1;i<26;i++){ const nm=base+" "+String.fromCharCode(65+i); if(!used.has(nm)) return nm; } return base+" "+(p.comps.length+1); }
 function addCompAt(be,yv){
   const sp=cur(), p=pr(sp), M=curModel(sp,p); pushHist(p,"성분 추가");
   const bgAt=M?interp(M.E,M.B,be):0; const h=Math.max(1,(yv!=null?yv:(M?interp(M.E,M.y,be):1))-bgAt);
@@ -43289,7 +43364,8 @@ async function autoSuggest(){
     const ch=o.added||o.removed||(o.relaxed&&o.relaxed.length);
     if(ch){
       const keep=new Map(p.comps.map(c=>[c.id,c]));
-      p.comps=o.comps.map(c=>{ const k=keep.get(c.id); if(k){ c.name=k.name; c.slot=k.slot; } else { c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } return c; });
+      const olds=o.comps.filter(c=>keep.has(c.id)).map(c=>{ const k=keep.get(c.id); c.name=k.name; c.slot=k.slot; return c; });
+      p.comps=olds; o.comps.filter(c=>!keep.has(c.id)).forEach(c=>{ c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); p.comps.push(c); });
       p.cons=o.cons; }
     else { const m=new Map(o.comps.map(c=>[c.id,c])); p.comps.forEach(c=>{ const q=m.get(c.id); if(q) Object.keys(q).forEach(k=>{ if(k!=="name"&&k!=="slot"&&k!=="color") c[k]=q[k]; }); }); }
     touch(p); rerender();
@@ -43400,14 +43476,15 @@ function build(root){
   ROOT=root;
   root.innerHTML=`<div class="xps">
     <div class="card xps-top">
-      <div class="grp"><label class="btn primary sm" style="cursor:pointer">파일 열기<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">VGD · VAMAS · Avantage xls/xlsx/avg · 텍스트 — 끌어다 놓기 가능</span></div>
-      <div class="grp" id="xpsChg"></div>
-      <div class="grp" style="margin-left:auto"><button class="btn sm" id="xpsSaveP">프로젝트 저장</button><label class="btn sm" style="cursor:pointer">프로젝트 열기<input type="file" id="xpsLoadP" accept=".json" style="display:none"></label><button class="btn sm" id="xpsClear">모두 지우기</button></div>
+      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="VGD · VAMAS(.vms) · Avantage xls/xlsx/avg · 텍스트. 여러 파일·폴더째 끌어다 놓아도 됩니다">파일 열기<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+      <div class="grp" style="margin-left:auto"><button class="btn sm" id="xpsSaveP" title="스펙트럼·피팅·대전 보정을 JSON 한 파일로 저장">작업 저장</button><label class="btn sm" style="cursor:pointer" title="저장한 JSON 열기">작업 열기<input type="file" id="xpsLoadP" accept=".json" style="display:none"></label><button class="btn sm" id="xpsClear" title="목록과 작업을 모두 지움(두 번 눌러 확인)">모두 지우기</button></div>
+      <div class="xps-chg" id="xpsChg"></div>
     </div>
     <div class="xps-main">
       <div class="card xps-list" id="xpsList"></div>
       <div class="card xps-center"><div class="xps-plotbar" id="xpsBar"></div><div id="xpsPlot"></div>
-        <div class="xps-prog" id="xpsProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="xpsStop">중단</button></div></div>
+        <div class="xps-prog" id="xpsProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="xpsStop">중단</button></div>
+        <div class="xps-msg" id="xpsMsg" hidden></div></div>
       <div class="card xps-side"><div class="seg xps-tabs" id="xpsTabs"></div><div id="xpsPanel"></div></div>
     </div></div>`;
   const x=$q(root,".xps");
@@ -43423,18 +43500,24 @@ function build(root){
 }
 const _cf={};
 function confirmInline(k,msg){ const now=Date.now(); if(_cf[k]&&now-_cf[k]<4000){ delete _cf[k]; return true; } _cf[k]=now; note(msg,"warn"); return false; }
-function rerender(){ if(!ROOT||!$q(ROOT,".xps")) return; drawList(); drawBar(); drawChg(); drawTabs(); drawPlot(); renderPanel(); }
+function rerender(){ if(!ROOT||!$q(ROOT,".xps")) return; drawList(); drawBar(); drawChg(); drawTabs(); drawPlot(); renderPanel(); drawMsg(); }
 
 /* ---------------- 왼쪽 목록 ---------------- */
 function drawList(){
   const el=$q(ROOT,"#xpsList"); if(!el) return;
-  if(!S.specs.length){ el.innerHTML=`<div class="xps-drop" id="xpsDrop">여기에 파일을 놓거나<br><b>눌러서 열기</b><br><span class="xs">여러 파일·여러 시료 한꺼번에</span></div>`; $q(el,"#xpsDrop").onclick=()=>$q(ROOT,"#xpsFin").click(); return; }
-  const groups={}; S.specs.forEach(s=>{ const k=s.sample||"(시료 이름 없음)"; (groups[k]=groups[k]||[]).push(s); });
+  if(!S.specs.length){ el.innerHTML=`<div class="xps-drop" id="xpsDrop">여기에 파일을 놓거나<br><b>눌러서 열기</b><br><span class="xs">한 측정 지점의 파일을 <b>C 1s 와 함께</b> 한꺼번에</span></div>
+    <ol class="xps-steps"><li><b>파일 열기</b> — Survey·C 1s·관심 원소를 같이. 같은 시료끼리 자동으로 묶입니다</li><li><b>대전 보정</b> — 위의 <b>C 1s 로 맞추기</b> 한 번(C 1s 를 자동으로 피팅해 맞춤)</li><li><b>피팅</b> — 스펙트럼을 고르고 <b>자동 제안</b> → <b>피팅</b></li><li><b>정량·내보내기</b> — 정량·결과 탭</li></ol>`; $q(el,"#xpsDrop").onclick=()=>$q(ROOT,"#xpsFin").click(); return; }
+  const groups={}; S.specs.forEach(s=>{ const k=SK(s); (groups[k]=groups[k]||[]).push(s); });
   const ov=new Set(S.ui.overlay);
-  el.innerHTML=Object.entries(groups).map(([k,arr])=>{ const sm=S.samples[k]||{shift:0};
-    return `<div class="smp"><div class="h" title="${esc(k)}">${esc(k)}<span class="sh">${sm.shift?`Δ ${sm.shift>0?"+":""}${f(sm.shift,2)}`:""}</span></div>${arr.map(s=>{ const p=S.proc[s.uid]; const r=p&&p.result; const st=r?(r.stale?`<span class="st stale">수정됨</span>`:`<span class="st ok">χ²ν ${f(r.stats.chi2nu,2)}</span>`):(p&&p.comps.length?`<span class="st">${p.comps.length}성분</span>`:"");
+  el.innerHTML=Object.entries(groups).map(([k,arr])=>{ const d=smpDisp(k); const cs=chgState(arr[0]); const ren=S.ui.renSmp===k;
+    const badge=cs.st==="none"?(arr.some(isC1s)?`<span class="badge wr" title="대전 보정 안 함 — 위의 ‘C 1s 로 맞추기’">보정 전</span>`:`<span class="badge" title="대전 보정 안 함 (이 시료에 C 1s 없음)">보정 전</span>`)
+      :cs.st==="ok"||cs.st==="manual"?`<span class="badge ok" title="대전 보정 ${esc(smpOf(arr[0]).refNote||"")}">Δ ${cs.sh>0?"+":""}${f(cs.sh,2)}</span>`:`<span class="badge wr" title="${esc(cs.why||"")}">Δ ${cs.sh>0?"+":""}${f(cs.sh,2)} ⟳</span>`;
+    return `<div class="smp"><div class="h" title="${esc(k)}">${ren?`<input type="text" class="xps-in" id="xpsRenI" value="${esc(k===NOSMP?"":k)}" placeholder="시료 이름"><button class="btn xs" id="xpsRenOk">확인</button>`
+      :`<span class="snm">${esc(d.name)}</span><button class="ren" data-ren="${esc(k)}" title="시료 이름 바꾸기 — 다른 시료와 같은 이름으로 바꾸면 합쳐집니다">✎</button>${badge}`}</div>${d.ctx&&!ren?`<div class="ctx" title="${esc(k)}">${esc(d.ctx)}</div>`:""}${arr.map(s=>{ const p=S.proc[s.uid]; const r=p&&p.result; const st=r?(r.stale?`<span class="st stale">수정됨</span>`:`<span class="st ok">χ²ν ${f(r.stats.chi2nu,2)}</span>`):(p&&p.comps.length?`<span class="st">${p.comps.length}성분</span>`:"");
       return `<div class="it ${s.uid===S.sel?"sel":""}" data-u="${s.uid}"><input type="checkbox" data-ov="${s.uid}" ${ov.has(s.uid)?"checked":""} title="겹쳐 보기에 넣기"><span class="nm">${esc(s.region)}</span><span class="fm">${esc(s.format.replace("Avantage ",""))}</span>${st}<button class="x" data-del="${s.uid}" title="목록에서 빼기">×</button></div>`; }).join("")}</div>`; }).join("")
     +`<div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap">${S.ui.overlay.length>1?`<span class="badge inf">겹쳐 보기 ${S.ui.overlay.length}개</span> <select class="xps-sel" id="xpsOvN"><option value="max">최대=1</option><option value="area">넓이=1</option><option value="none">원래 세기</option></select> <span class="xps-f">간격 <input type="number" class="w56" id="xpsOvO" step="0.1" value="${S.ui.ovOffset}"></span> <button class="btn xs" id="xpsOvX">끄기</button>`:`<span class="muted xs">체크하면 겹쳐 봅니다 (2개 이상)</span>`}</div>`;
+  $a(el,"[data-ren]").forEach(b=>b.onclick=()=>{ S.ui.renSmp=b.dataset.ren; drawList(); const i=$q(el,"#xpsRenI"); if(i){ i.focus(); i.select(); } });
+  const ri=$q(el,"#xpsRenI"); if(ri){ const go=()=>{ const o=S.ui.renSmp; S.ui.renSmp=null; renameSample(o,ri.value); }; $q(el,"#xpsRenOk").onclick=go; ri.onkeydown=e=>{ if(e.key==="Enter") go(); if(e.key==="Escape"){ S.ui.renSmp=null; drawList(); } }; }
   $a(el,".it").forEach(d=>d.onclick=e=>{ if(e.target.closest("button")||e.target.tagName==="INPUT") return; S.sel=d.dataset.u; S.ui.selComp=null; save(); rerender(); });
   $a(el,"[data-del]").forEach(b=>b.onclick=()=>{ const u=b.dataset.del; if(!confirmInline("del"+u,"다시 누르면 목록에서 뺍니다")) return; S.specs=S.specs.filter(s=>s.uid!==u); delete S.proc[u]; S.ui.overlay=S.ui.overlay.filter(x=>x!==u); if(S.sel===u) S.sel=S.specs[0]?S.specs[0].uid:null; save(); rerender(); });
   $a(el,"[data-ov]").forEach(b=>b.onchange=()=>{ const u=b.dataset.ov; S.ui.overlay=b.checked?[...new Set(S.ui.overlay.concat(u))]:S.ui.overlay.filter(x=>x!==u); save(); rerender(); });
@@ -43447,50 +43530,131 @@ function drawBar(){
   const el=$q(ROOT,"#xpsBar"); if(!el) return; const sp=cur();
   if(!sp||S.ui.overlay.length>1){ el.innerHTML=S.ui.overlay.length>1?`<span class="ttl">겹쳐 보기</span>`:""; return; }
   const p=pr(sp);
-  el.innerHTML=`<span class="ttl">${esc(sp.region)}</span><span class="muted">${esc(sp.sample)}</span>
+  el.innerHTML=`<span class="ttl">${esc(sp.region)}</span><span class="muted" title="${esc(SK(sp))}">${esc(smpDisp(SK(sp)).name)}</span>
     <span class="sp"></span>
-    <button class="btn xs ${S.ui.addMode?"primary":""}" id="xpsAdd" title="그래프를 눌러 그 자리에 성분 추가">+ 눌러서 추가</button>
-    <select class="xps-sel" id="xpsAddS" title="추가할 모양">${Object.entries(C.SHAPES).map(([k,v])=>`<option value="${k}" ${S.ui.addShape===k?"selected":""}>${esc(k)}</option>`).join("")}</select>
+    <button class="btn xs ${S.ui.addMode?"primary":""}" id="xpsAdd" title="누른 뒤 그래프에서 성분을 둘 자리를 클릭 (세로 위치 = 높이). 다시 누르면 끔">${S.ui.addMode?"추가 중 — 그래프 클릭":"+ 성분 추가"}</button>
+    <select class="xps-sel" id="xpsAddS" title="추가할 성분의 선모양 (GLS = Avantage L/G Mix Sum)">${Object.entries(C.SHAPES).map(([k,v])=>`<option value="${k}" ${S.ui.addShape===k?"selected":""}>${esc(k)}</option>`).join("")}</select>
     <label class="xps-f" title="스핀–궤도 doublet 으로 추가"><input type="checkbox" id="xpsAddD" ${S.ui.addDoublet?"checked":""} ${soInfo(sp.reg.el,sp.reg.orb)?"":"disabled"}> doublet</label>
-    <label class="xps-f"><input type="checkbox" id="xpsRef" ${S.ui.showRef?"checked":""}> 참고선</label>
-    <button class="btn xs" id="xpsFitV" title="피팅 영역으로 확대">영역 보기</button><button class="btn xs" id="xpsAll" title="전체 (그래프 두 번 눌러도 됨)">전체</button>`;
-  $q(el,"#xpsAdd").onclick=()=>{ S.ui.addMode=!S.ui.addMode; drawBar(); if(S.ui.addMode) note("그래프에서 성분을 둘 자리를 누르세요 (세로 위치 = 높이)"); };
+    <label class="xps-f" title="라이브러리의 이 원소 준위 위치(대전 보정 적용)를 세로선으로"><input type="checkbox" id="xpsRef" ${S.ui.showRef?"checked":""}> 문헌 위치</label>
+    <button class="btn xs" id="xpsFitV" title="피팅 영역에 맞춰 확대">피팅 영역 확대</button><button class="btn xs" id="xpsAll" title="전체 보기 (그래프를 두 번 눌러도 됨)">전체 보기</button>`;
+  $q(el,"#xpsAdd").onclick=()=>{ S.ui.addMode=!S.ui.addMode; drawBar(); };
   $q(el,"#xpsAddS").onchange=e=>{ S.ui.addShape=e.target.value; save(); };
   $q(el,"#xpsAddD").onchange=e=>{ S.ui.addDoublet=e.target.checked; save(); };
   $q(el,"#xpsRef").onchange=e=>{ S.ui.showRef=e.target.checked; save(); drawPlot(); };
   $q(el,"#xpsAll").onclick=()=>{ delete PV[sp.uid]; drawPlot(); };
   $q(el,"#xpsFitV").onclick=()=>{ const v=plotView(sp); const sh=shOf(sp); const w=(p.hi-p.lo)*0.04; v.x0=p.lo+sh-w; v.x1=p.hi+sh+w; clampView(sp,v); drawPlot(); };
 }
-/* ---------------- 대전 보정 ---------------- */
+/* ---------------- 대전 보정 ----------------
+   시료마다 Δ 하나. 기준(sm.ref) = {uid, compId, be, name, file, target, how}: 기준 스펙트럼의 피팅된 성분.
+   피팅은 측정 BE 로 하고 화면·표·내보내기에만 Δ 를 더한다 → 피팅 순서와 무관. 기준 성분의 BE 가 다시 피팅으로 바뀌면 '다시 맞추기' 표시. */
+function chgCands(k){ return sampleSpecs(k).filter(isC1s); }
+/* 기준 성분 자동 선택: 넓이가 C 성분 합의 10 % 이상인 것 중 가장 낮은 BE (보통 C–C/C–H; 작은 탄화물·잡음 성분은 건너뜀) */
+function autoRefComp(comps){ const cc=comps.filter(c=>!c.el||c.el==="C"); const tot=cc.reduce((s,c)=>s+Math.max(0,c.area),0)||1;
+  return cc.filter(c=>c.area>=0.1*tot).sort((a,b)=>a.be-b.be)[0]||cc.sort((a,b)=>a.be-b.be)[0]||null; }
+function fitted(s){ const p=pr(s); return p.result&&!p.result.stale?p.result:null; }
+function chgState(sp){
+  const sm=smpOf(sp), sh=sm.shift||0;
+  if(sm.ref){ const s=byUid(sm.ref.uid); if(!s) return {st:"stale",sh,why:"기준 스펙트럼이 목록에서 빠졌습니다"};
+    const r=fitted(s); const c=r&&r.comps.find(c=>c.id===sm.ref.compId);
+    if(!r) return {st:"stale",sh,why:"기준 C 1s 의 피팅이 바뀌었거나 지워졌습니다 — 다시 맞추세요"};
+    if(!c) return {st:"stale",sh,why:"기준 성분이 없어졌습니다 — 다시 맞추세요"};
+    if(Math.abs(c.be-sm.ref.be)>0.005) return {st:"stale",sh,why:`기준 성분 BE 가 ${f(sm.ref.be,2)} → ${f(c.be,2)} eV 로 바뀌었습니다 — 다시 맞추세요`};
+    return {st:"ok",sh}; }
+  if(sh) return {st:"manual",sh};
+  return {st:"none",sh:0};
+}
+function setShift(sp,sh,ref,noteTxt){ const sm=smpOf(sp); sm.shift=+(+sh).toFixed(3); sm.ref=ref||null; sm.refNote=noteTxt||""; Object.keys(PV).forEach(k=>delete PV[k]); save(); rerender(); }
+/* 결과·정량 탭 위에 붙이는 한 줄 */
+function chgBanner(sp){ const cs=chgState(sp); if(cs.st==="ok"||cs.st==="manual") return "";
+  if(cs.st==="none") return `<div class="note ${chgCands(SK(sp)).length?"warn":""}" style="margin:4px 0 6px">대전 보정 전 BE 입니다${chgCands(SK(sp)).length?" — 위의 <b>C 1s 로 맞추기</b>를 누르세요":" (이 시료에 C 1s 없음 — 위 <b>기준 설정</b>에서 다른 기준이나 Δ 를 넣을 수 있습니다)"}.</div>`;
+  return `<div class="note warn" style="margin:4px 0 6px">${esc(cs.why)}.</div>`; }
 function drawChg(){
-  const el=$q(ROOT,"#xpsChg"); if(!el) return; const sp=cur(); if(!sp){ el.innerHTML=""; return; }
-  const sm=smpOf(sp);
-  el.innerHTML=`<span class="lbl">대전 보정</span><span class="xps-f">Δ <input type="number" step="0.01" class="w64" id="xpsSh" value="${+(sm.shift||0).toFixed(3)}"> eV</span>
-   <span class="xps-f" title="기준 성분이 가져야 할 BE (예: 탄소 오염 C–C 284.8, Au 4f7/2 84.0, 내부 기준)">기준 BE <input type="number" step="0.01" class="w64" id="xpsTg" value="${sm.target||284.8}"> eV</span><button class="btn xs" id="xpsShC" title="이 시료의 C 1s 피팅에서 가장 낮은 BE 의 C 성분을 기준 BE 로">C 1s 로</button><button class="btn xs" id="xpsShS" title="지금 선택한 성분(어떤 원소든)을 기준 BE 로 — 예: Au 4f7/2 = 84.0, 격자 O 1s, 금속 기판">선택 성분으로</button>
-   ${sm.refNote?`<span class="muted xs">${esc(sm.refNote)}</span>`:""}`;
-  $q(el,"#xpsSh").onchange=e=>{ sm.shift=+e.target.value||0; sm.refNote="직접 입력"; Object.keys(PV).forEach(k=>delete PV[k]); save(); rerender(); };
-  $q(el,"#xpsTg").onchange=e=>{ sm.target=+e.target.value||284.8; save(); };
-  $q(el,"#xpsShC").onclick=()=>shiftFromC1s(sp);
-  $q(el,"#xpsShS").onclick=()=>shiftFromSel(sp);
+  const el=$q(ROOT,"#xpsChg"); if(!el) return; const sp=cur(); if(!sp){ el.innerHTML=""; el.hidden=true; return; } el.hidden=false;
+  const k=SK(sp), sm=smpOf(sp), d=smpDisp(k), cs=chgState(sp), cands=chgCands(k);
+  const refS=cands.find(s=>s.uid===sm.refUid)||cands[0]||null;
+  const tg=sm.target!=null?sm.target:284.8;
+  const sgn=v=>(v>0?"+":"")+f(v,2);
+  let chip, btn;
+  if(cs.st==="ok"){ chip=`<span class="chip ok" title="${esc(sm.refNote)}"><b>Δ ${sgn(cs.sh)} eV</b><span class="sub">${esc(sm.refNote)}</span></span>`; btn=cands.length?`<button class="btn xs" id="xpsChgGo" title="기준 C 1s 를 다시 읽어 Δ 를 다시 계산">다시 맞추기</button>`:""; }
+  else if(cs.st==="manual"){ chip=`<span class="chip ok"><b>Δ ${sgn(cs.sh)} eV</b><span class="sub">${esc(sm.refNote||"직접 입력")}</span></span>`; btn=cands.length?`<button class="btn sm" id="xpsChgGo">C 1s 로 맞추기</button>`:""; }
+  else if(cs.st==="stale"){ chip=`<span class="chip wr"><b>Δ ${sgn(cs.sh)} eV</b><span class="sub">${esc(cs.why)}</span></span>`; btn=cands.length?`<button class="btn primary sm" id="xpsChgGo">다시 맞추기</button>`:""; }
+  else { chip=`<span class="chip ${cands.length?"wr":""}"><b>보정 안 함</b><span class="sub">${cands.length?"BE 가 측정값 그대로입니다":"이 시료에 C 1s 가 없습니다 — 기준 설정에서 다른 기준·Δ"}</span></span>`;
+    btn=cands.length?`<button class="btn primary sm" id="xpsChgGo" title="C 1s 가 아직 피팅되지 않았으면 자동 제안 → 피팅까지 한 뒤, C–C 성분을 ${tg} eV 로 맞춥니다">C 1s 로 맞추기</button>`:""; }
+  const open=!!S.ui.chgOpen;
+  let set="";
+  if(open){
+    const rr=refS?fitted(refS):null; const comps=rr?rr.comps:(refS?pr(refS).comps:[]); const auto=autoRefComp(comps);
+    const selC=pr(sp).comps.find(c=>c.id===S.ui.selComp);
+    set=`<div class="set">
+      <div class="r"><span class="k">기준 스펙트럼</span>${cands.length?`<select class="xps-sel" id="xcSpec">${cands.map(s=>`<option value="${s.uid}" ${refS&&s.uid===refS.uid?"selected":""}>${esc(s.region)} · ${esc(s.format.replace("Avantage ",""))} · ${esc(s.file||s.name)}${fitted(s)?"":" (피팅 전)"}</option>`).join("")}</select>${cands.length>1?`<span class="muted xs">이 시료에 C 1s 가 ${cands.length} 개 — 기준으로 쓸 것을 고르세요</span>`:""}`:`<span class="muted sm">이 시료에 C 1s 가 없습니다. 같은 측정의 C 1s 파일을 함께 열면 여기에 나타납니다.</span>`}</div>
+      ${cands.length?`<div class="r"><span class="k">기준 성분</span><select class="xps-sel" id="xcComp"><option value="">자동 — ${auto?esc((auto.name||"성분")+" "+f(auto.be,2)+" eV(측정)"):"피팅 후 결정"} (넓이 10 % 이상 중 가장 낮은 BE)</option>${comps.map(c=>`<option value="${c.id}" ${sm.refComp===c.id?"selected":""}>${esc(c.name||"성분")} · ${f(c.be,2)} eV (측정)</option>`).join("")}</select>${rr?"":`<span class="muted xs">C 1s 가 아직 피팅되지 않았습니다 — 맞추기를 누르면 자동으로 피팅합니다</span>`}</div>`:""}
+      <div class="r"><span class="k">기준 BE</span><input type="number" step="0.01" class="w64" id="xcTg" value="${tg}"> eV <button class="btn xs" data-tg="284.8" title="Thermo/Avantage 관행">284.8</button><button class="btn xs" data-tg="285.0" title="다른 흔한 관행">285.0</button><button class="btn xs" data-tg="84.0" title="Au 4f7/2 — 금을 기준으로 쓸 때(다른 기준 버튼과 함께)">Au 84.0</button><span class="muted xs">논문에는 쓴 값을 밝히세요</span></div>
+      <div class="r"><span class="k">다른 기준</span><button class="btn xs" id="xcSel" ${selC?"":"disabled"} title="지금 스펙트럼에서 선택한 성분(예: Au 4f7/2 → 84.0, 금속 기판)을 기준 BE 로">선택한 성분을 기준 BE 로${selC?` (${esc(selC.name||"성분")} ${f(selC.be,2)})`:""}</button>${selC?"":`<span class="muted xs">성분 목록이나 그래프에서 성분을 먼저 고르세요</span>`}</div>
+      <div class="r"><span class="k">Δ 직접 입력</span><input type="number" step="0.01" class="w64" id="xcSh" value="${+(sm.shift||0).toFixed(3)}"> eV <button class="btn xs" id="xcShOk">적용</button><button class="btn xs" id="xcOff" ${sm.shift||sm.ref?"":"disabled"}>보정 해제</button></div>
+      <div class="muted xs" style="line-height:1.55">Δ 는 시료(<b>${esc(d.name)}</b>)의 모든 스펙트럼에 같이 적용됩니다. 피팅은 측정 BE 로 하고 그래프·표·정량·내보내기에만 Δ 를 더하므로 <b>피팅 순서와 무관</b>합니다 — 넓이·FWHM·at% 는 Δ 와 무관. adventitious C 1s 기준은 시료 일함수에 따라 수백 meV 까지 달라질 수 있습니다(Greczynski &amp; Hultman, Prog. Mater. Sci. 2020).</div>
+    </div>`; }
+  el.innerHTML=`<div class="bar"><span class="lbl">대전 보정</span><span class="smpn" title="${esc(k)}">${esc(d.name)}</span>${chip}${btn||""}<button class="btn xs ${open?"on":""}" id="xpsChgSet" title="기준 스펙트럼·성분·기준 BE·Δ 직접 입력">기준 설정 ${open?"▴":"▾"}</button></div>${set}`;
+  const go=$q(el,"#xpsChgGo"); if(go) go.onclick=()=>calibrateC1s(sp);
+  $q(el,"#xpsChgSet").onclick=()=>{ S.ui.chgOpen=!S.ui.chgOpen; drawChg(); };
+  if(!open) return;
+  // 설정을 바꾸면: 기준 C 1s 가 이미 피팅돼 있고 지금 C 1s 기준(또는 아직 보정 전)이면 곧바로 다시 맞춘다. 다른 기준(선택 성분)·직접 입력 상태는 건드리지 않음
+  const reapply=()=>{ const rs=chgCands(k).find(s=>s.uid===sm.refUid)||chgCands(k)[0]; const viaC1s=!sm.ref||isC1s(byUid(sm.ref.uid));
+    if(rs&&fitted(rs)&&viaC1s&&(sm.ref||cs.st==="none")) calibrateC1s(sp); else drawChg(); };
+  const xs=$q(el,"#xcSpec"); if(xs) xs.onchange=()=>{ sm.refUid=xs.value; sm.refComp=null; save(); reapply(); };
+  const xc=$q(el,"#xcComp"); if(xc) xc.onchange=()=>{ sm.refComp=xc.value||null; save(); reapply(); };
+  const xt=$q(el,"#xcTg"); xt.onchange=()=>{ const v=+xt.value; if(isFinite(v)&&v>0){ sm.target=v; save(); if(sm.ref&&!isC1s(byUid(sm.ref.uid))) drawChg(); else reapply(); } };
+  $a(el,"[data-tg]").forEach(b=>b.onclick=()=>{ sm.target=+b.dataset.tg; save(); if(sm.ref&&!isC1s(byUid(sm.ref.uid))) drawChg(); else reapply(); });
+  const xsel=$q(el,"#xcSel"); if(xsel) xsel.onclick=()=>shiftFromSel(sp);
+  $q(el,"#xcShOk").onclick=()=>{ const v=+$q(el,"#xcSh").value; if(!isFinite(v)) return; setShift(sp,v,null,"직접 입력"); note(`대전 보정 Δ = ${sgn(v)} eV (직접 입력) — 시료 ${d.name} 전체`,"ok"); };
+  $q(el,"#xcOff").onclick=()=>{ setShift(sp,0,null,""); note("대전 보정을 해제했습니다 — BE 가 측정값 그대로입니다"); };
 }
 function shiftFromSel(sp){
   const p=pr(sp); const c=p&&p.comps.find(x=>x.id===S.ui.selComp);
   if(!c){ note("먼저 기준으로 쓸 성분을 그래프나 성분 목록에서 선택하세요","warn"); return; }
-  const sm=smpOf(sp); const tg=sm.target!=null?sm.target:284.8;
-  sm.shift=+(tg-c.be).toFixed(3); sm.refNote=`${sp.region} '${c.name||c.id}' ${f(c.be,2)} → ${tg} eV${p.result&&!p.result.stale?"":" (피팅 전 값)"}`;
-  Object.keys(PV).forEach(k=>delete PV[k]); save(); rerender(); note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV (${sm.refNote})`,"ok");
+  const sm=smpOf(sp); const tg=sm.target!=null?sm.target:284.8; const r=fitted(sp);
+  const ref=r&&r.comps.find(x=>x.id===c.id)?{uid:sp.uid,compId:c.id,be:c.be,name:c.name||"",file:sp.file||"",target:tg}:null;
+  setShift(sp,tg-c.be,ref,`${sp.region} '${c.name||"성분"}' ${f(c.be,2)} → ${tg} eV${r?"":" (피팅 전 값)"}`);
+  note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — ${sm.refNote}`,"ok");
 }
-function shiftFromC1s(sp){
-  const sm=smpOf(sp); const k=sp.sample||"(시료 이름 없음)";
-  const c1=S.specs.filter(s=>(s.sample||"(시료 이름 없음)")===k&&s.reg&&s.reg.el==="C"&&s.reg.orb==="1s");
-  if(!c1.length){ note("이 시료에 C 1s 스펙트럼이 없습니다 — Δ 를 직접 넣으세요","warn"); return; }
-  const s=c1[0], p=pr(s); let be=null, how="";
-  const sel=p.comps.find(c=>c.id===S.ui.selComp);
-  if(sel&&S.sel===s.uid){ be=sel.be; how="선택한 성분 '"+sel.name+"'"; }
-  else if(p.comps.length){ const cc=p.comps.filter(c=>!c.el||c.el==="C").sort((a,b)=>a.be-b.be); if(cc.length){ be=cc[0].be; how="가장 낮은 BE 의 C 성분 '"+cc[0].name+"'"+(p.result&&!p.result.stale?"":" (피팅 전 값)"); } }
-  if(be==null){ const R=region(s,p); let im=0; for(let i=1;i<R.y.length;i++) if(R.y[i]>R.y[im]) im=i; be=R.E[im]; how="C 1s 최댓값 위치(피팅 없음 — 대략값)"; }
-  sm.shift=+((sm.target||284.8)-be).toFixed(3); sm.refNote=`${how} ${f(be,2)} → ${sm.target||284.8} eV`;
-  Object.keys(PV).forEach(k2=>delete PV[k2]); save(); rerender(); note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV (${how})`,"ok");
+/* C 1s 로 맞추기: 기준 C 1s 가 피팅돼 있지 않으면 자동 제안 → 피팅을 먼저 하고(그 스펙트럼을 잠시 보여 줌), 기준 성분을 기준 BE 로 */
+async function calibrateC1s(sp){
+  if(RUN){ note("이미 계산 중입니다","warn"); return; }
+  const k=SK(sp), sm=smpOf(sp), cands=chgCands(k);
+  const s=cands.find(x=>x.uid===sm.refUid)||cands[0];
+  if(!s){ note("이 시료에 C 1s 스펙트럼이 없습니다 — 같은 측정의 C 1s 파일을 함께 열거나, 기준 설정에서 다른 기준·Δ 를 쓰세요","warn"); S.ui.chgOpen=true; drawChg(); return; }
+  const back=S.sel; let didFit=false;
+  if(!fitted(s)){
+    S.sel=s.uid; S.ui.selComp=null; rerender();
+    if(!pr(s).comps.length) await autoSuggest();
+    if(!pr(s).comps.length){ note("C 1s 에서 봉우리를 찾지 못해 맞추지 못했습니다 — Δ 를 직접 넣으세요","warn"); return; }
+    await runFit("one"); didFit=true;
+    if(!fitted(s)){ note("C 1s 피팅이 끝나지 않아 대전 보정을 하지 못했습니다","warn"); return; }
+  }
+  const r=fitted(s); const pick=S.sel===s.uid&&S.ui.selComp&&r.comps.find(x=>x.id===S.ui.selComp); // C 1s 화면에서 성분을 골라 두었으면 그것
+  const c=pick||(sm.refComp&&r.comps.find(x=>x.id===sm.refComp))||autoRefComp(r.comps);
+  if(!c){ note("C 1s 피팅에 C 성분이 없습니다 — 기준 설정에서 성분을 고르세요","warn"); S.ui.chgOpen=true; drawChg(); return; }
+  const tg=sm.target!=null?sm.target:284.8;
+  if(pick) sm.refComp=pick.id;
+  const how=pick?"선택한":sm.refComp&&c.id===sm.refComp?"고른":"가장 낮은 BE";
+  if(didFit&&back&&back!==s.uid) S.sel=back;
+  const nm=c.name&&c.name!=="C 1s"?`‘${c.name}’ `:"";
+  setShift(s,tg-c.be,{uid:s.uid,compId:c.id,be:c.be,name:c.name||"",file:s.file||"",target:tg},`C 1s ${nm}${f(c.be,2)} → ${f(tg,2)} eV · ${s.file||s.name} · ${how} 성분`);
+  const msg=`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — 시료 ${smpDisp(k).name} 의 모든 스펙트럼에 적용`+(didFit?` · C 1s 를 자동 제안 → 피팅해서 맞췄습니다 (성분 ${r.comps.length}, χ²ν ${f(r.stats.chi2nu,2)})`:"");
+  note(msg,"ok",didFit&&back!==s.uid?{label:"C 1s 피팅 보기",fn:()=>{ S.sel=s.uid; S.ui.selComp=null; save(); rerender(); }}:null);
+}
+/* 시료 이름 바꾸기(같은 이름이 있으면 합침) · 스펙트럼 하나를 다른 시료로 옮기기 */
+function renameSample(oldK,newName){
+  const nk=String(newName||"").trim()||NOSMP; if(nk===oldK){ drawList(); return; }
+  const merge=!!S.specs.some(s=>SK(s)===nk);
+  S.specs.forEach(s=>{ if(SK(s)===oldK) s.sample=nk===NOSMP?"":nk; });
+  if(!merge&&S.samples[oldK]) S.samples[nk]=S.samples[oldK];
+  delete S.samples[oldK]; save(); rerender();
+  note(merge?`시료 ‘${smpDisp(oldK).name}’ 를 ‘${smpDisp(nk).name}’ 에 합쳤습니다 — 대전 보정은 ‘${smpDisp(nk).name}’ 것을 씁니다`:`시료 이름을 ‘${smpDisp(nk).name}’ 로 바꿨습니다`,"ok");
+}
+function moveSpec(sp,newName){
+  const nk=String(newName||"").trim()||NOSMP; if(nk===SK(sp)) return; const oldK=SK(sp);
+  sp.sample=nk===NOSMP?"":nk; smpOf(sp); if(!sampleSpecs(oldK).length) delete S.samples[oldK];
+  save(); rerender(); note(`${sp.region} 을 시료 ‘${smpDisp(nk).name}’ 로 옮겼습니다`,"ok");
 }
 
 /* ---------------- 탭 ---------------- */
@@ -43519,19 +43683,19 @@ function panelFit(el,sp){
   const bgOpts=Object.entries(C.BG_TYPES).map(([k,v])=>`<option value="${k}" ${bg.type===k?"selected":""}>${esc(v)}</option>`).join("");
   el.innerHTML=`
    <div class="xps-h">영역 · 배경</div>
-   <div class="xps-row"><span class="xps-f">BE <input type="number" step="0.05" id="xpsLo" value="${f(p.lo+sh,2)}"> – <input type="number" step="0.05" id="xpsHi" value="${f(p.hi+sh,2)}"> eV</span><button class="btn xs" id="xpsRgA">전체</button><button class="btn xs" id="xpsRgV" title="지금 보이는 범위를 영역으로">보이는 범위</button></div>
+   <div class="xps-row"><span class="xps-f">BE <input type="number" step="0.05" id="xpsLo" value="${f(p.lo+sh,2)}"> – <input type="number" step="0.05" id="xpsHi" value="${f(p.hi+sh,2)}"> eV</span><button class="btn xs" id="xpsRgA" title="스펙트럼 전체를 피팅 영역으로">전체 범위</button><button class="btn xs" id="xpsRgV" title="그래프에 지금 보이는 범위를 피팅 영역으로">보이는 범위로</button></div>
    <div class="xps-row"><select class="xps-sel" id="xpsBg">${bgOpts}</select>${bg.type!=="active"&&bg.type!=="none"?`<span class="xps-f" title="끝점 평균에 쓰는 점 수">끝점 <input type="number" class="w56" min="1" max="50" id="xpsBgN" value="${bg.n||5}"> 점</span>`:""}
      ${bg.type==="tougaard"?`<select class="xps-sel" id="xpsTgU"><option value="u2" ${!bg.u3?"selected":""}>U2 (C=1643 eV²)</option><option value="u3" ${bg.u3?"selected":""}>U3 (C, D)</option></select>${bg.u3?`<span class="xps-f">C <input type="number" class="w64" id="xpsTgC" value="${bg.C}"> D <input type="number" class="w64" id="xpsTgD" value="${bg.D}"></span>`:""}`:""}
      ${bg.type==="active"?`<label class="xps-f"><input type="checkbox" id="xpsBgS" ${bg.cons&&bg.cons.s&&bg.cons.s.mode!=="fixed"?"checked":""}> 기울기도 피팅</label>`:""}</div>
    <div class="muted xs">${bgHelp(bg.type)}</div>${bgWarn(sp,p)}
    <hr class="xps-hr">
    <div class="xps-h">성분 <span class="muted sm">(${p.comps.length})</span></div>
-   <div class="xps-row"><button class="btn sm" id="xpsAuto">자동 제안</button>${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s 템플릿</button>`:""}<button class="btn sm" id="xpsTplS" title="지금 성분 구성을 템플릿으로 저장">템플릿 저장</button><select class="xps-sel" id="xpsTplL"><option value="">템플릿 불러오기…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="마지막 변경 되돌리기">되돌리기</button></div>
-   <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>자동 제안</b>을 누르거나 그래프 위 <b>+ 눌러서 추가</b>를 쓰세요.</div>`}</div>
+   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="봉우리를 찾아 출발 모형을 만들고, 잔차를 보고 성분 추가·doublet 넓이 비 조정까지 (BIC 로 판단). 결과는 출발값 — 확인 후 ‘피팅’">자동 제안</button>${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s 템플릿</button>`:""}<button class="btn sm" id="xpsTplS" title="지금 성분 구성을 템플릿으로 저장">템플릿 저장</button><select class="xps-sel" id="xpsTplL"><option value="">템플릿 불러오기…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="마지막 변경 되돌리기">되돌리기</button></div>
+   <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>자동 제안</b>을 누르거나 그래프 위 <b>+ 성분 추가</b>로 직접 놓으세요.</div>`}</div>
    <hr class="xps-hr">
    <div class="xps-h">피팅</div>
-   <div class="xps-row"><button class="btn primary sm" id="xpsFit">피팅</button><button class="btn sm" id="xpsMulti" title="비선형 매개변수를 한계 안에서 고르게 흩어 여러 번 시작 → 가장 낮은 χ²">다중 시작</button><span class="xps-f"><input type="number" class="w56" id="xpsStarts" min="2" max="400" value="${S.ui.starts||24}">회</span>
-     <button class="btn sm" id="xpsMC" title="최적 모형에 잡음을 다시 입혀 재피팅 → 신뢰구간">Monte Carlo</button><span class="xps-f"><input type="number" class="w56" id="xpsMCN" min="20" max="5000" value="${S.ui.mcN||200}">회</span></div>
+   <div class="xps-row"><button class="btn primary sm" id="xpsFit" title="지금 성분으로 최소제곱 피팅 (LM + 2 단계 가중)">피팅</button><button class="btn sm" id="xpsMulti" title="비선형 매개변수를 한계 안에서 고르게 흩어 여러 번 시작 → 가장 낮은 χ²">다중 시작</button><span class="xps-f"><input type="number" class="w56" id="xpsStarts" min="2" max="400" value="${S.ui.starts||24}">회</span>
+     <button class="btn sm" id="xpsMC" title="최적 모형에 잡음을 다시 입혀 재피팅 → 95 % 신뢰구간 (보고용 불확도)">Monte Carlo 불확도</button><span class="xps-f"><input type="number" class="w56" id="xpsMCN" min="20" max="5000" value="${S.ui.mcN||200}">회</span></div>
    ${r?fitStrip(r,sp):`<div class="muted xs">가중: ${sp.c?`Poisson (${esc(sp.cSrc)})`:"준-Poisson (척도는 잔차에서 추정)"} · LM + 2단계 IRLS</div>`}
    <div class="xps-row" style="margin-top:6px"><button class="btn xs" id="xpsSnap" ${r&&!r.stale?"":"disabled"} title="이 피팅을 모형 비교 목록에 저장">모형 비교에 저장</button><span class="muted xs">저장한 모형은 결과 탭에서 AICc·BIC 로 비교</span></div>`;
   // 영역
@@ -43682,7 +43846,7 @@ function panelResult(el,sp){
   const tot=r.summ.reduce((s,q)=>s+q.area,0);
   rows.push(`<tr class="tot"><td>합</td><td></td><td></td><td></td><td class="num">${pm(tot,r.mc&&r.mc.areaSum?r.mc.areaSum.sd:r.sumSig&&r.sumSig.all,0)}</td><td class="num">100</td><td></td></tr>`);
   const st=r.stats;
-  el.innerHTML=`
+  el.innerHTML=`${chgBanner(sp)}
    <div class="xps-h">봉우리 표 ${r.stale?`<span class="badge wr">수정 전 피팅</span>`:""} <span class="badge ${mc?"ok":"inf"}">${mc?`± = Monte Carlo ${r.mc.n}회 표준편차`:"± = 공분산 1σ"}</span></div>
    <div class="tw"><table class="xps-tbl"><thead><tr><th>이름</th><th class="num">BE (eV)</th><th class="num">FWHM</th><th class="num">높이 CPS</th><th class="num">넓이 CPS·eV</th><th class="num">넓이 %</th><th>모양</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>
    <div class="muted xs" style="margin-top:4px">BE 는 대전 보정 ${sh?`(Δ ${sh>0?"+":""}${f(sh,2)} eV)`:"없음"} 값. FWHM 은 모양 함수의 실제 반치폭. 넓이 = 성분 함수의 ℝ 적분(DS 는 영역 안 적분).${(r.stats.ar1Inflate>1.15)?` 잔차 이웃상관 ρ₁=${f(st.rho1,2)} → 공분산 σ 는 약 ×${f(st.ar1Inflate,2)} 과소평가일 수 있음(Monte Carlo 는 이를 반영).`:""}</div>
@@ -43735,7 +43899,7 @@ function lineChoices(el,orb){
 }
 function quantRows(sample){
   const rows=[];
-  S.specs.filter(s=>(s.sample||"(시료 이름 없음)")===sample&&s.reg&&s.reg.kind==="region").forEach(sp=>{
+  sampleSpecs(sample).filter(s=>s.reg&&s.reg.kind==="region").forEach(sp=>{
     const p=pr(sp); const r=p.result&&!p.result.stale?p.result:null; const sh=shOf(sp);
     // 원소별 묶음
     const els={};
@@ -43767,8 +43931,7 @@ function tfFor(sp){
   return {model:"none"};
 }
 function panelQuant(el,sp){
-  const sample=sp.sample||"(시료 이름 without)".replace(" without"," 이름 없음");
-  const smpK=sp.sample||"(시료 이름 없음)";
+  const smpK=SK(sp);
   const rows=quantRows(smpK);
   const used=rows.filter(r=>r.inc&&r.S>0);
   const qo={imfp:S.quant.imfp};
@@ -43782,7 +43945,7 @@ function panelQuant(el,sp){
   const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>c.shape==="DS"&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
   const im=S.quant.imfp, tq=S.quant.tf;
   el.innerHTML=`
-   <div class="xps-h">시료 <span class="muted">${esc(smpK)}</span></div>
+   <div class="xps-h">시료 <b>${esc(smpDisp(smpK).name)}</b> <span class="muted xs">${esc(smpDisp(smpK).ctx)}</span></div>${chgBanner(sp)}
    <div class="xps-row"><span class="xps-f">감도계수 <select class="xps-sel" id="xqLib"><option value="scofield">Scofield 1976 (Al Kα)</option><option value="althermo1">Avantage ALTHERMO1</option><option value="custom">사용자 값</option></select></span></div>
    <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">파일 계수(VGD/avg) · 없으면 없음</option><option value="power">(PE/KE)^x</option><option value="none">보정 없음</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}</div>
    <div class="xps-row"><span class="xps-f">IMFP <select class="xps-sel" id="xqIm"><option value="power">KE^n</option><option value="tpp2m">TPP-2M (물질 입력)</option><option value="none">보정 없음</option></select></span>${im.model==="power"?`<span class="xps-f">n <input type="number" class="w56" step="0.05" id="xqImn" value="${im.n}"></span>`:""}
@@ -43826,7 +43989,7 @@ function panelSurvey(el,sp){
    <div class="xps-h">원소 판별 ${isSv?"":`<span class="badge wr">이 스펙트럼은 서베이가 아님</span>`}</div>
    ${libOK?"":`<div class="note warn">원소 라이브러리(XPS_LIB)가 비어 있습니다.</div>`}
    <div class="xps-row"><span class="xps-f">SNR ≥ <input type="number" class="w56" id="xsSnr" value="${st.snr}"></span><span class="xps-f">허용 ± <input type="number" class="w56" step="0.1" id="xsTol" value="${st.tol}"> eV</span><button class="btn sm primary" id="xsRun">봉우리 찾기·판별</button></div>
-   <div class="muted xs">대전 보정(Δ)을 적용한 BE 로 라이브러리(Avantage 원소표 위치 — 없으면 X-ray Data Booklet, Scofield 단면적 가중, Auger KE)와 대조합니다. 가장 큰 미설명 봉우리부터 차례로, 그 봉우리를 ‘센 선’으로 설명하면서 다른 선들도 같은 화학 이동 δ(−4…+6 eV)로 맞는 원소를 채택합니다. 합성 survey 150 개 시험: 검출 가능한 원소 97.7 % 채택, 없는 원소 오채택 0.6 개/스펙트럼 — 후보일 뿐이니 영역 스펙트럼으로 확인하세요. 방사성 원소·H·He 는 기본 제외.</div>
+   <div class="muted xs">대전 보정(Δ)을 적용한 BE 로 라이브러리(Avantage 원소표 위치 — 없으면 X-ray Data Booklet, Scofield 단면적 가중, Auger KE)와 대조합니다. 가장 큰 미설명 봉우리부터 차례로, 그 봉우리를 ‘센 선’으로 설명하면서 다른 선들도 같은 화학 이동 δ(−4…+6 eV)로 맞는 원소를 채택합니다. 합성 survey 150 개 시험: 검출 가능한 원소 97.2 % 채택, 없는 원소 오채택 0.05 개/스펙트럼 — 후보일 뿐이니 영역 스펙트럼으로 확인하세요. 방사성 원소·H·He 는 기본 제외.</div>
    <div id="xsOut">${st.cands?surveyHTML(sp,st):""}</div>`;
   $q(el,"#xsSnr").onchange=e=>{ st.snr=+e.target.value||6; };
   $q(el,"#xsTol").onchange=e=>{ st.tol=+e.target.value||2; };
@@ -43877,8 +44040,11 @@ function panelInfo(el,sp){
   const regEd=`<div class="xps-h">원소 · 궤도 ${sp.reg&&sp.reg.el?`<span class="badge ok">${esc(sp.reg.el+" "+(sp.reg.orb||""))}</span>`:`<span class="badge wr">모름</span>`}</div>
     <div class="xps-row"><span class="xps-f">원소 <input type="text" class="xps-in w56" id="xiEl" value="${esc(sp.reg&&sp.reg.el||"")}" placeholder="예: Fe"></span><span class="xps-f">궤도 <select class="xps-sel" id="xiOrb">${orbs.map(o=>`<option ${sp.reg&&sp.reg.orb===o?"selected":""}>${o}</option>`).join("")}</select></span><button class="btn xs" id="xiSet">적용</button></div>
     <div class="muted xs">파일 이름에서 읽지 못했거나 틀렸을 때 지정합니다. doublet Δ·넓이 비, 참고선, 감도계수가 이 값을 씁니다.</div>`;
-  el.innerHTML=regEd+`<div class="xps-h">파일 · 출처</div><div class="tw"><table class="xps-tbl">
-    ${kv("파일",esc(sp.file))}${kv("형식",esc(sp.format))}${kv("영역",esc(sp.region))}${kv("시료",esc(sp.sample))}
+  const smpEd=`<div class="xps-h">시료 묶음</div>
+    <div class="xps-row"><span class="xps-f">이 스펙트럼의 시료 <input type="text" class="xps-in w120" id="xiSmp" list="xiSmpL" value="${esc(sp.sample||"")}" placeholder="${NOSMP}" style="width:220px"></span><datalist id="xiSmpL">${[...new Set(S.specs.map(SK))].map(k=>`<option value="${esc(k)}">`).join("")}</datalist><button class="btn xs" id="xiSmpOk">옮기기</button></div>
+    <div class="muted xs">대전 보정 Δ 는 시료마다 하나입니다. 자동 묶음이 틀렸으면(예: C 1s 가 다른 묶음에 들어감) 같은 시료 이름으로 옮기세요. 목록의 ✎ 로 묶음 전체 이름을 바꿀 수도 있습니다.</div>`;
+  el.innerHTML=regEd+smpEd+`<div class="xps-h">파일 · 출처</div><div class="tw"><table class="xps-tbl">
+    ${kv("파일",esc(sp.file))}${kv("형식",esc(sp.format))}${kv("영역",esc(sp.region))}${kv("시료",`<span title="${esc(SK(sp))}">${esc(smpDisp(SK(sp)).name)}</span> <span class="muted xs">${esc(smpDisp(SK(sp)).ctx)}</span>`)}
     ${kv("점 수 · 간격",`${sp.n} · ${f(sp.step,4)} eV`)}${kv("BE 범위",`${f(sp.be[0],2)} – ${f(sp.be[sp.n-1],2)} eV (측정값)`)}
     ${kv("광원 에너지",`${f(sp.hv,2)} eV <span class="muted xs">${esc(sp.hvSrc)}</span>`)}
     ${kv("계수 환산 c",sp.c?`${g(sp.c,4)} s <span class="muted xs">${esc(sp.cSrc)}</span>`:`<span class="muted">모름 — 잡음 척도는 잔차에서 추정</span>`)}
@@ -43892,6 +44058,7 @@ function panelInfo(el,sp){
     ${sp.extra&&sp.extra.avantageCols?`<div class="note" style="margin-top:6px">Avantage 내보내기의 추가 열: ${esc(Object.keys(sp.extra.avantageCols).join(", "))}</div>`:""}
     <div class="xps-h">라이브러리 출처</div><div class="muted xs" style="line-height:1.6">${Object.entries((L.meta&&L.meta.sources)||{}).map(([k,v])=>`<b>${esc(k)}</b>: ${esc(v)}`).join("<br>")||"—"}</div>
     <div class="xps-h">단축 조작</div><div class="muted xs" style="line-height:1.6">그래프: 휠 = 확대/축소 · 끌기 = 구간 확대 · 두 번 누르기 = 전체 · 점선 손잡이 = 피팅 영역 · 색 동그라미 끌기 = 성분 위치·높이 · 성분 면적 누르기 = 선택</div>`;
+  const xm=$q(el,"#xiSmpOk"); if(xm) xm.onclick=()=>moveSpec(sp,$q(el,"#xiSmp").value);
   const xs=$q(el,"#xiSet"); if(xs) xs.onclick=()=>{ const raw=$q(el,"#xiEl").value.trim(); const e=IO.SYMS.find(s=>s.toLowerCase()===raw.toLowerCase()); if(!e){ note("원소 기호를 확인하세요 (예: Fe, Co, Ta)","warn"); return; } const o=$q(el,"#xiOrb").value; if(!(LIB().core[e]||{lv:{}}).lv||!Object.keys((LIB().core[e]||{}).lv||{}).some(k=>k.startsWith(o))) note(e+" 에는 라이브러리에 "+o+" 준위가 없습니다 — 그래도 지정합니다","warn");
     sp.reg={kind:"region",el:e,orb:o,j:null,label:e+" "+o,manual:true}; sp.region=sp.reg.label; save(); rerender(); note("원소·궤도를 "+sp.reg.label+" 로 지정했습니다","ok"); };
 }
@@ -43904,16 +44071,18 @@ const safe=s=>String(s||"xps").replace(/[\\/:*?"<>|\s]+/g,"_").slice(0,80);
 const csvE=v=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
 function exportCurves(sp){ const p=pr(sp), M=curModel(sp,p), sh=shOf(sp); if(!M) return;
   const head=["BE_measured_eV","BE_corrected_eV","data_CPS","background","envelope","residual_over_sigma",...p.comps.map((c,i)=>(c.name||"comp"+(i+1)))];
-  const lines=[`# INNO Analytics XPS · ${sp.sample} · ${sp.region} · file ${sp.file} · bg ${p.bg.type} · charge shift ${sh} eV`,head.map(csvE).join(",")];
+  const lines=[`# INNO Analytics XPS · ${sp.sample} · ${sp.region} · file ${sp.file} · bg ${p.bg.type} · charge shift ${sh} eV (${smpOf(sp).refNote||(sh?"":"not charge-corrected")})`,head.map(csvE).join(",")];
   for(let i=0;i<M.n;i++) lines.push([M.E[i].toFixed(4),(M.E[i]+sh).toFixed(4),M.y[i],M.B[i].toFixed(4),M.env[i].toFixed(4),M.resid[i].toFixed(4),...M.parts.map(a=>a[i].toFixed(4))].join(","));
   download(safe(sp.sample+"_"+sp.region)+"_curves.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
-function exportPeaks(sp){ const k=sp.sample||"(시료 이름 없음)"; const lines=["sample,region,component,shape,BE_corr_eV,sBE,FWHM_eV,sFWHM,height_CPS,area_CPSeV,sArea,area_pct,sArea_pct,doublet_dE,doublet_ratio,chi2nu,uncertainty"];
-  S.specs.filter(s=>(s.sample||"(시료 이름 없음)")===k).forEach(s=>{ const p=pr(s), r=p.result; if(!r) return; const sh=shOf(s); const mc=r.mc&&r.mc.summ;
+function exportPeaks(sp){ const k=SK(sp); const lines=["sample,region,component,shape,BE_corr_eV,sBE,FWHM_eV,sFWHM,height_CPS,area_CPSeV,sArea,area_pct,sArea_pct,doublet_dE,doublet_ratio,chi2nu,uncertainty"];
+  sampleSpecs(k).forEach(s=>{ const p=pr(s), r=p.result; if(!r) return; const sh=shOf(s); const mc=r.mc&&r.mc.summ;
     r.comps.forEach((c,i)=>{ const q=r.summ[i], m=mc?mc[i]:null; lines.push([s.sample,s.region,c.name,c.shape,(q.be+sh).toFixed(3),(m?m.be.sd:q.sig.be).toFixed(3),f(q.fwhm,3),f(m?m.fwhm.sd:q.sig.fwhm,3),g(q.height,6),q.area.toFixed(2),(m?m.area.sd:q.sig.area).toFixed(2),f(q.areaPct,2),f(m?m.areaPct.sd:q.sig.areaPct,2),c.doublet?c.doublet.dE:"",c.doublet?c.doublet.r:"",f(r.stats.chi2nu,4),m?"MonteCarlo":"covariance"].map(csvE).join(",")); }); });
+  { const sm=S.samples[k]||{}; lines.push(`# charge shift ${sm.shift||0} eV · reference: ${sm.refNote||(sm.shift?"manual":"not charge-corrected (BE as measured)")}`); }
   download(safe(k)+"_peaks.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 function exportQuant(k,rows,qi){ const lines=["sample,element,line,region,BE_corr_eV,area,sArea,S,S_source,T,lambda,at_pct,s_at_pct,included"];
   rows.forEach(r=>{ const q=qi.get(r.id); lines.push([k,r.el,r.line,r.sp.region,(r.BE+r.sh).toFixed(2),r.area,r.sArea||"",r.S,r.Ssrc,q?q.T:"",q?q.L:"",q?q.at.toFixed(3):"",q&&q.sAt?q.sAt.toFixed(3):"",r.inc].map(csvE).join(",")); });
   lines.push(`# S: ${S.quant.lib}; T: ${S.quant.tf.model}; IMFP: ${JSON.stringify(S.quant.imfp)}`);
+  { const sm=S.samples[k]||{}; lines.push(`# charge shift ${sm.shift||0} eV · reference: ${sm.refNote||(sm.shift?"manual":"not charge-corrected (BE as measured)")}`); }
   download(safe(k)+"_quant.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 function figSVG(){ const svg=ROOT&&$q(ROOT,"#xpsSvg"); if(!svg) return null; const cl=svg.cloneNode(true); const cs=getComputedStyle(ROOT.querySelector(".xps"));
   // 변수·클래스를 값으로 굳힌다
@@ -43934,7 +44103,7 @@ function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니�
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
 function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
-window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>shiftFromC1s(cur())};
+window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k)};
 })();
 </script>
 <!-- INNO-XPS:END -->
