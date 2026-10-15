@@ -42808,11 +42808,12 @@ function suggestModel(E,y,o){
   let pk=findPeaks(E,y,{width:o.width||0.5,snr:o.snr||4,merge:o.merge||0.9}).filter(q=>q.be>E[3]&&q.be<E[n-4]);
   pk=pk.map(q=>({be:q.be,h:z[ix(q.be)]})).filter(q=>q.h>0);
   pk=pk.sort((a,b)=>b.h-a.h).slice(0,o.maxComps||8);
+  // 가장 큰 봉우리의 2 % 미만은 출발 모형에서 뺀다(작은 실제 성분은 잔차 보강이 근거 있을 때 다시 더함)
+  if(pk.length){ const hm=pk[0].h; pk=pk.filter(q=>q.h>=(o.minRel!=null?o.minRel:0.02)*hm); }
   const info=doubletInfo(o.lib||{},o.el,o.orb);
   const comps=[], cons={}; if(!pk.length) return {comps,cons,info,peaks:[]};
   const asc=pk.slice().sort((a,b)=>a.be-b.be), used=new Set();
   const F=o.F||1.2, shape=o.shape||"GLS";
-  let firstD=null;
   asc.forEach(q=>{
     if(used.has(q)) return; used.add(q);
     let partner=null;
@@ -42821,16 +42822,32 @@ function suggestModel(E,y,o){
     const cs=cons[c.id]={};
     if(info&&info.dE&&(partner||q.be+info.dE<E[n-1]-0.5)){
       c.doublet={dE:info.dE,r:info.r,q:1}; cs.r={mode:"fixed"}; cs.q={mode:"fixed"};
-      if(firstD) cs.dE={mode:"link",ref:firstD.id,k:1,b:0}; else cs.dE=dEConstraint(info);
-      if(!firstD) firstD=c; if(partner) used.add(partner);
+      if(partner) used.add(partner);
     }
-    cs.F={mode:"free",lo:0.3,hi:4};
+    cs.F={mode:"free",lo:0.3,hi:4}; cs.be={mode:"free",lo:E[0],hi:E[n-1]};
     const hh=trueFWHM(c.shape,shapeParams(c,1)).ymax; c.area=q.h/(hh||1)*(c.doublet?1+c.doublet.r:1);
     comps.push(c);
   });
-  // 같은 모양 매개변수(m)는 첫 성분에 연결 — 흔한 출발점
-  if(comps[0]&&comps[0].m!=null) comps.slice(1).forEach(c=>{ if(c.m!=null) cons[c.id].m={mode:"link",ref:comps[0].id,k:1,b:0}; });
+  // Δ 는 가장 큰 doublet 이 기준(범위 안 자유), 나머지 doublet 은 거기에 연결. 모양 매개변수(m)도 가장 큰 성분에 연결 — 흔한 출발점
+  const dA=anchorOf(comps.filter(c=>c.doublet)); comps.filter(c=>c.doublet).forEach(c=>{ cons[c.id].dE=c===dA?dEConstraint(info):{mode:"link",ref:dA.id,k:1,b:0}; });
+  const mA=anchorOf(comps); if(mA&&mA.m!=null) comps.forEach(c=>{ if(c!==mA&&c.m!=null) cons[c.id].m={mode:"link",ref:mA.id,k:1,b:0}; });
   return {comps,cons,info,peaks:pk};
+}
+
+/* 연결 기준(anchor) = 넓이가 가장 큰 성분 — 작은 성분을 기준으로 삼으면 그 성분이 죽을 때 전체가 퇴화한다 */
+function anchorOf(cs){ let b=null; (cs||[]).forEach(c=>{ if(!b||c.area>b.area) b=c; }); return b; }
+/* 성분 빼기 — 이 성분을 연결 기준으로 쓰던 매개변수는 남은 성분 중 가장 큰 것을 새 기준으로:
+   새 기준은 뺀 성분의 제약(예: Δ 의 자유 범위)을 물려받고, 나머지는 새 기준에 연결 */
+function removeComp(P,id){
+  const X=P.comps.find(c=>c.id===id); if(!X) return; const xc=P.cons[id]||{};
+  P.comps=P.comps.filter(c=>c.id!==id); delete P.cons[id];
+  const byK={}; for(const cid in P.cons) for(const k in P.cons[cid]){ const q=P.cons[cid][k]; if(q&&q.mode==="link"&&q.ref===id) (byK[k]=byK[k]||[]).push(cid); }
+  for(const k in byK){ const users=byK[k].map(cid=>P.comps.find(c=>c.id===cid)).filter(Boolean); const Y=anchorOf(users); if(!Y) continue;
+    const q=P.cons[Y.id][k]; const own=xc[k]?clone(xc[k]):null;
+    // 새 기준의 값: 연결식 그대로 (k·X + b) — 값은 이미 그렇게 들어 있으므로 제약만 바꾼다
+    if(own&&own.mode!=="link") P.cons[Y.id][k]=own; else delete P.cons[Y.id][k];
+    // 나머지는 새 기준에 연결. 연결식이 k=1, b=0(자동 제안이 만드는 꼴)이면 정확히 같은 관계, 아니면 근사 — 출발값이라 피팅이 다시 정한다
+    users.forEach(u=>{ if(u!==Y) P.cons[u.id][k].ref=Y.id; }); }
 }
 
 /* 잔차로 성분 더하기 (SPEC §9): 극대가 아닌 어깨(예: C 1s 의 C–O)는 봉우리 찾기로 안 보이므로
@@ -42844,50 +42861,71 @@ function refineByResidual(prob,o){
   let cur=clone(stripProb(prob)); cur.E=E; cur.y=prob.y; const userBg=clone(prob.bg);
   if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}};
   let r=fitOnce(cur,{}); let S=fitStats(cur,r); const log=[`시작 ${cur.comps.length} 성분 BIC ${S.BIC.toFixed(1)}`]; let added=0, removed=0;
-  // 죽은 성분 덜기: 넓이 몫이 작은 성분을 빼 보고 BIC 가 나빠지지 않으면(ΔBIC ≤ 2) 뺀다.
+  // 죽은 성분 덜기: 넓이 몫이 작거나(< 5 %) 중심이 창 밖으로 나간 성분을 빼 보고 BIC 가 나빠지지 않으면(ΔBIC ≤ 2) 뺀다.
   // 자동 제안이 겹친 다중항의 위쪽 짝(예: Au 4f5/2 + 다른 상태 4f7/2)을 별도 성분으로 잡으면 피팅이 그 성분을 넓이 0 으로 보내는데,
-  // 그대로 두면 퇴화(공분산 특이)와 '성분 수' 오판이 생기므로 여기서 정리한다. 다른 성분이 연결(link)로 참조하는 성분은 빼지 않는다.
+  // 그대로 두면 퇴화(공분산 특이)와 '성분 수' 오판이 생기므로 여기서 정리한다. 다른 성분이 연결(link)로 참조하던 성분이면 연결 기준을 남은 성분 중 가장 큰 것으로 옮긴다(removeComp).
+  // (실측 Ba 4d: 0.7 % 높이의 작은 봉우리가 첫 doublet = Δ·m 연결 기준이 되어 넓이 0 으로 창 밖에 남던 결함)
   const prune=()=>{ for(let pass=0;pass<4&&cur.comps.length>1;pass++){
       const tot=cur.comps.reduce((s,c)=>s+Math.max(0,c.area),0)||1; const refd=new Set();
       for(const id in cur.cons) for(const k in cur.cons[id]){ const q=cur.cons[id][k]; if(q&&q.mode==="link"&&q.ref) refd.add(q.ref); }
-      const order=cur.comps.map((c,i)=>i).filter(i=>!refd.has(cur.comps[i].id)&&cur.comps[i].area/tot<0.05).sort((a,b)=>cur.comps[a].area-cur.comps[b].area);
+      const out=c=>c.be<E[0]||c.be>E[n-1];
+      const order=cur.comps.map((c,i)=>i).filter(i=>cur.comps[i].area/tot<0.05||out(cur.comps[i])).sort((a,b)=>cur.comps[a].area-cur.comps[b].area);
       let done=false;
-      for(const i of order){ const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y; const id=cand.comps[i].id; cand.comps.splice(i,1); delete cand.cons[id];
+      for(const i of order){ const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y; removeComp(cand,cand.comps[i].id);
         let r2,S2; try{ r2=fitOnce(cand,{initAreas:false}); S2=fitStats(cand,r2); }catch(e){ continue; }
         if(S2.BIC<=S.BIC+2){ log.push(`${cur.comps[i].be.toFixed(2)} eV 성분(넓이 ${(100*cur.comps[i].area/tot).toFixed(1)}%) 뺌 → ΔBIC ${(S.BIC-S2.BIC).toFixed(1)}`); cur=cand; r=r2; S=S2; removed++; done=true; break; } }
       if(!done) break; } };
-  prune();
-  for(let it=0;it<maxAdd;it++){
-    const w=Math.max(2,Math.round(0.6/st)); const z=new Float64Array(n);
+  // 한 걸음마다 후보 수를 모두 맞춰 보고 BIC 가 가장 많이 주는 것 하나를 받는다(≥ 10 일 때만):
+  //  (가) 잔차 덩어리(z ≥ 4)에 성분 더하기
+  //  (나) doublet 넓이 비 r 풀기 / (다) 폭 배율 q 풀기 — 통계 비 (2j+1) 는 얕은 준위(예: Ba 4d)에서 어긋나는 일이 흔하다(광이온화 단면적의 j 의존).
+  //      모든 화학 상태에 같은 값(가장 큰 doublet 에 연결). 분해되지 않는 doublet(Δ < 1.2 eV)은 폭과 퇴화하므로 풀지 않음.
+  // (나)(다)를 성분 더하기와 '경쟁'시키는 까닭: 비가 틀린 채 두면 1/2 자리 잔차를 가짜 성분이 메우고(합성 양성 대조),
+  // 반대로 비를 먼저 풀면 빠진 화학 상태를 비가 흡수할 수 있다 — 어느 쪽이 데이터를 더 잘 설명하는지로 고른다.
+  const relaxed=[];
+  const relaxCand=(k,lo,hi)=>{ if(o.relax===false) return null; const dA=anchorOf(cur.comps.filter(c=>c.doublet&&c.doublet.dE>=DOUBLET_RESOLVE)); if(!dA) return null;
+    const cc=(cur.cons[dA.id]||{})[k]; if(cc&&cc.mode!=="fixed") return null;
+    const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y; const v0=dA.doublet[k];
+    cand.comps.filter(c=>c.doublet&&c.doublet.dE>=DOUBLET_RESOLVE).forEach(c=>{ cand.cons[c.id]=cand.cons[c.id]||{};
+      cand.cons[c.id][k]=c.id===dA.id?{mode:"free",lo:+(v0*lo).toFixed(4),hi:+(v0*hi).toFixed(4)}:{mode:"link",ref:dA.id,k:1,b:0}; c.doublet[k]=v0; });
+    const r2=fitOnce(cand,{initAreas:false}), S2=fitStats(cand,r2); const nv=cand.comps.find(c=>c.id===dA.id).doublet[k];
+    return {cand,r2,S2,kind:k,txt:`${k==="r"?"넓이 비 r":"폭 배율 q"} 풀기 (${v0.toFixed(3)} → ${nv.toFixed(3)})`}; };
+  const addCand=()=>{ const w=Math.max(2,Math.round(0.6/st)); const z=new Float64Array(n);
     for(let i=0;i<n;i++){ let sum=0,c=0; for(let j=Math.max(0,i-w);j<=Math.min(n-1,i+w);j++){ sum+=S.resid[j]; c++; } z[i]=sum/Math.sqrt(c); }
     // ρ₁ 이 크면 이웃 잔차가 상관 → 평활 합의 분산이 커지므로 그만큼 나눈다
     const inf=Math.sqrt((1+Math.max(0,S.rho1))/(1-Math.min(0.95,Math.max(0,S.rho1)))); let im=-1, zm=0;
     for(let i=w;i<n-w;i++){ const zz=z[i]/inf; if(zz>zm){ zm=zz; im=i; } }
-    if(im<0||zm<zMin){ log.push(`잔차 최대 z ${zm.toFixed(1)} < ${zMin} → 멈춤`); break; }
+    if(im<0||zm<zMin){ log.push(`잔차 최대 z ${zm.toFixed(1)} < ${zMin}`); return null; }
     const be=E[im]; const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y;
-    const ref=cand.comps[0]; const c=newComp(ref?ref.shape:"GLS",be,{F:1.2,el:ref?ref.el:"",line:ref?ref.line:""});
+    const ref=anchorOf(cand.comps); const c=newComp(ref?ref.shape:"GLS",be,{F:1.2,el:ref?ref.el:"",line:ref?ref.line:""});
     if(ref&&ref.m!=null) c.m=ref.m;
-    const cs=cand.cons[c.id]={F:{mode:"free",lo:0.3,hi:4}};
+    const cs=cand.cons[c.id]={F:{mode:"free",lo:0.3,hi:4},be:{mode:"free",lo:E[0],hi:E[n-1]}};
     if(ref&&ref.m!=null) cs.m={mode:"link",ref:ref.id,k:1,b:0};
-    const d0=cand.comps.find(q=>q.doublet);
-    if(d0&&be+d0.doublet.dE<E[n-1]-0.5){ c.doublet={dE:d0.doublet.dE,r:d0.doublet.r,q:d0.doublet.q}; cs.r={mode:"fixed"}; cs.q={mode:"fixed"};
-      const dc=(cand.cons[d0.id]||{}).dE; cs.dE=dc&&dc.mode==="fixed"?{mode:"fixed"}:{mode:"link",ref:d0.id,k:1,b:0}; }
+    const d0=anchorOf(cand.comps.filter(q=>q.doublet));
+    if(d0&&be+d0.doublet.dE<E[n-1]-0.5){ c.doublet={dE:d0.doublet.dE,r:d0.doublet.r,q:d0.doublet.q};
+      const d0c=cand.cons[d0.id]||{}; ["dE","r","q"].forEach(k=>{ const dc=d0c[k]; cs[k]=!dc||dc.mode==="fixed"?{mode:"fixed"}:{mode:"link",ref:d0.id,k:1,b:0}; }); }
     // 넓이 출발: 잔차 덩어리 높이
     const hh=trueFWHM(c.shape,shapeParams(c,1)).ymax; c.area=Math.max(1e-9,(prob.y[im]-r.mu[im]))/(hh||1)*(c.doublet?1+c.doublet.r:1);
     cand.comps.push(c);
-    let r2, S2; try{ r2=fitOnce(cand,{initAreas:false}); S2=fitStats(cand,r2); }catch(e){ log.push("추가 피팅 실패: "+e.message); break; }
-    const dB=S.BIC-S2.BIC;
-    if(dB<dBIC){ log.push(`${be.toFixed(2)} eV 추가 → ΔBIC ${dB.toFixed(1)} < ${dBIC} → 받지 않음`); break; }
-    log.push(`${be.toFixed(2)} eV 추가 → ΔBIC ${dB.toFixed(1)} 채택`); cur=cand; r=r2; S=S2; added++;
+    const r2=fitOnce(cand,{initAreas:false}), S2=fitStats(cand,r2);
+    return {cand,r2,S2,kind:"add",txt:`${be.toFixed(2)} eV 성분 추가 (z ${zm.toFixed(1)})`}; };
+  prune();
+  for(let it=0;it<maxAdd+2;it++){
+    const cands=[]; const tryC=f=>{ try{ const x=f(); if(x) cands.push(x); }catch(e){ log.push("후보 피팅 실패: "+e.message); } };
+    if(added<maxAdd) tryC(addCand); tryC(()=>relaxCand("r",0.75,1.33)); tryC(()=>relaxCand("q",0.6,1.6));
+    if(!cands.length) break;
+    cands.forEach(x=>x.dB=S.BIC-x.S2.BIC); cands.sort((a,b)=>b.dB-a.dB); const best=cands[0];
+    log.push(cands.map(x=>`${x.txt} ΔBIC ${x.dB.toFixed(1)}`).join(" · "));
+    if(best.dB<dBIC){ log.push(`가장 나은 수도 ΔBIC < ${dBIC} → 멈춤`); break; }
+    log.push(`→ 채택: ${best.txt}`); cur=best.cand; r=best.r2; S=best.S2; if(best.kind==="add") added++; else relaxed.push(best.kind);
   }
   if(added) prune();
   // 사용자 배경으로 되돌려 다시 맞춘다(성분 구성만 가져감)
   if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
-  return {prob:cur,res:r,stats:S,added,removed,log};
+  return {prob:cur,res:r,stats:S,added,removed,relaxed,log};
 }
 
 /* Worker 용: 잔차 보강 결과를 직렬화 가능한 형태로 */
-function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,log:rf.log}; }
+function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
 
 /* ============================================================
    보조: 문제 만들기 (스펙트럼 + 영역 + 배경 + 성분)
@@ -42959,7 +42997,7 @@ const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
+  tfValue,tpp2m,imfpValue,quantify,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -43248,13 +43286,14 @@ async function autoSuggest(){
   setProg("자동 제안: 잔차 보강 중…",0.3);
   try{
     const [o]=await pool([{cmd:"auto",prob,opt:{}}]); hideProg(); if(!o) throw new Error("결과 없음");
-    if(o.added||o.removed){
+    const ch=o.added||o.removed||(o.relaxed&&o.relaxed.length);
+    if(ch){
       const keep=new Map(p.comps.map(c=>[c.id,c]));
       p.comps=o.comps.map(c=>{ const k=keep.get(c.id); if(k){ c.name=k.name; c.slot=k.slot; } else { c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } return c; });
       p.cons=o.cons; }
     else { const m=new Map(o.comps.map(c=>[c.id,c])); p.comps.forEach(c=>{ const q=m.get(c.id); if(q) Object.keys(q).forEach(k=>{ if(k!=="name"&&k!=="slot"&&k!=="color") c[k]=q[k]; }); }); }
     touch(p); rerender();
-    note(`성분 ${p.comps.length}개를 제안했습니다${soTxt}${o.added||o.removed?` · 잔차 보강 +${o.added}/−${o.removed} (${o.log.slice(1).join("; ")})`:""}. 출발점일 뿐이니 확인한 뒤 '피팅'을 누르세요`);
+    note(`성분 ${p.comps.length}개를 제안했습니다${soTxt}${ch?` · 잔차 보강: ${o.log.filter(t=>/채택|뺌/.test(t)).map(t=>t.replace(/^→ 채택: /,"")).join("; ")}`:""}. 출발점일 뿐이니 확인한 뒤 '피팅'을 누르세요`);
   }catch(e){ hideProg(); RUN=null; note(`성분 ${p.comps.length}개를 제안했습니다${soTxt} (잔차 보강 생략: ${e.message||e}). 출발점일 뿐이니 확인하세요`,"warn"); }
 }
 /* C 1s adventitious 템플릿 (출발값; 간격은 문헌의 흔한 값 ±0.4 eV 범위로만 풀어 둠) */
@@ -43522,7 +43561,7 @@ function panelFit(el,sp){
 function bgWarn(sp,p){
   const out=[];
   if(p.bg.type==="shirley"||p.bg.type==="smart"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.converged===false) out.push("Shirley 반복이 수렴하지 않았습니다(200 회) — 배경이 기울어 Shirley 고정점이 없는 경우입니다. ‘Shirley — 피팅 안에서’ + ‘기울기도 피팅’, 또는 Linear 를 쓰세요."); } }
-  if((p.bg.type==="shirley"||p.bg.type==="smart"||p.bg.type==="linear")&&p.hi-p.lo>40) out.push("창이 넓습니다("+f(p.hi-p.lo,0)+" eV): 끝점으로 정하는 배경은 넓은 창에서 모양 오차가 쌓여 넓이가 몇 % 틀릴 수 있습니다(합성 시험 −8…+8 %). ‘Shirley — 피팅 안에서’ + ‘기울기도 피팅’을 권합니다.");
+  if((p.bg.type==="shirley"||p.bg.type==="smart"||p.bg.type==="linear")&&p.hi-p.lo>20) out.push("창이 넓습니다("+f(p.hi-p.lo,0)+" eV): 끝점으로 정하는 배경은 창이 넓을수록 모양 오차가 쌓여 넓이가 틀립니다(합성 143 경우, Smart: 20–40 eV 최대 ≈8 %, 40 eV 넘으면 최대 ≈14 %; 20 eV 이하는 ≈3 %). ‘Shirley — 피팅 안에서’ + ‘기울기도 피팅’을 권합니다.");
   if(p.bg.type==="tougaard"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.negClamped) out.push("높은 BE 끝이 낮은 BE 끝보다 낮아 Tougaard 세기가 음수가 됩니다 — 비물리적이라 0 으로 두었습니다(평평한 배경). 영역을 봉우리 뒤로 30 eV 이상 넓히거나 다른 배경을 쓰세요."); } }
   if(p.bg.type!=="active"&&p.bg.type!=="none"&&p.comps.some(c=>(c.shape==="GLS"||c.shape==="GLP"||c.shape==="V")&&((c.m||0)>0.3||(c.wL||0)>0.4))) out.push("Lorentzian 꼬리가 큰 성분 + 끝점으로 정하는 배경: 창 밖·끝점 평균 안으로 들어간 꼬리 넓이가 빠져 넓이가 몇 % 작게 나옵니다(합성 시험 −2…−5 %). 창을 넓히거나 ‘Shirley — 피팅 안에서’를 쓰세요.");
   return out.map(t=>`<div class="note warn" style="margin-top:4px">${esc(t)}</div>`).join("");
