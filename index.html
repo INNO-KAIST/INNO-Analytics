@@ -34185,7 +34185,7 @@ function barLabel(m){
    Views
    ============================================================ */
 /* 파일 목록은 탭이 아니라 왼쪽 상시 열이다 — 지금 무엇을 보고 있는지가 화면에서 사라지면 안 된다. */
-const VIEWS=[["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["lattice","격자 · FFT"],["interf","간섭 검사"],["meta","메타데이터"],["energy","Energy Diagram"],["dre","DRE"],["xps","XPS"]];
+const VIEWS=[["xps","XPS"],["image","이미지"],["maps","원소 맵"],["spectrum","EDS 스펙트럼"],["lattice","격자 · FFT"],["interf","간섭 검사"],["meta","메타데이터"],["energy","Energy Diagram"],["dre","DRE"]];
 function go(v){
   state.view=v;
   if(v==="maps"){
@@ -41489,16 +41489,23 @@ function dv(u8){ return new DataView(u8.buffer,u8.byteOffset,u8.byteLength); }
 const NULLV=1e37;                          // VAMAS 의 '값 없음'
 const isNullV=v=>!isFinite(v)||Math.abs(v)>=0.99e37;
 
-/* 영역 이름 → 원소·궤도 ("Co2p", "Ta 4f7/2", "O1s Scan", "Survey") */
+/* 영역 이름 → 원소·궤도 ("Co2p", "Ta 4f7/2", "O1s Scan", "fe2p", "Survey")
+   원소 기호는 주기율표(Z = 1–92 + 몇 개)에 있는 것만 인정한다 — "Peak 2p" 같은 이름을 원소로 오인하지 않게. */
+const SYMS="H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm".split(" ");
+const SYMSET=new Set(SYMS), SYMLC=new Map(SYMS.map(e=>[e.toLowerCase(),e]));
 function parseRegionName(s){
-  const t=String(s||"").replace(/\.(txt|vgd|vms|avg|csv|dat|xy)$/i,"").trim();
+  const t=String(s||"").replace(/\.(txt|vgd|vms|npl|avg|csv|dat|xy)$/i,"").trim();
   if(/survey|wide|overview|와이드|서베이/i.test(t)) return {kind:"survey",label:"Survey"};
   if(/valence|\bVB\b|가전자/i.test(t)) return {kind:"vb",label:"VB"};
-  const m=/(?:^|[^A-Za-z])([A-Z][a-z]?)\s*([1-7])\s*([spdf])\s*(1\/2|3\/2|5\/2|7\/2)?(?![a-z])/.exec(" "+t);
-  if(m) return {kind:"region",el:m[1],orb:m[2]+m[3],j:m[4]||null,label:m[1]+" "+m[2]+m[3]+(m[4]||"")};
+  // 1) 대소문자 그대로 (Co2p, Ta 4f7/2)
+  const re=/(?:^|[^A-Za-z])([A-Z][a-z]?)[\s_\-]*([1-7])\s*([spdf])\s*(1\/2|3\/2|5\/2|7\/2)?(?![a-z])/g; let m;
+  while((m=re.exec(" "+t))){ if(SYMSET.has(m[1])) return {kind:"region",el:m[1],orb:m[2]+m[3],j:m[4]||null,label:m[1]+" "+m[2]+m[3]+(m[4]||"")}; }
+  // 2) 대소문자 무시 (fe2p, CO2P) — 기호표에 있는 것만
+  const re2=/(?:^|[^A-Za-z])([A-Za-z]{1,2})[\s_\-]*([1-7])\s*([spdfSPDF])\s*(1\/2|3\/2|5\/2|7\/2)?(?![a-z])/g;
+  while((m=re2.exec(" "+t))){ const e=SYMLC.get(m[1].toLowerCase()); if(e) return {kind:"region",el:e,orb:m[2]+m[3].toLowerCase(),j:m[4]||null,label:e+" "+m[2]+m[3].toLowerCase()+(m[4]||""),caseFixed:true}; }
   const a=/(?:^|[^A-Za-z])([A-Z][a-z]?)\s*(KLL|LMM|MNN|KVV|LVV|MVV|NOO)/.exec(" "+t);
-  if(a) return {kind:"auger",el:a[1],label:a[1]+" "+a[2]};
-  return {kind:"region",label:t||"?"};
+  if(a&&SYMSET.has(a[1])) return {kind:"auger",el:a[1],label:a[1]+" "+a[2]};
+  return {kind:"region",label:t||"?",unknown:true};
 }
 /* 파일 이름에서 시료 이름: "[D.I. on BCT (600'C 5h)] Ta4f.txt" → "D.I. on BCT (600'C 5h)" */
 function sampleFromName(fn){
@@ -41991,7 +41998,7 @@ async function readFile(name,u8,opt){
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={readFile,pathSample,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,pathSample,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -42304,7 +42311,10 @@ function buildMap(prob){
   // 배경 매개변수 (active)
   if(prob.bg&&prob.bg.type==="active"){
     const bc=prob.bg.cons||{};
-    ["c0","k","s"].forEach(k=>{ const cs=bc[k]||{mode:k==="s"?"fixed":"free"}; if(cs.mode==="fixed") return; const d=PDEF[k]; free.push({ci:-1,k,lo:cs.lo!=null?cs.lo:d.lo,hi:cs.hi!=null?cs.hi:d.hi,id:"bg"}); });
+    ["c0","k","s"].forEach(k=>{ const cs=bc[k]||{mode:k==="s"?"fixed":"free"}; if(cs.mode==="fixed") return; const d=PDEF[k];
+      // k 상한: 계단 높이 k·∫P 가 데이터 세기 범위의 1.5 배를 넘지 못하게(SPEC 2 v1.1) — 넓이→0·k→∞ 퇴화 방향을 막는다
+      const hi=cs.hi!=null?cs.hi:(k==="k"&&prob.bg._khi>0?prob.bg._khi:d.hi);
+      free.push({ci:-1,k,lo:cs.lo!=null?cs.lo:d.lo,hi,id:"bg"}); });
   }
   // 연결 사슬: 연결 대상이 또 연결이면 끝까지 따라간다(순환 금지)
   const linkOf=(ci,k)=>links.find(l=>l.ci===ci&&l.k===k);
@@ -42409,7 +42419,8 @@ function varianceFrom(yhat,c){ const cc=c>0?c:1; let m=0; for(const t of yhat) i
 /* 넓이 초기값: 비선형 매개변수 고정, 가중 NNLS */
 function initAreas(prob,map,v){
   const E=prob.E, n=E.length, ctx={emin:E[0],emax:E[n-1]};
-  const Bst=prob.bg.type==="active"?bgShirley(E,prob.y,prob.bg.n||5,false):(prob._Bst||(prob._Bst=bgStatic(E,prob.y,prob.bg)));
+  // active 의 넓이 초기화는 직선 배경으로 — 정적 Shirley 는 기울어진 배경에서 수렴하지 않을 수 있다(고정점이 없음)
+  const Bst=prob.bg.type==="active"?bgLinear(E,prob.y,prob.bg.n||5):(prob._Bst||(prob._Bst=bgStatic(E,prob.y,prob.bg)));
   // 넓이 묶음: 자유 넓이마다 한 열(그 넓이에 ×k 로 연결된 성분 포함)
   const groups=[]; const freeArea=map.free.map((f,i)=>f.k==="area"&&f.ci>=0?i:-1).filter(i=>i>=0);
   if(!freeArea.length) return;
@@ -42427,6 +42438,8 @@ function initAreas(prob,map,v){
   if(prob.bg.type==="active"){
     const p=endpoints(E,prob.y,prob.bg.n||5); const P=new Float64Array(n); prob.comps.forEach(c=>{ const u=compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=u[i]; });
     const Q=cumtrapz(E,P); if(prob.bg.c0==null||prob.bg._auto!==false) prob.bg.c0=p.ylo; if(prob.bg.k==null||prob.bg._auto!==false) prob.bg.k=Q[n-1]>0?Math.max(0,(p.yhi-p.ylo)/Q[n-1]):0; if(prob.bg.s==null) prob.bg.s=0;
+    let ymn=Infinity, ymx=-Infinity; for(const t of prob.y){ if(t<ymn) ymn=t; if(t>ymx) ymx=t; }
+    if(Q[n-1]>0) prob.bg._khi=Math.max(1.5*(ymx-ymn)/Q[n-1],2*prob.bg.k);
   }
 }
 /* LM 한 번. prob 은 제자리에서 바뀐다. v: 분산 배열 */
@@ -42482,11 +42495,11 @@ function lmFit(prob,map,v,opt){
 /* 한 번의 완전한 피팅: (넓이 초기화) → LM(평활 분산) → LM(모형 분산) */
 function fitOnce(prob,opt){
   opt=opt||{};
-  const map=buildMap(prob); applyLinks(prob,map);
+  let map=buildMap(prob); applyLinks(prob,map);
   const E=prob.E, y=prob.y; let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const ys=smoothQ(E,y,smoothHW(E));
   let v=varianceFrom(ys,prob.c);
-  if(opt.initAreas!==false) initAreas(prob,map,v);
+  if(opt.initAreas!==false){ initAreas(prob,map,v); if(prob.bg.type==="active"){ map=buildMap(prob); applyLinks(prob,map); } }   // k 상한 반영
   let r=lmFit(prob,map,v,opt); const chi2p1=r.chi2;
   if(opt.irls!==false){ v=varianceFrom(r.mu,prob.c); r=lmFit(prob,map,v,opt); }
   r.v=v; r.map=map; r.chi2p1=chi2p1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
@@ -42686,11 +42699,15 @@ function findPeaks(E,y,opt){
   const pk=[];
   for(let i=2;i<n-2;i++){
     if(!(ys[i]>=ys[i-1]&&ys[i]>=ys[i+1]&&d2[i]>0)) continue;
-    // 국소 기준선: ±w 창의 양끝 최솟값
-    const w=Math.max(hw*3,Math.round(4/st)); const a=Math.max(0,i-w), b=Math.min(n-1,i+w);
-    let la=Infinity, lb=Infinity; for(let j=a;j<i;j++) la=Math.min(la,ys[j]); for(let j=i+1;j<=b;j++) lb=Math.min(lb,ys[j]);
+    // 높이 = 지형 prominence(scipy.signal.peak_prominences 와 같은 정의): 양쪽으로 이 봉우리보다 높은 점(또는 창 끝)까지 가며
+    // 그 구간 최솟값을 구하고, 둘 중 큰 값을 기준선으로. 큰 봉우리 꼬리 위의 잡음 굴곡은 prominence 가 작아 걸러진다.
+    const w=Math.max(hw*3,Math.round((opt.window||4)/st)); const a=Math.max(0,i-w), b=Math.min(n-1,i+w);
+    let la=ys[i], lb=ys[i];
+    for(let j=i-1;j>=a;j--){ if(ys[j]>ys[i]) break; if(ys[j]<la) la=ys[j]; }
+    for(let j=i+1;j<=b;j++){ if(ys[j]>ys[i]) break; if(ys[j]<lb) lb=ys[j]; }
     const base=Math.max(la,lb); const h=ys[i]-base; if(!(h>0)) continue;
-    const sd=Math.sqrt(kap*Math.max(ys[i],1)/(2*hw+1)); // 평활 후 잡음
+    // 평활(2차 다항식, N=2hw+1 점) 뒤 한 점의 잡음 σ ≈ 1.5·σ/√N, prominence 는 두 평활값의 차라 ×√2
+    const sd=1.5*Math.SQRT2*Math.sqrt(kap*Math.max(ys[i],1)/(2*hw+1));
     const snr=h/sd; if(snr<(opt.snr||5)) continue;
     pk.push({i,be:E[i],h,snr,y:ys[i]});
   }
@@ -42755,6 +42772,122 @@ function identify(peaks,lib,o){
 }
 /* 기본 채택(화면의 체크 기본값) = 탐욕적 배정에서 채택된 원소 */
 function acceptDefault(c){ return !!c.accepted; }
+
+/* ============================================================
+   12) 원소에 독립적인 모형 출발점 (SPEC §9) — 어떤 원소·궤도든 같은 규칙
+   ============================================================ */
+const ORB_JJ={p:["3/2","1/2"],d:["5/2","3/2"],f:["7/2","5/2"]}, ORB_RR={p:0.5,d:2/3,f:0.75};
+/* doublet 정보: Δ 후보 두 출처(Avantage 원소표 · X-ray Data Booklet), 넓이 비 (2j+1), 분해 가능 여부 */
+function doubletInfo(lib,el,orb){
+  if(!el||!orb) return null; const l=orb.slice(-1), J=ORB_JJ[l]; if(!J) return null;
+  const rec=(lib.core||{})[el]||{}, lv=rec.lv||{}, idp=lib.idpos||{};
+  const bk=(lv[orb+J[0]]>0&&lv[orb+J[1]]>0&&!(rec.soWarn||[]).includes(orb))?+(lv[orb+J[1]]-lv[orb+J[0]]).toFixed(3):null;
+  const av=(idp[el+" "+orb+J[0]]!=null&&idp[el+" "+orb+J[1]]!=null&&idp[el+" "+orb+J[1]]>idp[el+" "+orb+J[0]])?+(idp[el+" "+orb+J[1]]-idp[el+" "+orb+J[0]]).toFixed(3):null;
+  const bkOK=bk!=null&&bk>0;
+  let dE=null, src="";
+  if(av!=null){ dE=av; src="Avantage 원소표 "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  else if(bkOK){ dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  return {dE,r:ORB_RR[l],J,src:dE!=null?src:"라이브러리에 쓸 수 있는 값 없음",alt:{avantage:av,booklet:bkOK?bk:null},
+    spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE};
+}
+const DOUBLET_RESOLVE=1.2;   // eV — 이 이상이면 두 봉우리가 데이터에서 갈라져 Δ 를 데이터로 정할 수 있다
+/* Δ 제약: 라이브러리 Δ ± max(0.3 eV, 5 %, 두 출처 차 + 0.1) 안에서 자유. 라이브러리 Δ 의 정밀도가 0.1–0.5 eV 라
+   고정하면 분해되지 않는 doublet 에서도 계통 편향·가짜 성분이 생긴다(합성 시험: Rb 3d 라이브러리 1.0 vs 참 1.07 → 20 회 중 3 회 가짜 성분).
+   여러 화학 상태의 doublet 은 첫 성분의 Δ 에 연결(매개변수 1 개만 늘어남). */
+function dEConstraint(info){
+  if(!info||info.dE==null) return {mode:"free",lo:0.05,hi:40};
+  const w=Math.max(0.3,0.05*info.dE,(info.spread||0)+0.1); return {mode:"free",lo:+Math.max(0.05,info.dE-w).toFixed(3),hi:+(info.dE+w).toFixed(3)};
+}
+/* 출발 모형 제안: 봉우리 찾기 → (짝이 보이거나 짝 위치가 영역 안이면) doublet → 넓이는 높이에서.
+   o = {bg, el, orb, lib, shape, F}. 반환 {comps, cons, info, peaks} */
+function suggestModel(E,y,o){
+  o=o||{}; const n=E.length; const bg=o.bg||{type:"smart",n:5};
+  const B=bg.type==="active"||bg.type==="none"?bgShirley(E,y,bg.n||5,true):bgStatic(E,y,bg);
+  const z=Float64Array.from(y,(v,i)=>v-B[i]);
+  const ix=be=>{ let i=Math.round((be-E[0])/((E[n-1]-E[0])/(n-1))); return Math.max(0,Math.min(n-1,i)); };
+  let pk=findPeaks(E,y,{width:o.width||0.5,snr:o.snr||4,merge:o.merge||0.9}).filter(q=>q.be>E[3]&&q.be<E[n-4]);
+  pk=pk.map(q=>({be:q.be,h:z[ix(q.be)]})).filter(q=>q.h>0);
+  pk=pk.sort((a,b)=>b.h-a.h).slice(0,o.maxComps||8);
+  const info=doubletInfo(o.lib||{},o.el,o.orb);
+  const comps=[], cons={}; if(!pk.length) return {comps,cons,info,peaks:[]};
+  const asc=pk.slice().sort((a,b)=>a.be-b.be), used=new Set();
+  const F=o.F||1.2, shape=o.shape||"GLS";
+  let firstD=null;
+  asc.forEach(q=>{
+    if(used.has(q)) return; used.add(q);
+    let partner=null;
+    if(info&&info.dE){ const tol=Math.max(0.7,0.08*info.dE); partner=asc.find(t=>t!==q&&!used.has(t)&&Math.abs(t.be-(q.be+info.dE))<tol&&t.h<q.h*1.3); }
+    const c=newComp(shape,q.be,{F,el:o.el||"",line:o.orb||""});
+    const cs=cons[c.id]={};
+    if(info&&info.dE&&(partner||q.be+info.dE<E[n-1]-0.5)){
+      c.doublet={dE:info.dE,r:info.r,q:1}; cs.r={mode:"fixed"}; cs.q={mode:"fixed"};
+      if(firstD) cs.dE={mode:"link",ref:firstD.id,k:1,b:0}; else cs.dE=dEConstraint(info);
+      if(!firstD) firstD=c; if(partner) used.add(partner);
+    }
+    cs.F={mode:"free",lo:0.3,hi:4};
+    const hh=trueFWHM(c.shape,shapeParams(c,1)).ymax; c.area=q.h/(hh||1)*(c.doublet?1+c.doublet.r:1);
+    comps.push(c);
+  });
+  // 같은 모양 매개변수(m)는 첫 성분에 연결 — 흔한 출발점
+  if(comps[0]&&comps[0].m!=null) comps.slice(1).forEach(c=>{ if(c.m!=null) cons[c.id].m={mode:"link",ref:comps[0].id,k:1,b:0}; });
+  return {comps,cons,info,peaks:pk};
+}
+
+/* 잔차로 성분 더하기 (SPEC §9): 극대가 아닌 어깨(예: C 1s 의 C–O)는 봉우리 찾기로 안 보이므로
+   맞춘 뒤 정규화 잔차를 성분 폭 정도로 평활해 가장 큰 양의 덩어리(z)에 성분을 더하고, BIC(데이터 가중 χ²_d)가
+   10 이상 줄 때만 받아들인다(강한 증거). 원소·궤도와 무관한 규칙. 넓이 몫 < 5 % 인 성분은 빼 보고 ΔBIC ≤ 2 면 뺀다. 반환: {prob, res, stats, added, removed, log} */
+function refineByResidual(prob,o){
+  o=o||{}; const maxAdd=o.maxAdd!=null?o.maxAdd:4, zMin=o.zMin||4, dBIC=o.dBIC||10;
+  const E=prob.E, n=E.length, st=(E[n-1]-E[0])/(n-1);
+  // 성분을 더할지는 유연한 배경(피팅 안 Shirley + 기울기)으로 판단한다 — 정적 배경의 모양 오차가 잔차 덩어리로 남아
+  // '가짜 성분'으로 채택되는 것을 막기 위해(합성 시험: 정적 배경으로 판단하면 참 1 성분 스펙트럼 143 개 중 106 개에 성분이 더해짐)
+  let cur=clone(stripProb(prob)); cur.E=E; cur.y=prob.y; const userBg=clone(prob.bg);
+  if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}};
+  let r=fitOnce(cur,{}); let S=fitStats(cur,r); const log=[`시작 ${cur.comps.length} 성분 BIC ${S.BIC.toFixed(1)}`]; let added=0, removed=0;
+  // 죽은 성분 덜기: 넓이 몫이 작은 성분을 빼 보고 BIC 가 나빠지지 않으면(ΔBIC ≤ 2) 뺀다.
+  // 자동 제안이 겹친 다중항의 위쪽 짝(예: Au 4f5/2 + 다른 상태 4f7/2)을 별도 성분으로 잡으면 피팅이 그 성분을 넓이 0 으로 보내는데,
+  // 그대로 두면 퇴화(공분산 특이)와 '성분 수' 오판이 생기므로 여기서 정리한다. 다른 성분이 연결(link)로 참조하는 성분은 빼지 않는다.
+  const prune=()=>{ for(let pass=0;pass<4&&cur.comps.length>1;pass++){
+      const tot=cur.comps.reduce((s,c)=>s+Math.max(0,c.area),0)||1; const refd=new Set();
+      for(const id in cur.cons) for(const k in cur.cons[id]){ const q=cur.cons[id][k]; if(q&&q.mode==="link"&&q.ref) refd.add(q.ref); }
+      const order=cur.comps.map((c,i)=>i).filter(i=>!refd.has(cur.comps[i].id)&&cur.comps[i].area/tot<0.05).sort((a,b)=>cur.comps[a].area-cur.comps[b].area);
+      let done=false;
+      for(const i of order){ const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y; const id=cand.comps[i].id; cand.comps.splice(i,1); delete cand.cons[id];
+        let r2,S2; try{ r2=fitOnce(cand,{initAreas:false}); S2=fitStats(cand,r2); }catch(e){ continue; }
+        if(S2.BIC<=S.BIC+2){ log.push(`${cur.comps[i].be.toFixed(2)} eV 성분(넓이 ${(100*cur.comps[i].area/tot).toFixed(1)}%) 뺌 → ΔBIC ${(S.BIC-S2.BIC).toFixed(1)}`); cur=cand; r=r2; S=S2; removed++; done=true; break; } }
+      if(!done) break; } };
+  prune();
+  for(let it=0;it<maxAdd;it++){
+    const w=Math.max(2,Math.round(0.6/st)); const z=new Float64Array(n);
+    for(let i=0;i<n;i++){ let sum=0,c=0; for(let j=Math.max(0,i-w);j<=Math.min(n-1,i+w);j++){ sum+=S.resid[j]; c++; } z[i]=sum/Math.sqrt(c); }
+    // ρ₁ 이 크면 이웃 잔차가 상관 → 평활 합의 분산이 커지므로 그만큼 나눈다
+    const inf=Math.sqrt((1+Math.max(0,S.rho1))/(1-Math.min(0.95,Math.max(0,S.rho1)))); let im=-1, zm=0;
+    for(let i=w;i<n-w;i++){ const zz=z[i]/inf; if(zz>zm){ zm=zz; im=i; } }
+    if(im<0||zm<zMin){ log.push(`잔차 최대 z ${zm.toFixed(1)} < ${zMin} → 멈춤`); break; }
+    const be=E[im]; const cand=clone(stripProb(cur)); cand.E=E; cand.y=prob.y;
+    const ref=cand.comps[0]; const c=newComp(ref?ref.shape:"GLS",be,{F:1.2,el:ref?ref.el:"",line:ref?ref.line:""});
+    if(ref&&ref.m!=null) c.m=ref.m;
+    const cs=cand.cons[c.id]={F:{mode:"free",lo:0.3,hi:4}};
+    if(ref&&ref.m!=null) cs.m={mode:"link",ref:ref.id,k:1,b:0};
+    const d0=cand.comps.find(q=>q.doublet);
+    if(d0&&be+d0.doublet.dE<E[n-1]-0.5){ c.doublet={dE:d0.doublet.dE,r:d0.doublet.r,q:d0.doublet.q}; cs.r={mode:"fixed"}; cs.q={mode:"fixed"};
+      const dc=(cand.cons[d0.id]||{}).dE; cs.dE=dc&&dc.mode==="fixed"?{mode:"fixed"}:{mode:"link",ref:d0.id,k:1,b:0}; }
+    // 넓이 출발: 잔차 덩어리 높이
+    const hh=trueFWHM(c.shape,shapeParams(c,1)).ymax; c.area=Math.max(1e-9,(prob.y[im]-r.mu[im]))/(hh||1)*(c.doublet?1+c.doublet.r:1);
+    cand.comps.push(c);
+    let r2, S2; try{ r2=fitOnce(cand,{initAreas:false}); S2=fitStats(cand,r2); }catch(e){ log.push("추가 피팅 실패: "+e.message); break; }
+    const dB=S.BIC-S2.BIC;
+    if(dB<dBIC){ log.push(`${be.toFixed(2)} eV 추가 → ΔBIC ${dB.toFixed(1)} < ${dBIC} → 받지 않음`); break; }
+    log.push(`${be.toFixed(2)} eV 추가 → ΔBIC ${dB.toFixed(1)} 채택`); cur=cand; r=r2; S=S2; added++;
+  }
+  if(added) prune();
+  // 사용자 배경으로 되돌려 다시 맞춘다(성분 구성만 가져감)
+  if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
+  return {prob:cur,res:r,stats:S,added,removed,log};
+}
+
+/* Worker 용: 잔차 보강 결과를 직렬화 가능한 형태로 */
+function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,log:rf.log}; }
 
 /* ============================================================
    보조: 문제 만들기 (스펙트럼 + 영역 + 배경 + 성분)
@@ -42826,7 +42959,7 @@ const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
+  tfValue,tpp2m,imfpValue,quantify,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -42849,7 +42982,6 @@ const pm=(v,s,d)=>v==null||!isFinite(v)?"—":`${f(v,d)}${s!=null&&isFinite(s)?`
 const SLOTS=8;
 const ACCEPT=".vgd,.vms,.npl,.xls,.xlsx,.txt,.csv,.dat,.xy,.avg,.json";
 const ORB_J={s:null,p:["3/2","1/2"],d:["5/2","3/2"],f:["7/2","5/2"]};
-const ORB_R={p:0.5,d:2/3,f:0.75};
 
 /* ---------------- 상태 ---------------- */
 function defState(){ return {v:1,specs:[],sel:null,proc:{},samples:{},quant:{lib:"scofield",imfp:{model:"power",n:0.6,mat:{rho:5,Nv:24,M:150,Eg:3}},tf:{model:"auto",x:1},custom:{},rows:{}},ui:{tab:"fit",showRef:true,resid:"norm",overlay:[],ovNorm:"max",ovOffset:0,selComp:null,addMode:false,survey:{}}}; }
@@ -43091,47 +43223,39 @@ function addCompAt(be,yv){
   const bgAt=M?interp(M.E,M.B,be):0; const h=Math.max(1,(yv!=null?yv:(M?interp(M.E,M.y,be):1))-bgAt);
   const r=sp.reg||{}; const dbl=S.ui.addDoublet&&soInfo(r.el,r.orb);
   const c=C.newComp(S.ui.addShape||"GLS",be,{F:1.2,el:r.el||"",line:dbl?r.orb:(r.orb||"")});
-  if(dbl){ c.doublet={dE:dbl.dE||1,r:dbl.r,q:1}; p.cons[c.id]={dE:{mode:dbl.dE?"fixed":"free"},r:{mode:"fixed"},q:{mode:"fixed"}}; if(!dbl.dE) note("Δ(스핀–궤도 간격)를 쓸 수 없어 1 eV 로 두고 풀어 둡니다 — "+dbl.src,"warn"); }
+  if(dbl){ c.doublet={dE:dbl.dE||1,r:dbl.r,q:1}; p.cons[c.id]={dE:C.dEConstraint(dbl),r:{mode:"fixed"},q:{mode:"fixed"}}; if(!dbl.dE) note("Δ(스핀–궤도 간격)를 라이브러리에서 쓸 수 없어 1 eV 로 두고 풀어 둡니다 — 문헌값을 넣으세요","warn"); }
   c.name=defName(sp,p,!!dbl); c.slot=slotFor(p);
   const hh=compHeight(Object.assign({},c,{area:1})); c.area=h/(hh||1)*(dbl?(1+dbl.r):1);
   p.comps.push(c); S.ui.selComp=c.id; S.ui.addMode=false; touch(p); rerender();
 }
-function soInfo(el,orb){
-  if(!el||!orb) return null; const l=orb.slice(-1); const J=ORB_J[l]; if(!J) return null;
-  const rec=LIB().core[el]||{}; const lv=rec.lv||{}; const a=lv[orb+J[0]], b=lv[orb+J[1]];
-  if(!(a>0&&b>0)) return {dE:null,r:ORB_R[l],src:"라이브러리에 값 없음"};
-  if((rec.soWarn||[]).includes(orb)) return {dE:null,r:ORB_R[l],src:"X-ray Data Booklet 의 "+el+" "+orb+" 두 값 순서가 뒤바뀌어 있어(인쇄값 그대로) 간격을 쓰지 않음 — 문헌값을 직접 넣으세요"};
-  return {dE:+Math.abs(b-a).toFixed(3),r:ORB_R[l],src:"X-ray Data Booklet (원소 상태) "+el+" "+orb+J[1]+" − "+orb+J[0]};
-}
-function autoSuggest(){
+function soInfo(el,orb){ const d=C.doubletInfo(LIB(),el,orb); if(!d) return null; return d; }
+function soNote(so){ if(!so) return ""; const a=so.alt||{}; const both=a.avantage!=null&&a.booklet!=null;
+  return `Δ ${so.dE!=null?so.dE+" eV":"—"} (${so.src}${both?`; Booklet ${a.booklet} eV`:""}) · 넓이 비 ${f(so.r,3)} — ${so.dE==null?"직접 넣으세요":so.resolvable?"분해되는 doublet 이라 Δ 를 데이터로 정함(±범위 안)":"분해되지 않는 doublet 이라 Δ 고정"+(both&&so.spread>0.1?` — 두 출처가 ${f(so.spread,2)} eV 다름: 문헌값을 확인하세요`:"")}`; }
+async function autoSuggest(){
   const sp=cur(), p=pr(sp); const R=region(sp,p); if(!R) return;
-  const E=Float64Array.from(R.E), y=Float64Array.from(R.y);
-  const B=p.bg.type==="active"||p.bg.type==="none"?C.bgShirley(E,y,p.bg.n||5,true):C.bgStatic(E,y,p.bg);
-  const z=Float64Array.from(y,(v,i)=>v-B[i]);
-  let pk=C.findPeaks(E,y,{width:0.5,snr:4,merge:0.9}).filter(q=>q.be>E[3]&&q.be<E[E.length-4]);
-  if(!pk.length){ note("뚜렷한 봉우리를 찾지 못했습니다 — 그래프에서 직접 추가하세요","warn"); return; }
-  pk=pk.map(q=>({be:q.be,h:interp(E,z,q.be)})).filter(q=>q.h>0).sort((a,b)=>b.h-a.h).slice(0,8);
+  if(RUN){ note("이미 계산 중입니다","warn"); return; }
+  const r=sp.reg||{};
+  if(!r.el) note("이 스펙트럼의 원소·궤도를 모릅니다(파일 이름에서 못 읽음) — 정보 탭에서 지정하면 doublet·감도계수를 씁니다","warn");
+  const s=C.suggestModel(Float64Array.from(R.E),Float64Array.from(R.y),{bg:p.bg,el:r.el,orb:r.orb,lib:LIB(),shape:S.ui.addShape||"GLS"});
+  if(!s.comps.length){ note("뚜렷한 봉우리를 찾지 못했습니다 — 그래프에서 직접 추가하세요","warn"); return; }
   pushHist(p,"자동 제안");
-  const r=sp.reg||{}; const so=soInfo(r.el,r.orb);
-  p.comps=[]; p.cons={};
-  const used=new Set();
-  const asc=pk.slice().sort((a,b)=>a.be-b.be);
-  asc.forEach(q=>{
-    if(used.has(q)) return;
-    let partner=null;
-    if(so&&so.dE){ partner=asc.find(t=>t!==q&&!used.has(t)&&Math.abs(t.be-(q.be+so.dE))<0.7&&t.h<q.h*1.3); }
-    const c=C.newComp("GLS",q.be,{F:1.2,el:r.el||"",line:r.orb||""});
-    // doublet: 짝 봉우리가 보이거나, 짝 위치(q.be+Δ)가 영역 안이면. 짝이 영역 밖인 봉우리(예: 위성)는 단일 성분
-    if(so&&so.dE&&(partner||q.be+so.dE<E[E.length-1]-0.5)){ c.doublet={dE:so.dE,r:so.r,q:1}; p.cons[c.id]={dE:{mode:"fixed"},r:{mode:"fixed"},q:{mode:"fixed"}}; if(partner) used.add(partner); }
-    // 자동 제안 성분의 FWHM 범위: 0.3–4 eV (넓은 위성은 사용자가 풀어 준다)
-    (p.cons[c.id]=p.cons[c.id]||{}).F={mode:"free",lo:0.3,hi:4};
-    used.add(q); c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p);
-    const hh=compHeight(Object.assign({},c,{area:1})); c.area=q.h/(hh||1)*(c.doublet?1+c.doublet.r:1);
-    p.comps.push(c);
-  });
-  // 같은 모양 매개변수(m)는 첫 성분에 연결 (흔한 출발점)
-  const f0=p.comps[0]; p.comps.slice(1).forEach(c=>{ (p.cons[c.id]=p.cons[c.id]||{}).m={mode:"link",ref:f0.id,k:1,b:0}; });
-  touch(p); rerender(); note(`성분 ${p.comps.length}개를 제안했습니다${so&&so.dE?` (doublet Δ=${so.dE} eV, 비 ${f(so.r,3)} — ${so.src})`:""}. 출발점일 뿐이니 확인하세요`);
+  p.comps=[]; p.cons=s.cons;
+  s.comps.forEach(c=>{ c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); p.comps.push(c); });
+  touch(p); rerender();
+  const soTxt=s.info&&s.info.dE&&p.comps.some(c=>c.doublet)?" — "+soNote(s.info):"";
+  // 2 단계: 잔차 보강(덜 설명된 봉우리 추가 · 넓이 0 으로 간 성분 덜기) — 판단은 피팅 안 Shirley + 기울기 배경, z≥4 · ΔBIC≥10
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(`성분 ${p.comps.length}개를 제안했습니다${soTxt}. 출발점일 뿐이니 확인하세요`); return; }
+  setProg("자동 제안: 잔차 보강 중…",0.3);
+  try{
+    const [o]=await pool([{cmd:"auto",prob,opt:{}}]); hideProg(); if(!o) throw new Error("결과 없음");
+    if(o.added||o.removed){
+      const keep=new Map(p.comps.map(c=>[c.id,c]));
+      p.comps=o.comps.map(c=>{ const k=keep.get(c.id); if(k){ c.name=k.name; c.slot=k.slot; } else { c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } return c; });
+      p.cons=o.cons; }
+    else { const m=new Map(o.comps.map(c=>[c.id,c])); p.comps.forEach(c=>{ const q=m.get(c.id); if(q) Object.keys(q).forEach(k=>{ if(k!=="name"&&k!=="slot"&&k!=="color") c[k]=q[k]; }); }); }
+    touch(p); rerender();
+    note(`성분 ${p.comps.length}개를 제안했습니다${soTxt}${o.added||o.removed?` · 잔차 보강 +${o.added}/−${o.removed} (${o.log.slice(1).join("; ")})`:""}. 출발점일 뿐이니 확인한 뒤 '피팅'을 누르세요`);
+  }catch(e){ hideProg(); RUN=null; note(`성분 ${p.comps.length}개를 제안했습니다${soTxt} (잔차 보강 생략: ${e.message||e}). 출발점일 뿐이니 확인하세요`,"warn"); }
 }
 /* C 1s adventitious 템플릿 (출발값; 간격은 문헌의 흔한 값 ±0.4 eV 범위로만 풀어 둠) */
 function templateC1s(){
@@ -43159,6 +43283,7 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   if(d.cmd==="fit") out=C.fitJob(d.prob,d.starts,d.opt);
   else if(d.cmd==="final") out=C.finalJob(d.prob,d.opt);
   else if(d.cmd==="mc") out=C.mcJob(d.prob,d.res,d.M,d.seed,d.opt);
+  else if(d.cmd==="auto") out=C.autoJob(d.prob,d.opt);
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
   const url=URL.createObjectURL(new Blob([body],{type:"text/javascript"})); WORK={url}; return url;
@@ -43168,7 +43293,7 @@ function pool(jobs,onDone){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -43302,11 +43427,19 @@ function drawChg(){
   const el=$q(ROOT,"#xpsChg"); if(!el) return; const sp=cur(); if(!sp){ el.innerHTML=""; return; }
   const sm=smpOf(sp);
   el.innerHTML=`<span class="lbl">대전 보정</span><span class="xps-f">Δ <input type="number" step="0.01" class="w64" id="xpsSh" value="${+(sm.shift||0).toFixed(3)}"> eV</span>
-   <span class="xps-f">C 1s C–C = <input type="number" step="0.1" class="w56" id="xpsTg" value="${sm.target||284.8}"> eV</span><button class="btn xs" id="xpsShC" title="이 시료의 C 1s 피팅에서 가장 낮은 BE 의 C 성분(또는 선택한 성분)을 기준으로 Δ 를 정합니다">C 1s 로 맞추기</button>
+   <span class="xps-f" title="기준 성분이 가져야 할 BE (예: 탄소 오염 C–C 284.8, Au 4f7/2 84.0, 내부 기준)">기준 BE <input type="number" step="0.01" class="w64" id="xpsTg" value="${sm.target||284.8}"> eV</span><button class="btn xs" id="xpsShC" title="이 시료의 C 1s 피팅에서 가장 낮은 BE 의 C 성분을 기준 BE 로">C 1s 로</button><button class="btn xs" id="xpsShS" title="지금 선택한 성분(어떤 원소든)을 기준 BE 로 — 예: Au 4f7/2 = 84.0, 격자 O 1s, 금속 기판">선택 성분으로</button>
    ${sm.refNote?`<span class="muted xs">${esc(sm.refNote)}</span>`:""}`;
   $q(el,"#xpsSh").onchange=e=>{ sm.shift=+e.target.value||0; sm.refNote="직접 입력"; Object.keys(PV).forEach(k=>delete PV[k]); save(); rerender(); };
   $q(el,"#xpsTg").onchange=e=>{ sm.target=+e.target.value||284.8; save(); };
   $q(el,"#xpsShC").onclick=()=>shiftFromC1s(sp);
+  $q(el,"#xpsShS").onclick=()=>shiftFromSel(sp);
+}
+function shiftFromSel(sp){
+  const p=pr(sp); const c=p&&p.comps.find(x=>x.id===S.ui.selComp);
+  if(!c){ note("먼저 기준으로 쓸 성분을 그래프나 성분 목록에서 선택하세요","warn"); return; }
+  const sm=smpOf(sp); const tg=sm.target!=null?sm.target:284.8;
+  sm.shift=+(tg-c.be).toFixed(3); sm.refNote=`${sp.region} '${c.name||c.id}' ${f(c.be,2)} → ${tg} eV${p.result&&!p.result.stale?"":" (피팅 전 값)"}`;
+  Object.keys(PV).forEach(k=>delete PV[k]); save(); rerender(); note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV (${sm.refNote})`,"ok");
 }
 function shiftFromC1s(sp){
   const sm=smpOf(sp); const k=sp.sample||"(시료 이름 없음)";
@@ -43388,6 +43521,8 @@ function panelFit(el,sp){
 /* 배경 경고: Tougaard 음의 세기(0 으로 둠), 정적 배경의 넓이 편향 */
 function bgWarn(sp,p){
   const out=[];
+  if(p.bg.type==="shirley"||p.bg.type==="smart"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.converged===false) out.push("Shirley 반복이 수렴하지 않았습니다(200 회) — 배경이 기울어 Shirley 고정점이 없는 경우입니다. ‘Shirley — 피팅 안에서’ + ‘기울기도 피팅’, 또는 Linear 를 쓰세요."); } }
+  if((p.bg.type==="shirley"||p.bg.type==="smart"||p.bg.type==="linear")&&p.hi-p.lo>40) out.push("창이 넓습니다("+f(p.hi-p.lo,0)+" eV): 끝점으로 정하는 배경은 넓은 창에서 모양 오차가 쌓여 넓이가 몇 % 틀릴 수 있습니다(합성 시험 −8…+8 %). ‘Shirley — 피팅 안에서’ + ‘기울기도 피팅’을 권합니다.");
   if(p.bg.type==="tougaard"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.negClamped) out.push("높은 BE 끝이 낮은 BE 끝보다 낮아 Tougaard 세기가 음수가 됩니다 — 비물리적이라 0 으로 두었습니다(평평한 배경). 영역을 봉우리 뒤로 30 eV 이상 넓히거나 다른 배경을 쓰세요."); } }
   if(p.bg.type!=="active"&&p.bg.type!=="none"&&p.comps.some(c=>(c.shape==="GLS"||c.shape==="GLP"||c.shape==="V")&&((c.m||0)>0.3||(c.wL||0)>0.4))) out.push("Lorentzian 꼬리가 큰 성분 + 끝점으로 정하는 배경: 창 밖·끝점 평균 안으로 들어간 꼬리 넓이가 빠져 넓이가 몇 % 작게 나옵니다(합성 시험 −2…−5 %). 창을 넓히거나 ‘Shirley — 피팅 안에서’를 쓰세요.");
   return out.map(t=>`<div class="note warn" style="margin-top:4px">${esc(t)}</div>`).join("");
@@ -43438,7 +43573,7 @@ function compCard(sp,p,c,ci){
     <div class="xps-row">${shapeSel}<label class="xps-f"><input type="checkbox" data-dbl="${c.id}" ${c.doublet?"checked":""}> doublet</label>
     <span class="xps-f" title="정량에서 이 성분이 속한 원소">원소 <input type="text" class="xps-in w56" data-el="${c.id}" value="${esc(c.el||"")}"></span><label class="xps-f" title="정량 합에 넣기"><input type="checkbox" data-q="${c.id}" ${c.noQuant?"":"checked"}> 정량</label></div>
     <div class="pg">${names.map(field).join("")}${ced}</div>
-    ${c.doublet&&so&&so.dE?`<div class="muted xs" style="margin-top:4px">라이브러리 Δ ${so.dE} eV, 비 ${f(so.r,3)} (${esc(so.src)}) — 화학 상태에 따라 Δ 는 조금 다를 수 있음</div>`:""}
+    ${c.doublet&&so?`<div class="muted xs" style="margin-top:4px">${esc(soNote(so))}. 화학 상태에 따라 Δ 는 조금 다를 수 있음</div>`:""}
     ${sm?`<div class="muted xs" style="margin-top:4px">실제 FWHM ${f(sm.fwhm,3)}${sm.sig.fwhm!=null?" ± "+f(sm.sig.fwhm,3):""} eV · 높이 ${g(sm.height,4)} · 넓이 ${f(sm.areaPct,1)} %${sm.sig.areaPct!=null?" ± "+f(sm.sig.areaPct,1):""}</div>`:""}
   </div></div>`;
 }
@@ -43466,7 +43601,7 @@ function bindComps(el,sp,p){
       if(nx==="link"){ const ref=p.comps.find(o=>o.id!==c.id&&C.paramNames(o).includes(k)); cs[k].ref=prev.ref||ref.id; if(k==="be"){ cs[k].k=1; cs[k].b=+(c.be-(p.comps.find(o=>o.id===cs[k].ref)||ref).be).toFixed(3); } else { const rv=C.getP(p.comps.find(o=>o.id===cs[k].ref)||ref,k); cs[k].k=rv?+(C.getP(c,k)/rv).toPrecision(4):1; cs[k].b=0; } }
       S.ui.ced=nx==="fixed"?null:{id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); });
     const shp=$q(card,"[data-shape]"); if(shp) shp.onchange=()=>{ pushHist(p,"모양"); const i=p.comps.indexOf(c); const n=C.convertShape(c,shp.value); n.slot=c.slot; n.noQuant=c.noQuant; p.comps[i]=n; const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(n).includes(k)) delete cs[k]; }); touch(p); renderPanel(); drawPlot(); };
-    const db=$q(card,"[data-dbl]"); if(db) db.onchange=()=>{ pushHist(p,"doublet"); if(db.checked){ const so=soInfo(c.el||sp.reg.el,c.line||sp.reg.orb)||{dE:1,r:0.5}; c.doublet={dE:so.dE||1,r:so.r||0.5,q:1}; c.area*=1+c.doublet.r; const cs=(p.cons[c.id]=p.cons[c.id]||{}); cs.dE={mode:"fixed"}; cs.r={mode:"fixed"}; cs.q={mode:"fixed"}; if(!so.dE) note("이 궤도의 Δ 를 라이브러리에서 찾지 못했습니다 — 직접 넣으세요","warn"); } else { c.area/=1+c.doublet.r; c.doublet=null; const cs=p.cons[c.id]||{}; delete cs.dE; delete cs.r; delete cs.q; } touch(p); renderPanel(); drawPlot(); };
+    const db=$q(card,"[data-dbl]"); if(db) db.onchange=()=>{ pushHist(p,"doublet"); if(db.checked){ const so=soInfo(c.el||sp.reg.el,c.line||sp.reg.orb)||{dE:null,r:0.5}; c.doublet={dE:so.dE||1,r:so.r||0.5,q:1}; c.area*=1+c.doublet.r; const cs=(p.cons[c.id]=p.cons[c.id]||{}); cs.dE=C.dEConstraint(so.dE?so:null); cs.r={mode:"fixed"}; cs.q={mode:"fixed"}; if(!so.dE) note("이 궤도의 Δ 를 라이브러리에서 찾지 못했습니다 — 직접 넣으세요","warn"); } else { c.area/=1+c.doublet.r; c.doublet=null; const cs=p.cons[c.id]||{}; delete cs.dE; delete cs.r; delete cs.q; } touch(p); renderPanel(); drawPlot(); };
     const ei=$q(card,"[data-el]"); if(ei) ei.onchange=()=>{ c.el=ei.value.trim(); touch(p); };
     const qi=$q(card,"[data-q]"); if(qi) qi.onchange=()=>{ c.noQuant=!qi.checked; touch(p); };
     const ced=$q(card,".ced"); if(ced){ const k=ced.dataset.ced; const ok=$q(ced,"[data-cok]"); ok.onclick=()=>{ const cs=(p.cons[c.id]=p.cons[c.id]||{}); const o=cs[k]||{mode:"free"};
@@ -43545,13 +43680,20 @@ function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ c
 /* ============================================================
    정량 패널
    ============================================================ */
-function rsfLookup(el,line,src){
-  const L=LIB(); const key=el+" "+line;
-  if(src==="althermo1") return L.althermo1&&L.althermo1[key]!=null?{v:L.althermo1[key],src:"ALTHERMO1"}:null;
+/* 광원 → 감도계수 표: Al Kα(1486.6) · Mg Kα(1253.6) 만 Scofield 표가 있다. 그 밖(Ag Lα, Cr Kα, 방사광)은 직접 입력 */
+function srcOf(hv){ if(Math.abs(hv-1486.6)<3) return "al"; if(Math.abs(hv-1253.6)<3) return "mg"; return null; }
+function rsfLookup(el,line,src,hv){
+  const L=LIB(); const key=el+" "+line; const s=srcOf(hv||1486.6);
   if(src==="custom") return S.quant.custom[key]!=null?{v:+S.quant.custom[key],src:"사용자"}:null;
-  const t=(L.scofield&&L.scofield.al)||{}; return t[key]!=null?{v:t[key],src:"Scofield"}:null;
+  if(src==="althermo1"){ if(s!=="al") return null; return L.althermo1&&L.althermo1[key]!=null?{v:L.althermo1[key],src:"ALTHERMO1"}:null; }
+  if(!s) return null; const t=(L.scofield&&L.scofield[s])||{}; return t[key]!=null?{v:t[key],src:"Scofield "+(s==="al"?"Al":"Mg")}:null;
 }
-function lineChoices(el,orb){ const l=(orb||"").slice(-1); const J=ORB_J[l]; return J?[orb,orb+J[0],orb+J[1]]:[orb]; }
+/* 이 원소에서 감도계수가 있는 선 전부(궤도 합 먼저, Scofield 큰 순) — 어떤 원소든 */
+function lineChoices(el,orb){
+  const t=(LIB().scofield||{}).al||{}; const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")).map(k=>k.slice(el.length+1));
+  const tot=ks.filter(k=>k.length===2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]), sub=ks.filter(k=>k.length>2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]);
+  const out=[]; if(orb) out.push(orb); tot.concat(sub).forEach(k=>{ if(!out.includes(k)) out.push(k); }); return out.length?out:[orb||""];
+}
 function quantRows(sample){
   const rows=[];
   S.specs.filter(s=>(s.sample||"(시료 이름 없음)")===sample&&s.reg&&s.reg.kind==="region").forEach(sp=>{
@@ -43568,8 +43710,9 @@ function quantRows(sample){
         src=`피팅 ${idx.length}성분`; }
       else { const R=region(sp,p); if(R&&R.E.length>8){ const E=Float64Array.from(R.E), y=Float64Array.from(R.y); const B=C.bgStatic(E,y,p.bg.type==="active"?{type:"shirley",n:p.bg.n}:p.bg)||C.bgShirley(E,y,5,false); const Q=C.cumtrapz(E,Float64Array.from(y,(v,i)=>v-B[i])); area=Q[Q.length-1]; let w=0,ws=0; for(let i=0;i<E.length;i++){ const t=Math.max(0,y[i]-B[i]); w+=t*E[i]; ws+=t; } BE=ws>0?w/ws:(E[0]+E[E.length-1])/2; src="영역 적분(배경 위)"; } }
       if(area==null) return;
-      const line=ov.line||(r&&els[e]&&els[e].some(i=>!r.comps[i].doublet)&&!els[e].some(i=>r.comps[i].doublet)&&ORB_J[(sp.reg.orb||"").slice(-1)]&&sp.reg.el===e?(sp.reg.orb):(e===sp.reg.el?sp.reg.orb:"")) ;
-      const lk=rsfLookup(e,line||"",S.quant.lib);
+      const cl=r&&els[e]?(r.comps[els[e][0]].line||""):"";
+      const line=ov.line||(e===sp.reg.el?sp.reg.orb:(cl?cl.replace(/(1\/2|3\/2|5\/2|7\/2)$/,""):""));
+      const lk=rsfLookup(e,line||"",S.quant.lib,sp.hv);
       const S_=ov.rsf!=null?+ov.rsf:(lk?lk.v:null);
       const tf=tfFor(sp);
       rows.push({id,sp,el:e,line,area,sArea,BE,src,S:S_,Ssrc:ov.rsf!=null?"직접":(lk?lk.src:"없음"),hv:sp.hv,PE:sp.meta&&sp.meta.passEnergy,tf,inc:ov.inc!==false,sh});
@@ -43596,6 +43739,7 @@ function panelQuant(el,sp){
   const noTF=used.some(r=>!r.tf||r.tf.model==="none");
   const peMix=new Set(used.map(r=>r.PE).filter(v=>v!=null)).size>1;
   const dup=Object.entries(used.reduce((m,r)=>{ m[r.el]=(m[r.el]||0)+1; return m; },{})).filter(([k,v])=>v>1).map(([k])=>k);
+  const noSrc=[...new Set(rows.filter(r=>!srcOf(r.hv)).map(r=>f(r.hv,1)))];
   const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>c.shape==="DS"&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
   const im=S.quant.imfp, tq=S.quant.tf;
   el.innerHTML=`
@@ -43615,6 +43759,7 @@ function panelQuant(el,sp){
    ${anyVgdTF?`<div class="xps-row"><button class="btn xs" id="xqProf" title="VGD 에서 읽은 transmission 계수를 다른 파일(txt/xls)에도 씀">VGD 의 장비 함수를 이 프로젝트 기본으로</button>${S.quant.tfProfile?`<span class="badge inf">장비 함수 저장됨 (PE ${esc(S.quant.tfProfile.pe)})</span>`:""}</div><div class="muted xs">VGD 의 transmission 계수 해석 ln T = Σaₖ(ln(KE/PE))ᵏ 은 계수 값의 거동(높은 KE/PE 에서 T∝(KE/PE)^≈−0.9)으로 추정한 것입니다 — Avantage 의 같은 데이터 at% 와 한 번 대조해 확인하세요.</div>`:""}
    ${peMix?`<div class="note warn" style="margin-top:6px">pass energy 가 다른 영역이 섞여 있습니다 — transmission 보정 없이는 비교할 수 없습니다.</div>`:""}
    ${dup.length?`<div class="note warn" style="margin-top:6px">같은 원소가 여러 행: ${esc(dup.join(", "))} — 한 원소당 한 선만 체크하세요(예: Co 2p 와 Co 3p 중 하나).</div>`:""}
+   ${noSrc.length?`<div class="note warn" style="margin-top:6px">광원 hν = ${esc(noSrc.join(", "))} eV 에 대한 감도계수 표가 없습니다(Scofield 표는 Al Kα·Mg Kα 만). 감도계수를 직접 넣으세요.</div>`:""}
    ${dsIn?`<div class="note warn" style="margin-top:6px">DS(Doniach–Šunjić) 성분이 있습니다(${esc(dsIn)}): DS 넓이는 피팅 창 안의 적분이라 창 폭에 따라 달라집니다. 같은 창 규칙으로 잰 시료끼리만 at% 를 비교하세요.</div>`:""}
    <div class="muted xs" style="margin-top:4px">ALTHERMO1 은 Scofield 대비 선마다 다르지만(5–95 % 범위 −26…+49 %) KE 와 상관이 없다(log 기울기 0.01) — T·λ 가 들어 있지 않은 값이므로 T·λ 보정을 함께 적용한다.</div>
    <div class="xps-row" style="margin-top:6px"><button class="btn sm" id="xqCsv">정량 CSV</button></div>`;
@@ -43636,7 +43781,7 @@ function panelQuant(el,sp){
    서베이 패널
    ============================================================ */
 function panelSurvey(el,sp){
-  const isSv=sp.reg&&sp.reg.kind==="survey"; const st=S.ui.survey[sp.uid]||(S.ui.survey[sp.uid]={snr:6,tol:2,cands:null,acc:{}});
+  const isSv=sp.reg&&sp.reg.kind==="survey"; const st=S.ui.survey[sp.uid]||(S.ui.survey[sp.uid]={snr:4,tol:2,cands:null,acc:{}});
   const L=LIB(); const libOK=L.core&&Object.keys(L.core).length>0;
   el.innerHTML=`
    <div class="xps-h">원소 판별 ${isSv?"":`<span class="badge wr">이 스펙트럼은 서베이가 아님</span>`}</div>
@@ -43662,7 +43807,7 @@ function surveyHTML(sp,st){
 function bindSurvey(el,sp,st){ $a(el,"[data-acc]").forEach(i=>i.onchange=()=>{ st.acc[i.dataset.acc]=i.checked; updMarks(sp,st); save(); renderPanel(); drawPlot(); }); }
 function updMarks(sp,st){ const sh=shOf(sp); st.marks=[]; (st.cands||[]).filter(c=>st.acc[c.el]).forEach(c=>c.found.filter(x=>!x.auger).slice(0,3).forEach(x=>{ const i=sp.be.findIndex(b=>b>=x.obs-sh); st.marks.push({be:x.obs-sh,y:i>=0?sp.y[i]:0,lab:x.line}); })); }
 function surveyQuant(sp,st){
-  const L=LIB(); const acc=(st.cands||[]).filter(c=>st.acc[c.el]); if(!acc.length) return null; const sh=shOf(sp); const sc=L.scofield.al||{};
+  const L=LIB(); const acc=(st.cands||[]).filter(c=>st.acc[c.el]); if(!acc.length) return null; const sh=shOf(sp); const sc=L.scofield[srcOf(sp.hv)||"al"]||{};
   const rows=[];
   acc.forEach(c=>{ // 주선: Scofield 가장 큰 선 중 관측된 것 → 궤도 전체(두 subshell) 창
     const lines=c.found.filter(x=>!x.auger).map(x=>({...x,s:sc[x.line]||0})).sort((a,b)=>b.s-a.s); if(!lines.length) return;
@@ -43689,7 +43834,11 @@ function panelInfo(el,sp){
   const cExp=sp.c?1/sp.c:null;
   const noiseTxt=nz?`κ = ${g(nz.kappa,3)} CPS${sp.c?` (Poisson 이면 1/c = ${g(cExp,3)} → 비 ${f(nz.kappa/cExp,2)})`:` → 유효 계수 시간 ≈ ${g(1/nz.kappa,3)} s/점`}`:"—";
   const L=LIB();
-  el.innerHTML=`<div class="xps-h">파일 · 출처</div><div class="tw"><table class="xps-tbl">
+  const orbs=["1s","2s","2p","3s","3p","3d","4s","4p","4d","4f","5s","5p","5d","6s","6p"];
+  const regEd=`<div class="xps-h">원소 · 궤도 ${sp.reg&&sp.reg.el?`<span class="badge ok">${esc(sp.reg.el+" "+(sp.reg.orb||""))}</span>`:`<span class="badge wr">모름</span>`}</div>
+    <div class="xps-row"><span class="xps-f">원소 <input type="text" class="xps-in w56" id="xiEl" value="${esc(sp.reg&&sp.reg.el||"")}" placeholder="예: Fe"></span><span class="xps-f">궤도 <select class="xps-sel" id="xiOrb">${orbs.map(o=>`<option ${sp.reg&&sp.reg.orb===o?"selected":""}>${o}</option>`).join("")}</select></span><button class="btn xs" id="xiSet">적용</button></div>
+    <div class="muted xs">파일 이름에서 읽지 못했거나 틀렸을 때 지정합니다. doublet Δ·넓이 비, 참고선, 감도계수가 이 값을 씁니다.</div>`;
+  el.innerHTML=regEd+`<div class="xps-h">파일 · 출처</div><div class="tw"><table class="xps-tbl">
     ${kv("파일",esc(sp.file))}${kv("형식",esc(sp.format))}${kv("영역",esc(sp.region))}${kv("시료",esc(sp.sample))}
     ${kv("점 수 · 간격",`${sp.n} · ${f(sp.step,4)} eV`)}${kv("BE 범위",`${f(sp.be[0],2)} – ${f(sp.be[sp.n-1],2)} eV (측정값)`)}
     ${kv("광원 에너지",`${f(sp.hv,2)} eV <span class="muted xs">${esc(sp.hvSrc)}</span>`)}
@@ -43704,6 +43853,8 @@ function panelInfo(el,sp){
     ${sp.extra&&sp.extra.avantageCols?`<div class="note" style="margin-top:6px">Avantage 내보내기의 추가 열: ${esc(Object.keys(sp.extra.avantageCols).join(", "))}</div>`:""}
     <div class="xps-h">라이브러리 출처</div><div class="muted xs" style="line-height:1.6">${Object.entries((L.meta&&L.meta.sources)||{}).map(([k,v])=>`<b>${esc(k)}</b>: ${esc(v)}`).join("<br>")||"—"}</div>
     <div class="xps-h">단축 조작</div><div class="muted xs" style="line-height:1.6">그래프: 휠 = 확대/축소 · 끌기 = 구간 확대 · 두 번 누르기 = 전체 · 점선 손잡이 = 피팅 영역 · 색 동그라미 끌기 = 성분 위치·높이 · 성분 면적 누르기 = 선택</div>`;
+  const xs=$q(el,"#xiSet"); if(xs) xs.onclick=()=>{ const raw=$q(el,"#xiEl").value.trim(); const e=IO.SYMS.find(s=>s.toLowerCase()===raw.toLowerCase()); if(!e){ note("원소 기호를 확인하세요 (예: Fe, Co, Ta)","warn"); return; } const o=$q(el,"#xiOrb").value; if(!(LIB().core[e]||{lv:{}}).lv||!Object.keys((LIB().core[e]||{}).lv||{}).some(k=>k.startsWith(o))) note(e+" 에는 라이브러리에 "+o+" 준위가 없습니다 — 그래도 지정합니다","warn");
+    sp.reg={kind:"region",el:e,orb:o,j:null,label:e+" "+o,manual:true}; sp.region=sp.reg.label; save(); rerender(); note("원소·궤도를 "+sp.reg.label+" 로 지정했습니다","ok"); };
 }
 
 /* ============================================================
