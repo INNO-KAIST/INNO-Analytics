@@ -1,14 +1,15 @@
 """INNO Analytics 단일 HTML 에 Energy Diagram·DRE·XPS·Image Analysis 탭을 주입한다 (멱등).
 사용: python inject_all.py <입력 html> <출력 html>   (입력=출력 가능)
-- 이전에 주입한 블록(INNO-ED / INNO-DRE / INNO-IF / INNO-XPS 표지)을 지우고 다시 넣는다.
+- 이전에 주입한 블록(INNO-ED / INNO-DRE / INNO-IF / INNO-XPS / INNO-IMG / INNO-TOUCH 표지)을 지우고 다시 넣는다.
+- INNO-TOUCH = 공용 터치 제스처 window.INNO_TOUCH (touch/src) — head 에 CSS·JS 로.
 - XPS 원소 라이브러리 src/xps_lib.js 는 modules/xps/build/build_lib.py 가 만든다(없으면 중단).
 - 본 앱 코드 변경은 정규식 치환 + 개수 확인. 원본(주입 전)과 이미 주입된 판본 모두에서 같은 결과가 나온다."""
 import sys, re, os
 HERE=os.path.dirname(os.path.abspath(__file__))
-ED=os.path.join(HERE,'energy_diagram','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
+ED=os.path.join(HERE,'energy_diagram','src'); TO=os.path.join(HERE,'touch','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
 inp,outp=sys.argv[1],sys.argv[2]
 s=open(inp,encoding='utf-8').read()
-s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
+s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
 def R(desc,pat,rep,flags=0):
     global s
     n=len(re.findall(pat,s,flags))
@@ -58,6 +59,9 @@ css=rd(f'{ED}/ed.css')+'\n'+rd(f'{DR}/dre.css')+'\n'+rd(f'{XP}/xps.css')+'\n'+rd
 @media (max-width:380px){ #nav button .nl::after{font-size:8.5px;letter-spacing:-.3px} }
 '''
 head='<!-- INNO-ED:BEGIN css -->\n<style id="ed-css">\n'+css+'</style>\n<!-- INNO-ED:END -->\n'
+# 공용 터치 제스처(window.INNO_TOUCH) — 모든 탭·나중의 Diffraction 이 같이 쓴다. head 에 두어 어느 탭 코드보다 먼저 정의된다.
+tjs=rd(f'{TO}/inno_touch.js'); assert '</script' not in tjs.lower(), 'inno_touch: script 종료 태그'
+head+='<!-- INNO-TOUCH:BEGIN css+js -->\n<style id="inno-touch-css">\n'+rd(f'{TO}/touch.css')+'</style>\n<script id="inno-touch-js">\n'+tjs+'</script>\n<!-- INNO-TOUCH:END -->\n'
 i=s.index('</head>'); s=s[:i]+head+s[i:]
 edjs=''.join(rd(f'{ED}/{f}')+'\n' for f in ('ed_data.js','ed_core.js','ed_ui.js'))
 core=rd(f'{DR}/dre_core.js'); ui=rd(f'{DR}/dre_ui.js'); ifjs=rd(f'{IF}/interf_suggest.js')
@@ -65,7 +69,7 @@ assert os.path.exists(f'{XP}/xps_lib.js'), 'xps_lib.js 없음: python3 -I module
 xlib=rd(f'{XP}/xps_lib.js'); xio=rd(f'{XP}/xps_io.js'); xcore=rd(f'{XP}/xps_core.js'); xui=rd(f'{XP}/xps_ui.js')
 icore=''.join(rd(os.path.join(IM,'core',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'core'))) if f.endswith('.js'))
 iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js')+'\n'+rd(f'{IM}/img_lif.js')+'\n'+rd(f'{IM}/img_oir.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
-for name,src in (('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
+for name,src in (('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
     assert '</script' not in src.lower(), name+': script 종료 태그'
     # 문법 확인 (node 가 있으면): 주석이 코드를 삼키는 등의 편집 실수를 주입 전에 막음
     import shutil as _sh, subprocess as _sp, tempfile as _tf

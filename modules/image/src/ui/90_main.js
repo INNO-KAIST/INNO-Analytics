@@ -19,7 +19,7 @@ function build(root){
       <div class="card im-list" id="imList"></div>
       <div class="card im-center">
         <div class="im-toolbar" id="imTools"></div>
-        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>Drop here</div></div>
+        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>Drop here</div><div class="im-polybar" id="imPolyBar" hidden></div></div>
         <div class="im-stackbar" id="imStack"></div>
         <div class="im-status" id="imStatus"></div>
         <div class="im-prog" id="imProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="imStop">Stop</button></div>
@@ -43,6 +43,7 @@ function build(root){
   x.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length){ e.preventDefault(); e.stopPropagation(); x.classList.remove("over"); loadFiles(e.dataTransfer.files); } });
   const ov=q("#imOverlay"); ov.addEventListener("pointerdown",onDown); ov.addEventListener("pointermove",onMove); ov.addEventListener("pointerup",onUp); ov.addEventListener("dblclick",onDbl);
   ov.addEventListener("pointerleave",()=>{ HOVER=null; drawStatus(); }); ov.addEventListener("wheel",onWheel,{passive:false}); ov.addEventListener("contextmenu",e=>e.preventDefault());
+  ov.addEventListener("pointercancel",e=>{ if(e.pointerType==="touch"&&TSNAP) touchRestore(); }); ov.addEventListener("pointerup",()=>{ TSNAP=null; }); bindTouch(ov); // 손가락 제스처 (INNO_TOUCH)
   try{ new ResizeObserver(()=>draw()).observe(q("#imCanvasWrap")); }catch(e){}
   rerender();
 }

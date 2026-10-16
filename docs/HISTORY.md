@@ -5,6 +5,13 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-17 휴대폰 터치 조작 — 공용 제스처 window.INNO_TOUCH**(modules/touch/src, inject_all.py 의 INNO-TOUCH 블록 · head):
+  한 구현을 모든 캔버스가 같이 쓴다 — EM Image, EDS Maps, EDS Spectrum, Lattice FFT(실공간·FFT·역FFT), Image Analysis, XPS. 나중의 Diffraction 모듈도 `INNO_TOUCH.attach(el,{getView,setView,oneFinger,onTap,onDoubleTap,onLongPress,onPassCancel…})` 로 붙인다.
+  두 손가락 = 핀치 중심 고정 확대·이동(어느 도구든), 한 손가락 = 이동 또는 그리기 도구면 그리기(둘째 손가락이 오면 그리던 것 취소), 두 번 탭 = 맞춤, 탭·길게 누르기 = hover 로만 보이던 값(화소 값·XPS 풍선).
+  확대 기능이 없던 Maps·Lattice 캔버스는 CSS transform 확대(cssZoom, 다시 계산 안 함), EDS Spectrum 은 에너지 축 보기 범위(저장 안 함). 손가락만 처리 — 마우스 동작은 그대로.
+  Image Analysis: 다각형 Finish·Cancel 막대, 손잡이·허용 거리 확대, Point 탭·길게 눌러 지우기(Alt+클릭 대신), Point·Wand·Zoom 은 탭 = 클릭. XPS: Add component 뒤 탭 = 그 BE 에 성분, 표지·손잡이 끌기. Lattice: 확대한 FFT 탭 = 스폿 측정.
+  pointer:coarse 에서만 주요 단추·도구·탭 ≥ 40 px, 파일 목록 × 늘 보이기. rAF 로 한 프레임에 한 번만 다시 그림. DRE·Energy Diagram 은 확대 기능이 없어 그대로.
+  시험: interf/test/ui_touch.py(390×844 hasTouch·isMobile, CDP 다중 터치) 70 · 데스크톱 Chromium(Image·검수·XPS·DRE·셸) 그대로 통과 · node 378 · XPS 145.
 - **10-17 화면 영어 통일 · OIR 실측 검증 · Asylum IBW 단위** :
   탭 이름 XPS · EM Image · Image Analysis · EDS Maps · EDS Spectrum · Lattice FFT · EDS Interference · EM Metadata · Energy Diagram · DRE Kinetics('이미지'→EM Image 로 Image Analysis 와 구분),
   제목·메뉴·버튼·표 머리는 영어, 설명·알림·경고는 한국어(docs/UI-English-style.md). 휴대폰 아래 탭은 짧은 이름(EM Img·Analysis·Maps·Spectra·FFT·Interf.·Meta·Energy·DRE), 390·360 px 가로 넘침 없음.

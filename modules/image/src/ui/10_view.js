@@ -111,7 +111,7 @@ function draw(){
     for(let x=Math.max(0,Math.floor(ax));x<=Math.min(im.w,Math.ceil(bx));x++){ const s=toScr(v,x,0)[0]; ox.moveTo(s,0); ox.lineTo(s,H); }
     for(let y=Math.max(0,Math.floor(ay));y<=Math.min(im.h,Math.ceil(by));y++){ const s=toScr(v,0,y)[1]; ox.moveTo(0,s); ox.lineTo(W,s); } ox.stroke(); }
   drawThreshold(im,ox,v); drawParticles(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
-  drawStatus(); drawProfileMini();
+  drawStatus(); drawProfileMini(); drawPolyBar();
 }
 function thrRange(im){ const T=S.ui.thr; return {lo:+T.lower,hi:+T.upper}; }
 function drawThreshold(im,ox,v){
@@ -179,7 +179,7 @@ function drawRoi(ox,v,r,act,im){
   else if(r.type==="poly"||r.type==="free"||r.type==="traced"){ pathOf(ox,v,r,!r.open); ox.stroke(); }
   else if(r.type==="line"||r.type==="angle"){ pathOf(ox,v,r,false); if(r.type==="line"&&(S.ui.lw||1)>1){ ox.save(); ox.globalAlpha=0.25; ox.lineWidth=(S.ui.lw||1)*v.zoom; ox.stroke(); ox.restore(); } ox.stroke(); }
   else if(r.type==="point"){ r.pts.forEach((p,k)=>{ const [sx,sy]=toScr(v,p[0],p[1]); ox.beginPath(); ox.arc(sx,sy,act?4.5:3.5,0,2*Math.PI); ox.fillStyle=r.cls!=null?CLS_COL[r.cls[k]%CLS_COL.length]:col; ox.fill(); ox.lineWidth=1; ox.strokeStyle="#000"; ox.stroke(); }); }
-  if(act&&r.type!=="point"){ handlesOf(r).forEach(([hx,hy])=>{ const [sx,sy]=toScr(v,hx,hy); ox.fillStyle="#fff"; ox.fillRect(sx-3,sy-3,6,6); ox.strokeStyle="#000"; ox.lineWidth=1; ox.strokeRect(sx-3,sy-3,6,6); }); }
+  if(act&&r.type!=="point"){ const hs=TUI()?5:3; handlesOf(r).forEach(([hx,hy])=>{ const [sx,sy]=toScr(v,hx,hy); ox.fillStyle="#fff"; ox.fillRect(sx-hs,sy-hs,2*hs,2*hs); ox.strokeStyle="#000"; ox.lineWidth=1; ox.strokeRect(sx-hs,sy-hs,2*hs,2*hs); }); } // 손가락이면 손잡이를 크게
   if(r.name&&!act){ const b=roiBounds(r); const [sx,sy]=toScr(v,b.x,b.y); ox.font="600 10.5px DM Sans,system-ui"; ox.fillStyle=col; ox.fillText(r.name,sx+2,sy-3); }
   void im; ox.restore();
 }
@@ -191,24 +191,26 @@ function drawRois(im,ox,v){ if(S.ui.showAll!==false) roiList(im).forEach(r=>{ if
 const TOOLS=[["rect","Rectangle","M3 5h18v14H3z"],["oval","Oval","M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z"],["poly","Polygon","M4 18 7 5l9 3 4 9-9 3z"],["free","Freehand","M4 15c3-9 6 4 9-3s5-3 7 1"],
   ["line","Straight line (profile)","M4 19 20 5"],["angle","Angle","M4 19h16M4 19 15 6"],["point","Multi-point (count)","M7 8h.01M15 7h.01M10 15h.01M17 16h.01"],["wand","Wand (tracing)","M4 20 14 10M15 4v3M18 6l-2 2M20 9h-3"],
   ["scale","Set Scale (draw a line on the scale bar)","M3 17h18M3 13v8M21 13v8M8 17v-2M13 17v-2"],["hand","Scrolling tool (Space)","M8 13V6a1.5 1.5 0 0 1 3 0v6V4a1.5 1.5 0 0 1 3 0v8V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"],["zoom","Zoom (click = in, Alt+click = out)","M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-6-6M7 10h6M10 7v6"]];
-let DRAG=null, SPACE=false, HOVER=null;
+let DRAG=null, SPACE=false, HOVER=null, LASTPT="mouse";
+const TUI=()=>LASTPT==="touch"||!!(window.INNO_TOUCH&&INNO_TOUCH.touchUI()); // 손가락 화면: 손잡이·허용 거리를 크게
 function evPos(e){ const cv=$q(ROOT,"#imOverlay"); const r=cv.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
-function hitHandle(im,r,sx,sy){ const v=viewOf(im); const H=handlesOf(r); for(let k=0;k<H.length;k++){ const [hx,hy]=toScr(v,H[k][0],H[k][1]); if(Math.abs(hx-sx)<=5&&Math.abs(hy-sy)<=5) return k; } return -1; }
+function hitHandle(im,r,sx,sy,tol){ tol=tol||5; const v=viewOf(im); const H=handlesOf(r); for(let k=0;k<H.length;k++){ const [hx,hy]=toScr(v,H[k][0],H[k][1]); if(Math.abs(hx-sx)<=tol&&Math.abs(hy-sy)<=tol) return k; } return -1; }
 function insideRoi(im,r,ix,iy){ if(r.type==="rect"||r.type==="oval"){ const b=roiBounds(r); if(r.type==="rect") return ix>=b.x&&ix<=b.x+b.w&&iy>=b.y&&iy<=b.y+b.h; const dx=(ix-b.x-b.w/2)/(b.w/2), dy=(iy-b.y-b.h/2)/(b.h/2); return dx*dx+dy*dy<=1; }
   if(r.type==="poly"||r.type==="free"||r.type==="traced"){ let c=false; const P=r.pts; for(let i=0,j=P.length-1;i<P.length;j=i++){ if((P[i][1]>iy)!==(P[j][1]>iy)&&ix<(P[j][0]-P[i][0])*(iy-P[i][1])/(P[j][1]-P[i][1])+P[i][0]) c=!c; } return c; }
-  if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<5; }
+  if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<(LASTPT==="touch"?12:5); }
   return false; }
 const snapI=v=>Math.floor(v); // ImageJ: 화면 → 영상 좌표는 (int) 내림
 function onDown(e){
   const im=cur(); if(!im) return; const [sx,sy]=evPos(e); const v=viewOf(im); const [ix,iy]=toImg(v,sx,sy); const tool=S.ui.tool;
   if(e.button===2) return; // 오른쪽 단추는 그리지 않음
-  $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId);
+  LASTPT=e.pointerType||"mouse"; const touch=LASTPT==="touch"; if(touch&&!e._tap) touchSnap(im); // 손가락: 둘째 손가락이 오면 되돌릴 수 있게
+  try{ $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId); }catch(er){}
   if(e.button===1||SPACE||tool==="hand"){ DRAG={mode:"pan",sx,sy,vx:v.x,vy:v.y}; return; }
   if(tool==="zoom"){ zoomStep(im,e.altKey?-1:1,sx,sy); return; }
   const a=activeRoi(im);
-  if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
+  if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy,touch?14:5); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
     if(insideRoi(im,a,ix,iy)&&!(e.shiftKey)){ DRAG={mode:"move",orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; } }
-  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<7){ finishPoly(im); return; } const P=[snapI(ix),snapI(iy)]; t.pts[t.pts.length-1]=P; t.pts.push(P.slice()); draw(); return; } // 터치는 hover 가 없어 고무줄 점을 누른 자리로 먼저 옮김
+  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<(touch?18:7)){ finishPoly(im); return; } const P=[snapI(ix),snapI(iy)]; t.pts[t.pts.length-1]=P; t.pts.push(P.slice()); draw(); return; } // 터치는 hover 가 없어 고무줄 점을 누른 자리로 먼저 옮김
     DRAG={mode:"poly",temp:{id:uid(),type:"poly",pts:[[snapI(ix),snapI(iy)],[snapI(ix),snapI(iy)]]}}; return; }
   if(tool==="angle"){ if(DRAG&&DRAG.mode==="angle"){ DRAG.temp.pts.push([ix,iy]); if(DRAG.temp.pts.length>=4){ DRAG.temp.pts.length=3; setActive(im,DRAG.temp); DRAG=null; } draw(); return; } DRAG={mode:"angle",temp:{id:uid(),type:"angle",pts:[[ix,iy],[ix,iy]]}}; return; }
   if(tool==="point"){ let r=a&&a.type==="point"?a:null; if(!r||!e.shiftKey&&!S.ui.pointAdd&&false){ r={id:uid(),type:"point",pts:[],cls:[]}; } if(!r) r={id:uid(),type:"point",pts:[],cls:[]};
@@ -250,6 +252,42 @@ function onDbl(){ const im=cur(); if(im&&DRAG&&DRAG.mode==="poly"){ DRAG.temp.pt
 function updateCursor(im,sx,sy,ix,iy){ const el=$q(ROOT,"#imOverlay"); const t=S.ui.tool; let c="crosshair"; if(SPACE||t==="hand") c="grab"; else if(t==="zoom") c="zoom-in";
   else { const a=activeRoi(im); if(a){ if(hitHandle(im,a,sx,sy)>=0) c="pointer"; else if(insideRoi(im,a,ix,iy)) c="move"; } } el.style.cursor=c; }
 function onWheel(e){ const im=cur(); if(!im) return; e.preventDefault(); const [sx,sy]=evPos(e); if(e.ctrlKey||e.metaKey||!e.shiftKey){ zoomAt(im,Math.exp(-e.deltaY*0.0018),sx,sy); } else { const v=viewOf(im); v.x+=e.deltaY/v.zoom; draw(); } }
+/* ---------- 터치 (window.INNO_TOUCH) ----------
+   두 손가락 = 확대(핀치 중심 고정)·이동 — 어느 도구든. 한 손가락 = 그리기 도구(rect·oval·poly·free·line·angle·scale)면 그대로 그리기,
+   Hand 면 이동, Point·Wand·Zoom 은 탭 한 번이 클릭 한 번(끌면 이동). 탭 = 그 화소 값(상태 줄), 길게 누르기 = 값 읽기(따라 움직임),
+   두 번 탭 = 화면에 맞춤. Point 도구에서 길게 누르기 = 가까운 점 지우기(데스크톱의 Alt+클릭). */
+const TAP_TOOLS=new Set(["point","wand","zoom"]), PASS_DT=new Set(["rect","oval","line","free","scale"]);
+let TSNAP=null;
+function touchSnap(im){ const a=activeRoi(im); TSNAP={id:im.id,a,pts:a?JSON.parse(JSON.stringify(a.pts)):null,cls:a&&a.cls?a.cls.slice():null,drag:DRAG?JSON.parse(JSON.stringify(DRAG)):null}; }
+function touchRestore(){ const t=TSNAP; TSNAP=null; const im=cur(); if(!im||!t||t.id!==im.id){ DRAG=null; draw(); return; }
+  if(t.a){ t.a.pts=t.pts; if(t.cls) t.a.cls=t.cls; S.roiSel[im.id]=t.a; } else delete S.roiSel[im.id];
+  DRAG=t.drag; save(); draw(); drawSide(); }
+function bindTouch(ov){
+  if(!window.INNO_TOUCH||ov._touch) return;
+  const at=p=>{ const im=cur(); if(!im) return null; const v=viewOf(im); return {im,ix:v.x+p.x/v.zoom,iy:v.y+p.y/v.zoom}; };
+  const fake=(p,alt)=>({clientX:p.clientX,clientY:p.clientY,button:0,pointerId:-1,pointerType:"touch",shiftKey:false,altKey:!!alt,ctrlKey:false,metaKey:false,_tap:true});
+  const showVal=p=>{ const q=at(p); if(!q) return; HOVER=[q.ix,q.iy]; drawStatus(); };
+  ov._touch=INNO_TOUCH.attach(ov,{
+    oneFinger:()=>{ const t=S.ui.tool; return !cur()||t==="hand"||TAP_TOOLS.has(t)?"pan":"pass"; },
+    getView:()=>{ const im=cur(); return im?Object.assign({id:im.id},viewOf(im)):null; },
+    setView:(v0,g)=>{ const im=cur(); if(!im||!v0||v0.id!==im.id) return; const n=INNO_TOUCH.affine(v0,g,{min:1/72,max:64}); const v=viewOf(im); v.zoom=n.zoom; v.x=n.x; v.y=n.y; draw(); },
+    onPassCancel:touchRestore,
+    onTap:p=>{ LASTPT="touch"; if(TAP_TOOLS.has(S.ui.tool)) onDown(fake(p)); showVal(p); },
+    onDoubleTap:(p,info)=>{ const im=cur(); if(!im) return; if(info&&info.pass&&!PASS_DT.has(S.ui.tool)) return; fitView(im); draw(); },
+    doubleTap:()=>!TAP_TOOLS.has(S.ui.tool),
+    doubleTapInPass:true,
+    onLongPress:p=>{ LASTPT="touch"; const im=cur(); const a=im&&activeRoi(im);
+      if(S.ui.tool==="point"&&a&&a.type==="point"){ const v=viewOf(im); if(a.pts.some(q=>{ const [x,y]=toScr(v,q[0],q[1]); return Math.hypot(x-p.x,y-p.y)<16; })){ onDown(fake(p,true)); return; } }
+      showVal(p); },
+    onLongPressMove:showVal
+  });
+}
+function drawPolyBar(){ const el=ROOT&&$q(ROOT,"#imPolyBar"); if(!el) return;
+  const on=!!(DRAG&&(DRAG.mode==="poly"||DRAG.mode==="angle")&&LASTPT==="touch"); if(!on){ if(!el.hidden){ el.hidden=true; el.innerHTML=""; } return; }
+  const n=DRAG.temp.pts.length-1, key=DRAG.mode+n; if(!el.hidden&&el.dataset.k===key) return; el.dataset.k=key; el.hidden=false;
+  el.innerHTML=DRAG.mode==="poly"?`<span class="t">${n} pts</span><button class="btn sm primary" id="imPolyDone" ${n<3?"disabled":""}>Finish</button><button class="btn sm" id="imPolyEsc">Cancel</button>`:`<span class="t">Angle ${n}/3</span><button class="btn sm" id="imPolyEsc">Cancel</button>`;
+  const d=$q(el,"#imPolyDone"); if(d) d.onclick=()=>{ const im=cur(); if(im&&DRAG&&DRAG.mode==="poly") finishPoly(im); };
+  $q(el,"#imPolyEsc").onclick=()=>{ DRAG=null; draw(); }; }
 /* Wand: 문턱 범위(Threshold 탭)·이진 영상이면 그 범위로, 아니면 클릭한 값과 같은 화소(허용 tolerance)로 8-연결 외곽선 */
 let WAND_BUSY=false;
 async function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; if(WAND_BUSY){ note("Wand: 앞의 외곽선을 아직 찾는 중입니다"); return; }

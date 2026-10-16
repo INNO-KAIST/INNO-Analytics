@@ -237,7 +237,7 @@ function bindPlot(host){
   svg.addEventListener("dblclick",()=>{ const sp=cur(); if(!sp) return; delete PV[sp.uid]; drawPlot(); });
   svg.addEventListener("pointerdown",e=>{
     if(!GEO) return; const q=svgPt(svg,e); const t=e.target;
-    if(t.dataset&&t.dataset.hdl){ DRAG={kind:"hdl",k:t.dataset.hdl}; svg.setPointerCapture(e.pointerId); return; }
+    if(t.dataset&&t.dataset.hdl){ DRAG={kind:"hdl",k:t.dataset.hdl,lo:GEO.p.lo,hi:GEO.p.hi}; svg.setPointerCapture(e.pointerId); return; }
     if(t.dataset&&t.dataset.mk){ const c=GEO.p.comps.find(c=>c.id===t.dataset.mk); if(c){ S.ui.selComp=c.id; DRAG={kind:"mk",c,x:q.x,y:q.y,be:c.be,area:c.area,h:compHeight(c)}; pushHist(GEO.p,"끌기"); svg.setPointerCapture(e.pointerId); renderPanel(); } return; }
     if(q.x<ML||q.x>ML+GEO.pw||q.y<MT||q.y>MT+GEO.ph) return;
     if(S.ui.addMode){ addCompAt(GEO.inv(q.x)-GEO.sh,GEO.invY(q.y)); return; }
@@ -257,7 +257,40 @@ function bindPlot(host){
   };
   svg.addEventListener("pointerup",up); svg.addEventListener("pointercancel",up);
   svg.addEventListener("pointerleave",()=>{ if(!DRAG&&tip) tip.hidden=true; const ov=$q(svg,"#xpsOver"); if(ov&&!DRAG) ov.innerHTML=""; });
+  bindTouch(host);
 }
+/* ---------------- 터치 (window.INNO_TOUCH) ----------------
+   두 손가락 = BE 축 확대(핀치 중심 고정)·이동, 한 손가락 끌기 = BE 축 이동, 두 번 탭 = 전체 보기(데스크톱의 두 번 클릭).
+   탭 = 그 자리 값 풍선(마우스를 올렸을 때와 같음)·가까운 성분 선택, 'Add component' 를 누른 뒤의 탭 = 그 자리에 성분 놓기.
+   길게 누르기 = 풍선이 손가락을 따라감. 성분 꼭대기 표지·영역 손잡이는 한 손가락으로 그대로 끈다(둘째 손가락이 오면 끌기 취소). */
+function bindTouch(host){
+  if(!window.INNO_TOUCH||host._touch) return;
+  const svgOf=()=>$q(host,"#xpsSvg");
+  const tipAt=p=>{ const svg=svgOf(); if(!svg||!GEO) return; hover(svg,$q(host,"#xpsTip"),svgPt(svg,p)); };
+  host._touch=INNO_TOUCH.attach(host,{
+    filter:e=>!!(e.target&&e.target.closest&&e.target.closest("#xpsSvg")),
+    touchAction:false,                                   // touch-action:none 은 CSS 가 그래프(svg)에만 — 범례 위에서는 쪽이 스크롤됨
+    oneFinger:e=>{ const t=e.target; return t&&t.dataset&&(t.dataset.hdl||t.dataset.mk)?"pass":"pan"; },
+    getView:()=>GEO?{uid:GEO.sp.uid,x0:GEO.v.x0,x1:GEO.v.x1}:null,
+    setView:(v0,g)=>{ const svg=svgOf(); if(!v0||!svg||!GEO||GEO.sp.uid!==v0.uid) return;
+      const q0=svgPt(svg,{clientX:g.clientX0,clientY:g.clientY0}), q=svgPt(svg,{clientX:g.clientX,clientY:g.clientY});
+      const span0=v0.x1-v0.x0, be0=v0.x1-(q0.x-ML)/GEO.pw*span0, span=span0/(g.kind==="pinch"?g.scaleX:1);
+      const v=GEO.v; v.x1=be0+(q.x-ML)/GEO.pw*span; v.x0=v.x1-span; clampView(GEO.sp,v); drawPlot(); },
+    onPassCancel:cancelDrag,
+    onTap:p=>{ const svg=svgOf(); if(!svg||!GEO) return; const q=svgPt(svg,p);
+      if(q.x<ML||q.x>ML+GEO.pw||q.y<MT||q.y>MT+GEO.ph){ tipAt(p); return; }
+      if(S.ui.addMode){ addCompAt(GEO.inv(q.x)-GEO.sh,GEO.invY(q.y)); return; }
+      selectNearComp(q); drawPlot(); tipAt(p); },
+    onDoubleTap:()=>{ const sp=cur(); if(!sp) return; delete PV[sp.uid]; drawPlot(); },
+    doubleTap:()=>!S.ui.addMode,                         // 성분 놓기는 탭 즉시
+    onLongPress:tipAt, onLongPressMove:tipAt
+  });
+}
+/* 손가락 끌기를 둘째 손가락이 가져갈 때: 끌기 전 값으로 */
+function cancelDrag(){ const d=DRAG; DRAG=null; if(!d||!GEO) return;
+  if(d.kind==="mk"){ d.c.be=d.be; d.c.area=d.area; const h=GEO.p.hist; if(h&&h.length) h.pop(); touch(GEO.p); }
+  else if(d.kind==="hdl"&&d.lo!=null){ GEO.p.lo=d.lo; GEO.p.hi=d.hi; touch(GEO.p); syncRegionInputs(); }
+  drawPlot(); }
 function clampView(sp,v){ const sh=shOf(sp); const a=sp.be[0]+sh, b=sp.be[sp.n-1]+sh; if(v.x1-v.x0<0.2){ const c=(v.x0+v.x1)/2; v.x0=c-0.1; v.x1=c+0.1; } if(v.x1-v.x0>b-a){ v.x0=a; v.x1=b; } if(v.x0<a){ v.x1+=a-v.x0; v.x0=a; } if(v.x1>b){ v.x0-=v.x1-b; v.x1=b; } }
 function clampRegion(sp,p){ p.lo=Math.max(sp.be[0],Math.min(p.lo,sp.be[sp.n-1])); p.hi=Math.max(sp.be[0],Math.min(p.hi,sp.be[sp.n-1])); }
 function selectNearComp(q){ const M=GEO.M; if(!M) return; const be=GEO.inv(q.x)-GEO.sh; const yv=GEO.invY(q.y); let best=null; GEO.p.comps.forEach((c,ci)=>{ const a=M.parts[ci]; const B=interp(M.E,M.B,be), val=interp(M.E,a,be); if(yv>=B&&yv<=B+val&&(!best||val>best.v)) best={c,v:val}; }); S.ui.selComp=best?best.c.id:null; renderPanel(); }
@@ -1298,5 +1331,5 @@ function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니�
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
 function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
-window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k)};
+window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO};
 })();

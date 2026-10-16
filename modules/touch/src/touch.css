@@ -1,0 +1,30 @@
+/* ============================================================
+   INNO_TOUCH — 손가락 기기(pointer:coarse)에서만 적용. 데스크톱(마우스) 화면은 그대로.
+   - 주요 단추·도구 막대·탭 막대 ≥ 40 px
+   - 마우스를 올려야만 보이던 단추(파일 목록의 ×)를 늘 보이게
+   - 제스처를 받는 캔버스: 길게 누를 때 글자 선택·확대경이 뜨지 않게
+   ============================================================ */
+@media (pointer:coarse){
+  .inno-touch{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  .btn,.btn.sm,.btn.xs,label.btn,.xps .btn.xs{min-height:40px}
+  .btn.sm,.btn.xs,label.btn{display:inline-flex;align-items:center;justify-content:center}
+  .btn.xs,.xps .btn.xs{min-width:40px}
+  select.btn,.card select,.card input[type=text],.card input[type=number]{min-height:40px}
+  .seg button{min-height:40px}
+  .nav button{min-height:44px}
+  #nav button{min-height:48px}
+  .imx .im-toolbar .tb{width:40px;height:40px}
+  .imx .im-tabs button,.xps .xps-tabs button{min-height:40px;padding-left:10px;padding-right:10px}
+  .sideitem .x{opacity:1;width:36px;height:36px;top:2px;right:2px;font-size:16px}
+  .sideitem .n{padding-right:34px}
+  .imx .im-list .it .x,.xps .xps-list .it .x{min-width:40px;min-height:40px;font-size:17px}
+  .imx .im-list .it input[type=checkbox],.xps .xps-list .it input[type=checkbox]{width:22px;height:22px}
+  input[type=range]{min-height:32px}
+  .sidetog{min-width:44px;min-height:44px}
+}
+/* Image Analysis: 다각형을 손가락으로 그릴 때 끝내기·취소 (캔버스 위에 떠 있음, 손가락으로 그리는 중에만 보임) */
+.imx .im-polybar{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:8px;z-index:3;
+  background:color-mix(in srgb,var(--surface,#fff) 88%,transparent);border:1px solid var(--line,#ccc);border-radius:12px;padding:6px;box-shadow:var(--shadow,0 4px 14px rgba(0,0,0,.2))}
+.imx .im-polybar[hidden]{display:none}
+.imx .im-polybar .btn{min-height:40px;min-width:72px}
+.imx .im-polybar .t{align-self:center;font-size:12px;color:var(--ink2,#444);padding:0 4px;white-space:nowrap}
