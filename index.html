@@ -1015,6 +1015,246 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 @media (max-width:380px){ #nav button .nl::after{font-size:8.5px;letter-spacing:-.3px} }
 </style>
 <!-- INNO-ED:END -->
+<!-- INNO-TOUCH:BEGIN css+js -->
+<style id="inno-touch-css">
+/* ============================================================
+   INNO_TOUCH — 손가락 기기(pointer:coarse)에서만 적용. 데스크톱(마우스) 화면은 그대로.
+   - 주요 단추·도구 막대·탭 막대 ≥ 40 px
+   - 마우스를 올려야만 보이던 단추(파일 목록의 ×)를 늘 보이게
+   - 제스처를 받는 캔버스: 길게 누를 때 글자 선택·확대경이 뜨지 않게
+   ============================================================ */
+@media (pointer:coarse){
+  .inno-touch{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  .btn,.btn.sm,.btn.xs,label.btn,.xps .btn.xs{min-height:40px}
+  .btn.sm,.btn.xs,label.btn{display:inline-flex;align-items:center;justify-content:center}
+  .btn.xs,.xps .btn.xs{min-width:40px}
+  select.btn,.card select,.card input[type=text],.card input[type=number]{min-height:40px}
+  .seg button{min-height:40px}
+  .nav button{min-height:44px}
+  #nav button{min-height:48px}
+  .imx .im-toolbar .tb{width:40px;height:40px}
+  .imx .im-tabs button,.xps .xps-tabs button{min-height:40px;padding-left:10px;padding-right:10px}
+  .sideitem .x{opacity:1;width:36px;height:36px;top:2px;right:2px;font-size:16px}
+  .sideitem .n{padding-right:34px}
+  .imx .im-list .it .x,.xps .xps-list .it .x{min-width:40px;min-height:40px;font-size:17px}
+  .imx .im-list .it input[type=checkbox],.xps .xps-list .it input[type=checkbox]{width:22px;height:22px}
+  input[type=range]{min-height:32px}
+  .sidetog{min-width:44px;min-height:44px}
+}
+/* Image Analysis: 다각형을 손가락으로 그릴 때 끝내기·취소 (캔버스 위에 떠 있음, 손가락으로 그리는 중에만 보임) */
+.imx .im-polybar{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:8px;z-index:3;
+  background:color-mix(in srgb,var(--surface,#fff) 88%,transparent);border:1px solid var(--line,#ccc);border-radius:12px;padding:6px;box-shadow:var(--shadow,0 4px 14px rgba(0,0,0,.2))}
+.imx .im-polybar[hidden]{display:none}
+.imx .im-polybar .btn{min-height:40px;min-width:72px}
+.imx .im-polybar .t{align-self:center;font-size:12px;color:var(--ink2,#444);padding:0 4px;white-space:nowrap}
+</style>
+<script id="inno-touch-js">
+/* ============================================================
+   INNO_TOUCH — 공용 터치 제스처 (pointer events) · 2026-10-17
+   한 구현을 모든 탭(EM Image·EDS Maps·EDS Spectrum·Lattice FFT·Image Analysis·XPS, 나중의 Diffraction)이 같이 쓴다.
+
+   원칙
+   - pointerType==="touch" 인 포인터만 다룬다. 마우스·펜은 손대지 않는다 → 데스크톱 동작은 그대로.
+   - 붙인 요소(el)에 capture 단계 수신기를 단다. 이 도우미가 맡은 손가락의 사건은 stopImmediatePropagation 으로
+     앱의 기존 pointer 처리기(같은 요소 또는 자식)에 가지 않게 한다. 'pass' 로 넘긴 손가락은 앱이 그대로 받는다.
+   - 화면 갱신은 requestAnimationFrame 한 번에 한 번(setView). 손가락 사건마다 다시 그리지 않는다.
+   - touch-action:none 은 붙인 요소에만(opts.touchAction===false 이면 앱 CSS 에 맡김). 나머지 쪽은 평소처럼 스크롤된다.
+
+   API
+   const detach = INNO_TOUCH.attach(el, {
+     getView()            → 제스처 시작 때의 보기 상태(불투명 값, 앱이 복사해서 돌려준다)
+     setView(v0, g)       → 시작 상태 v0 기준으로 제스처 g 를 적용(한 프레임에 한 번)
+                            g = {kind:"pan"|"pinch", x0,y0, x,y, dx,dy, scale, scaleX, scaleY,
+                                 clientX0,clientY0, clientX,clientY}
+                            x0,y0 = 시작 중심(손가락 둘이면 가운데), x,y = 지금 중심 — el 기준 CSS px(opts.box 로 바꿀 수 있음)
+                            scale = 손가락 거리 비, scaleX/scaleY = 가로/세로 간격 비(간격이 24 px 보다 좁게 시작하면 scale)
+     oneFinger            "pan"(기본) | "pass" | "none" | (pointerdown 사건)=>그중 하나
+                            pass: 앱의 처리기가 그 손가락을 받는다(그리기 도구). 둘째 손가락이 오면 onPassCancel 후 핀치로 넘어간다.
+                            none: 한 손가락은 탭·길게 누르기만(끌어도 보기 안 움직임).
+     onPassCancel()       pass 로 넘긴 손가락을 도우미가 가져갈 때(둘째 손가락·길게 누르기) 앱이 시작한 일을 되돌린다.
+                            없으면 합성 pointercancel 을 el 에 보낸다.
+     onTap(p)             p = {x,y,clientX,clientY,target,pointerType:"touch"}  (pan/none 모드의 한 번 탭)
+     onDoubleTap(p,info)  두 번 탭(보통 맞춤·초기화). 있으면 한 번 탭은 doubleTapMs 만큼 늦게 onTap 으로 간다.
+     doubleTap            true(기본) | false | ()=>bool — 지금 두 번 탭을 기다릴지(예: 점 찍기 도구에서는 끔)
+     doubleTapInPass      true 면 pass 모드의 빠른 두 탭도 onDoubleTap(p,{pass:true}) 로 알린다(앱의 탭 처리는 그대로 일어남)
+     onLongPress(p)       길게 누르기(값 읽기 등). false 를 돌려주면 무시. 이어서 onLongPressMove(p), onLongPressEnd(p)
+     longPressInPass      true 면 pass 모드에서도 길게 누르기를 잡는다(그 손가락은 onPassCancel 후 도우미가 가져감)
+     onGestureStart(), onGestureEnd()
+     filter(ev)           false 면 이 pointerdown 을 아예 다루지 않음(앱 그대로)
+     box()                지역 좌표의 원점 {left,top} (client 좌표). 기본 el.getBoundingClientRect()
+     touchAction          false 면 el 의 touch-action 을 건드리지 않음
+     longPressMs=500, tapSlop=10, doubleTapMs=300, doubleTapSlop=30
+   })  → detach()
+
+   보조
+   INNO_TOUCH.affine(v0,g,{min,max})   보기 {zoom,x,y} (화면 = (영상 − x)·zoom) 에 핀치·이동을 적용한 새 값 — 핀치 중심 고정
+   INNO_TOUCH.cssZoom(target,{frame,view,min,max,clip,onTap,onDoubleTap,onChange,...})
+                                       확대 기능이 없는 캔버스에 CSS transform 으로 확대·이동(다시 그리지 않음).
+                                       view = {s,tx,ty} 객체(앱이 다시 그려도 그대로 쓰도록 앱이 들고 있음)
+                                       → {view, reset(), apply(), detach()}
+   INNO_TOUCH.touchUI()                마지막 포인터가 손가락이었거나 거친 포인터(pointer:coarse) 기기인가 — 손잡이 크게 그리기 등
+   INNO_TOUCH.lastPointer()            "touch" | "mouse" | "pen"
+   ============================================================ */
+(function(){
+"use strict";
+if(window.INNO_TOUCH) return;
+const DEF={oneFinger:"pan",longPressMs:500,tapSlop:10,doubleTapMs:300,doubleTapSlop:30,doubleTap:true};
+const now=()=>performance.now();
+let LAST={type:"mouse",t:0};
+const MQ=(()=>{ try{ return window.matchMedia("(pointer: coarse)"); }catch(e){ return null; } })();
+try{ document.addEventListener("pointerdown",e=>{ LAST={type:e.pointerType||"mouse",t:now()};
+  const r=document.documentElement; const on=e.pointerType==="touch"; if(r.classList.contains("inno-touch-last")!==on) r.classList.toggle("inno-touch-last",on); },true); }catch(e){}
+const touchUI=()=>LAST.type==="touch"||!!(MQ&&MQ.matches);
+const SWALLOW=["pointerover","pointerenter","pointerout","pointerleave"];
+
+function attach(el,opts){
+  if(!el) return ()=>{};
+  const o=Object.assign({},DEF,opts||{});
+  const P=new Map();            // 내려 있는 손가락 id → {x,y,x0,y0} (client)
+  const owned=new Set();        // 도우미가 맡은(소비하는) 손가락 id
+  let passId=null;              // 앱에 넘긴 손가락
+  let gest=null, started=false, pendG=null, raf=0, lastG=null;
+  let lp=null, lpOn=false, seq=null;   // seq: 이번 손가락 묶음 {t0,moved,multi,mode}
+  let pendTap=null, passTap=null, suppressUntil=0;
+  const prevTA=el.style.touchAction; if(o.touchAction!==false) el.style.touchAction="none";
+  el.classList.add("inno-touch");
+  const box=()=>o.box?o.box():el.getBoundingClientRect();
+  const loc=(cx,cy)=>{ const b=box(); return {x:cx-b.left,y:cy-b.top}; };
+  const mk=(cx,cy,target)=>Object.assign(loc(cx,cy),{clientX:cx,clientY:cy,target:target||el,pointerType:"touch"});
+  const dtOn=()=>!!o.onDoubleTap&&(typeof o.doubleTap==="function"?o.doubleTap():o.doubleTap!==false);
+  const modeOf=e=>{ const m=typeof o.oneFinger==="function"?o.oneFinger(e):o.oneFinger; return m==="pass"||m==="none"?m:"pan"; };
+  const stop=e=>{ e.stopImmediatePropagation(); if(e.cancelable) e.preventDefault(); };
+  const cap=id=>{ try{ el.setPointerCapture(id); }catch(e){} };
+  const clearLP=()=>{ if(lp){ clearTimeout(lp); lp=null; } };
+  function firePending(){ if(!pendTap) return; clearTimeout(pendTap.timer); const p=pendTap.p; pendTap=null; if(o.onTap) o.onTap(p); }
+  function applyNow(){ if(raf){ cancelAnimationFrame(raf); raf=0; } if(pendG&&gest&&o.setView){ const g=pendG; pendG=null; o.setView(gest.v0,g); } pendG=null; }
+  function schedule(g){ pendG=g; lastG=g; if(!raf) raf=requestAnimationFrame(()=>{ raf=0; const gg=pendG; pendG=null; if(gg&&gest&&o.setView) o.setView(gest.v0,gg); }); }
+  function centre(fromStart){ const ids=[...P.keys()].filter(id=>owned.has(id)).slice(0,2); const a=P.get(ids[0]), b=ids.length>1?P.get(ids[1]):null; if(!a) return null;
+    if(!b&&fromStart) return {ids,x:a.x0,y:a.y0,d:0,sx:0,sy:0};
+    return b?{ids,x:(a.x+b.x)/2,y:(a.y+b.y)/2,d:Math.hypot(a.x-b.x,a.y-b.y),sx:Math.abs(a.x-b.x),sy:Math.abs(a.y-b.y)}:{ids,x:a.x,y:a.y,d:0,sx:0,sy:0}; }
+  function begin(fromStart){ applyNow(); const c=centre(fromStart); if(!c){ gest=null; return; }
+    if(!o.getView||!o.setView){ gest=null; return; }
+    if(!started){ started=true; if(o.onGestureStart) o.onGestureStart(); }
+    const L=loc(c.x,c.y); gest={ids:c.ids,v0:o.getView(),cx0:c.x,cy0:c.y,x0:L.x,y0:L.y,d0:c.d,sx0:c.sx,sy0:c.sy,pinch:c.ids.length>1}; }
+  function update(){ if(!gest) return; const c=centre(); if(!c||c.ids.length!==gest.ids.length) return;
+    const L=loc(c.x,c.y); const s=gest.pinch&&gest.d0>0?Math.max(0.02,c.d/gest.d0):1;
+    const sX=gest.pinch&&gest.sx0>=24?Math.max(0.02,c.sx/gest.sx0):s, sY=gest.pinch&&gest.sy0>=24?Math.max(0.02,c.sy/gest.sy0):s;
+    schedule({kind:gest.pinch?"pinch":"pan",x0:gest.x0,y0:gest.y0,x:L.x,y:L.y,dx:L.x-gest.x0,dy:L.y-gest.y0,scale:s,scaleX:sX,scaleY:sY,clientX0:gest.cx0,clientY0:gest.cy0,clientX:c.x,clientY:c.y}); }
+  function endAll(){ applyNow(); const was=started; gest=null; started=false; if(was&&o.onGestureEnd) o.onGestureEnd(lastG); lastG=null; }
+  function takePass(){ if(passId==null) return; const id=passId; passId=null; owned.add(id);
+    if(o.onPassCancel){ try{ o.onPassCancel(); }catch(e){ console.error(e); } }
+    else { try{ el.dispatchEvent(new PointerEvent("pointercancel",{pointerId:id,pointerType:"touch",bubbles:true})); }catch(e){} }
+    cap(id); }
+
+  function down(e){
+    if(e.pointerType!=="touch"||!e.isTrusted) return;
+    if(e.isPrimary&&P.size) reset();                         // 앞 묶음이 끝을 못 받았으면(요소가 바뀜 등) 버림
+    if(!P.size&&o.filter&&o.filter(e)===false) return;
+    P.set(e.pointerId,{x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY});
+    if(P.size===1){
+      if(pendTap&&Math.hypot(e.clientX-pendTap.p.clientX,e.clientY-pendTap.p.clientY)>o.doubleTapSlop) firePending();
+      const m=modeOf(e); seq={t0:now(),moved:false,multi:false,mode:m,x:e.clientX,y:e.clientY,target:e.target}; lpOn=false;
+      if(m==="pass"){ passId=e.pointerId; suppressUntil=0; if(o.onLongPress&&o.longPressInPass) armLP(e); return; }
+      owned.add(e.pointerId); stop(e); cap(e.pointerId);
+      if(o.onLongPress) armLP(e);
+      return;
+    }
+    // 둘째(이상) 손가락: 언제나 핀치·이동
+    stop(e); owned.add(e.pointerId); cap(e.pointerId);
+    clearLP(); firePending(); if(seq) seq.multi=true;
+    if(lpOn){ lpOn=false; if(o.onLongPressEnd) o.onLongPressEnd(null); }
+    if(passId!=null) takePass();
+    begin();
+  }
+  function armLP(e){ clearLP(); const t=e.target; lp=setTimeout(()=>{ lp=null; if(P.size!==1||!seq||seq.moved||seq.multi) return;
+      const [id,q]=[...P.entries()][0]; const p=mk(q.x,q.y,t);
+      if(passId!=null) takePass();
+      if(o.onLongPress(p)===false) return; lpOn=true; firePending(); if(gest){ applyNow(); gest=null; } },o.longPressMs); }
+  function move(e){
+    if(e.pointerType!=="touch") return; const q=P.get(e.pointerId); if(!q) return;
+    q.x=e.clientX; q.y=e.clientY;
+    if(seq&&!seq.moved&&Math.hypot(q.x-q.x0,q.y-q.y0)>o.tapSlop){ seq.moved=true; clearLP(); firePending(); }
+    if(e.pointerId===passId) return;                         // 앱이 받는다
+    if(!owned.has(e.pointerId)) return;
+    stop(e);
+    if(lpOn){ if(o.onLongPressMove) o.onLongPressMove(mk(q.x,q.y,e.target)); return; }
+    if(!gest&&seq&&seq.moved&&seq.mode==="pan"&&P.size===1) begin(true);   // 끌기 시작: 누른 자리 기준이라 보기가 손가락을 정확히 따라감
+    if(gest) update();
+  }
+  function up(e){
+    if(e.pointerType!=="touch") return; const q=P.get(e.pointerId); if(!q) return;
+    P.delete(e.pointerId);
+    if(e.pointerId===passId){ passId=null; clearLP();
+      const tap=e.type==="pointerup"&&seq&&!seq.moved&&!seq.multi&&now()-seq.t0<o.longPressMs;
+      if(tap&&o.doubleTapInPass&&o.onDoubleTap){ const p=mk(e.clientX,e.clientY,e.target);
+        if(passTap&&now()-passTap.t<o.doubleTapMs&&Math.hypot(p.clientX-passTap.x,p.clientY-passTap.y)<o.doubleTapSlop){ passTap=null; o.onDoubleTap(p,{pass:true}); }
+        else passTap={t:now(),x:p.clientX,y:p.clientY}; }
+      if(!P.size) seq=null; return; }
+    if(!owned.has(e.pointerId)) return;
+    stop(e); suppressUntil=now()+700; const pid=e.pointerId; setTimeout(()=>owned.delete(pid),500);
+    if(lpOn&&!P.size){ lpOn=false; clearLP(); if(o.onLongPressEnd) o.onLongPressEnd(mk(q.x,q.y,e.target)); seq=null; endAll(); return; }
+    if(P.size){ if(gest) begin(); return; }                  // 손가락 하나 남음 → 그 손가락으로 이동을 이어 감
+    clearLP();
+    const s=seq; seq=null; endAll();
+    const tap=e.type==="pointerup"&&s&&!s.moved&&!s.multi&&!lpOn&&now()-s.t0<o.longPressMs;
+    if(!tap) return;
+    const p=mk(e.clientX,e.clientY,s.target);
+    if(dtOn()){
+      if(pendTap&&now()-pendTap.t<o.doubleTapMs+120&&Math.hypot(p.clientX-pendTap.p.clientX,p.clientY-pendTap.p.clientY)<o.doubleTapSlop){ clearTimeout(pendTap.timer); pendTap=null; o.onDoubleTap(p,{pass:false}); }
+      else { firePending(); pendTap={p,t:now(),timer:setTimeout(()=>{ const t=pendTap; pendTap=null; if(t&&o.onTap) o.onTap(t.p); },o.doubleTapMs)}; }
+    } else if(o.onTap) o.onTap(p);
+  }
+  function swallowCompat(e){ if(now()<suppressUntil){ e.stopImmediatePropagation(); e.preventDefault(); } }
+  function swallowHover(e){ if(e.pointerType==="touch"&&owned.has(e.pointerId)) e.stopImmediatePropagation(); }
+  function lost(e){ if(e.pointerType==="touch"&&owned.has(e.pointerId)&&P.has(e.pointerId)&&!el.isConnected) reset(); }
+  function reset(){ clearLP(); if(raf){ cancelAnimationFrame(raf); raf=0; } pendG=null; const was=started; gest=null; started=false; P.clear(); passId=null; lpOn=false; seq=null; if(was&&o.onGestureEnd) o.onGestureEnd(null); }
+  function ctx(e){ if(LAST.type==="touch"&&now()-LAST.t<2000) e.preventDefault(); }
+  const L=[["pointerdown",down],["pointermove",move],["pointerup",up],["pointercancel",up],["click",swallowCompat],["dblclick",swallowCompat],["contextmenu",ctx],["lostpointercapture",lost]].concat(SWALLOW.map(t=>[t,swallowHover]));
+  L.forEach(([t,f])=>el.addEventListener(t,f,{capture:true,passive:false}));
+  const detach=()=>{ L.forEach(([t,f])=>el.removeEventListener(t,f,{capture:true})); clearLP(); if(pendTap) clearTimeout(pendTap.timer); if(raf) cancelAnimationFrame(raf);
+    if(o.touchAction!==false) el.style.touchAction=prevTA; el.classList.remove("inno-touch"); P.clear(); owned.clear(); };
+  detach.el=el; detach.opts=o;
+  return detach;
+}
+
+/* 보기 {zoom,x,y}: 화면 = (영상 − x)·zoom. 시작 중심 아래의 영상 점이 지금 중심 아래에 오도록 */
+function affine(v0,g,lim){ lim=lim||{}; const mn=lim.min!=null?lim.min:1e-3, mx=lim.max!=null?lim.max:1e3;
+  const ix=v0.x+g.x0/v0.zoom, iy=v0.y+g.y0/v0.zoom; const z=Math.min(mx,Math.max(mn,v0.zoom*g.scale));
+  return {zoom:z,x:ix-g.x/z,y:iy-g.y/z}; }
+
+/* CSS transform 확대 (그 자체로 확대 기능이 없는 캔버스용). target 의 배치 상자를 기준으로 translate·scale.
+   frame = 손가락을 받는 요소(기본 target). frame===target 이면 clip-path 로 원래 상자 밖을 잘라 레이아웃·이웃을 덮지 않는다. */
+function cssZoom(target,opt){
+  opt=opt||{}; const frame=opt.frame||target, self=frame===target; const view=opt.view||{s:1,tx:0,ty:0};
+  if(!(view.s>0)){ view.s=1; view.tx=0; view.ty=0; }
+  const mn=opt.min!=null?opt.min:1, mx=opt.max!=null?opt.max:8, clip=opt.clip!=null?opt.clip:self;
+  const size=()=>({W:target.offsetWidth||target.clientWidth||1,H:target.offsetHeight||target.clientHeight||1});
+  const layoutLeftTop=()=>{ const r=target.getBoundingClientRect(); return {left:r.left-view.tx,top:r.top-view.ty}; };
+  const box=()=>self?layoutLeftTop():frame.getBoundingClientRect();
+  const lt=()=>{ if(self) return {x:0,y:0}; const a=layoutLeftTop(), f=frame.getBoundingClientRect(); return {x:a.left-f.left,y:a.top-f.top}; };
+  function bound(){ const {W,H}=size(); if(view.s<=1){ view.s=Math.max(mn,view.s); if(view.s===1){ view.tx=0; view.ty=0; } return; }
+    view.tx=Math.min(0,Math.max(W*(1-view.s),view.tx)); view.ty=Math.min(0,Math.max(H*(1-view.s),view.ty)); }
+  function apply(){ bound(); const id=view.s===1&&!view.tx&&!view.ty;
+    target.style.transformOrigin="0 0"; target.style.transform=id?"":`translate(${view.tx}px,${view.ty}px) scale(${view.s})`;
+    if(clip){ if(id) target.style.clipPath=""; else { const {W,H}=size(), s=view.s; const l=-view.tx/s, t=-view.ty/s, r=W-(W-view.tx)/s, b=H-(H-view.ty)/s;
+      target.style.clipPath=`inset(${Math.max(0,t)}px ${Math.max(0,r)}px ${Math.max(0,b)}px ${Math.max(0,l)}px)`; } }
+    target.classList.toggle("inno-zoomed",!id); if(opt.onChange) opt.onChange(view); }
+  function reset(){ view.s=1; view.tx=0; view.ty=0; apply(); }
+  const det=attach(frame,Object.assign({},opt,{
+    box,
+    getView:()=>{ const L=lt(); return {s:view.s,tx:view.tx,ty:view.ty,lx:L.x,ly:L.y}; },
+    setView:(v0,g)=>{ const ux=(g.x0-v0.lx-v0.tx)/v0.s, uy=(g.y0-v0.ly-v0.ty)/v0.s; const s=Math.min(mx,Math.max(mn,v0.s*g.scale));
+      view.s=s; view.tx=g.x-v0.lx-s*ux; view.ty=g.y-v0.ly-s*uy; apply(); },
+    onDoubleTap:opt.onDoubleTap||(()=>reset())
+  }));
+  if(view.s!==1||view.tx||view.ty) apply();
+  return {view,reset,apply,detach:det};
+}
+
+window.INNO_TOUCH={version:"1.0",attach,affine,cssZoom,touchUI,lastPointer:()=>LAST.type};
+})();
+</script>
+<!-- INNO-TOUCH:END -->
 </head>
 <body>
 <div id="app">
@@ -34804,10 +35044,11 @@ function renderImage(root){
     const vr=viewRect();
     return {x:(p.x-vr.sx)/vr.sw*cv.width, y:(p.y-vr.sy)/vr.sh*cv.height};
   }
-  let drag=null;
+  let drag=null, tsnap=null;
   cv.addEventListener("pointerdown",ev=>{
     cv.setPointerCapture(ev.pointerId);
     const p=toImg(ev);
+    if(ev.pointerType==="touch") tsnap={p0:S.p0,p1:S.p1,roi:S.roi?Object.assign({},S.roi):null};   // 둘째 손가락이 오면 되돌림
     if(S.tool==="none"){ drag={mode:"pan",x:ev.clientX,y:ev.clientY,cx:S.cx,cy:S.cy}; }
     else if(S.tool==="line"){ S.p0=p; S.p1=p; drag={mode:"line"}; }
     else { S.roi={x0:p.x,y0:p.y,x1:p.x,y1:p.y}; drag={mode:"roi"}; }
@@ -34816,6 +35057,7 @@ function renderImage(root){
   cv.addEventListener("pointermove",ev=>{
     if(!drag){ hoverReadout(toImg(ev)); return; }
     const p=toImg(ev);
+    if(ev.pointerType==="touch") hoverReadout(p);       // 손가락에는 hover 가 없으니 끄는 동안 값을 보여 준다
     if(drag.mode==="pan"){
       const r=cv.getBoundingClientRect(), vr=viewRect();
       S.cx=drag.cx-((ev.clientX-drag.x)/r.width)*(vr.sw/c.w);
@@ -34834,6 +35076,24 @@ function renderImage(root){
     $("#rZm").value=Math.round(S.zoom*100); syncLbl(); draw();
   },{passive:false});
 
+  /* ---- touch (window.INNO_TOUCH): 두 손가락 = 확대(핀치 중심 고정)·이동 — 어느 도구든.
+     Pan 도구의 한 손가락 = 이동, Distance·ROI 도구의 한 손가락 = 그리기. 탭·길게 누르기 = 그 화소 값, 두 번 탭 = 보기 초기화 ---- */
+  if(window.INNO_TOUCH) INNO_TOUCH.attach(cv,{
+    oneFinger:()=>S.tool==="none"?"pan":"pass",
+    getView:()=>{ const r=cv.getBoundingClientRect(); return {zoom:S.zoom,dw:r.width,dh:r.height,vr:viewRect()}; },
+    setView:(v0,g)=>{
+      const z=Math.max(Math.min(1,v0.zoom),Math.min(8,v0.zoom*g.scale));
+      const ix=v0.vr.sx+(g.x0/v0.dw)*v0.vr.sw, iy=v0.vr.sy+(g.y0/v0.dh)*v0.vr.sh;
+      const sw=c.w/z, sh=c.h/z;
+      S.zoom=z; S.cx=(ix-(g.x/v0.dw)*sw+sw/2)/c.w; S.cy=(iy-(g.y/v0.dh)*sh+sh/2)/c.h;
+      const r=viewRect(); S.cx=(r.sx+r.sw/2)/c.w; S.cy=(r.sy+r.sh/2)/c.h;      // 가장자리에서 밀린 만큼 쌓이지 않게
+      $("#rZm").value=Math.round(S.zoom*100); syncLbl(); draw(); },
+    onPassCancel:()=>{ if(tsnap){ S.p0=tsnap.p0; S.p1=tsnap.p1; S.roi=tsnap.roi; } tsnap=null; drag=null; drawMeas(); },
+    onTap:p=>hoverReadout(toImg(p)),
+    onDoubleTap:()=>{ S.zoom=1; S.cx=.5; S.cy=.5; $("#rZm").value=100; syncLbl(); draw(); },
+    onLongPress:p=>hoverReadout(toImg(p)), onLongPressMove:p=>hoverReadout(toImg(p))
+  });
+
   function hoverReadout(p){
     const ix=Math.floor(p.x), iy=Math.floor(p.y);
     const el=$("#hoverRO"); if(!el) return;
@@ -34851,9 +35111,9 @@ function renderImage(root){
     const sx=r.width/cv.width, sy=r.height/cv.height;
     let s="";
     if(S.tool==="line"&&S.p0&&S.p1){
-      const a=toDisp(S.p0), b=toDisp(S.p1);
+      const a=toDisp(S.p0), b=toDisp(S.p1), er=window.INNO_TOUCH&&INNO_TOUCH.touchUI()?7:4;   // 손가락 화면: 끝점을 크게
       s+=`<line x1="${ox+a.x*sx}" y1="${oy+a.y*sy}" x2="${ox+b.x*sx}" y2="${oy+b.y*sy}" stroke="#38BDF8" stroke-width="2"/>`;
-      s+=`<circle cx="${ox+a.x*sx}" cy="${oy+a.y*sy}" r="4" fill="#38BDF8"/><circle cx="${ox+b.x*sx}" cy="${oy+b.y*sy}" r="4" fill="#38BDF8"/>`;
+      s+=`<circle cx="${ox+a.x*sx}" cy="${oy+a.y*sy}" r="${er}" fill="#38BDF8"/><circle cx="${ox+b.x*sx}" cy="${oy+b.y*sy}" r="${er}" fill="#38BDF8"/>`;
     }
     if(S.tool==="roi"&&S.roi){
       const a=toDisp({x:Math.min(S.roi.x0,S.roi.x1),y:Math.min(S.roi.y0,S.roi.y1)});
@@ -34995,7 +35255,7 @@ function linePlot(xs,ys,xlab,ylab,opts){
   opts=opts||{};
   const W=opts.w||860,H=opts.h||240,ml=52,mr=12,mt=10,mb=34;
   const pw=W-ml-mr, ph=H-mt-mb;
-  const x0=Math.min(...xs), x1=Math.max(...xs);
+  const x0=opts.xr?opts.xr[0]:Math.min(...xs), x1=opts.xr?opts.xr[1]:Math.max(...xs);   // xr = 보이는 x 범위(손가락 확대)
   let y0=opts.logY?Math.max(0.5,Math.min(...ys.filter(v=>v>0))):0, y1=Math.max(...ys);
   if(!(y1>y0)) y1=y0+1;
   const fx=v=>ml+(x1>x0?(v-x0)/(x1-x0):0)*pw;
@@ -35596,15 +35856,21 @@ function renderMaps(root){
     ctx.putImageData(new ImageData(out,W,H),0,0);
     fitCanvas();
   }
+  let fitK=1;
   function fitCanvas(){
     const sr=stage.getBoundingClientRect();
-    const k=Math.min(sr.width/W,(sr.height||420)/H);
+    const k=Math.min(sr.width/W,(sr.height||420)/H); fitK=k;
     cv.style.width=(W*k)+"px"; cv.style.height=(H*k)+"px";
-    cv.style.imageRendering=k>=1?"pixelated":"auto";
+    if(MAPFIT.zoom) MAPFIT.zoom.apply(); else mapBar();
+  }
+  /* 축척 막대 — 손가락 확대(MAPFIT.view.s) 중이면 그만큼 */
+  function mapBar(){
+    const k=fitK, z=(MAPFIT.view&&MAPFIT.view.s)||1;
+    cv.style.imageRendering=k*z>=1?"pixelated":"auto";
     const sb=$("#msbar");
     if(px&&sb){
-      const target=W*px.x*0.25, nice=niceBar(target);
-      const wpx=(nice/px.x)*k;
+      const target=W*px.x*0.25/z, nice=niceBar(target);
+      const wpx=(nice/px.x)*k*z;
       sb.style.display="block";
       sb.querySelector(".bar").style.width=wpx+"px";
       sb.querySelector(".lbl").textContent=barLabel(nice);
@@ -35701,11 +35967,15 @@ function renderMaps(root){
       (rec.name||"map").replace(/\.[^.]+$/,"")+"_"+L.el+(L.fam?("_"+L.fam+"line"):"_velox")+".tif");
   };
 
+  /* touch (window.INNO_TOUCH): 두 손가락 = 확대·이동, 한 손가락 = 확대 상태에서 이동, 두 번 탭 = 맞춤.
+     CSS 확대라 맵을 다시 합성하지 않는다. 같은 파일 안에서는 층을 바꿔 다시 그려도 확대 상태가 남는다 */
+  { const zk=(rec.name||"")+"|"+W+"x"+H; if(MAPFIT.zkey!==zk){ MAPFIT.zkey=zk; MAPFIT.view={s:1,tx:0,ty:0}; } }
+  MAPFIT.zoom=window.INNO_TOUCH?INNO_TOUCH.cssZoom(cv,{frame:stage,view:MAPFIT.view,min:1,max:16,onChange:()=>{ try{ mapBar(); }catch(e){} }}):null;
   composite();
   window.addEventListener("resize",MAPRESIZE);
   MAPFIT.fit=()=>{ try{ fitCanvas(); }catch(e){} };
 }
-const MAPFIT={fit:null};
+const MAPFIT={fit:null,zoom:null,view:null,zkey:null};
 let _mrzT=null;
 function MAPRESIZE(){ clearTimeout(_mrzT); _mrzT=setTimeout(()=>{ if(state.view==="maps"&&MAPFIT.fit) MAPFIT.fit(); },120); }
 
@@ -35785,6 +36055,7 @@ function segResolution(rec){
   return rec._segRes;
 }
 
+const SPVIEW={key:null,x0:null,x1:null};
 function renderSpectrum(root){
   const S=loadSpectrum();
   if(!S){ root.innerHTML='<div class="card"><div class="note">이 파일에는 <b>/Data/Spectrum</b> 데이터셋이 없습니다. HAADF 이미지 전용 .emd 로 보입니다.</div></div>'; return; }
@@ -35877,20 +36148,26 @@ function renderSpectrum(root){
     <div class="card" id="peakCard"></div>
   </div>`));
 
+  /* 손가락 확대 범위(keV) — 같은 스펙트럼일 때만, 저장하지 않음 */
+  { const vk=(rec.name||"")+"|"+state.curSpec; if(SPVIEW.key!==vk){ SPVIEW.key=vk; SPVIEW.x0=SPVIEW.x1=null; } }
+  const specFull=()=>{ const emax=Math.max(1,num($("#inEmax").value,eMax)); return [S.E[S.i0|0], Math.min(emax,S.E[S.nch-1])]; };
   const redraw=()=>{
     const emax=Math.max(1,num($("#inEmax").value,eMax));
     P.eMax=emax;
     const xs=[],ys=[];
+    const F=specFull(); let xr=null;
+    if(SPVIEW.x0!=null){ const a=Math.max(F[0],SPVIEW.x0), b=Math.min(F[1],SPVIEW.x1); if(b>a) xr=[a,b]; }
     for(let i=0;i<S.nch;i++){
       if(i<(S.i0|0)) continue;            // 검출기 유효 구간(BeginEnergy) 아래
       if(S.E[i]>emax) break;
+      if(xr&&(S.E[i]<xr[0]||S.E[i]>xr[1])) continue;
       xs.push(S.E[i]); ys.push(S.y[i]);
     }
     if(xs.length<2){ $("#spPlot").innerHTML='<div class="note warn">표시할 채널이 없습니다.</div>'; return; }
     let extra="";
     if(P.showLines&&P.els.length){
       const W=860,ml=52,mr=12,mt=10,ph=240-10-34;
-      const x0=xs[0],x1=xs[xs.length-1],pw=W-ml-mr;
+      const x0=xr?xr[0]:xs[0],x1=xr?xr[1]:xs[xs.length-1],pw=W-ml-mr;
       const COLS=["#2563EB","#DC2626","#059669","#D97706","#7C3AED","#0891B2","#DB2777","#65A30D"];
       const labels=[];    // {x, txt, col} — placed with collision avoidance
       P.els.forEach((el,ei)=>{
@@ -35917,8 +36194,19 @@ function renderSpectrum(root){
       });
       labels.forEach(L=>{ extra+=`<text class="elbl" x="${(L.x+2).toFixed(1)}" y="${L.y}" fill="${L.col}">${esc(L.txt)}</text>`; });
     }
-    $("#spPlot").innerHTML=linePlot(xs,ys,"Energy [keV]","Counts",{logY:P.logY,extra});
+    $("#spPlot").innerHTML=linePlot(xs,ys,"Energy [keV]","Counts",{logY:P.logY,extra,xr});
   };
+  /* touch (window.INNO_TOUCH): 두 손가락 = 에너지 축 확대(핀치 중심 고정), 한 손가락 = 옆으로 이동, 두 번 탭 = 전체 */
+  if(window.INNO_TOUCH){ const host=$("#spPlot"); INNO_TOUCH.attach(host,{
+    getView:()=>{ const F=specFull(); return {a:SPVIEW.x0!=null?Math.max(F[0],SPVIEW.x0):F[0], b:SPVIEW.x1!=null?Math.min(F[1],SPVIEW.x1):F[1], w:host.getBoundingClientRect().width||1, F}; },
+    setView:(v0,g)=>{ const k=860/v0.w, ml=52, pw=860-52-12, fx=x=>(x*k-ml)/pw, F=v0.F;
+      const span0=v0.b-v0.a, e0=v0.a+fx(g.x0)*span0;
+      const span=Math.min(F[1]-F[0],Math.max(6*S.cal.disp/1000,span0/(g.kind==="pinch"?g.scaleX:1)));
+      let a=e0-fx(g.x)*span, b=a+span; if(a<F[0]){ b+=F[0]-a; a=F[0]; } if(b>F[1]){ a-=b-F[1]; b=F[1]; } a=Math.max(F[0],a);
+      if(b-a>=(F[1]-F[0])*(1-1e-9)){ SPVIEW.x0=SPVIEW.x1=null; } else { SPVIEW.x0=a; SPVIEW.x1=b; }
+      redraw(); },
+    onDoubleTap:()=>{ SPVIEW.x0=SPVIEW.x1=null; redraw(); }
+  }); }
   $("#ckLog").onchange=e=>{ P.logY=e.target.checked; redraw(); };
   $("#ckLine").onchange=e=>{ P.showLines=e.target.checked; redraw(); };
   $("#inEmax").oninput=redraw;
@@ -37456,6 +37744,7 @@ function latState(){
   return L;
 }
 let LATFFT=null;   // {key, P, roi}
+const LATZ={rk:null,fk:null,real:null,fft:null,inv:null};   // 손가락 확대 상태(캔버스별, 저장하지 않음)
 
 function latPx(img){
   const L=latState();
@@ -37773,6 +38062,17 @@ function renderLattice(root){
       m.snrN=np[Math.min(F.N-1,Math.round(m.a.y))*F.N+Math.min(F.N-1,Math.round(m.a.x))]; }
     if(m.gpx<3){ toast("중심(DC)에 너무 가깝습니다","warn"); return; }
     L.spots.push({x,y,m,on:true,pick:"click"}); renderView(); };
+
+  /* touch (window.INNO_TOUCH): 캔버스마다 두 손가락 = 확대·이동(CSS — 다시 계산하지 않음), 두 번 탭 = 맞춤,
+     탭 = 클릭과 같음(실공간: 영역 옮기기, FFT: 스폿 재기 — 확대한 채로 찍으면 더 정확). 다시 그려도 확대 상태가 남는다 */
+  if(window.INNO_TOUCH){
+    if(LATZ.rk!==img0.key){ LATZ.rk=img0.key; LATZ.real={s:1,tx:0,ty:0}; }
+    if(LATZ.fk!==F.key){ LATZ.fk=F.key; LATZ.fft={s:1,tx:0,ty:0}; LATZ.inv={s:1,tx:0,ty:0}; }
+    const tapAs=cv=>p=>{ if(cv.onclick) cv.onclick({clientX:p.clientX,clientY:p.clientY,target:cv}); };
+    INNO_TOUCH.cssZoom(cvR,{view:LATZ.real,max:8,onTap:tapAs(cvR)});
+    INNO_TOUCH.cssZoom(cvF,{view:LATZ.fft,max:8,onTap:tapAs(cvF)});
+    if(cvI.width>20) INNO_TOUCH.cssZoom(cvI,{view:LATZ.inv,max:8});
+  }
 
   $("#latImg").onchange=e=>{ state.curImage=+e.target.value; IMG.cache=null; LATFFT=null; L.cx=null; L.spots=[]; renderView(); };
   $("#latN").onchange=e=>{ L.N=+e.target.value; L.spots=[]; renderView(); };
@@ -43657,7 +43957,7 @@ function bindPlot(host){
   svg.addEventListener("dblclick",()=>{ const sp=cur(); if(!sp) return; delete PV[sp.uid]; drawPlot(); });
   svg.addEventListener("pointerdown",e=>{
     if(!GEO) return; const q=svgPt(svg,e); const t=e.target;
-    if(t.dataset&&t.dataset.hdl){ DRAG={kind:"hdl",k:t.dataset.hdl}; svg.setPointerCapture(e.pointerId); return; }
+    if(t.dataset&&t.dataset.hdl){ DRAG={kind:"hdl",k:t.dataset.hdl,lo:GEO.p.lo,hi:GEO.p.hi}; svg.setPointerCapture(e.pointerId); return; }
     if(t.dataset&&t.dataset.mk){ const c=GEO.p.comps.find(c=>c.id===t.dataset.mk); if(c){ S.ui.selComp=c.id; DRAG={kind:"mk",c,x:q.x,y:q.y,be:c.be,area:c.area,h:compHeight(c)}; pushHist(GEO.p,"끌기"); svg.setPointerCapture(e.pointerId); renderPanel(); } return; }
     if(q.x<ML||q.x>ML+GEO.pw||q.y<MT||q.y>MT+GEO.ph) return;
     if(S.ui.addMode){ addCompAt(GEO.inv(q.x)-GEO.sh,GEO.invY(q.y)); return; }
@@ -43677,7 +43977,40 @@ function bindPlot(host){
   };
   svg.addEventListener("pointerup",up); svg.addEventListener("pointercancel",up);
   svg.addEventListener("pointerleave",()=>{ if(!DRAG&&tip) tip.hidden=true; const ov=$q(svg,"#xpsOver"); if(ov&&!DRAG) ov.innerHTML=""; });
+  bindTouch(host);
 }
+/* ---------------- 터치 (window.INNO_TOUCH) ----------------
+   두 손가락 = BE 축 확대(핀치 중심 고정)·이동, 한 손가락 끌기 = BE 축 이동, 두 번 탭 = 전체 보기(데스크톱의 두 번 클릭).
+   탭 = 그 자리 값 풍선(마우스를 올렸을 때와 같음)·가까운 성분 선택, 'Add component' 를 누른 뒤의 탭 = 그 자리에 성분 놓기.
+   길게 누르기 = 풍선이 손가락을 따라감. 성분 꼭대기 표지·영역 손잡이는 한 손가락으로 그대로 끈다(둘째 손가락이 오면 끌기 취소). */
+function bindTouch(host){
+  if(!window.INNO_TOUCH||host._touch) return;
+  const svgOf=()=>$q(host,"#xpsSvg");
+  const tipAt=p=>{ const svg=svgOf(); if(!svg||!GEO) return; hover(svg,$q(host,"#xpsTip"),svgPt(svg,p)); };
+  host._touch=INNO_TOUCH.attach(host,{
+    filter:e=>!!(e.target&&e.target.closest&&e.target.closest("#xpsSvg")),
+    touchAction:false,                                   // touch-action:none 은 CSS 가 그래프(svg)에만 — 범례 위에서는 쪽이 스크롤됨
+    oneFinger:e=>{ const t=e.target; return t&&t.dataset&&(t.dataset.hdl||t.dataset.mk)?"pass":"pan"; },
+    getView:()=>GEO?{uid:GEO.sp.uid,x0:GEO.v.x0,x1:GEO.v.x1}:null,
+    setView:(v0,g)=>{ const svg=svgOf(); if(!v0||!svg||!GEO||GEO.sp.uid!==v0.uid) return;
+      const q0=svgPt(svg,{clientX:g.clientX0,clientY:g.clientY0}), q=svgPt(svg,{clientX:g.clientX,clientY:g.clientY});
+      const span0=v0.x1-v0.x0, be0=v0.x1-(q0.x-ML)/GEO.pw*span0, span=span0/(g.kind==="pinch"?g.scaleX:1);
+      const v=GEO.v; v.x1=be0+(q.x-ML)/GEO.pw*span; v.x0=v.x1-span; clampView(GEO.sp,v); drawPlot(); },
+    onPassCancel:cancelDrag,
+    onTap:p=>{ const svg=svgOf(); if(!svg||!GEO) return; const q=svgPt(svg,p);
+      if(q.x<ML||q.x>ML+GEO.pw||q.y<MT||q.y>MT+GEO.ph){ tipAt(p); return; }
+      if(S.ui.addMode){ addCompAt(GEO.inv(q.x)-GEO.sh,GEO.invY(q.y)); return; }
+      selectNearComp(q); drawPlot(); tipAt(p); },
+    onDoubleTap:()=>{ const sp=cur(); if(!sp) return; delete PV[sp.uid]; drawPlot(); },
+    doubleTap:()=>!S.ui.addMode,                         // 성분 놓기는 탭 즉시
+    onLongPress:tipAt, onLongPressMove:tipAt
+  });
+}
+/* 손가락 끌기를 둘째 손가락이 가져갈 때: 끌기 전 값으로 */
+function cancelDrag(){ const d=DRAG; DRAG=null; if(!d||!GEO) return;
+  if(d.kind==="mk"){ d.c.be=d.be; d.c.area=d.area; const h=GEO.p.hist; if(h&&h.length) h.pop(); touch(GEO.p); }
+  else if(d.kind==="hdl"&&d.lo!=null){ GEO.p.lo=d.lo; GEO.p.hi=d.hi; touch(GEO.p); syncRegionInputs(); }
+  drawPlot(); }
 function clampView(sp,v){ const sh=shOf(sp); const a=sp.be[0]+sh, b=sp.be[sp.n-1]+sh; if(v.x1-v.x0<0.2){ const c=(v.x0+v.x1)/2; v.x0=c-0.1; v.x1=c+0.1; } if(v.x1-v.x0>b-a){ v.x0=a; v.x1=b; } if(v.x0<a){ v.x1+=a-v.x0; v.x0=a; } if(v.x1>b){ v.x0-=v.x1-b; v.x1=b; } }
 function clampRegion(sp,p){ p.lo=Math.max(sp.be[0],Math.min(p.lo,sp.be[sp.n-1])); p.hi=Math.max(sp.be[0],Math.min(p.hi,sp.be[sp.n-1])); }
 function selectNearComp(q){ const M=GEO.M; if(!M) return; const be=GEO.inv(q.x)-GEO.sh; const yv=GEO.invY(q.y); let best=null; GEO.p.comps.forEach((c,ci)=>{ const a=M.parts[ci]; const B=interp(M.E,M.B,be), val=interp(M.E,a,be); if(yv>=B&&yv<=B+val&&(!best||val>best.v)) best={c,v:val}; }); S.ui.selComp=best?best.c.id:null; renderPanel(); }
@@ -44718,7 +45051,7 @@ function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니�
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
 function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
-window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k)};
+window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO};
 })();
 </script>
 <!-- INNO-XPS:END -->
@@ -50622,7 +50955,7 @@ function draw(){
     for(let x=Math.max(0,Math.floor(ax));x<=Math.min(im.w,Math.ceil(bx));x++){ const s=toScr(v,x,0)[0]; ox.moveTo(s,0); ox.lineTo(s,H); }
     for(let y=Math.max(0,Math.floor(ay));y<=Math.min(im.h,Math.ceil(by));y++){ const s=toScr(v,0,y)[1]; ox.moveTo(0,s); ox.lineTo(W,s); } ox.stroke(); }
   drawThreshold(im,ox,v); drawParticles(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
-  drawStatus(); drawProfileMini();
+  drawStatus(); drawProfileMini(); drawPolyBar();
 }
 function thrRange(im){ const T=S.ui.thr; return {lo:+T.lower,hi:+T.upper}; }
 function drawThreshold(im,ox,v){
@@ -50690,7 +51023,7 @@ function drawRoi(ox,v,r,act,im){
   else if(r.type==="poly"||r.type==="free"||r.type==="traced"){ pathOf(ox,v,r,!r.open); ox.stroke(); }
   else if(r.type==="line"||r.type==="angle"){ pathOf(ox,v,r,false); if(r.type==="line"&&(S.ui.lw||1)>1){ ox.save(); ox.globalAlpha=0.25; ox.lineWidth=(S.ui.lw||1)*v.zoom; ox.stroke(); ox.restore(); } ox.stroke(); }
   else if(r.type==="point"){ r.pts.forEach((p,k)=>{ const [sx,sy]=toScr(v,p[0],p[1]); ox.beginPath(); ox.arc(sx,sy,act?4.5:3.5,0,2*Math.PI); ox.fillStyle=r.cls!=null?CLS_COL[r.cls[k]%CLS_COL.length]:col; ox.fill(); ox.lineWidth=1; ox.strokeStyle="#000"; ox.stroke(); }); }
-  if(act&&r.type!=="point"){ handlesOf(r).forEach(([hx,hy])=>{ const [sx,sy]=toScr(v,hx,hy); ox.fillStyle="#fff"; ox.fillRect(sx-3,sy-3,6,6); ox.strokeStyle="#000"; ox.lineWidth=1; ox.strokeRect(sx-3,sy-3,6,6); }); }
+  if(act&&r.type!=="point"){ const hs=TUI()?5:3; handlesOf(r).forEach(([hx,hy])=>{ const [sx,sy]=toScr(v,hx,hy); ox.fillStyle="#fff"; ox.fillRect(sx-hs,sy-hs,2*hs,2*hs); ox.strokeStyle="#000"; ox.lineWidth=1; ox.strokeRect(sx-hs,sy-hs,2*hs,2*hs); }); } // 손가락이면 손잡이를 크게
   if(r.name&&!act){ const b=roiBounds(r); const [sx,sy]=toScr(v,b.x,b.y); ox.font="600 10.5px DM Sans,system-ui"; ox.fillStyle=col; ox.fillText(r.name,sx+2,sy-3); }
   void im; ox.restore();
 }
@@ -50702,24 +51035,26 @@ function drawRois(im,ox,v){ if(S.ui.showAll!==false) roiList(im).forEach(r=>{ if
 const TOOLS=[["rect","Rectangle","M3 5h18v14H3z"],["oval","Oval","M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z"],["poly","Polygon","M4 18 7 5l9 3 4 9-9 3z"],["free","Freehand","M4 15c3-9 6 4 9-3s5-3 7 1"],
   ["line","Straight line (profile)","M4 19 20 5"],["angle","Angle","M4 19h16M4 19 15 6"],["point","Multi-point (count)","M7 8h.01M15 7h.01M10 15h.01M17 16h.01"],["wand","Wand (tracing)","M4 20 14 10M15 4v3M18 6l-2 2M20 9h-3"],
   ["scale","Set Scale (draw a line on the scale bar)","M3 17h18M3 13v8M21 13v8M8 17v-2M13 17v-2"],["hand","Scrolling tool (Space)","M8 13V6a1.5 1.5 0 0 1 3 0v6V4a1.5 1.5 0 0 1 3 0v8V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"],["zoom","Zoom (click = in, Alt+click = out)","M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-6-6M7 10h6M10 7v6"]];
-let DRAG=null, SPACE=false, HOVER=null;
+let DRAG=null, SPACE=false, HOVER=null, LASTPT="mouse";
+const TUI=()=>LASTPT==="touch"||!!(window.INNO_TOUCH&&INNO_TOUCH.touchUI()); // 손가락 화면: 손잡이·허용 거리를 크게
 function evPos(e){ const cv=$q(ROOT,"#imOverlay"); const r=cv.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
-function hitHandle(im,r,sx,sy){ const v=viewOf(im); const H=handlesOf(r); for(let k=0;k<H.length;k++){ const [hx,hy]=toScr(v,H[k][0],H[k][1]); if(Math.abs(hx-sx)<=5&&Math.abs(hy-sy)<=5) return k; } return -1; }
+function hitHandle(im,r,sx,sy,tol){ tol=tol||5; const v=viewOf(im); const H=handlesOf(r); for(let k=0;k<H.length;k++){ const [hx,hy]=toScr(v,H[k][0],H[k][1]); if(Math.abs(hx-sx)<=tol&&Math.abs(hy-sy)<=tol) return k; } return -1; }
 function insideRoi(im,r,ix,iy){ if(r.type==="rect"||r.type==="oval"){ const b=roiBounds(r); if(r.type==="rect") return ix>=b.x&&ix<=b.x+b.w&&iy>=b.y&&iy<=b.y+b.h; const dx=(ix-b.x-b.w/2)/(b.w/2), dy=(iy-b.y-b.h/2)/(b.h/2); return dx*dx+dy*dy<=1; }
   if(r.type==="poly"||r.type==="free"||r.type==="traced"){ let c=false; const P=r.pts; for(let i=0,j=P.length-1;i<P.length;j=i++){ if((P[i][1]>iy)!==(P[j][1]>iy)&&ix<(P[j][0]-P[i][0])*(iy-P[i][1])/(P[j][1]-P[i][1])+P[i][0]) c=!c; } return c; }
-  if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<5; }
+  if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<(LASTPT==="touch"?12:5); }
   return false; }
 const snapI=v=>Math.floor(v); // ImageJ: 화면 → 영상 좌표는 (int) 내림
 function onDown(e){
   const im=cur(); if(!im) return; const [sx,sy]=evPos(e); const v=viewOf(im); const [ix,iy]=toImg(v,sx,sy); const tool=S.ui.tool;
   if(e.button===2) return; // 오른쪽 단추는 그리지 않음
-  $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId);
+  LASTPT=e.pointerType||"mouse"; const touch=LASTPT==="touch"; if(touch&&!e._tap) touchSnap(im); // 손가락: 둘째 손가락이 오면 되돌릴 수 있게
+  try{ $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId); }catch(er){}
   if(e.button===1||SPACE||tool==="hand"){ DRAG={mode:"pan",sx,sy,vx:v.x,vy:v.y}; return; }
   if(tool==="zoom"){ zoomStep(im,e.altKey?-1:1,sx,sy); return; }
   const a=activeRoi(im);
-  if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
+  if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy,touch?14:5); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
     if(insideRoi(im,a,ix,iy)&&!(e.shiftKey)){ DRAG={mode:"move",orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; } }
-  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<7){ finishPoly(im); return; } const P=[snapI(ix),snapI(iy)]; t.pts[t.pts.length-1]=P; t.pts.push(P.slice()); draw(); return; } // 터치는 hover 가 없어 고무줄 점을 누른 자리로 먼저 옮김
+  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<(touch?18:7)){ finishPoly(im); return; } const P=[snapI(ix),snapI(iy)]; t.pts[t.pts.length-1]=P; t.pts.push(P.slice()); draw(); return; } // 터치는 hover 가 없어 고무줄 점을 누른 자리로 먼저 옮김
     DRAG={mode:"poly",temp:{id:uid(),type:"poly",pts:[[snapI(ix),snapI(iy)],[snapI(ix),snapI(iy)]]}}; return; }
   if(tool==="angle"){ if(DRAG&&DRAG.mode==="angle"){ DRAG.temp.pts.push([ix,iy]); if(DRAG.temp.pts.length>=4){ DRAG.temp.pts.length=3; setActive(im,DRAG.temp); DRAG=null; } draw(); return; } DRAG={mode:"angle",temp:{id:uid(),type:"angle",pts:[[ix,iy],[ix,iy]]}}; return; }
   if(tool==="point"){ let r=a&&a.type==="point"?a:null; if(!r||!e.shiftKey&&!S.ui.pointAdd&&false){ r={id:uid(),type:"point",pts:[],cls:[]}; } if(!r) r={id:uid(),type:"point",pts:[],cls:[]};
@@ -50761,6 +51096,42 @@ function onDbl(){ const im=cur(); if(im&&DRAG&&DRAG.mode==="poly"){ DRAG.temp.pt
 function updateCursor(im,sx,sy,ix,iy){ const el=$q(ROOT,"#imOverlay"); const t=S.ui.tool; let c="crosshair"; if(SPACE||t==="hand") c="grab"; else if(t==="zoom") c="zoom-in";
   else { const a=activeRoi(im); if(a){ if(hitHandle(im,a,sx,sy)>=0) c="pointer"; else if(insideRoi(im,a,ix,iy)) c="move"; } } el.style.cursor=c; }
 function onWheel(e){ const im=cur(); if(!im) return; e.preventDefault(); const [sx,sy]=evPos(e); if(e.ctrlKey||e.metaKey||!e.shiftKey){ zoomAt(im,Math.exp(-e.deltaY*0.0018),sx,sy); } else { const v=viewOf(im); v.x+=e.deltaY/v.zoom; draw(); } }
+/* ---------- 터치 (window.INNO_TOUCH) ----------
+   두 손가락 = 확대(핀치 중심 고정)·이동 — 어느 도구든. 한 손가락 = 그리기 도구(rect·oval·poly·free·line·angle·scale)면 그대로 그리기,
+   Hand 면 이동, Point·Wand·Zoom 은 탭 한 번이 클릭 한 번(끌면 이동). 탭 = 그 화소 값(상태 줄), 길게 누르기 = 값 읽기(따라 움직임),
+   두 번 탭 = 화면에 맞춤. Point 도구에서 길게 누르기 = 가까운 점 지우기(데스크톱의 Alt+클릭). */
+const TAP_TOOLS=new Set(["point","wand","zoom"]), PASS_DT=new Set(["rect","oval","line","free","scale"]);
+let TSNAP=null;
+function touchSnap(im){ const a=activeRoi(im); TSNAP={id:im.id,a,pts:a?JSON.parse(JSON.stringify(a.pts)):null,cls:a&&a.cls?a.cls.slice():null,drag:DRAG?JSON.parse(JSON.stringify(DRAG)):null}; }
+function touchRestore(){ const t=TSNAP; TSNAP=null; const im=cur(); if(!im||!t||t.id!==im.id){ DRAG=null; draw(); return; }
+  if(t.a){ t.a.pts=t.pts; if(t.cls) t.a.cls=t.cls; S.roiSel[im.id]=t.a; } else delete S.roiSel[im.id];
+  DRAG=t.drag; save(); draw(); drawSide(); }
+function bindTouch(ov){
+  if(!window.INNO_TOUCH||ov._touch) return;
+  const at=p=>{ const im=cur(); if(!im) return null; const v=viewOf(im); return {im,ix:v.x+p.x/v.zoom,iy:v.y+p.y/v.zoom}; };
+  const fake=(p,alt)=>({clientX:p.clientX,clientY:p.clientY,button:0,pointerId:-1,pointerType:"touch",shiftKey:false,altKey:!!alt,ctrlKey:false,metaKey:false,_tap:true});
+  const showVal=p=>{ const q=at(p); if(!q) return; HOVER=[q.ix,q.iy]; drawStatus(); };
+  ov._touch=INNO_TOUCH.attach(ov,{
+    oneFinger:()=>{ const t=S.ui.tool; return !cur()||t==="hand"||TAP_TOOLS.has(t)?"pan":"pass"; },
+    getView:()=>{ const im=cur(); return im?Object.assign({id:im.id},viewOf(im)):null; },
+    setView:(v0,g)=>{ const im=cur(); if(!im||!v0||v0.id!==im.id) return; const n=INNO_TOUCH.affine(v0,g,{min:1/72,max:64}); const v=viewOf(im); v.zoom=n.zoom; v.x=n.x; v.y=n.y; draw(); },
+    onPassCancel:touchRestore,
+    onTap:p=>{ LASTPT="touch"; if(TAP_TOOLS.has(S.ui.tool)) onDown(fake(p)); showVal(p); },
+    onDoubleTap:(p,info)=>{ const im=cur(); if(!im) return; if(info&&info.pass&&!PASS_DT.has(S.ui.tool)) return; fitView(im); draw(); },
+    doubleTap:()=>!TAP_TOOLS.has(S.ui.tool),
+    doubleTapInPass:true,
+    onLongPress:p=>{ LASTPT="touch"; const im=cur(); const a=im&&activeRoi(im);
+      if(S.ui.tool==="point"&&a&&a.type==="point"){ const v=viewOf(im); if(a.pts.some(q=>{ const [x,y]=toScr(v,q[0],q[1]); return Math.hypot(x-p.x,y-p.y)<16; })){ onDown(fake(p,true)); return; } }
+      showVal(p); },
+    onLongPressMove:showVal
+  });
+}
+function drawPolyBar(){ const el=ROOT&&$q(ROOT,"#imPolyBar"); if(!el) return;
+  const on=!!(DRAG&&(DRAG.mode==="poly"||DRAG.mode==="angle")&&LASTPT==="touch"); if(!on){ if(!el.hidden){ el.hidden=true; el.innerHTML=""; } return; }
+  const n=DRAG.temp.pts.length-1, key=DRAG.mode+n; if(!el.hidden&&el.dataset.k===key) return; el.dataset.k=key; el.hidden=false;
+  el.innerHTML=DRAG.mode==="poly"?`<span class="t">${n} pts</span><button class="btn sm primary" id="imPolyDone" ${n<3?"disabled":""}>Finish</button><button class="btn sm" id="imPolyEsc">Cancel</button>`:`<span class="t">Angle ${n}/3</span><button class="btn sm" id="imPolyEsc">Cancel</button>`;
+  const d=$q(el,"#imPolyDone"); if(d) d.onclick=()=>{ const im=cur(); if(im&&DRAG&&DRAG.mode==="poly") finishPoly(im); };
+  $q(el,"#imPolyEsc").onclick=()=>{ DRAG=null; draw(); }; }
 /* Wand: 문턱 범위(Threshold 탭)·이진 영상이면 그 범위로, 아니면 클릭한 값과 같은 화소(허용 tolerance)로 8-연결 외곽선 */
 let WAND_BUSY=false;
 async function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; if(WAND_BUSY){ note("Wand: 앞의 외곽선을 아직 찾는 중입니다"); return; }
@@ -51475,7 +51846,7 @@ function build(root){
       <div class="card im-list" id="imList"></div>
       <div class="card im-center">
         <div class="im-toolbar" id="imTools"></div>
-        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>Drop here</div></div>
+        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>Drop here</div><div class="im-polybar" id="imPolyBar" hidden></div></div>
         <div class="im-stackbar" id="imStack"></div>
         <div class="im-status" id="imStatus"></div>
         <div class="im-prog" id="imProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="imStop">Stop</button></div>
@@ -51499,6 +51870,7 @@ function build(root){
   x.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length){ e.preventDefault(); e.stopPropagation(); x.classList.remove("over"); loadFiles(e.dataTransfer.files); } });
   const ov=q("#imOverlay"); ov.addEventListener("pointerdown",onDown); ov.addEventListener("pointermove",onMove); ov.addEventListener("pointerup",onUp); ov.addEventListener("dblclick",onDbl);
   ov.addEventListener("pointerleave",()=>{ HOVER=null; drawStatus(); }); ov.addEventListener("wheel",onWheel,{passive:false}); ov.addEventListener("contextmenu",e=>e.preventDefault());
+  ov.addEventListener("pointercancel",e=>{ if(e.pointerType==="touch"&&TSNAP) touchRestore(); }); ov.addEventListener("pointerup",()=>{ TSNAP=null; }); bindTouch(ov); // 손가락 제스처 (INNO_TOUCH)
   try{ new ResizeObserver(()=>draw()).observe(q("#imCanvasWrap")); }catch(e){}
   rerender();
 }
