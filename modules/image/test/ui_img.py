@@ -220,6 +220,74 @@ with sync_playwright() as p:
             ijraw = np.fromfile(rf, np.uint8).astype(np.float32) if os.path.exists(rf) else None
             want = f"I 7 {'Mask of ' if newimg else ''}{fn} {info['nz']} {info['nt']} 8"
             chk(info['same'] and ijraw is not None and np.array_equal(ijraw, got) and want in lg, f'Color Threshold 스택 {fn} {"새 영상" if newimg else "제자리"}: 앱 = 핵심, .ijm(장마다) = ImageJ 화소·차원', [info['same'], want, lg.strip()[-160:]])
+    # 7c-5) Analyze Skeleton — 앱 결과 = Fiji AnalyzeSkeleton (같은 골격을 SkelDriver 로), .ijm (Skeletonize + Analyze Skeleton) 을 Fiji 플러그인을 넣은 ImageJ 로 실행해 같은 표
+    if os.environ.get('SKIP_SKEL') != '1' and os.path.exists('/tmp/askel_out/SkelDriver.class') and os.path.exists('/tmp/ijplug/plugins/AnalyzeSkeleton_.jar'):
+        sel('bin8.tif'); n0s = pg.evaluate('IMG_UI._state().skelTrees.length')
+        pg.evaluate("IMG_UI._run('skeleton',{skel:true,lsp:true,tagged:true,lspImg:true})"); pg.wait_for_function(f'IMG_UI._state().skelTrees.length>{n0s}', timeout=30000); pg.wait_for_timeout(300)
+        sk = pg.evaluate("""(()=>{ const S=IMG_UI._state(); const tg=S.images.find(i=>i.name==='Tagged skeleton of bin8.tif'); const lp=S.images.find(i=>i.name==='Longest shortest paths of bin8.tif');
+            return {w:tg.w,h:tg.h,tag:Array.from(IMG_UI._px.get(tg.id)[0]),lsp:Array.from(IMG_UI._px.get(lp.id)[0]),trees:S.skelTrees.filter(r=>r.Image==='bin8.tif'),br:S.skelBranches.filter(r=>r.Image==='bin8.tif'),sel:S.images.find(i=>i.id===S.sel).name,lut:tg.disp[0].lut}; })()""")
+        import tifffile, subprocess, tempfile
+        tdk = tempfile.mkdtemp(); skf = os.path.join(tdk, 'sk.tif'); tag = np.array(sk['tag'], np.float32).reshape(sk['h'], sk['w'])
+        tifffile.imwrite(skf, ((tag > 0) * 255).astype(np.uint8))
+        lg = subprocess.run(f'JAVA_TOOL_OPTIONS= java -cp /tmp/ij.jar:/tmp/askel_out SkelDriver {skf} 0 0 1 1 1 1', shell=True, capture_output=True, text=True).stdout.splitlines()
+        T = [list(map(float, l.split()[2:])) for l in lg if l.startswith('T ')]; E = [list(map(float, l.split()[1:])) for l in lg if l.startswith('E ')]
+        TAG = dict(tuple(map(int, x.split(':'))) for l in lg if l.startswith('TAG') for x in l.split()[1:])
+        app_t = [[r['# Branches'], r['# Junctions'], r['# End-point voxels'], r['# Junction voxels'], r['# Slab voxels'], r['Average Branch Length'], r['# Triple points'], r['# Quadruple points'], r['Maximum Branch Length'], r['Longest Shortest Path'], r['spx'], r['spy'], r['spz']] for r in sk['trees']]
+        same_t = len(app_t) == len(T) and all(np.allclose(a, b, rtol=1e-12, atol=1e-12) for a, b in zip(app_t, T))
+        tagok = all(int(v) == TAG.get(i, 0) for i, v in enumerate(sk['tag']))
+        # Branch information: 나무마다 길이 내림차순 (Fiji 표 순서) — Fiji 가지를 같은 규칙으로 정렬해 비교
+        fe = []
+        for t in range(len(T)):
+            L = [e for e in E if int(e[0]) == t]; L = sorted(enumerate(L), key=lambda x: (-x[1][1], x[0])); fe += [x[1] for x in L]
+        same_b = len(fe) == len(sk['br']) and all(abs(a[1] - b['Branch length']) < 1e-12 and [a[2], a[3], a[5], a[6]] == [b['V1 x'], b['V1 y'], b['V2 x'], b['V2 y']] for a, b in zip(fe, sk['br']))
+        chk(same_t and same_b and tagok and sk['lut'] == 'Fire' and len(T) > 3, f'Analyze Skeleton (bin8 → Skeletonize): 골격 {len(T)} · 가지 {len(E)} — 표·Branch information·태그 = Fiji', [same_t, same_b, tagok, sk['lut']])
+        lspN = sum(1 for v in sk['lsp'] if v == 96); chk(lspN > 0 and sum(1 for v in sk['lsp'] if v > 0) == sum(1 for v in sk['tag'] if v > 0), 'Longest shortest path 영상: 골격 255 위에 경로 96', lspN)
+        ijm = pg.evaluate("IMG_UI._ops.skeleton.ij({skel:true,lsp:true,tagged:true})"); of = os.path.join(tdk, 'out.txt'); mf = os.path.join(tdk, 'm.ijm')
+        open(mf, 'w').write(f'open("{os.path.join(REF, "in", "bin8.tif")}"); setOption("BlackBackground", true);\n' + ijm + f'\ns="N "+nResults; for(i=0;i<nResults;i++) s=s+"\\nR "+getResult("# Branches",i)+" "+d2s(getResult("Average Branch Length",i),9)+" "+d2s(getResult("Longest Shortest Path",i),9);\nFile.saveString(s,"{of}"); eval("script","System.exit(0);");\n')
+        subprocess.run(f'JAVA_TOOL_OPTIONS= timeout 120 xvfb-run -a java -Dplugins.dir=/tmp/ijplug -cp /tmp/ij.jar ij.ImageJ -macro {mf}', shell=True, capture_output=True)
+        rr = open(of).read().splitlines() if os.path.exists(of) else []
+        ijr = [list(map(float, l.split()[1:])) for l in rr if l.startswith('R ')]
+        chk(len(ijr) == len(T) and all(abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[5]) < 1e-6 and abs(a[2] - b[9]) < 1e-6 for a, b in zip(ijr, T)), '.ijm (Skeletonize → Analyze Skeleton) 을 Fiji 플러그인 ImageJ 로 실행 → 같은 표', rr[:3])
+        # 가지치기: (a) shortest branch + Prune ends (b) lowest intensity branch, 원본 = g8.tif → SkelDriver 와 같은 표, (b) 는 .ijm 을 Fiji 로 실행해도 같은 표
+        gid = pg.evaluate("IMG_UI._state().images.find(i=>i.name==='g8.tif').id")
+        for nm, prm, drv in [('shortest branch + Prune ends', {'prune': 'shortest branch', 'pruneEnds': True}, '1 1'), ('lowest intensity branch (원본 g8)', {'prune': 'lowest intensity branch', 'orig': gid, 'pruneEnds': False}, '3 0')]:
+            sel('bin8.tif'); n0 = pg.evaluate('IMG_UI._state().skelTrees.length')
+            P = dict(skel=True, lsp=True, tagged=False, lspImg=False, **prm)
+            pg.evaluate("P=>IMG_UI._run('skeleton',P)", P); pg.wait_for_function(f'IMG_UI._state().skelTrees.length>{n0}', timeout=30000); pg.wait_for_timeout(200)
+            tr = pg.evaluate(f"IMG_UI._state().skelTrees.slice({n0})")
+            lg = subprocess.run(f'JAVA_TOOL_OPTIONS= java -cp /tmp/ij.jar:/tmp/askel_out SkelDriver {skf} {drv} 1 1 1 1 {os.path.join(REF, "in", "g8.tif")}', shell=True, capture_output=True, text=True).stdout.splitlines()
+            T2 = [list(map(float, l.split()[2:])) for l in lg if l.startswith('T ')]
+            a2 = [[r['# Branches'], r['# Junctions'], r['# End-point voxels'], r['# Junction voxels'], r['# Slab voxels'], r['Average Branch Length'], r['# Triple points'], r['# Quadruple points'], r['Maximum Branch Length'], r['Longest Shortest Path'], r['spx'], r['spy'], r['spz']] for r in tr]
+            okp = len(a2) == len(T2) and all(np.allclose(x, y, rtol=1e-12, atol=1e-12) for x, y in zip(a2, T2))
+            chk(okp and len(T2) > 3, f'Analyze Skeleton 가지치기 {nm}: 표 = Fiji ({len(T2)} 골격, 가지 {int(sum(t[0] for t in T2))})', [len(a2), len(T2)])
+            if 'orig' in prm:
+                ijm2 = pg.evaluate("P=>IMG_UI._ops.skeleton.ij(P)", dict(P, origName='g8.tif')); of2 = os.path.join(tdk, 'out2.txt'); mf2 = os.path.join(tdk, 'm2.ijm')
+                open(mf2, 'w').write(f'open("{os.path.join(REF, "in", "g8.tif")}"); open("{os.path.join(REF, "in", "bin8.tif")}"); setOption("BlackBackground", true);\n' + ijm2 + f'\ns="N "+nResults; for(i=0;i<nResults;i++) s=s+"\\nR "+getResult("# Branches",i)+" "+d2s(getResult("Average Branch Length",i),9); s=s+"\\nT "+getTitle()+" "+getValue("Mean");\nFile.saveString(s,"{of2}"); eval("script","System.exit(0);");\n')
+                subprocess.run(f'JAVA_TOOL_OPTIONS= timeout 120 xvfb-run -a java -Dplugins.dir=/tmp/ijplug -cp /tmp/ij.jar ij.ImageJ -macro {mf2}', shell=True, capture_output=True)
+                rr2 = open(of2).read().splitlines() if os.path.exists(of2) else []
+                ij2 = [list(map(float, l.split()[1:])) for l in rr2 if l.startswith('R ')]
+                tl = [l for l in rr2 if l.startswith('T ')]
+                chk(len(ij2) == len(T2) and all(abs(x[0] - y[0]) < 1e-9 and abs(x[1] - y[5]) < 1e-6 for x, y in zip(ij2, T2)) and tl and tl[0].split()[1] == 'bin8.tif',
+                    '.ijm 가지치기(original_image) 를 Fiji 로 실행 → 같은 표 · 끝나면 원본 영상 다시 선택', [len(ij2), len(T2), tl])
+        # z step 없는 3D 스택: 1 화소로 세고 경고 (ok 알림 뒤 = 맨 위), LSP 영상만 골라도 LSP 계산, Slice 열
+        sk2 = pg.evaluate("""(async()=>{ const w=12,h=10,d=3, pl=[]; for(let z=0;z<d;z++){ const a=new Float32Array(w*h); if(z===0) for(let x=1;x<11;x++) a[5*w+x]=255; else a[5*w+10]=255; pl.push(a); } /* x 1..10 (z0) + (10,5) 에서 z 로 2 화소 — 26-이웃이라 (9,5,0)·(10,5,0)·(10,5,1) 이 접점: Fiji SkelDriver LSP = 10.414213562373096 */
+            IMG_UI._addImage({name:'skz.tif',w,h,bit:8,nc:1,nz:d,nt:1,planes:pl,cal:null}); const n0=IMG_UI._state().skelTrees.length;
+            await IMG_UI._run('skeleton',{skel:false,lsp:false,tagged:false,lspImg:true}); const S=IMG_UI._state(); const t=S.skelTrees.slice(n0);
+            return {n:t.length, lsp:t.map(r=>r['Longest Shortest Path']), msgs:IMG_UI._msgs().slice(0,3).map(m=>m.k+':'+m.m), lspimg:!!S.images.find(i=>i.name==='Longest shortest paths of skz.tif')}; })()""")
+        chk(sk2['n'] == 1 and abs(sk2['lsp'][0] - 10.414213562373096) < 1e-12 and sk2['lspimg'] and sk2['msgs'][0].startswith('warn:z 간격을 모릅니다') and sk2['msgs'][1].startswith('ok:'),
+            'Analyze Skeleton 3D (z step 없음): 1 화소로 세고 경고는 ok 뒤 · LSP 영상만 골라도 LSP 계산', sk2)
+    # Wand (Worker): 이진 영상의 입자 몇 개를 클릭 → 외곽선 = ImageJ doWand(8-connected, tolerance 0) 의 꼭짓점과 같음
+    sel('bin8.tif'); wb = pg.evaluate("""(async()=>{ const im=IMG_UI._cur(); const d=IMG_UI._px.get(im.id)[0]; const pts=[]; for(let i=0;i<d.length&&pts.length<4;i+=997) if(d[i]>0) pts.push([i%im.w,Math.floor(i/im.w)]);
+        const out=[]; for(const [x,y] of pts){ await IMG_UI._wand(im,x,y); const S=IMG_UI._state(); const a=S.roiSel[im.id]; out.push({x,y,pts:a&&a.pts}); } return out; })()""")
+    if not wb or any(w['pts'] is None for w in wb):
+        wb2 = pg.evaluate("(()=>{ const S=IMG_UI._state(); return Object.keys(S).filter(k=>/act|roi/i.test(k)); })()"); chk(False, 'Wand: ROI 를 찾지 못함', wb2)
+    else:
+        tdw = tempfile.mkdtemp(); mf = os.path.join(tdw, 'w.ijm'); of = os.path.join(tdw, 'w.txt')
+        open(mf, 'w').write(f'open("{os.path.join(REF, "in", "bin8.tif")}"); s="";\n' + ''.join(f'doWand({w["x"]},{w["y"]},0,"8-connected"); getSelectionCoordinates(xs,ys); s=s+"W"; for(i=0;i<xs.length;i++) s=s+" "+xs[i]+","+ys[i]; s=s+"\\n";\n' for w in wb) + f'File.saveString(s,"{of}");\n')
+        subprocess.run(f'JAVA_TOOL_OPTIONS= xvfb-run -a java -Xmx1g -cp /tmp/ij.jar ij.ImageJ -batch {mf}', shell=True, capture_output=True)
+        ijw = [sorted(tuple(map(int, t.split(','))) for t in l.split()[1:]) for l in open(of).read().splitlines() if l.startswith('W')] if os.path.exists(of) else []
+        appw = [sorted(tuple(int(round(v)) for v in p) for p in w['pts']) for w in wb]
+        chk(len(ijw) == len(appw) == len(wb) and all(a == b for a, b in zip(appw, ijw)), f'Wand (Worker) {len(wb)} 입자: 외곽선 꼭짓점 = ImageJ doWand', [len(a) for a in appw])
     # Sample: 사각형 ROI → 범위, Auto (HSB = Brightness 만)
     sel('trgb.tif'); pg.evaluate("IMG_UI._state().ui.panel='threshold'; IMG_UI._setActive({type:'rect',pts:[[5,5],[25,5],[25,20],[5,20]]}); IMG_UI.rerender()"); pg.wait_for_selector('#ctSample', timeout=10000); pg.wait_for_selector('#ctApply:not([disabled])', timeout=20000)
     pg.click('#ctSample'); pg.wait_for_timeout(300)

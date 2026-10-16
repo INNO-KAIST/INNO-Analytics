@@ -1,0 +1,768 @@
+{
+ "gray12.oir": {
+  "desc": "C1 12-bit (16-bit 저장)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "gray12.oir"
+ },
+ "gray8_odd.oir": {
+  "desc": "8-bit, 홀수 너비 7",
+  "w": 7,
+  "h": 5,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 8,
+  "px": 0.124,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "gray8_odd.oir"
+ },
+ "gray16.oir": {
+  "desc": "16-bit",
+  "w": 9,
+  "h": 4,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 1.2427,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "gray16.oir"
+ },
+ "c3.oir": {
+  "desc": "3 채널 (order 속성이 GUID 순서와 다름)",
+  "w": 8,
+  "h": 6,
+  "nc": 3,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "Alexa 488",
+   "DAPI",
+   "Alexa 594"
+  ],
+  "zStep": 0,
+  "chLut": [
+   "Green",
+   "Blue",
+   "Red"
+  ],
+  "truth": "oirfile = Bio-Formats",
+  "key": "c3.oir"
+ },
+ "z5.oir": {
+  "desc": "Z 5",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 5,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0.3699999999999992,
+  "truth": "oirfile = Bio-Formats",
+  "key": "z5.oir"
+ },
+ "t4.oir": {
+  "desc": "T 4",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 4,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "t4.oir"
+ },
+ "c2z3t2.oir": {
+  "desc": "C2·Z3·T2",
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 3,
+  "nt": 2,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "zStep": 0.5,
+  "truth": "oirfile = Bio-Formats",
+  "key": "c2z3t2.oir"
+ },
+ "blocks3.oir": {
+  "desc": "면마다 PIXEL 블록 3 개",
+  "w": 10,
+  "h": 9,
+  "nc": 1,
+  "nz": 2,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 2.0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "blocks3.oir"
+ },
+ "wide.oir": {
+  "desc": "너비 515",
+  "w": 515,
+  "h": 3,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.0621,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile = Bio-Formats",
+  "key": "wide.oir"
+ },
+ "c2z4big.oir": {
+  "desc": "C2·Z4·T3 64×48 (Z·T 고르기 시험)",
+  "w": 64,
+  "h": 48,
+  "nc": 2,
+  "nz": 4,
+  "nt": 3,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "zStep": 1.25,
+  "choose": {
+   "z": [
+    1,
+    3
+   ],
+   "t": [
+    0,
+    2
+   ]
+  },
+  "truth": "oirfile = Bio-Formats",
+  "key": "c2z4big.oir"
+ },
+ "rgb8.oir": {
+  "desc": "RGB 8-bit (colorType RGB, 표본별 GUID)",
+  "w": 6,
+  "h": 4,
+  "nc": 3,
+  "nz": 1,
+  "nt": 1,
+  "bit": 8,
+  "px": 0.31,
+  "chNames": [
+   "R",
+   "G",
+   "B"
+  ],
+  "zStep": 0,
+  "rgb": true,
+  "truth": "oirfile = Bio-Formats",
+  "key": "rgb8.oir"
+ },
+ "noframes.oir": {
+  "desc": "면마다 FRAMEPROPERTIES 없음 (위치는 첫 면 하나)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 3,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0.8,
+  "truth": "Bio-Formats (다름: oirfile 은 면 위치가 하나뿐이면 Z 간격을 버리고 축 설정 step 도 안 씀; Bio-Formats 는 0.8 µm — 앱은 축 설정 step 을 쓴다)",
+  "disagree": [
+   "z step BF 0.8 / oirfile None"
+  ],
+  "key": "noframes.oir"
+ },
+ "miss_mid.oir": {
+  "desc": "Z 4 중 가운데(z3) PIXEL 블록 없음",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 4,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0.5,
+  "warn": "0 으로 채웠습니다",
+  "truth": "Bio-Formats (다름: oirfile 은 있는 Z 번호만 모아 Z 3 으로 당김(z4 가 z3 자리로); Bio-Formats 는 Z 4, 빠진 면 = 0 — 앱은 번호 자리를 지킨다)",
+  "disagree": [
+   "크기 BF X8 Y6 Z4 C1 T1 / oirfile X8 Y6 Z3 C1 T1 L1",
+   "화소 다름"
+  ],
+  "key": "miss_mid.oir"
+ },
+ "miss_last.oir": {
+  "desc": "Z 4 중 마지막 면 없음 (중단된 획득)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 3,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0.5,
+  "warn": "획득 설정보다 면이 적습니다",
+  "truth": "oirfile = Bio-Formats",
+  "key": "miss_last.oir"
+ },
+ "lambda4.oir": {
+  "desc": "λ 4",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 4,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "truth": "oirfile (다름: Bio-Formats 7.3.1 은 λ 를 채널로 세지만 화소는 모두 λ1 면을 되풀이 — 앱은 oirfile 의 L 축을 T 에 잇는다)",
+  "disagree": [
+   "크기 BF X8 Y6 Z1 C4 T1 / oirfile X8 Y6 Z1 C1 T1 L4",
+   "화소 다름"
+  ],
+  "key": "lambda4.oir"
+ },
+ "c2l3.oir": {
+  "desc": "C2·λ3",
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 3,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "zStep": 0,
+  "truth": "oirfile (다름: 위와 같음)",
+  "disagree": [
+   "크기 BF X8 Y6 Z1 C6 T1 / oirfile X8 Y6 Z1 C2 T1 L3",
+   "화소 다름"
+  ],
+  "key": "c2l3.oir"
+ },
+ "l3z2.oir": {
+  "desc": "λ3·Z2",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 2,
+  "nt": 3,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 1.0,
+  "truth": "oirfile (다름: 위와 같음)",
+  "disagree": [
+   "크기 BF X8 Y6 Z2 C3 T1 / oirfile X8 Y6 Z2 C1 T1 L3",
+   "화소 다름"
+  ],
+  "key": "l3z2.oir"
+ },
+ "f32.oir": {
+  "desc": "깊이 4 바이트 (float 자료)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 32,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "warn": "깊이 4 바이트",
+  "truth": "oirfile (다름: oirfile 은 깊이 4 = 32-bit float, Bio-Formats 는 uint32 로 읽음 (실측으로 확인 못 함) — 앱은 float 로 봐서 값이 그럴듯하면 float, 대부분 비정규수면 uint32 (p9_u32 참고))",
+  "disagree": [
+   "화소 다름",
+   "형식 BF uint32"
+  ],
+  "key": "f32.oir"
+ },
+ "linescan.oir": {
+  "desc": "선 주사 (면 높이 1, 40 줄을 블록 4 개로)",
+  "w": 16,
+  "h": 40,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1"
+  ],
+  "zStep": 0,
+  "warn": "선 주사",
+  "truth": "oirfile (다름: Bio-Formats 7.3.1 은 Y 1 줄만 읽음; oirfile 은 PIXEL 자료 길이로 40 줄 (kymograph) — 앱은 oirfile)",
+  "disagree": [
+   "크기 BF X16 Y1 Z1 C1 T1 / oirfile X16 Y40 Z1 C1 T1 L1",
+   "화소 다름"
+  ],
+  "key": "linescan.oir"
+ },
+ "ref.oir": {
+  "desc": "참조(개관) 영상 REF_ 블록 포함",
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "zStep": 0,
+  "warn": "참조 영상",
+  "truth": "oirfile (다름: Bio-Formats 7.3.1 은 REF_ 블록을 본 영상 채널 자료로 덮어씀; oirfile 은 따로 둠 — 앱은 본 영상 + 참조 영상 2 개)",
+  "disagree": [
+   "화소 다름"
+  ],
+  "key": "ref.oir",
+  "ref": {
+   "w": 12,
+   "h": 10,
+   "nc": 2
+  }
+ },
+ "noindex.oir": {
+  "desc": "block index 가 잘림 (끝 일부만 남음)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 4,
+  "nt": 1,
+  "bit": 16,
+  "px": 0.31,
+  "zStep": 0.5,
+  "chNames": [
+   "CH1"
+  ],
+  "key": "noindex.oir",
+  "warn": "index",
+  "truth": "만든 자료 = Bio-Formats(같음); oirfile 실패 (ValueError)",
+  "disagree": [
+   "oirfile 실패 (ValueError)"
+  ]
+ },
+ "trunc_pix.oir": {
+  "desc": "z3 PIXEL 안에서 잘림 (index·메타데이터 없음 → 화소만)",
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 3,
+  "nt": 1,
+  "bit": 16,
+  "px": null,
+  "zStep": 0,
+  "chNames": [
+   "CH1"
+  ],
+  "key": "trunc_pix.oir",
+  "warn": "메타데이터(lsmimage)가 없습니다",
+  "nometa": true,
+  "truth": "만든 자료 (잘린 뒤 = 0); oirfile 실패 (ValueError); Bio-Formats 오류: Exception in thread \"main\" java.lang.IllegalArgumentException: newPosition > limit: (1290 > 1234)",
+  "disagree": [
+   "oirfile 실패 (ValueError)",
+   "Bio-Formats: Exception in thread \"main\" java.lang.IllegalArgumentException: newPosition > limit: (1290 > 1234)"
+  ]
+ },
+ "header_only.oir": {
+  "desc": "머리 40 바이트만",
+  "error": "OIR 머리"
+ },
+ "split.oir": {
+  "desc": "큰 획득이 본 파일 + 보조 파일 split_00001 로 나뉨 (본 파일만 열기)",
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 2,
+  "bit": 16,
+  "px": 0.31,
+  "zStep": 0,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "key": "split.oir",
+  "warn": "보조 파일",
+  "truth": "본 파일만: oirfile(multifile=False) T 2 = Bio-Formats; 보조 파일과 함께: oirfile(multifile=True) T 4, Bio-Formats 오류 (Exception in thread \"main\" java.io.EOFException: Attempting to read beyond end of file.)",
+  "disagree": [
+   "보조 파일이 옆에 있을 때 Bio-Formats: Exception in thread \"main\" java.io.EOFException: Attempting to read beyond end of file. / oirfile T 4 (앱은 보조 파일을 읽지 않음)"
+  ]
+ },
+ "split_00001": {
+  "desc": "보조 파일만 (메타데이터 없음)",
+  "error": "보조 파일"
+ },
+ "pair.poir": {
+  "desc": "POIR (ZIP): OIR 2 개 (stored·deflate) + txt",
+  "images": [
+   "gray12.oir",
+   "c3.oir"
+  ],
+  "inner": [
+   "Image_01/gray12.oir",
+   "Image_02/c3.oir"
+  ],
+  "truth": "oirfile PoirFile 의 각 OIR = 단일 파일 정답"
+ },
+ "p1_globalctr.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "desc": "채널끼리 엇갈린 PIXEL 블록, 번호는 파일 전체에서 셈",
+  "key": "p1_globalctr.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'C': 2, 'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C2 T1 uint16 pz - ch CH1|CH2 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p1b_interleave1.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "desc": "채널끼리 엇갈린 블록, 면마다 1 부터 번호",
+  "key": "p1b_interleave1.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'C': 2, 'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C2 T1 uint16 pz - ch CH1|CH2 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p3_nestedname.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "채널 안에 염료 name 이 또 있음 → 바로 아래 name (Bio-Formats 와 같음; oirfile 은 안쪽 마지막 name)",
+  "key": "p3_nestedname.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p4_twoaxes.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 3,
+  "nt": 1,
+  "zStep": 0.5,
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "ZSTACK 축 정의 2 개 → 마지막 것 (oirfile 과 같음; Bio-Formats 는 오류)",
+  "key": "p4_twoaxes.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Z': 3, 'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: 오류 (Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke \"org.w3)",
+  "px": 0.31,
+  "bit": 16
+ },
+ "p5_nomarker.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "block index 에 0xFFFFFFFF 표지 없음 (위치는 맞음)",
+  "key": "p5_nomarker.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p6_dupuid.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "warn": "되풀이",
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "같은 UID 가 두 번 → 첫 것 + 알림 (Bio-Formats 는 마지막 것, oirfile 은 둘을 이어 높이 12)",
+  "key": "p6_dupuid.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 12, 'X': 8} uint16 ≠ 정답 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 ≠ 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p7_snapuid.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "UID 에 _a_b 없음 (스냅샷형)",
+  "key": "p7_snapuid.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p8_fileinfo_only.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "px": null,
+  "warn": "메타데이터(lsmimage)가 없습니다",
+  "nometa": true,
+  "desc": "METADATA 에 fileinfo 만 (lsmimage 없음) → 화소만 + 알림",
+  "key": "p8_fileinfo_only.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: 오류 (Exception in thread \"main\" java.lang.IllegalArgumentException: 0 must be non-nul)",
+  "zStep": 0,
+  "bit": 16
+ },
+ "p9_u32.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "bit": 32,
+  "warn": "uint32",
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "깊이 4 바이트, uint32 자료 (float 로 보면 비정규수) → uint32 (Bio-Formats 와 같음)",
+  "key": "p9_u32.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Y': 6, 'X': 8} float32 ≠ 정답 · Bio-Formats: X8 Y6 Z1 C1 T1 uint32 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0
+ },
+ "p10_fp_perchan.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 3,
+  "fi": "2.5 s",
+  "chNames": [
+   "CH1",
+   "CH2"
+  ],
+  "desc": "FRAMEPROPERTIES 가 채널마다 → frame interval 2.5 s (면 위치)",
+  "key": "p10_fp_perchan.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'T': 3, 'C': 2, 'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z1 C2 T3 uint16 pz - ch CH1|CH2 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p11_extraline.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 2,
+  "nt": 1,
+  "zStep": 1.0,
+  "warn": "남는 바이트",
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "한 면에 한 줄 남는 자료 → 높이 6 유지 (Bio-Formats 와 같음; oirfile 은 7)",
+  "key": "p11_extraline.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'Z': 2, 'Y': 7, 'X': 8} uint16 ≠ 정답 · Bio-Formats: X8 Y6 Z2 C1 T1 uint16 pz 1.0 ch CH1 = 정답",
+  "px": 0.31,
+  "bit": 16
+ },
+ "p12_upper.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "GUID 가 대문자 (oirfile 은 못 읽음, Bio-Formats 는 읽음)",
+  "key": "p12_upper.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {} uint16 ≠ 정답 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p13_case_mismatch.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 2,
+  "nz": 1,
+  "nt": 1,
+  "chNames": [
+   "RFP",
+   "GFP"
+  ],
+  "desc": "lsmimage GUID 는 대문자, UID 는 소문자 → 대소문자 무시, order 순 RFP·GFP",
+  "key": "p13_case_mismatch.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'C': 2, 'Y': 6, 'X': 8} uint16 ≠ 정답 · Bio-Formats: X8 Y6 Z1 C2 T1 uint16 pz - ch RFP|GFP ≠ 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p14_rgb_bgr.oir": {
+  "w": 6,
+  "h": 4,
+  "nc": 3,
+  "nz": 1,
+  "nt": 1,
+  "bit": 8,
+  "rgb": true,
+  "warn": "RGB 성분",
+  "desc": "RGB, 채널 차례 B·G·R (이름) → R·G·B 로",
+  "key": "p14_rgb_bgr.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'S': 3, 'Y': 4, 'X': 6} uint8 ≠ 정답 · Bio-Formats: X6 Y4 Z1 C3 T1 uint8 pz - ch B|G|R ≠ 정답",
+  "px": 0.31,
+  "zStep": 0
+ },
+ "p15_refonly.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 1,
+  "nt": 1,
+  "warn": "참조(개관) 영상만",
+  "chNames": [
+   "CH1"
+  ],
+  "refonly": true,
+  "desc": "REF_ 블록만 (본 영상 없음) → 참조 영상만 + 알림",
+  "key": "p15_refonly.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {} uint16 ≠ 정답 · Bio-Formats: X8 Y6 Z1 C1 T1 uint16 pz - ch CH1 = 정답",
+  "px": 0.31,
+  "zStep": 0,
+  "bit": 16
+ },
+ "p16_zdrift.oir": {
+  "w": 8,
+  "h": 6,
+  "nc": 1,
+  "nz": 3,
+  "nt": 2,
+  "zStep": 0.5,
+  "fi": "1 s",
+  "chNames": [
+   "CH1"
+  ],
+  "desc": "T 사이 Z 표류 0.013 µm → 같은 T 안에서 잰 간격 0.5 (oirfile 0.013, Bio-Formats 0.5)",
+  "key": "p16_zdrift.oir",
+  "truth": "만든 자료 (앱 규칙) · oirfile: {'T': 2, 'Z': 3, 'Y': 6, 'X': 8} uint16 = 만든 자료 · Bio-Formats: X8 Y6 Z3 C1 T2 uint16 pz 0.5 ch CH1 = 정답",
+  "px": 0.31,
+  "bit": 16
+ },
+ "q1_datadesc.poir": {
+  "desc": "POIR data descriptor·한글 이름",
+  "images": [
+   "gray12.oir"
+  ],
+  "inner": [
+   "Image_01/데이터 한글.oir"
+  ],
+  "truth": "oirfile PoirFile = 단일 파일 정답"
+ },
+ "q2_zip64entry.poir": {
+  "desc": "POIR ZIP64 extra 가 있는 작은 항목",
+  "images": [
+   "gray12.oir"
+  ],
+  "inner": [
+   "Image_01/a.oir"
+  ],
+  "truth": "oirfile PoirFile = 단일 파일 정답"
+ },
+ "q3_three.poir": {
+  "desc": "POIR 에 64×48·C2·Z4·T3 OIR 3 개 — 메모리 한도는 묶음 전체",
+  "images": [
+   "c2z4big.oir",
+   "c2z4big.oir",
+   "c2z4big.oir"
+  ],
+  "inner": [
+   "Image_00/c2z4big.oir",
+   "Image_01/c2z4big.oir",
+   "Image_02/c2z4big.oir"
+  ],
+  "budget": true
+ }
+}

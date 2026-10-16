@@ -13,7 +13,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------------- 상태 ----------------
    S 는 JSON 으로 저장되는 부분(영상 메타데이터·ROI·결과·매크로·화면). 화소는 PX(id → Float32Array[]) 에 따로 둔다 */
-function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],
+function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],
   measure:{cols:["Area","Mean","StdDev","Min","Max","X","Y","Perim.","Feret","MinFeret","Circ.","AR","Round","Solidity","ECD"]},
   macro:{rec:true,steps:[]},
   ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:true,manual:false,lower:0,upper:255,show:true},

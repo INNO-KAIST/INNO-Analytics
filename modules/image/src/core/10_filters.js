@@ -203,16 +203,83 @@ function rankMedian(p,radius){
     }
     return out;
   }
-  const buf=new Float64Array(n), ab=new Float64Array(n), bl=new Float64Array(n);
-  for(let y=0;y<H;y++){ for(let x=0;x<W;x++){ let c=0; for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; for(let xx=-r;xx<=r;xx++) buf[c++]=P.d[row+xx]; }
-      // ImageJ getNaNAwareMedian: 추정값 g = 가운데 화소(NaN 이면 결과 NaN). NaN 은 뺀 개수 m, half=⌊m/2⌋.
-      // g 보다 큰 값이 half 개보다 많으면 그중 (nAbove−half−1) 번째, 작은 값이 half 개보다 많으면 그중 half 번째, 아니면 g
-      const g=P.d[(y+kR)*PW+kR+x]; if(g!==g){ out[y*W+x]=NaN; continue; }
-      let m=0,na=0,nb=0; for(let i=0;i<c;i++){ const v=buf[i]; if(v!==v) continue; m++; if(v>g) ab[na++]=v; else if(v<g) bl[nb++]=v; }
-      const half=m>>1; out[y*W+x]=!m?NaN:na>half?quickSelect(ab,na-half-1,na):nb>half?quickSelect(bl,half,nb):g; }
-    if((y&31)===0) IC.progress(y/H); }
+  if(n>=25) return rankMedianHist(p,P,kR,dx,n);
+  const B=medBufs(n); for(let y=0;y<H;y++){ for(let x=0;x<W;x++) out[y*W+x]=medianAt(P,kR,dx,x,y,B); if((y&31)===0) IC.progress(y/H); }
   return out;
 }
+const medBufs=n=>({buf:new Float64Array(n),ab:new Float64Array(n),bl:new Float64Array(n)});
+/* 16/32-bit 한 화소의 중앙값 — ImageJ getNaNAwareMedian 과 같은 규칙.
+   추정값 g = 가운데 화소(NaN 이면 결과 NaN). NaN 은 뺀 개수 m, half=⌊m/2⌋.
+   g 보다 큰 값이 half 개보다 많으면 그중 (nAbove−half−1) 번째, 작은 값이 half 개보다 많으면 그중 half 번째, 아니면 g */
+function medianAt(P,kR,dx,x,y,B){ const PW=P.PW, d=P.d, buf=B.buf, ab=B.ab, bl=B.bl; let c=0;
+  for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; for(let xx=-r;xx<=r;xx++) buf[c++]=d[row+xx]; }
+  const g=d[(y+kR)*PW+kR+x]; if(g!==g) return NaN;
+  let m=0,na=0,nb=0; for(let i=0;i<c;i++){ const v=buf[i]; if(v!==v) continue; m++; if(v>g) ab[na++]=v; else if(v<g) bl[nb++]=v; }
+  const half=m>>1; return !m?NaN:na>half?quickSelect(ab,na-half-1,na):nb>half?quickSelect(bl,half,nb):g; }
+/* 16/32-bit 중앙값, 큰 창 (n ≥ 25): 값을 순위(rank)로 바꿔 두 단계 이동 히스토그램 (Huang 방식, 거친 칸으로 건너뜀).
+   NaN 없는 창은 개수 n 이 늘 홀수(원형 커널) → 중앙값이 하나로 정해져 medianAt 과 같은 값.
+   창에 NaN 이 있으면(짝수 개일 때 결과가 추정값에 따라 다름) 그 화소만 medianAt → ImageJ 와 같음. */
+function rankMedianHist(p,P,kR,dx,n){
+  const W=p.w,H=p.h,PW=P.PW,PH=P.PH,d=P.d,NP=PW*PH; const out=new Float32Array(W*H);
+  // 순위: 16-bit 정수(0..65535)는 값 그대로, 아니면 정렬한 서로 다른 값의 번호 (같은 값 = 같은 순위, ±∞ 포함). NaN = −1
+  const rk=new Int32Array(NP); let vals=null, U; let int16=p.bit===16;
+  if(int16) for(let i=0;i<NP;i++){ const v=d[i]; if(!(v>=0&&v<=65535&&v===Math.floor(v))){ int16=false; break; } }
+  if(int16){ U=65536; for(let i=0;i<NP;i++) rk[i]=d[i]; }
+  else { const srt=new Float64Array(NP); let m=0; for(let i=0;i<NP;i++) if(d[i]===d[i]) srt[m++]=d[i];
+    const so=srt.subarray(0,m).sort(); U=0; for(let k=0;k<m;k++) if(!U||so[k]!==so[U-1]) so[U++]=so[k]; vals=so.subarray(0,U);
+    for(let i=0;i<NP;i++){ const v=d[i]; if(v!==v){ rk[i]=-1; continue; } let lo=0,hi=U-1; while(lo<hi){ const mid=(lo+hi)>>1; if(vals[mid]<v) lo=mid+1; else hi=mid; } rk[i]=lo; } }
+  if(!U){ out.fill(NaN); return out; }
+  // 세 단계 개수: L0 = 순위마다, L1 = 64 순위마다, L2 = 4096 순위마다 → 중앙값 순위 m 을 옮길 때 칸을 건너뜀
+  const L0=new Int32Array(U+4096), L1=new Int32Array((U>>6)+65), L2=new Int32Array((U>>12)+2); const half=n>>1; const MB=medBufs(n);
+  const put=(q,s)=>{ L0[q]+=s; L1[q>>6]+=s; L2[q>>12]+=s; };
+  for(let y=0;y<H;y++){
+    let nan=0;
+    for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q<0) nan++; else put(q,1); } }
+    let m=0, below=0; // below = 순위 < m 인 값의 개수
+    for(let x=0;x<W;x++){
+      if(x>0) for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; const qo=rk[row-r-1], qi=rk[row+r];
+        if(qo<0) nan--; else { put(qo,-1); if(qo<m) below--; }
+        if(qi<0) nan++; else { put(qi,1); if(qi<m) below++; } }
+      if(nan){ out[y*W+x]=medianAt(P,kR,dx,x,y,MB); continue; }
+      while(below+L0[m]<=half){ below+=L0[m]; m++;
+        if((m&63)===0) while(below+L1[m>>6]<=half){ below+=L1[m>>6]; m+=64; if((m&4095)===0) while(below+L2[m>>12]<=half){ below+=L2[m>>12]; m+=4096; } } }
+      while(below>half){
+        if((m&4095)===0&&below-L2[(m>>12)-1]>half){ m-=4096; below-=L2[m>>12]; continue; }
+        if((m&63)===0&&below-L1[(m>>6)-1]>half){ m-=64; below-=L1[m>>6]; continue; }
+        m--; below-=L0[m]; }
+      out[y*W+x]=int16?m:vals[m];
+    }
+    // 줄 끝: 마지막 창을 빼서 개수를 0 으로 (전체를 지우면 U 가 클 때 줄마다 U 번 — 느림)
+    for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+W-1; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q>=0) put(q,-1); } }
+    if((y&31)===0) IC.progress(y/H);
+  }
+  return out;
+}
+IC._medianDirect=function(p,radius){ const {kR,dx}=IC.lineRadii(radius); const P=padded(p,kR), B=medBufs(IC.lineRadii(radius).n), out=new Float32Array(p.w*p.h);
+  for(let y=0;y<p.h;y++) for(let x=0;x<p.w;x++) out[y*p.w+x]=medianAt(P,kR,dx,x,y,B); return out; }; // 시험용 기준 (화소마다 모아 고름)
+/* Remove Outliers — ImageJ RankFilters.filterLine(OUTLIERS) 의 순서 그대로 (float 연산):
+   s = 밝은 쪽 −1 · 어두운 쪽 +1 (보통 LUT). 창 안 v·s 의 최댓값 M(NaN 제외, 최소 −Float.MAX) 에 대해 v·s+thr < M 일 때만 중앙값을 구하고
+   v·s+thr < med·s 이면 v → med. 중앙값은 getMedian(NaN 을 빼지 않음, 추정값 = 그 줄에서 마지막으로 구한 중앙값, 줄 처음 = 첫 화소(NaN→0)).
+   NaN 없는 창은 개수가 홀수라 추정값과 관계없이 참 중앙값 → 빠른 rankMedian 결과를 쓰고, NaN 이 있는 창만 추정값 규칙을 그대로 따른다. */
+function removeOutliers(p,radius,threshold,bright){
+  const W=p.w,H=p.h,d=p.data, sg=bright?-1:1, thr=Math.fround(threshold), FMAX=3.4028234663852886e38;
+  const med=rankMedian(p,radius); const ext=rankMinMax(p,radius,!bright); // 밝은 쪽: 창 최솟값(→ M = −min), 어두운 쪽: 최댓값
+  let anyNaN=false; for(let i=0;i<W*H;i++) if(d[i]!==d[i]){ anyNaN=true; break; }
+  let hasNaN=null, P=null, kR=0, dx=null, B=null;
+  if(anyNaN){ const ind=new Float32Array(W*H); for(let i=0;i<W*H;i++) ind[i]=d[i]!==d[i]?1:0; hasNaN=rankMinMax({w:W,h:H,bit:32,data:ind},radius,true);
+    const L=IC.lineRadii(radius); kR=L.kR; dx=L.dx; P=padded(p,kR); B=medBufs(L.n); }
+  const out=new Float32Array(W*H);
+  for(let y=0;y<H;y++){ let g=d[y*W]; if(g!==g) g=0;
+    for(let x=0;x<W;x++){ const i=y*W+x; let v=d[i]; const M=Math.max(-FMAX,sg*ext[i]); const vs=Math.fround(v*sg+thr);
+      if(vs<M){ const m=(hasNaN&&hasNaN[i]>0)?medianGuess(P,kR,dx,x,y,B,g):med[i]; g=m; if(vs<m*sg) v=m; }
+      out[i]=v; }
+    if((y&63)===0) IC.progress(y/H); }
+  return out;
+}
+/* ImageJ getMedian (NaN 을 빼지 않음 — NaN 은 추정값과 같은 것으로 셈) */
+function medianGuess(P,kR,dx,x,y,B,g){ const PW=P.PW, d=P.d, ab=B.ab, bl=B.bl; let na=0,nb=0,n=0;
+  for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; for(let xx=-r;xx<=r;xx++){ const v=d[row+xx]; n++; if(v>g) ab[na++]=v; else if(v<g) bl[nb++]=v; } }
+  const half=n>>1; return na>half?quickSelect(ab,na-half-1,na):nb>half?quickSelect(bl,half,nb):g; }
 /* type: mean | median | min | max | variance | outliers | despeckle | tophat | open | close
    o.radius, o.threshold, o.which ('bright'|'dark'), o.light (Top Hat: light background) */
 IC.rank=function(p,type,o){
@@ -234,10 +301,8 @@ IC.rank=function(p,type,o){
     if(type==="tophat"){ out=new Float32Array(W*H); const off=(light&&p.bit!==32)?IC.maxOf(p.bit):0;
       for(let i=0;i<W*H;i++) out[i]=p.data[i]-b[i]+off; }
     else out=b;
-  }else if(type==="outliers"){
-    const med=rankMedian(p,r), thr=+o.threshold||0, bright=(o.which||"bright")==="bright"; out=Float32Array.from(p.data);
-    for(let i=0;i<W*H;i++){ const v=p.data[i]; if(bright?(v-thr>med[i]):(v+thr<med[i])) out[i]=med[i]; }
-  }else throw new Error("알 수 없는 rank filter: "+type);
+  }else if(type==="outliers") out=removeOutliers(p,r,+o.threshold||0,(o.which||"bright")==="bright");
+  else throw new Error("알 수 없는 rank filter: "+type);
   return {w:W,h:H,bit:p.bit,data:IC.roundTo(out,p.bit)};
 };
 

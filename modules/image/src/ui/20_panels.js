@@ -10,7 +10,8 @@ function formHTML(o,im){ const v=formVals(o);
   return o.params.filter(p=>!(p.stackOnly&&!isStack(im))&&(!p.showIf||p.showIf(v))).map(p=>{ const id=`imf_${o.id}_${p.k}`; const u=p.unit?`<span class="u">${esc(p.unit)}</span>`:"";
     if(p.type==="bool") return `<label class="im-chk"><input type="checkbox" id="${id}" data-k="${p.k}" ${v[p.k]?"checked":""}> ${esc(p.label)}</label>`;
     if(p.type==="sel") return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${p.opts.map(([a,b])=>`<option value="${esc(a)}" ${String(v[p.k])===String(a)?"selected":""}>${esc(b)}</option>`).join("")}</select></label>`;
-    if(p.type==="img") return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${S.images.filter(x=>x.id!==im.id).map(x=>`<option value="${x.id}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`;
+    if(p.type==="img"){ const L=S.images.filter(x=>x.id!==im.id); if(L.length&&!L.some(x=>x.id===v[p.k])) v[p.k]=L[0].id; /* 보이는 첫 항목 = 값 (고르지 않고 실행해도 화면과 같게) */
+      return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${L.map(x=>`<option value="${x.id}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`; }
     if(p.type==="text") return `<label class="im-f col"><span>${esc(p.label)}</span><textarea id="${id}" data-k="${p.k}" rows="3" class="mono">${esc(v[p.k])}</textarea></label>`;
     return `<label class="im-f"><span>${esc(p.label)}</span><input type="number" id="${id}" data-k="${p.k}" value="${esc(v[p.k])}" ${p.min!=null?`min="${p.min}"`:""} ${p.max!=null?`max="${p.max}"`:""} step="${p.step||(p.type==="int"?1:"any")}">${u}</label>`; }).join("");
 }

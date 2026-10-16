@@ -124,7 +124,9 @@ function askImport1(o){ const posB=o.posBytes||[...Array(o.positions)].map(()=>o
       <div class="im-row"><span class="xs" id="ipInfo"></span><span class="sp"></span><button class="btn sm" data-close>취소</button><button class="btn primary sm" id="ipOk">Open</button></div>`);
     const g=q=>$q(m,q); const seq=(id,n)=>{ if(n<=1) return [0]; const a=clamp(Math.round(+g(`#${id}a`).value||1),1,n), b=clamp(Math.round(+g(`#${id}b`).value||n),a,n), st=Math.max(1,Math.round(+g(`#${id}s`).value||1)); const r=[]; for(let i=a;i<=b;i+=st) r.push(i-1); return r; };
     const pick=()=>{ const p=o.positions>1?$a(m,".ipP").filter(x=>x.checked).map(x=>+x.value):[0]; return {p,z:seq("ipZ",o.nz),t:seq("ipT",o.nt)}; };
-    const upd=()=>{ const r=pick(); const b=r.p.reduce((a,i)=>a+posB[i],0)*r.z.length*r.t.length/(o.nz*o.nt); const el=g("#ipInfo"); el.textContent=`${r.p.length} × Z ${r.z.length} × T ${r.t.length} → ${gb(b)}${b>LIM?" — 너무 큼(한도 "+gb(LIM)+")":""}`; el.className="xs "+(b>LIM||!r.p.length?"warn":"ok"); g("#ipOk").disabled=b>LIM||!r.p.length; };
+    const cnt=(list,n)=>n<=1?1:list.filter(v=>v<n).length; /* 위치마다 Z·T 수가 다르면(posNz·posNt) 그 위치 안의 것만 셈 */
+    const bytesOf=r=>o.posNz||o.posNt?r.p.reduce((a,i)=>{ const nz=o.posNz?o.posNz[i]:o.nz, nt=o.posNt?o.posNt[i]:o.nt; return a+posB[i]*cnt(r.z,nz)/nz*cnt(r.t,nt)/nt; },0):r.p.reduce((a,i)=>a+posB[i],0)*r.z.length*r.t.length/(o.nz*o.nt);
+    const upd=()=>{ const r=pick(); const b=bytesOf(r); const el=g("#ipInfo"); el.textContent=`${r.p.length} × Z ${r.z.length} × T ${r.t.length} → ${gb(b)}${b>LIM?" — 너무 큼(한도 "+gb(LIM)+")":""}`; el.className="xs "+(b>LIM||!r.p.length?"warn":"ok"); g("#ipOk").disabled=b>LIM||!r.p.length; };
     $a(m,"input").forEach(x=>x.oninput=upd); if(g("#ipAll")) g("#ipAll").onclick=()=>{ $a(m,".ipP").forEach(x=>x.checked=true); upd(); }; if(g("#ipNone")) g("#ipNone").onclick=()=>{ $a(m,".ipP").forEach(x=>x.checked=false); upd(); };
     // 처음 값: 한도를 넘으면 Z(없으면 T) step 을 키워 맞춘다
     { const b0=posB.slice(0,Math.min(64,o.positions)).reduce((a,b)=>a+b,0); if(b0>LIM){ const k=o.nz>1?"ipZ":o.nt>1?"ipT":null; if(k){ const n=k==="ipZ"?o.nz:o.nt; g(`#${k}s`).value=Math.min(n,Math.max(1,Math.ceil(b0/LIM))); } } } // 처음 체크된 위치(≤64) 기준으로 한도에 맞는 가장 촘촘한 간격
@@ -166,4 +168,4 @@ function onKey(e){
 }
 try{ document.addEventListener("keydown",onKey); document.addEventListener("keyup",e=>{ if(e.key===" ") SPACE=false; }); window.addEventListener("blur",()=>{ SPACE=false; }); }catch(e){}
 
-window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll};
+window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll,_msgs:()=>MSGS,_wand:wandAt};

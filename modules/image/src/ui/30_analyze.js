@@ -108,6 +108,53 @@ op("zprofile",{label:"Plot Z-axis Profile",group:"meas",hidden:true,kind:"measur
   ij:()=>`run("Plot Z-axis Profile");`});
 
 /* ===== Analyze 패널 ===== */
+/* ---------- Analyze Skeleton (2D/3D) — Fiji AnalyzeSkeleton 과 같은 결과 (core/85_skeleton.js: 동작 명세·블랙박스 대조로 새로 쓴 독립 구현) ---------- */
+const SK_PRUNE=[["none","none"],["shortest branch","shortest branch"],["lowest intensity voxel","lowest intensity voxel"],["lowest intensity branch","lowest intensity branch"]];
+op("skeleton",{label:"Analyze Skeleton (2D/3D)",group:"analyze",kind:"analyze",hidden:true,params:[R("skel","먼저 Skeletonize (2D, ImageJ)",false,{type:"bool"}),
+  R("prune","Prune cycle method","none",{type:"sel",opts:SK_PRUNE}),R("orig","Original image (세기)","",{type:"img",showIf:P=>/intensity/.test(P.prune||"")}),R("pruneEnds","Prune ends",false,{type:"bool"}),R("lsp","Longest shortest path",true,{type:"bool"}),R("tagged","Tagged skeleton 영상",true,{type:"bool"}),R("lspImg","Longest shortest path 영상",false,{type:"bool"})],
+  run:async(im,P)=>{ if(im.rgb) throw new Error("이진(0/255) 영상에서 — RGB 는 Color Threshold 로 mask 를 만든 뒤");
+    const d=im.nz, w=im.w, h=im.h, P0=planesOf(im); const data=new Uint8Array(w*h*d); let nonBin=0;
+    for(let z=0;z<d;z++){ let pl=P0[pIndex(im,im.c,z,im.t)];
+      if(P.skel){ if(d>1) throw new Error("3D 스택의 Skeletonize 는 없습니다 (Fiji Skeletonize3D) — 이미 골격인 스택에서 쓰거나, 장마다 2D 로는 Binary ▸ Skeletonize");
+        if(im.bit!==8||!IC.isBinary({w,h,bit:im.bit,data:pl})) throw new Error("Skeletonize 는 이진(0/255) 8-bit 영상에서 — Threshold ▸ Convert to Mask 먼저"); pl=(await call("skeletonize",[{w,h,bit:8,data:pl}])).data; }
+      for(let i=0;i<w*h;i++){ const v=pl[i]; if(v!==0&&v!==255) nonBin++; data[z*w*h+i]=v!==0&&v===v?255:0; } }
+    if(nonBin) throw new Error(`이진(0/255) 영상이 아닙니다 (0·255 아닌 화소 ${nonBin}) — Threshold ▸ Convert to Mask, Binary ▸ Skeletonize 뒤에`);
+    const c=calOf(im); let pd=1; const later=[];
+    if(d>1){ const k=im.cal?IO.unitToM(c.unit):0; if(im.zStep>0&&k) pd=im.zStep*1e-6/k;
+      else later.push(`z 간격을 모릅니다 (${!(im.zStep>0)?"z step 없음":`단위 '${c.unit}' 를 길이로 못 바꿈`}) — z 간격 = 1 화소로 셈. Image ▸ Properties 에서 지정하면 3D 길이가 맞습니다`); }
+    if(im.nc>1||im.nt>1) later.push(`hyperstack: 현재 ${im.nc>1?`채널 ${im.c+1}`:""}${im.nc>1&&im.nt>1?" · ":""}${im.nt>1?`시점 ${im.t+1}`:""} 의 z 스택만 분석했습니다 (Fiji 는 hyperstack 의 모든 장을 한 3D 로 봄 — 같은 결과는 Duplicate 로 떼어 낸 뒤)`);
+    const wantLsp=!!(P.lsp||P.lspImg); const prune=P.prune||"none"; let orig=null, origName="";
+    if(/intensity/.test(prune)){ const o=byId(P.orig)||S.images.find(x=>x.name===P.origName); if(!o) throw new Error("세기 기준 가지치기: 원본(회색) 영상을 고르세요");
+      if(o.w!==w||o.h!==h||o.nz!==d) throw new Error(`원본 영상의 크기가 골격과 같아야 합니다 (${w}×${h}${d>1?"×"+d:""})`); if(o.rgb) throw new Error("원본 영상은 회색(8/16/32-bit)이어야 합니다");
+      const OP=planesOf(o); orig=new Float32Array(w*h*d); for(let z=0;z<d;z++) orig.set(OP[pIndex(o,o.c,z,o.t)],z*w*h); origName=o.name; }
+    setProg("Analyze Skeleton …",0.3); let r; try{ r=await call("analyzeSkeleton",[{w,h,d,data},{pw:c.pw,ph:c.ph,pd},{lsp:wantLsp,prune,pruneEnds:!!P.pruneEnds,orig:orig?{data:orig}:null}],f=>setProg("Analyze Skeleton …",0.3+0.6*f)); } finally { hideProg(); }
+    const slice=[im.nc>1?`c${im.c+1}`:"",im.nt>1?`t${im.t+1}`:""].filter(Boolean).join(" "); const u=c.unit;
+    const CAP_T=20000, CAP_B=100000; const room=n=>Math.max(0,n);
+    const nT=Math.min(r.trees.length,room(CAP_T-S.skelTrees.length)); if(nT<r.trees.length) later.push(`Skeleton 표가 ${CAP_T} 줄을 넘어 골격 ${r.trees.length-nT} 개를 표에 넣지 않았습니다 — Clear 뒤 다시, 또는 작은 영역으로`);
+    const lspTxt=v=>v===v?v:"건너뜀";
+    r.trees.slice(0,nT).forEach((t,k)=>S.skelTrees.push({Image:im.name,Slice:slice,Skeleton:k+1,"# Branches":t.branches,"# Junctions":t.junctions,"# End-point voxels":t.endPoints,"# Junction voxels":t.junctionVoxels,"# Slab voxels":t.slabs,
+      "Average Branch Length":t.avgLength,"# Triple points":t.triples,"# Quadruple points":t.quadruples,"Maximum Branch Length":t.maxLength,...(wantLsp?{"Longest Shortest Path":lspTxt(t.lsp),spx:lspTxt(t.spx),spy:lspTxt(t.spy),spz:lspTxt(t.spz)}:{}),Unit:u}));
+    // Branch information: 나무마다 길이 내림차순 (Fiji 'Show detailed info' 와 같은 순서 — 같은 길이는 원래 순서)
+    const byT=r.trees.map(()=>[]); r.edges.forEach((e,i)=>byT[e.tree].push([e,i])); let bLeft=room(CAP_B-S.skelBranches.length), bDrop=0;
+    for(let k=0;k<nT;k++){ const E=byT[k].sort((a,b)=>b[0].length-a[0].length||a[1]-b[1]).map(x=>x[0]);
+      for(const e of E){ if(bLeft<=0){ bDrop++; continue; } bLeft--; S.skelBranches.push({Image:im.name,Slice:slice,"Skeleton ID":k+1,"Branch length":e.length,"V1 x":e.v1[0]*c.pw,"V1 y":e.v1[1]*c.ph,"V1 z":e.v1[2]*pd,"V2 x":e.v2[0]*c.pw,"V2 y":e.v2[1]*c.ph,"V2 z":e.v2[2]*pd,"Euclidean distance":e.euclid,"running average length":e.lengthRa,Unit:u}); } }
+    for(let k=nT;k<r.trees.length;k++) bDrop+=byT[k].length;
+    if(bDrop) later.push(`Branch information 이 ${CAP_B} 줄을 넘어 가지 ${bDrop} 개를 표에 넣지 않았습니다 (Skeleton 표의 수는 전체)`);
+    const tb=r.trees.reduce((a,t)=>a+t.branches,0), tj=r.trees.reduce((a,t)=>a+t.junctions,0);
+    S.summary.push({Image:im.name,Slice:slice,Count:r.trees.length,Threshold:`Analyze Skeleton: 골격 ${r.trees.length} · 가지 ${tb} · 접점 ${tj}`,Unit:u});
+    let out;
+    if(P.tagged){ const pl=[]; for(let z=0;z<d;z++) pl.push(Float32Array.from(r.tag.subarray(z*w*h,(z+1)*w*h)));
+      out=addImage({name:"Tagged skeleton of "+im.name,w,h,bit:8,nc:1,nz:d,nt:1,planes:pl,cal:im.cal,zStep:im.zStep,info:[["Tag","끝점 30 · 줄기 127 · 접점 70 (Fiji 와 같음)"]]},{parent:im.id,src:"derived"}); out.disp[0].lut="Fire"; out.disp[0].min=0; out.disp[0].max=255; }
+    if(P.lspImg&&r.lspImage){ const pl=[]; for(let z=0;z<d;z++) pl.push(Float32Array.from(r.lspImage.subarray(z*w*h,(z+1)*w*h)));
+      const o2=addImage({name:"Longest shortest paths of "+im.name,w,h,bit:8,nc:1,nz:d,nt:1,planes:pl,cal:im.cal,zStep:im.zStep,info:[["Value","골격 255 · 가장 긴 최단 경로의 줄기 96"]]},{parent:im.id,src:"derived"}); o2.disp[0].lut="Fire"; o2.disp[0].min=0; o2.disp[0].max=255; if(!out) out=o2; }
+    record({op:"skeleton",params:{...clean(P),origName},label:`Analyze Skeleton (${r.trees.length} 골격, 가지 ${tb}${prune!=="none"||P.pruneEnds?" · pruned":""})`},im);
+    S.ui.bottom="skeleton"; S.ui.bottomOpen=true; save(); note(`골격 ${r.trees.length} · 가지 ${tb} · 접점 ${tj}${d>1?` (3D, z 간격 ${g4(pd)} ${u})`:""}`,"ok");
+    (r.warn||[]).concat(later).forEach(x=>note(x,"warn")); /* 경고는 ok 뒤에 — 묻히지 않게 */
+    return undefined; },
+  ij:P=>{ const pr=P.prune||"none", dup=P.skel||pr!=="none"||P.pruneEnds; // Skeletonize·가지치기는 Fiji 에서 입력을 바꿈 → 사본에서 (앱은 원본을 바꾸지 않음)
+    return (dup?`orig=getImageID(); run("Duplicate...", "title=[Skeleton of "+getTitle()+"]");${P.skel?' run("Skeletonize");':""} // 앱은 원본을 바꾸지 않음 — 사본에서\n`:"")
+    +`run("Analyze Skeleton (2D/3D)", "prune=${pr==="none"?"none":"["+pr+"]"}${P.pruneEnds?" prune_0":""}${P.lsp||P.lspImg?" calculate":""} show${/intensity/.test(pr)?` original_image=[${ijq(P.origName||"original")}]`:""}"); // Fiji 는 Tagged skeleton${P.lsp||P.lspImg?"·Longest shortest paths":""} 영상을 늘 만듦`+(dup?"\nselectImage(orig);":""); },
+  help:"Fiji Analyze Skeleton 과 같은 정의·결과: 끝점(<2 이웃)·접점(>2)·줄기(=2), 가지 길이 = 화소 중심 거리의 합. 가지치기: 고리(가장 짧은 가지·가장 어두운 화소·가장 어두운 가지 — 세기는 원본 영상)·끝 가지. Longest shortest path 는 크기 제한 없음."});
 function panelAnalyze(el,im){
   const A=S.ui.pa; const bin=!im.rgb&&IC.isBinary(curPlaneOf(im)); const c=calOf(im); const us=A.unitPx?"px²":unitSq(im); const fm=formVals(OPS.findMaxima);
   const reds=S.images.filter(x=>x.id!==im.id&&x.w===im.w&&x.h===im.h);
@@ -126,6 +173,7 @@ function panelAnalyze(el,im){
   <hr class="im-hr"><div class="im-h">Tools</div>
   <div class="im-tool"><b>Radial Profile</b><span class="xs muted">중심 = 점·타원 ROI</span><div id="rpForm">${formHTML(OPS.radial,im)}</div><button class="btn sm" id="rpRun">Plot</button></div>
   <div class="im-tool"><b>Orientation</b><span class="xs muted">구조 텐서 (OrientationJ 정의)</span><div id="orForm">${formHTML(OPS.orientation,im)}</div><button class="btn sm" id="orRun">Analyze</button></div>
+  <div class="im-tool"><b>Analyze Skeleton (2D/3D)</b><span class="xs muted">가지·접점·길이 (Fiji 와 같은 결과)${im.nz>1?" · 스택 = 3D":""}</span><div id="skForm">${formHTML(OPS.skeleton,im)}</div><button class="btn sm" id="skRun">Analyze</button></div>
   ${isStack(im)?`<div class="im-tool"><b>Z-axis Profile</b><span class="xs muted">ROI 평균의 장별 변화</span><button class="btn sm" id="zpRun">Plot</button></div>`:""}`;
   const q=s=>$q(el,s); const up=()=>save();
   q("#paMin").onchange=e=>{ A.minSize=e.target.value===""?0:+e.target.value; up(); }; q("#paMax").onchange=e=>{ A.maxSize=e.target.value; up(); }; q("#paPx").onchange=e=>{ A.unitPx=e.target.checked; up(); renderPanel(); };
@@ -133,7 +181,7 @@ function panelAnalyze(el,im){
   q("#paX").onchange=e=>{ A.exclude=e.target.checked; up(); }; q("#paH").onchange=e=>{ A.holes=e.target.checked; up(); }; q("#paR").onchange=e=>{ A.addRoi=e.target.checked; up(); };
   q("#paRed").onchange=e=>{ A.redirect=e.target.value; up(); }; q("#paShow").onchange=e=>{ A.show=e.target.value; up(); draw(); };
   q("#paRun").onclick=()=>runOp("analyze",Object.assign({},A,{thr:bin?null:Object.assign({},S.ui.thr)}));
-  bindForm(q("#fmForm"),OPS.findMaxima,re=>{ if(re) renderPanel(); }); bindForm(q("#rpForm"),OPS.radial,()=>{}); bindForm(q("#orForm"),OPS.orientation,()=>{});
+  bindForm(q("#fmForm"),OPS.findMaxima,re=>{ if(re) renderPanel(); }); bindForm(q("#rpForm"),OPS.radial,()=>{}); bindForm(q("#orForm"),OPS.orientation,()=>{}); bindForm(q("#skForm"),OPS.skeleton,re=>{ if(re) renderPanel(); }); q("#skRun").onclick=()=>runOp("skeleton");
   q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
   q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
@@ -176,12 +224,12 @@ function roiAdd(im){ const a=activeRoi(im); if(!a){ note("ROI 가 없습니다")
 
 /* ============================================================ 아래쪽 표 ============================================================ */
 function drawBottom(){
-  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["plots",`Plots (${S.plots.length})`]];
+  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["skeleton",`Skeleton (${S.skelTrees.length})`],["plots",`Plots (${S.plots.length})`]];
   el.innerHTML=`<div class="im-btabs">${tabs.map(([k,l])=>`<button data-b="${k}" class="${S.ui.bottom===k?"active":""}">${l}</button>`).join("")}<span class="sp"></span><button class="btn xs" id="imBtog">${S.ui.bottomOpen?"접기":"펼치기"}</button></div><div class="im-bbody" ${S.ui.bottomOpen?"":"hidden"} id="imBbody"></div>`;
   $a(el,"[data-b]").forEach(b=>b.onclick=()=>{ S.ui.bottom=b.dataset.b; S.ui.bottomOpen=true; save(); drawBottom(); });
   $q(el,"#imBtog").onclick=()=>{ S.ui.bottomOpen=!S.ui.bottomOpen; save(); drawBottom(); };
   if(!S.ui.bottomOpen) return; const B=$q(el,"#imBbody");
-  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,plots:bPlots}[S.ui.bottom]||bResults)(B);
+  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,skeleton:bSkeleton,plots:bPlots}[S.ui.bottom]||bResults)(B);
 }
 function tableHTML(rows,cols,o){ o=o||{}; if(!rows.length) return `<div class="xs muted im-empty">${o.empty||"표가 비었습니다"}</div>`;
   return `<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }
@@ -201,6 +249,13 @@ function bParticles(B){ const im=cur(); const pa=im&&S.particles[im.id]; if(!pa)
   $q(B,"#ptCsv").onclick=()=>downloadText(`${im.name}_particles.csv`,csvOf(pa.rows,cols)); $q(B,"#ptCopy").onclick=()=>copyText(tsvOf(pa.rows,cols));
   $a(B,"tbody tr").forEach(tr=>tr.onclick=e=>{ const i=+tr.dataset.i; if(e.shiftKey||e.ctrlKey||e.metaKey){ const s=new Set(pa.sel); s.has(i)?s.delete(i):s.add(i); pa.sel=[...s]; } else pa.sel=[i];
     const c=pa.cent[i]; const v=viewOf(im); const {W,H}=canvasSize(); if(c){ v.x=c[0]-W/v.zoom/2; v.y=c[1]-H/v.zoom/2; } draw(); $a(B,"tbody tr").forEach(t=>t.classList.toggle("sel",pa.sel.includes(+t.dataset.i))); }); }
+function bSkeleton(B){ const T=S.skelTrees, Bb=S.skelBranches; const units=[...new Set(T.map(r=>r.Unit))]; const one=units.length===1?units[0]:null;
+  const tc=["Image","Slice","Skeleton","# Branches","# Junctions","# End-point voxels","# Junction voxels","# Slab voxels","Average Branch Length","# Triple points","# Quadruple points","Maximum Branch Length","Longest Shortest Path","spx","spy","spz"].filter(k=>T.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k,u:one&&/Length|Path|^sp/.test(k)?one:""})).concat(one?[]:[{k:"Unit"}]);
+  const bc=["Image","Slice","Skeleton ID","Branch length","V1 x","V1 y","V1 z","V2 x","V2 y","V2 z","Euclidean distance","running average length"].filter(k=>Bb.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k,u:one&&/length|distance|^V/.test(k)?one:""})).concat(one?[]:[{k:"Unit"}]);
+  B.innerHTML=`<div class="im-row"><button class="btn xs" id="skCsv" ${T.length?"":"disabled"}>골격 CSV</button><button class="btn xs" id="skBcsv" ${Bb.length?"":"disabled"}>가지 CSV</button><button class="btn xs" id="skClr" ${T.length?"":"disabled"}>Clear</button><span class="xs muted">열 이름 = Fiji Analyze Skeleton 의 Results · Branch information (Image·Slice·Unit 열은 앱에서 더함)</span></div>
+    ${tableHTML(T,tc,{empty:"Analyze ▸ Analyze Skeleton 결과가 쌓입니다 (골격마다 한 줄)."})}${Bb.length?`<div class="im-h" style="margin-top:8px">Branch information <span class="muted xs">${Bb.length} 가지</span></div>${tableHTML(Bb.slice(0,2000),bc)}${Bb.length>2000?`<div class="xs muted">처음 2000 줄만 — 전부는 CSV</div>`:""}`:""}`;
+  $q(B,"#skCsv").onclick=()=>downloadText("Skeleton.csv",csvOf(T,tc)); $q(B,"#skBcsv").onclick=()=>downloadText("Branch information.csv",csvOf(Bb,bc));
+  $q(B,"#skClr").onclick=()=>{ if(confirm2("skclr","Skeleton 표를 비울까요? 한 번 더")){ S.skelTrees=[]; S.skelBranches=[]; save(); drawBottom(); } }; }
 function bSummary(B){ const cols=["Image","Slice","Count","Total Area","Average Size","%Area","ECD mean","ECD SD","Feret mean","Circ. mean","Density (/area)","Unit","Threshold"].filter(k=>S.summary.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k}));
   B.innerHTML=`<div class="im-row"><button class="btn xs" id="smCsv" ${S.summary.length?"":"disabled"}>CSV</button><button class="btn xs" id="smClr" ${S.summary.length?"":"disabled"}>Clear</button><span class="xs muted">영상(장)마다 한 줄 — batch 결과도 여기에</span></div>${tableHTML(S.summary,cols,{empty:"Analyze Particles · Find Maxima 요약이 쌓입니다."})}`;
   $q(B,"#smCsv").onclick=()=>downloadText("Summary.csv",csvOf(S.summary,cols)); $q(B,"#smClr").onclick=()=>{ if(confirm2("smclr","Summary 를 비울까요? 한 번 더")){ S.summary=[]; save(); drawBottom(); } }; }

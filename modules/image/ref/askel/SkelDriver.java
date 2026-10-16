@@ -3,7 +3,11 @@
 // 실행: java -cp ij.jar:out SkelDriver <skeleton.tif> <prune 0..3> <pruneEnds 0/1> <lsp 0/1> <pw> <ph> <pd> [원본.tif]
 import ij.*; import ij.measure.Calibration; import sc.fiji.analyzeSkeleton.*; import java.util.*;
 public class SkelDriver {
-  public static void main(String[] a) {
+  public static void main(String[] args) throws Exception {
+    if (args[0].equals("-list")) { int k = 0; for (String line : java.nio.file.Files.readAllLines(java.nio.file.Paths.get(args[1]))) { if (line.trim().isEmpty()) continue; System.out.println("CASE " + (k++)); one(line.trim().split("\t")); } System.exit(0); }
+    one(args); System.exit(0);
+  }
+  static void one(String[] a) {
     ImagePlus imp = IJ.openImage(a[0]);
     Calibration c = imp.getCalibration(); c.pixelWidth = Double.parseDouble(a[4]); c.pixelHeight = Double.parseDouble(a[5]); c.pixelDepth = Double.parseDouble(a[6]);
     ImagePlus orig = a.length > 7 ? IJ.openImage(a[7]) : null; if (orig != null) orig.setCalibration(c);
@@ -26,6 +30,8 @@ public class SkelDriver {
     StringBuilder b = new StringBuilder("TAG");
     for (int z = 1; z <= t.getSize(); z++) { byte[] px = (byte[]) t.getPixels(z); for (int i = 0; i < px.length; i++) if (px[i] != 0) b.append(" " + ((z - 1) * px.length + i) + ":" + (px[i] & 255)); }
     System.out.println(b);
-    System.exit(0);
+    if (a[3].equals("1")) { ImageStack l = s.getResultImage(true); StringBuilder c2 = new StringBuilder("LSPIMG"); // 가장 긴 최단 경로 영상: 값 96 인 화소
+      if (l != null) for (int z = 1; z <= l.getSize(); z++) { byte[] px = (byte[]) l.getPixels(z); for (int i = 0; i < px.length; i++) if ((px[i] & 255) == 96) c2.append(" " + ((z - 1) * px.length + i)); }
+      System.out.println(c2); }
   }
 }

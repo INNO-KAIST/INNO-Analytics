@@ -1,4 +1,4 @@
-# Image Analysis 탭 — SPEC v1.3 (2026-10-16)
+# Image Analysis 탭 — SPEC v1.4 (2026-10-16)
 
 ImageJ 를 본뜬 영상 분석 탭. 계산 결과가 ImageJ 와 같도록 ImageJ 1.54u 의 알고리즘을 옮겼다.
 ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LICENSE.txt`). 옮긴 원본 파일은 각 함수 머리말에 적었다.
@@ -13,6 +13,9 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
 | `src/core/80_color.js` | Color Threshold (HSB·RGB·Lab·YUV, pass/stop, Auto, Sample) |
 | `ref/gen_afm.py`, `ref/gwyconv/gwyconv.c` | AFM 합성 파일 + 정답(Gwyddion 2.64 가져오기 모듈·gwyfile·magic-afm·손 계산). gwyconv = Gwyddion 모듈을 직접 불러 GWY 로 쓰는 변환기 |
 | `test/test_afm.js` | AFM 시험 164 (합성 16 파일·실측 13 파일) |
+| `src/core/85_skeleton.js` | Analyze Skeleton (2D/3D) — 동작 명세·블랙박스 대조로 새로 쓴 clean-room 구현 (가지치기 포함) |
+| `cleanroom/` | 그 명세(SPEC_analyze_skeleton.md)·증거 기록(NOTES.md)·실험 스크립트 |
+| `test/test_skeleton.js`, `ref/askel/SkelDriver.java` | Fiji AnalyzeSkeleton(GPL-3, 시험에서만 실행)과 고정 102 경우 + FUZZ 대조 |
 | `test/test_color.js` | Color Threshold 시험 17 (ImageJ 실행 대조: 2²⁴ 색 전부, RGB hyperstack TIFF) |
 | `src/zstd_vendor.js` | fzstd 0.1.1 (MIT, 원본 그대로) — CZI zstd 해독 |
 | `src/ui/*.js` | 화면. `inject_all.py` 가 하나의 IIFE 로 묶는다 |
@@ -71,6 +74,29 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
 - 채널 색 → 가까운 LUT(Red·Green·Blue·Cyan·Magenta·Yellow). 광학 영상 보정 단위는 µm(10 nm 미만이면 nm).
 - 큰 파일: 위치/scene 이 6 개를 넘거나 32-bit 메모리로 600 MB 를 넘으면 고르기 창(위치·scene, Z·T 범위와 간격). 한도 1.6 GB. 간격을 두고 고른 Z 는 z step 도 그만큼 곱한다.
 
+## 3b-2. Leica LIF (v1.4)
+- 구조: [0x70, 크기, 0x2A, 글자 수, XML(UTF-16LE)] 다음 memory block 들(v1 크기 int32 · v2 int64). XML 의 Element 마다 `Data/Image/ImageDescription` 이 영상 하나(문서 순서, Memory Size > 0 인 것만).
+- 차원 배치(Bio-Formats LIFReader 와 같음): 앞 두 차원 = 영상 면(XZ 주사면이면 세로 = Z), 남은 공간 차원 하나 = Z, 시간·파장(T·λ·Λ·그 밖)은 하나의 T 로 이음(앞 차원이 빠르게), tile(M)마다 영상 따로.
+  Z 가 1 장이고 λ 등이 있으면 Bio-Formats 는 그것을 Z 로 두지만 여기서는 T(화소 같음, Image Info 에 적음).
+- 화소 크기 = Length/(N−1) (µm, 10 nm 미만이면 nm). 세로 축이 공간이 아니면(XT·X-λ) 화소 높이 = 너비 + 알림, 세로 간격은 Image Info. z step = ScannerSettingRecord dblStepSize(있으면, Bio-Formats 와 같음).
+- RGB(색 카메라, X BytesInc = 3·bps): Leica 는 B·G·R 로 저장 → ChannelTag(1 R·2 G·3 B, 없으면 BytesInc 거꾸로)로 R·G·B. 8-bit = RGB 영상, 16-bit = R·G·B 3 채널(ND2·CZI 와 같은 모형).
+- 채널 이름(liffile 과 같은 차례): ChannelProperty DyeName('Leica/' 뗌) → 모두 없으면 HardwareSetting 의 MultiBand DyeName(채널 수와 같을 때) → 순차 주사 단계마다 하나 → C1…. LUT 이름 → 색(모르는 이름은 그 채널만 비움).
+- 손상: memory block 없음·채널 자료형 섞임·차원 값(N<1, BytesInc≤0)·크기 초과인 series 는 알림과 함께 건너뛰고 나머지를 읽는다. 파일 끝이 잘린 series 는 넘는 화소를 0 으로 채우고 알림(Bio-Formats 와 같은 방침).
+  XML 머리·memory block 머리 안에서 잘림 → 분명한 오류/알림. 잘못된 문자 참조(&#x110000;)는 U+FFFD.
+- 고르기 창: series 마다 크기가 다르면 Z·T 는 가장 큰 값으로 묻고 series 마다 그 안의 것만(메모리 계산도 series 별). 잎 이름이 겹치면 경로(맨 위 요소 뺌)로 이름. metaText = 첫 영상 요소의 XML.
+
+## 3b-3. Olympus/Evident OIR·POIR (v1.4 — 실측 파일 미검증)
+- 형식 지식: oirfile(BSD-3, © C. Gohlke — 머리말에 고지). Bio-Formats 7.3.1 은 블랙박스로만 실행. 공개 실측 .oir 가 없어 **합성 파일 45 개**로만 확인했다 —
+  oirfile 과 Bio-Formats 가 같게 읽는 경우는 그 값이 정답, 둘이 다르면 근거를 적고 한쪽을 따름(λ 축·float 깊이·선 주사·참조 영상 = oirfile, 가운데 빠진 면의 위치·z step = Bio-Formats). 모든 OIR 영상에 '실측 미검증' 알림.
+- 블록: OLYMPUSRAWFORMAT 머리 → 끝의 block index(표지 없으면 머리가 맞는지 확인하고 사용, 잃으면 앞에서부터 차례로 읽고 알림) → UID+PIXEL 짝, FRAMEPROPERTIES, METADATA(여러 XML, 이름공간으로 구분).
+  한 면의 PIXEL 블록은 index 순서로 잇는다(UID 끝 번호는 거꾸로 갈 때 알림만). 같은 UID 두 번 = 첫 것 + 알림. 면 바이트가 넘치면(선 주사가 아니면) 높이 유지 + 알림.
+- 차원: C·Z·T·λ(λ 는 T 에 이음, λ 가 빠르게). 같은 축 설정이 여럿이면 마지막(oirfile). 4 바이트 깊이 = float32, 값이 float 로 맞지 않으면(대부분 subnormal·NaN·∞·>1e29) uint32 + 알림(Bio-Formats 는 uint32).
+- 보정: 화소 µm, z step = 같은 T·λ 안 frame 위치 간격의 중앙값 — 설정(length z·축 step)과 1 % 넘게 다르면 설정 + 알림(Z drift 보정 파일에서 oirfile 은 틀림). frame interval·λ 범위·방출 파장은 Info.
+  채널 이름 = 채널 바로 아래 name, 순서 = order 속성, GUID 대소문자 무시. 채널 색 = 방출 파장(LUT XML 은 형식을 몰라 읽지 않음). RGB 는 이름(R·G·B)으로 맞춤. System·Software·Objective Info.
+- 손상: 빠진 면 = 0 + 알림, 설정보다 면이 적음(보조 파일 `_00001…` 에 나머지) → 알림(보조 파일은 읽지 않음), 보조 파일만 열면 분명한 오류, 참조(REF_) 블록만 있는 파일 = 참조 영상 + 알림.
+- POIR(ZIP): stored·deflate, data descriptor, UTF-8 이름(아니면 '항목 N'). ZIP64·암호화는 분명한 오류. 메모리 한도는 묶음 전체, 고르기 창에 안쪽 파일 이름, 뒤 창 취소 시 앞 영상 유지.
+- 시험: `node test/test_oir.js` (54). 실측 FV3000/FV4000 파일이 생기면 먼저 oirfile·Bio-Formats·앱 세 쪽으로 읽어 위 가정(블록 순서·UID·λ·4 바이트 깊이·선 주사)을 확인할 것.
+
 ## 3c. Registration (StackReg)
 - 엔진 `75_stackreg.js` = pystackreg 0.2.8 C++(TurboReg ANSI-C 이식, 허용 라이선스 — 머리말에 원문·논문 인용) 를 연산 순서까지 옮김. Java TurboReg/StackReg(재배포 제한 라이선스)는 옮기지 않았다.
 - pystackreg 대조 45 사례(5 변환 × 크기 4, 음수·8-bit, 512², stack previous/first/mean): 행렬 최대 차 3×10⁻¹³(rigid — Node 와 glibc 의 atan2·sin 1 ulp 차이까지 추적), 나머지 0, 변환 영상 화소 동일.
@@ -103,6 +129,34 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
   Sample = ROI 안 범위, HSB Hue 는 쓰인 범위와 가장 긴 빈 구간 중 좁은 쪽(빨강처럼 0/255 를 감싸면 stop).
 - 결과는 새 mask 영상(기본) 또는 제자리(스택은 '모든 장' 필요). .ijm 은 ImageJ 가 만드는 매크로와 같은 단계(변수 이름 ct_ — batch 고리의 i 를 덮지 않음); ImageJ 매크로는 한 장만.
 
+## 3f. Analyze Skeleton (v1.4) — clean-room 독립 구현
+- **출처·라이선스**: `src/core/85_skeleton.js` 는 Fiji `AnalyzeSkeleton_`(Arganda-Carreras 2010, GPL-3) 의 **소스를 보지 않은** 작업자가
+  동작 명세(`cleanroom/SPEC_analyze_skeleton.md` — 출력이 무엇인지만 적음)와 jar 를 블랙박스로 실행한 결과만으로 새로 쓴 구현이다(clean-room).
+  명세에 없던 규칙(가지치기 전부, LSP 대각 항목)은 실험으로 찾아 `cleanroom/NOTES.md` 에 입력·출력 증거를 남겼다. 명세 작성자(소스를 본 쪽)와 구현자를 나눴다.
+  이전(v1.3 개발 중) 의 GPL 절차 이식본은 배포 전에 지웠다. 시험에서만 Fiji jar 를 실행한다(앱에 넣지 않음). ※ 법률 자문이 아님 — 외부 배포 전 기관 확인 권장.
+- **결과 = Fiji**: 나무 수·모든 열·가지 목록(길이·두 꼭짓점·running average·줄기 수)·태그 영상·Longest shortest path 영상(경로 96) 이 같음(상대 10⁻¹²).
+  `node test/test_skeleton.js` 고정 102 경우(가지치기 52 포함) + `FUZZ=3000` 씨앗 여럿(각 5852, 0 실패), 구현자의 별도 가지치기 무작위 9300 경우 0 불일치.
+- **Fiji 보다 나은 점**: Longest shortest path 크기 제한 없음 — 꼭짓점 ≤ 600 은 Fiji 와 같은 행렬 절차, 그 위는 block-cut tree 이심률·이심률 경계 + Dijkstra 로 같은 쌍·경로·시작점
+  (Fiji 실행과 꼭짓점 1232–8494 나무·고리 골격 대조 같음). 길이가 같은(10⁻¹² 안) 쌍·경로가 있어 Fiji 의 갱신 순서에 따라 갈릴 수 있으면 경고(길이는 같음).
+  속도: 1500² 꽉 찬 덩어리 0.9 s, 2000² 뱀 경로 + LSP 0.6 s, 256³ 희소 골격 1 s, 꼭짓점 52 k 나무 0.9 s. 부피 한도 2.5×10⁸ 화소(분명한 오류).
+- **가지치기**(Fiji 와 같음): Prune cycle method = none · shortest branch(줄기 수가 가장 적은 가지, 가운데 줄기에서 자름) · lowest intensity voxel · lowest intensity branch
+  (세기 = 원본 영상의 화소 주변 상자 평균 — Fiji 와 같음; 원본은 같은 크기의 회색 영상, 8-bit 로 대조). Prune ends(끝점 가지 제거). 고리를 자르면 골격 전체를 다시 분석.
+- 입력은 0/255 이진(0 아닌 화소 = 골격). '먼저 Skeletonize' 는 2D(ImageJ BinaryProcessor). 스택은 3D(z 간격 = z step, 보정 단위로). 결과: Skeleton 표(골격마다)·Branch information(나무마다 길이 내림차순)·Summary 한 줄,
+  Tagged skeleton(끝 30·줄기 127·접점 70, Fire LUT), 선택하면 Longest shortest path 영상(경로 96). intensity 열은 없다(Fiji 의 intensity 열은 골격 영상의 값이라 늘 255).
+- 표 상한: Skeleton 20 000 줄, Branch information 100 000 줄(넘는 것은 경고와 함께 넣지 않음). Slice 열 = c·t. z 간격 모름 → 1 화소 + 경고. hyperstack → 현재 c·t 의 z 스택만 + 경고(Fiji 는 모든 장을 한 3D 로 봄).
+- .ijm: Skeletonize·가지치기는 Fiji 에서 입력을 바꾸므로 `Duplicate...` 사본에서 → `run("Analyze Skeleton (2D/3D)", "prune=[…] prune_0 calculate show original_image=[…]")` → 원본 다시 선택.
+  `display`(labeled skeletons) 는 앱에 없어 넣지 않음. Fiji 플러그인을 넣은 ImageJ 로 실행해 같은 표 확인(가지치기·original_image 포함).
+
+## 3g. 속도 개선 (v1.4) — 결과는 ImageJ 와 화소 하나까지 같음
+- **Median 16/32-bit, 창 화소 n ≥ 25** (반지름 ≥ 2.5): 값을 순위로 바꿔(16-bit 정수는 값 그대로, 그 밖은 정렬한 서로 다른 값의 번호, ±∞ 포함) 세 단계 개수(순위·64·4096 칸) 이동 히스토그램.
+  NaN 없는 원형 창은 개수가 늘 홀수 → 중앙값이 하나로 정해져 ImageJ getNaNAwareMedian 과 같다. 창에 NaN 이 있는 화소만 ImageJ 규칙(가운데 화소 추정, NaN 뺀 개수)으로 직접 계산.
+  1024² r=15: 16-bit 13 s → 0.9 s, 32-bit 14 s → 2.1 s. 2048² 32-bit r=10 7.6 s (서로 다른 값 4 M 개, 최악).
+- **Remove Outliers**: ImageJ RankFilters.filterLine(OUTLIERS) 의 순서 그대로(float 연산 v·s+thr < 창 최댓값 일 때만 중앙값, 추정값 = 그 줄에서 마지막으로 구한 중앙값, 줄 처음 = 첫 화소(NaN→0),
+  getMedian 은 NaN 을 빼지 않음). 이전 구현은 NaN 이 있는 32-bit 에서 80 화소가 ImageJ 와 달랐다(NaN 창의 짝수 개 중앙값이 추정값에 따라 달라짐) → 같음.
+- 시험(`test/test_ij_edge.js`, ImageJ 직접 실행): 16-bit(넓은 범위·같은 값 많음)·32-bit(NaN 덩어리·±∞·같은 값 많음 + NaN) × r 2.5·5·8.5 Median, × r 6·1, 정수·소수 문턱, Bright·Dark Remove Outliers — 모두 차이 0.
+  빠른 경로 = 직접 경로 무작위 400 경우(NaN·±∞·같은 값) 차이 0.
+- **Wand**: Worker 에서(형식 배열 스택). 4096² 한 덩어리 0.75 s, 그동안 화면 멈추지 않음. 연속 클릭은 앞 것이 끝날 때까지 알림. 결과 = 이전 주 스레드 구현(무작위 3000 경우 같음), ImageJ doWand(8-connected) 꼭짓점과 같음(Chromium 시험).
+
 ## 4. 화소 크기 (calibration) 규칙
 - 출처가 확실한 값만 자동 적용: Nikon ND2 `dCalibration`(bCalibrated 일 때), Zeiss CZI `Scaling/Distance`, ImageJ ImageDescription(unit)+XResolution, OME-XML PhysicalSize, FEI/Thermo 34680·34682 `[Scan] PixelWidth`, Zeiss 34118 `Image Pixel Size`, TESCAN 50431, Hitachi 옆 `.txt` `PixelSize`(nm), JEOL 옆 `.txt` 축척 막대, DM·MRC·EMD·BCF(앱 기존 파서), Igor wave scaling, Nanonis SCAN_RANGE, Gwyddion xreal/xres, Nanoscope Scan Size(전역 크기·종횡비 규칙), ARDF IDEF 간격.
 - TIFF/PNG 해상도 태그만 있으면 '후보'로 보이고 적용하지 않는다(72 dpi 같은 기본값이 흔함).
@@ -115,6 +169,8 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
 - `python3 test/ui_img.py` (41): nd2·czi 열기(화소 = 정답, 고르기 창, 창이 떠 있을 때 또 열기), Register rigid(정답 회전·drift, 화소 = pystackreg), Worker 결과 = ImageJ, 되돌리기, Preview, Threshold 패널·Convert to Mask = ImageJ, Analyze Particles = ImageJ, 마우스 ROI·Ctrl+M = numpy, Find Maxima 개수, Macro 기록→다른 영상, .ijm, 새로 고침 복원, 모바일, 콘솔 오류 0.
 - AFM: `node test/test_afm.js` (164) — 합성 16 파일(정답 = Gwyddion·gwyfile·magic-afm·손 계산) + 실측 13 파일(`ref/real/afm`, 정답 = Gwyddion) + 손상 파일 오류·단위 해석. 정답 다시 만들기: `python3 -I ref/gen_afm.py test/io/afm ref/real/afm` (gwyddion·libgwyddion20-dev·gwyfile·magic-afm 필요).
 - Color Threshold: `node test/test_color.js` (17, ImageJ 실행) — 2²⁴ 색 변환, 문턱 7 경우, Auto·Sample, RGB hyperstack TIFF. Chromium: 패널·Sample·Auto, 스택·hyperstack .ijm 을 ImageJ 로 실행해 대조.
+- v1.4: LIF `node test/test_lif.js` (47: 실측 9 파일 = Bio-Formats·liffile, 합성 경계 11 = `ref/gen_lif_synth.py`), OIR `node test/test_oir.js` (54), Skeleton `node test/test_skeleton.js` (102, `FUZZ=3000` 5852),
+  ImageJ 경계 `node test/test_ij_edge.js` (47: + 큰 창 Median·Remove Outliers 28), Chromium + Wand(ImageJ doWand)·Skeleton 가지치기·.ijm(Fiji 실행).
 - ImageJ 기준 다시 만들기: ImageJ 소스(github.com/imagej/ImageJ) 를 javac 로 컴파일 → `python3 -I ref/gen_ref.py ij.jar ref/data`.
 
 ## 6. 독립 검토로 고친 것 (v1.0 안)
@@ -155,8 +211,17 @@ TIFF spacing 단위(nm 보정에서 z step 1000 배) · CZI 의 RGB 채널 + 회
   실패 뒤 '변환 중' 고정, 재생 중 겹쳐 그림 사라짐, 닫은 영상 캐시 남음, min > max 허용(→ ImageJ 처럼 min ≤ max).
 - 함께 찾은 결함: Enhance Contrast(표시만) 가 영상 ver 를 올려 새로 고침 때 그 영상을 버림. RGB hyperstack TIFF 의 z·t 를 읽고 쓰지 못함(z 로 합침).
 
+## 6e. 독립 검토로 고친 것 (v1.4)
+- Analyze Skeleton(이식본 검토): GPL-3 절차 이식이라는 판정 → clean-room 으로 새로 씀(§3f). 그 과정의 반영: 다시 볼 접점 목록 shift·가지 이력 unshift 가 제곱 시간, LSP 한도·경고가 묻힘,
+  .ijm 이 원본을 Skeletonize(Fiji 는 제자리), Slice 열에 채널 없음, z 간격 모를 때 조용히 1, LSP 영상만 골라도 LSP 계산, 표 상한.
+- LIF 13 건: 크기 다른 series 섞인 파일에서 큰 series 를 Z·T 일부로 못 엶, series 하나가 손상되면 파일 전체 실패, 잘린 파일, 색 카메라 RGB 가 B·G·R, XT·X-λ 의 세로 보정, 채널 이름·metaText 없음,
+  같은 잎 이름, 잘린 머리의 RangeError, 잘못된 문자 참조, 차원 값 검사, LUT 하나 모르면 전부 버림, 진행 표시.
+- OIR 21 건(구현 직후 검토): 한 면 블록을 UID 번호로 다시 정렬·잘라 냄, Z drift 파일의 z step, 4 바이트 깊이, fileinfo 만 있는 파일 거부, POIR 메모리 한도·창·취소, 넘치는 바이트·중복 UID, 축 설정 여럿,
+  채널 이름·순서·GUID 대소문자, index 표지 없음, frame interval, RGB 순서, 선 주사 판정, 참조 영상만, ZIP64·암호화·이름, 진행 표시 다시 그리기, 채널 색·Info.
+- 함께 찾은 결함: Remove Outliers 가 NaN 있는 32-bit 에서 ImageJ 와 80 화소 다름(§3g), 영상 고르기 칸을 건드리지 않고 실행하면 보이는 첫 영상이 아니라 '없음'(Image Calculator 포함).
+
 ## 7. 한계 (다음 단계)
-- lif·oir·vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
-- Analyze Skeleton, 3D 연산, bilinear·비강체(elastic) 정합은 없다.
+- vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 은 실측 파일로 검증하지 않았다(합성만), 보조 파일(_00001…)을 함께 읽지 않는다. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
+- 3D 연산(3D skeletonize·필터), bilinear·비강체(elastic) 정합은 없다.
 - 2.4×10⁷ 화소를 넘는 영상은 전체를 볼 때 줄여 보이고(확대하면 원래 해상도), 문턱 겹쳐 그림은 줄인 해상도.
-- Wand 는 주 스레드(2048² 균일 영역 0.6 s). 16/32-bit Median·Remove Outliers 는 큰 반지름에서 느림(1024², r=15: 13 s). 터치 두 손가락 확대 없음.
+- 터치 두 손가락 확대 없음.

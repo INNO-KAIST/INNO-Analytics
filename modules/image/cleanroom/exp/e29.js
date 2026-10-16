@@ -1,0 +1,11 @@
+const gen=require("./gen.js"), CR=require("../askel_cr.js"), O=require("./oracle.js");
+const [seed,N,idx]=process.argv.slice(2).map(Number); const c=gen(seed,N)[idx]; const P=+(process.env.P||2);
+const o=O.run([Object.assign({},c,{prune:0}),Object.assign({},c,{prune:P})]);
+const rem=new Set(); for(const [p] of o[0].tag) if(!o[1].tag.has(p)) rem.add(p);
+const g=CR._t.debugGraph(c,{pw:c.cal[0],ph:c.cal[1],pd:c.cal[2]});
+const raw=(x,y,z)=>(x<0||y<0||z<0||x>=c.w||y>=c.h||z>=c.d)?null:c.orig[x+c.w*(y+c.h*z)];
+const win=(p)=>{ const a=[]; for(let dz=(c.d>1?-1:0);dz<=(c.d>1?1:0);dz++) for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) a.push(raw(p[0]+dx,p[1]+dy,p[2]+dz)); return a; };
+const sum=(a)=>a.reduce((s,v)=>s+(v||0),0);
+console.log(c.name,c.w,c.h,c.d,"removed",[...rem].map(p=>[p%c.w,((p/c.w)|0)%c.h,(p/(c.w*c.h))|0].join()).join(" "));
+g.edges.forEach((e,k)=>{ const hit=e.slabs.some(p=>rem.has(p[0]+c.w*(p[1]+c.h*p[2]))); if(!hit&&!process.env.ALL) return;
+  console.log("edge",k,"tree",e.tree,"v",e.v1,e.v2,"nslab",e.slabs.length); e.slabs.forEach((p,j)=>{ const w=win(p); console.log("   ",j,p.join(),rem.has(p[0]+c.w*(p[1]+c.h*p[2]))?"REMOVED":"       ","raw",raw(...p),"sum",sum(w),"n",w.filter(v=>v!==null).length,"mean0",(sum(w)/w.length).toFixed(2),"meanSkip",(sum(w)/w.filter(v=>v!==null).length).toFixed(2)); }); });

@@ -5,6 +5,12 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-16 Image Analysis v1.4 — Analyze Skeleton(clean-room), Leica LIF, Olympus OIR, 큰 창 Median·Remove Outliers, Wand Worker**(SPEC §3b-2·3b-3·3f·3g·6e):
+  Analyze Skeleton: 처음 이식본이 Fiji(GPL-3) 절차를 그대로 옮긴 것으로 판정 → 명세 작성자(소스 본 쪽)와 구현자(소스를 보지 않음)를 나눈 clean-room 으로 새로 씀, 이식본은 지움.
+  Fiji jar 블랙박스 대조 고정 102(가지치기 52) + 무작위 수천 경우 일치, 가지치기 4 방식·Prune ends 추가, Longest shortest path 크기 제한 없음(Fiji 는 꼭짓점 8 494 나무에 1 212 s, 앱은 꼭짓점 52 k 나무 0.9 s — 같은 결과).
+  LIF: 실측 9 파일(Bio-Formats = liffile) + 합성 경계 11, 손상 series 건너뛰기·잘린 파일·RGB·채널 이름. OIR·POIR: oirfile(BSD) 형식 지식, 합성 45 파일(oirfile·Bio-Formats 대조) — 실측 미검증 알림.
+  Median 16/32-bit 순위 이동 히스토그램(1024² r=15 13 s → 0.9 s), Remove Outliers 를 ImageJ 순서 그대로(NaN 32-bit 80 화소 차이 → 0), Wand 를 Worker 로(4096² 0.75 s, 화면 안 멈춤).
+  독립 검토 3 건(LIF 13·OIR 21·Skeleton 이식본) 반영. 시험: node 378 · LIF 47 · OIR 54 · Skeleton 102(+FUZZ) · ImageJ 경계 47 · AFM 164 · Color 17 · 실측 135 · StackReg 161 · Chromium.
 - **10-16 Image Analysis v1.3 — AFM 형식(GWY·GSF·Nanoscope·ARDF), Color Threshold**(SPEC §3d·3e·6d):
   AFM: Gwyddion 2.64 가져오기 모듈과 같은 규칙(Nanoscope Z scale × soft scale, 9.2 이후 32-bit, 전역 크기·종횡비, 위아래, GWYO, mask·volume). 값은 물리량(높이 nm, 힘 nN, modulus MPa…), 연산에 따라 단위 유지·지움.
   정답 = Gwyddion 모듈을 직접 부르는 변환기 + gwyfile·magic-afm·손 계산. 실측 13 파일(SciFiDatasets·AFMReader·TopoStats) + 합성 16 → 164 대조 일치. 실측 ARDF 는 공개 자료가 없어 합성으로만 확인.

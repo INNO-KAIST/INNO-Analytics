@@ -441,11 +441,11 @@ IO.FORMATS=[
   ["TIFF / BigTIFF","tif,tiff,ome.tif,btf,tf8,gel","8·16·32-bit, float, RGB, 스택, ImageJ·OME 메타데이터, Zeiss·FEI·TESCAN SEM 태그"],
   ["PNG","png","1–16-bit (16-bit 그대로)"],["JPEG · BMP · GIF · WebP","jpg,jpeg,bmp,gif,webp,avif","브라우저 해독 (8-bit)"],
   ["Gatan DM3 / DM4","dm3,dm4","보정·스택"],["MRC / CCP4","mrc,mrcs,st,rec,ali,map","CELLA 보정"],["Velox EMD / HDF5","emd,h5,hdf5","프레임 스택"],["Bruker BCF","bcf","HeaderData 안 영상"],
-  ["Nikon ND2","nd2","NIS-Elements v2·v3: 채널·Z·T·XY 위치, lossless, 채널 이름·색, µm/px·z step (v1 JPEG 2000 제외)"],["Zeiss CZI","czi","ZEN: 채널·Z·T·scene·mosaic tile 합성, 비압축·zstd·JPG, Scaling·채널 이름·색 (JPEG XR 제외)"],
+  ["Nikon ND2","nd2","NIS-Elements v2·v3: 채널·Z·T·XY 위치, lossless, 채널 이름·색, µm/px·z step (v1 JPEG 2000 제외)"],["Leica LIF","lif","LAS X·LAS AF: series·tile, 채널·Z·T(λ 포함), XZ 주사, LUT 색, µm/px·z step"],["Olympus/Evident OIR · POIR","oir,poir","FluoView FV3000·FV4000: 채널·Z·T·λ(T 에 이음), 8/12/16-bit·float, RGB, 선 주사, 참조 영상, 채널 이름·파장, µm/px·z step (보조 파일 _00001… 은 함께 읽지 않음)"],["Zeiss CZI","czi","ZEN: 채널·Z·T·scene·mosaic tile 합성, 비압축·zstd·JPG, Scaling·채널 이름·색 (JPEG XR 제외)"],
   ["Gwyddion GWY · GSF","gwy,gsf","채널(DataField)·mask·volume(Brick), 제목·SI 단위·meta"],["Bruker Nanoscope","spm,000–999,pfc","채널·Trace/Retrace, Z scale × soft scale(nm/V 등) → 물리값, 16/32-bit (힘 곡선 파일 제외)"],
   ["Asylum ARDF","ardf","force map 영상 채널(Height·Adhesion·Modulus 등), IDEF 간격·단위 (힘 곡선은 알리기만)"],
   ["Igor IBW (Asylum AFM)","ibw","채널별 영상, wave scaling"],["Nanonis SXM","sxm","채널·방향별"],["NumPy","npy","2D·3D"],["텍스트 행렬","txt,csv,tsv,dat,asc","숫자 표"],["Raw","raw,bin","크기·형식 직접 지정"]];
-IO.ACCEPT=".nd2,.czi,.gwy,.gsf,.spm,.ardf,.pfc,"+Array.from({length:1000},(_,i)=>"."+String(i).padStart(3,"0")).join(",")+",.tif,.tiff,.btf,.png,.jpg,.jpeg,.bmp,.gif,.webp,.avif,.dm3,.dm4,.mrc,.mrcs,.st,.rec,.ali,.map,.emd,.h5,.hdf5,.bcf,.ibw,.sxm,.npy,.txt,.csv,.tsv,.dat,.asc,.raw,.bin";
+IO.ACCEPT=".nd2,.czi,.lif,.oir,.poir,.gwy,.gsf,.spm,.ardf,.pfc,"+Array.from({length:1000},(_,i)=>"."+String(i).padStart(3,"0")).join(",")+",.tif,.tiff,.btf,.png,.jpg,.jpeg,.bmp,.gif,.webp,.avif,.dm3,.dm4,.mrc,.mrcs,.st,.rec,.ali,.map,.emd,.h5,.hdf5,.bcf,.ibw,.sxm,.npy,.txt,.csv,.tsv,.dat,.asc,.raw,.bin";
 IO.sniff=function(name,u8){
   const n=name.toLowerCase(); const b=u8;
   if(b.length>=4&&((b[0]===0x49&&b[1]===0x49&&(b[2]===42||b[2]===43))||(b[0]===0x4D&&b[1]===0x4D&&b[2]===0&&(b[3]===42||b[3]===43)))) return "tiff";
@@ -456,10 +456,13 @@ IO.sniff=function(name,u8){
   if(b[0]===0x89&&b[1]===0x48&&b[2]===0x44&&b[3]===0x46) return "hdf5";
   if(b.length>=4&&b[0]===0xDA&&b[1]===0xCE&&b[2]===0xBE&&b[3]===0x0A) return "nd2"; if(/\.nd2$/.test(n)&&b[0]===0&&b[1]===0&&b[2]===0&&b[3]===0x0C) return "nd2";
   if(b.length>=10&&String.fromCharCode(...b.subarray(0,10))==="ZISRAWFILE") return "czi";
+  if(b.length>=16&&String.fromCharCode(...b.subarray(0,16))==="OLYMPUSRAWFORMAT") return "oir"; /* 보조 파일(이름_00001)은 확장자가 없음 */
+  if(/\.poir$/.test(n)&&b[0]===0x50&&b[1]===0x4B&&b[2]===3&&b[3]===4) return "poir";
   { const h=String.fromCharCode(...b.subarray(0,Math.min(b.length,32)));
     if(h.startsWith("GWYP")||h.startsWith("GWYO")) return "gwy"; if(h.startsWith("Gwyddion Simple Field 1.0\n")) return "gsf";
     if(/^[\\?]\*(File list|EC File list|Force file list)/.test(h)) return "nanoscope";
-    if(b.length>=16&&h.slice(8,12)==="ARDF") return "ardf"; }
+    if(b.length>=16&&h.slice(8,12)==="ARDF") return "ardf";
+    if(b.length>=21&&b[0]===0x70&&b[1]===0&&b[2]===0&&b[3]===0&&b[8]===0x2A&&b[13]===0x3C&&b[14]===0&&b[15]===0x4C&&b[17]===0x4D) return "lif"; } /* 0x70 … 0x2A "<LM" (UTF-16) */
   if(/\.dm[34]$/.test(n)) return "dm"; if(/\.(mrc|mrcs|st|rec|ali|map)$/.test(n)) return "mrc"; if(/\.bcf$/.test(n)) return "bcf"; if(/\.(emd|h5|hdf5)$/.test(n)) return "hdf5";
   if(/\.ibw$/.test(n)) return "ibw"; if(/\.sxm$/.test(n)) return "sxm"; if(/\.(avif)$/.test(n)) return "bitmap";
   if(/\.(txt|csv|tsv|dat|asc)$/.test(n)) return "text"; if(/\.(raw|bin)$/.test(n)) return "raw";
@@ -476,6 +479,8 @@ IO.readFile=async function(name,u8,ctx){
     case "czi": return IO.readCZI(name,u8,ctx);
     case "gwy": return IO.readGWY(name,u8); case "gsf": return IO.readGSF(name,u8);
     case "nanoscope": return IO.readNanoscope(name,u8); case "ardf": return IO.readARDF(name,u8);
+    case "lif": return IO.readLIF(name,u8,ctx);
+    case "oir": return IO.readOIR(name,u8,ctx); case "poir": return IO.readPOIR(name,u8,ctx);
     case "ibw": return readIBW(name,u8);
     case "sxm": return readSXM(name,u8);
     case "text": return readText(name,u8);

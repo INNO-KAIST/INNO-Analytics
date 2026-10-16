@@ -251,15 +251,17 @@ function updateCursor(im,sx,sy,ix,iy){ const el=$q(ROOT,"#imOverlay"); const t=S
   else { const a=activeRoi(im); if(a){ if(hitHandle(im,a,sx,sy)>=0) c="pointer"; else if(insideRoi(im,a,ix,iy)) c="move"; } } el.style.cursor=c; }
 function onWheel(e){ const im=cur(); if(!im) return; e.preventDefault(); const [sx,sy]=evPos(e); if(e.ctrlKey||e.metaKey||!e.shiftKey){ zoomAt(im,Math.exp(-e.deltaY*0.0018),sx,sy); } else { const v=viewOf(im); v.x+=e.deltaY/v.zoom; draw(); } }
 /* Wand: 문턱 범위(Threshold 탭)·이진 영상이면 그 범위로, 아니면 클릭한 값과 같은 화소(허용 tolerance)로 8-연결 외곽선 */
-function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; const p=curPlaneOf(im); let lo,hi;
+let WAND_BUSY=false;
+async function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; if(WAND_BUSY){ note("Wand: 앞의 외곽선을 아직 찾는 중입니다"); return; }
+  const p=curPlaneOf(im); let lo,hi;
   if(S.ui.panel==="threshold"&&!im.rgb){ ({lo,hi}=thrRange(im)); } else { const v=p.data[y*im.w+x]; const tol=+(S.ui.wandTol||0); lo=v-tol; hi=v+tol; }
-  const ins=(a,b)=>a>=0&&b>=0&&a<im.w&&b<im.h&&p.data[b*im.w+a]>=lo&&p.data[b*im.w+a]<=hi;
-  if(!ins(x,y)){ note("클릭한 화소가 범위 밖입니다"); return; }
-  // 8-연결 성분의 가장 위·왼쪽 화소에서 따라가야 항상 바깥 경계가 된다 (구멍 경계 방지)
-  const W=im.w, seen=new Uint8Array(W*im.h), st=[y*W+x]; seen[y*W+x]=1; let top=y*W+x;
-  while(st.length){ const i=st.pop(); if(i<top) top=i; const xx=i%W, yy=(i-xx)/W; for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const a2=xx+dx, b2=yy+dy; if(ins(a2,b2)){ const j=b2*W+a2; if(!seen[j]){ seen[j]=1; st.push(j); } } } }
-  const ol=IC.traceOutline(ins,top%W,Math.floor(top/W),false);
-  setActive(im,{id:uid(),type:"traced",pts:ol.xs.map((xx,k)=>[xx,ol.ys[k]])});
+  const id=im.id, big=im.w*im.h>4e6; WAND_BUSY=true; let ol;
+  try{ if(big) setProg("Wand …",0.1); ol=await call("wand",[{w:p.w,h:p.h,bit:p.bit,data:p.data},x,y,lo,hi]); }
+  catch(e){ if(!/취소/.test(e.message)) note("Wand: "+e.message,"warn"); return; }
+  finally{ WAND_BUSY=false; if(big) hideProg(); }
+  if(!ol){ note("클릭한 화소가 범위 밖입니다"); return; }
+  const im2=S.images.find(z=>z.id===id); if(!im2) return; // 그 사이 닫힌 영상
+  setActive(im2,{id:uid(),type:"traced",pts:ol.xs.map((xx,k)=>[xx,ol.ys[k]])});
 }
 
 /* ---------- 상태 줄 ---------- */

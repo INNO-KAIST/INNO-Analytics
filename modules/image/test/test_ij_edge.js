@@ -53,4 +53,16 @@ const rnd=(()=>{ let s=12345; return ()=>((s=(s*1103515245+12345)&0x7fffffff)/0x
   const q=P(6,4,16,new Array(24).fill(700)); const t=IC.autoThreshold(q,"Otsu",true); ok(t.none===true,"일정한 16-bit: 문턱 없음 (ImageJ −1,−1)",JSON.stringify(t.lower)); }
 // 11) Subtract Background 얇은 영상 → 분명한 오류
 { let err=null; try{ IC.subtractBackground(P(3,5,8,new Array(15).fill(10)),{radius:50}); }catch(e){ err=e; } ok(err&&/얇/.test(err.message),"Subtract Background (3×5, r=50) → 분명한 오류",err&&err.message); }
+// 13) 큰 창 Median·Remove Outliers (16/32-bit, n ≥ 25 → 순위 이동 히스토그램) — NaN·±∞·같은 값 많음, 가장자리
+{ const W=37,H=29; const mk16=(f)=>{ const d=[]; for(let i=0;i<W*H;i++) d.push(f(i)); return P(W,H,16,d); };
+  const g16=[["16-bit 넓은 범위",mk16(()=>Math.floor(rnd()*65536))],["16-bit 같은 값 많음",mk16(()=>30000+Math.floor(rnd()*4))]];
+  const d32=[]; for(let i=0;i<W*H;i++) d32.push(Math.round(rnd()*2000-1000)/10); for(let y=8;y<12;y++) for(let x=14;x<19;x++) d32[y*W+x]=NaN; d32[3*W+30]=Infinity; d32[20*W+5]=-Infinity; d32[0]=NaN; d32[W*H-1]=Infinity;
+  const d32b=d32.map(v=>v===v?Math.round(v/50)*5:v); // 같은 값 많은 float + NaN
+  const all=g16.concat([["32-bit NaN·±∞",P(W,H,32,d32)],["32-bit 같은 값 많음 + NaN",P(W,H,32,d32b)]]);
+  for(const [nm,p] of all) for(const r of [2.5,5,8.5]){
+    const L=pix(ij(dump+mk("a",p)+`run("Median...", "radius=${r}");\ndump();\n`))[0]; const a=Array.from(IC.rank(p,"median",{radius:r}).data);
+    const e=same(a,L,0); ok(!e,`Median r=${r} (${nm}) = ImageJ`,e); }
+  for(const [nm,p] of all) for(const [r,thr] of [[6,p.bit===16?(nm.includes("같은")?1:5000):20],[1,p.bit===16?0.5:12.3]]) for(const wh of ["Bright","Dark"]){
+    const L=pix(ij(dump+mk("a",p)+`run("Remove Outliers...", "radius=${r} threshold=${thr} which=${wh}");\ndump();\n`))[0]; const a=Array.from(IC.rank(p,"outliers",{radius:r,threshold:thr,which:wh.toLowerCase()}).data);
+    const e=same(a,L,0); ok(!e,`Remove Outliers r=${r} thr=${thr} ${wh} (${nm}) = ImageJ`,e); } }
 console.log(`\n${pass} 통과, ${fail} 실패`); try{ fs.rmSync(TMP,{recursive:true}); }catch(e){} if(fail){ console.log(fails.join("\n")); process.exit(1); }

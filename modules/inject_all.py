@@ -46,7 +46,7 @@ core=rd(f'{DR}/dre_core.js'); ui=rd(f'{DR}/dre_ui.js'); ifjs=rd(f'{IF}/interf_su
 assert os.path.exists(f'{XP}/xps_lib.js'), 'xps_lib.js 없음: python3 -I modules/xps/build/build_lib.py 먼저'
 xlib=rd(f'{XP}/xps_lib.js'); xio=rd(f'{XP}/xps_io.js'); xcore=rd(f'{XP}/xps_core.js'); xui=rd(f'{XP}/xps_ui.js')
 icore=''.join(rd(os.path.join(IM,'core',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'core'))) if f.endswith('.js'))
-iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
+iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js')+'\n'+rd(f'{IM}/img_lif.js')+'\n'+rd(f'{IM}/img_oir.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
 for name,src in (('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
     assert '</script' not in src.lower(), name+': script 종료 태그'
     # 문법 확인 (node 가 있으면): 주석이 코드를 삼키는 등의 편집 실수를 주입 전에 막음

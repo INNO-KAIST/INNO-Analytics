@@ -31,6 +31,16 @@ IC.traceOutline=function(inside,startX,startY,fourConnected){
   if(xs[0]!==x){ xs.push(x); ys.push(y); }
   return {xs,ys};
 };
+/* Wand (Worker 에서): 화소값이 [lo, hi] 인 8-연결 성분의 바깥 외곽선. 성분의 가장 위·왼쪽 화소에서 따라가야 늘 바깥 경계 (구멍 경계 방지).
+   반환 {xs, ys, n(성분 화소 수)} · 클릭한 화소가 범위 밖이면 null */
+IC.wand=function(p,x,y,lo,hi){ const W=p.w,H=p.h,d=p.data; x=Math.floor(x); y=Math.floor(y);
+  const ins=(a,b)=>a>=0&&b>=0&&a<W&&b<H&&d[b*W+a]>=lo&&d[b*W+a]<=hi;
+  if(!ins(x,y)) return null;
+  const seen=new Uint8Array(W*H), st=new Int32Array(W*H); let sp=0, n=0; st[sp++]=y*W+x; seen[y*W+x]=1; let top=y*W+x;
+  while(sp){ const i=st[--sp]; n++; if(i<top) top=i; const xx=i%W, yy=(i-xx)/W;
+    for(let dy=-1;dy<=1;dy++){ const b2=yy+dy; if(b2<0||b2>=H) continue; for(let dx=-1;dx<=1;dx++){ const a2=xx+dx; if(a2<0||a2>=W) continue; const j=b2*W+a2; if(!seen[j]){ const v=d[j]; if(v>=lo&&v<=hi){ seen[j]=1; st[sp++]=j; } } } }
+    if((n&0xfffff)===0) IC.progress(Math.min(0.9,n/(W*H))); }
+  const ol=IC.traceOutline(ins,top%W,Math.floor(top/W),false); ol.n=n; return ol; };
 /* PolygonRoi.getTracedPerimeter */
 IC.tracedPerimeter=function(xs,ys,pw,ph){
   const n=xs.length; if(n<4) return 0; pw=pw||1; ph=ph||1;
