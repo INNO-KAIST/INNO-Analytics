@@ -7,7 +7,8 @@ const PH={ Si:DC.parseCIF(fs.readFileSync(path.join(__dirname,"cif/Si_Fd-3m.cif"
 
 /* 스폿 회절도 합성: 정대축, 축척 s(1/nm/px), 중심, 회전 θ, 스폿 σ, 세기 ∝ |F|²·exp(−g²/g0²), 배경, 빔스토퍼, 글자 */
 function synthSpots(o){ const R=rng(o.seed); const w=o.w, h=o.h; const img=new Float32Array(w*h);
-  const zp=DC.zonePattern(o.phase,o.zone,o.gmax,{F:true}); const truth=[]; const c=Math.cos(o.rot), s=Math.sin(o.rot); let Imax=0; for(const p of zp.spots) Imax=Math.max(Imax,p.I);
+  let zp=DC.zonePattern(o.phase,o.zone,o.gmax,{F:true}); const truth=[];
+  if(o.dyn){ const D=o.dyn.zoneAverage(o.phase,o.zone,{kV:200,gmax:o.gmax,tRange:o.tRange||[10,80]}); zp={spots:D.beams.filter(b=>b.Irel>1e-4).map(b=>({x:b.x,y:b.y,h:b.h,g:b.g,I:b.Irel}))}; } /* 동역학(Bloch) 세기로 — 이중 회절 자리 포함 */ const c=Math.cos(o.rot), s=Math.sin(o.rot); let Imax=0; for(const p of zp.spots) Imax=Math.max(Imax,p.I);
   for(const p of zp.spots){ if(p.I<1e-6*Imax) continue; let u=(p.x*c-p.y*s)/o.scale, v=(p.x*s+p.y*c)/o.scale; if(o.T){ const uu=o.T[0][0]*u+o.T[0][1]*v, vv=o.T[1][0]*u+o.T[1][1]*v; u=uu; v=vv; } if(o.k){ const f=1+o.k*(u*u+v*v); u*=f; v*=f; } const x=o.cx+u, y=o.cy+v; if(x<5||y<5||x>w-5||y>h-5) continue; truth.push({x,y,h:p.h,g:p.g}); const A=o.peak*Math.sqrt(p.I/Imax)*Math.exp(-(p.g*p.g)/(o.g0*o.g0));
     const r=Math.ceil(4*o.sig); for(let yy=Math.max(0,Math.floor(y)-r);yy<=Math.min(h-1,Math.ceil(y)+r);yy++) for(let xx=Math.max(0,Math.floor(x)-r);xx<=Math.min(w-1,Math.ceil(x)+r);xx++) img[yy*w+xx]+=A*Math.exp(-((xx-x)**2+(yy-y)**2)/(2*o.sig*o.sig)); }
   // 직접빔 + 확산 배경

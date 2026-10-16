@@ -32,6 +32,18 @@ const FE="FeCr_ODS_SAD_zenodo19217212.tif"; if(M[FE]){ console.log("== Fe-Cr ODS
 // 자동 판정 (Worker 처리기 그대로): 링 = 광선마다 뚜렷한 봉우리, 스폿 = 뚜렷한 격자
 { require("../src/diff_work.js"); const H=globalThis.DIFF_WORK.handler(globalThis); console.log("== 자동 판정 (스폿/링)");
   for(const [f,want] of [[AU,"rings"],[SI,"spots"],[FE,"spots"]]){ if(!M[f]) continue; const m=M[f]; const r=H("analyze",{img:Float32Array.from(load(f)),w:m.w,h:m.h,opt:{pattern:"auto"}}); ok(r.type===want,`${f}: ${r.type} (${JSON.stringify(r.typeWhy)})`); } }
+// 큰 영상: 줄여서 찾고 원래 해상도에서 다듬은 결과 = 원래 해상도 전체 계산 (그리고 4096² 로 키운 영상도)
+{ const H=globalThis.DIFF_WORK.handler(globalThis); console.log("== 큰 영상: 줄여 찾기 + 원래 해상도 다듬기");
+  const up2=(src,w0)=>{ const w=w0*2, o=new Float32Array(w*w); for(let y=0;y<w;y++) for(let x=0;x<w;x++){ const X=Math.max(0,Math.min(w0-1.001,(x+0.5)/2-0.5)), Y=Math.max(0,Math.min(w0-1.001,(y+0.5)/2-0.5)); const x0=X|0,y0=Y|0,fx=X-x0,fy=Y-y0; o[y*w+x]=(1-fx)*(1-fy)*src[y0*w0+x0]+fx*(1-fy)*src[y0*w0+x0+1]+(1-fx)*fy*src[(y0+1)*w0+x0]+fx*fy*src[(y0+1)*w0+x0+1]; } return o; };
+  if(M[SI]){ const m=M[SI]; const A=H("analyze",{img:Float32Array.from(load(SI)),w:m.w,h:m.h,opt:{pattern:"spots",full:true}}), B=H("analyze",{img:Float32Array.from(load(SI)),w:m.w,h:m.h,opt:{pattern:"spots"}});
+    const t=Date.now(); const C=H("analyze",{img:up2(load(SI),m.w),w:2*m.w,h:2*m.h,opt:{pattern:"auto"}}); const tc=Date.now()-t; const La=A.spots.lattices[0], Lb=B.spots.lattices[0], Lc=C.spots.lattices[0];
+    const rel=(x,y)=>Math.abs(x-y)/y; ok(B.work===2&&rel(Lb.len[0],La.len[0])<1e-3&&rel(Lb.len[1],La.len[1])<1e-3&&Math.abs(Lb.ang12-La.ang12)<0.05,`Si 2048²: 줄여 찾기(×${B.work}) R1·R2 ${Lb.len.slice(0,2).map(x=>x.toFixed(2)).join("/")} = 전체 ${La.len.slice(0,2).map(x=>x.toFixed(2)).join("/")} px (${A.ms} → ${B.ms} ms)`);
+    ok(C.work===4&&C.type==="spots"&&rel(Lc.len[0]/2,La.len[0])<1.5e-3&&rel(Lc.len[1]/2,La.len[1])<1.5e-3,`Si 4096²(키운 영상): R1·R2 ÷ 2 = ${(Lc.len[0]/2).toFixed(2)}/${(Lc.len[1]/2).toFixed(2)} px, ${tc} ms`); }
+  if(M[AU]){ const m=M[AU]; const A=H("analyze",{img:Float32Array.from(load(AU)),w:m.w,h:m.h,opt:{pattern:"rings",full:true}}), B=H("analyze",{img:Float32Array.from(load(AU)),w:m.w,h:m.h,opt:{pattern:"rings"}});
+    const ph=phases.find(p=>p.name==="Au_Fm-3m"); const sa=DI.matchRings(A.rings.peaks,[ph],{})[0].scale, sb=DI.matchRings(B.rings.peaks,[ph],{})[0].scale;
+    ok(Math.abs(sb/sa-1)<1e-3&&Math.hypot(B.rings.center.x-A.rings.center.x,B.rings.center.y-A.rings.center.y)<0.5&&Math.abs(B.rings.ratio-A.rings.ratio)<0.001,`Au 2048²: 줄여 찾기 축척 ${sb.toFixed(6)} = 전체 ${sa.toFixed(6)} (${((sb/sa-1)*100).toFixed(3)} %), 중심 차 ${Math.hypot(B.rings.center.x-A.rings.center.x,B.rings.center.y-A.rings.center.y).toFixed(2)} px (${A.ms} → ${B.ms} ms)`);
+    const t=Date.now(); const C=H("analyze",{img:up2(load(AU),m.w),w:2*m.w,h:2*m.h,opt:{pattern:"auto"}}); const tc=Date.now()-t; const sc=DI.matchRings(C.rings.peaks,[ph],{})[0].scale*2;
+    ok(C.type==="rings"&&Math.abs(sc/sa-1)<2e-3,`Au 4096²(키운 영상): 링, 축척×2 ${sc.toFixed(6)} (${((sc/sa-1)*100).toFixed(3)} %), ${tc} ms`); } }
 // 내장 묶음(COD) 으로: 원소 필터(REDI 방식 — 상의 원소 ⊆ EDS 원소)
 let PACK=null; try{ require("../src/diff_pack.js"); PACK=globalThis.DIFF_PACK; }catch(e){}
 if(PACK&&M[FE]&&M[AU]){ console.log("== 내장 묶음 (COD "+PACK.phases.length+" 상) + 원소 필터");

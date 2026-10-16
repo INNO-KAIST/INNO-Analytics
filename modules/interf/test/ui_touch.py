@@ -275,6 +275,18 @@ with sync_playwright() as p:
         go(v); pg.screenshot(path=f'{out}/p_{v}.png')
         if not SHOTS: sizes(nm)
         chk(not hscroll(), f'{nm}: no page horizontal scroll')
+        if v == 'energy' and not SHOTS:
+            pg.fill('#edF', 'NaYF4:20%Yb,2%Er'); pg.click('#edApply'); pg.wait_for_timeout(600)
+            # 준위를 손가락으로 탭 → 풍선(hover 대신), 도식 밖 탭 → 닫힘
+            hit = pg.evaluate("(()=>{ const e=[...document.querySelectorAll('.lvhit.tipable')].find(x=>{ const r=x.getBoundingClientRect(); return r.width>4&&r.height>2; }); if(!e) return null; e.scrollIntoView({block:'center'}); return 1; })()")
+            if hit:
+                pg.wait_for_timeout(200); hit = pg.evaluate("(()=>{ const e=[...document.querySelectorAll('.lvhit.tipable')].find(x=>{ const r=x.getBoundingClientRect(); return r.width>4&&r.height>2&&r.top>60&&r.bottom<window.innerHeight-80; }); const r=e.getBoundingClientRect(); return [r.left+Math.min(r.width/2,20),r.top+r.height/2]; })()")
+                tap(hit[0], hit[1], 300); on = pg.evaluate("!!(document.querySelector('#edTip')&&document.querySelector('#edTip').classList.contains('on'))")
+                txt = pg.evaluate("(document.querySelector('#edTip')||{}).textContent||''")
+                chk(on and len(txt) > 3, 'Energy Diagram: finger tap on a level opens its tooltip', txt[:60])
+                tap(12, 12, 200); off = pg.evaluate("!(document.querySelector('#edTip')&&document.querySelector('#edTip').classList.contains('on'))")
+                chk(off, 'Energy Diagram: tap outside closes the tooltip')
+            else: chk(False, 'Energy Diagram: a level is visible to tap')
     # ---------- 360 px 폭 ----------
     pg.set_viewport_size({'width': 360, 'height': 780}); pg.wait_for_timeout(300)
     over = []

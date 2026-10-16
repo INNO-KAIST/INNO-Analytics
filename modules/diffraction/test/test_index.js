@@ -66,4 +66,14 @@ for(const ell of [1.074,1.10]){ const R=rng(SEED+40); const w=800, h=800, cx=402
   const bs=DP.findBeamStop(img,w,h); const A=DP.analyzeRings(img,w,h,{mask:bs.mask}); const M=DI.matchRings(A.peaks,phases,{});
   ok(Math.abs(A.ratio-ell)<0.003&&Math.hypot(A.center.x-cx,A.center.y-cy)<0.5,`e ${ell}: 장단축비 ${A.ratio.toFixed(4)}, 중심 오차 ${Math.hypot(A.center.x-cx,A.center.y-cy).toFixed(2)} px`);
   ok(M[0]&&M[0].phaseName==="Au_Fm-3m"&&Math.abs(M[0].scale/scale-1)<0.003,`e ${ell}: 1 위 ${M[0]&&M[0].phaseName}, 단축 기준 축척 ${M[0]&&M[0].scale.toFixed(6)} (정답 ${scale})`); }
+console.log("== 동역학 세기(Bloch, 두께 10–80 nm 평균)로 만든 Si [011]: 이중 회절 (200) 자리가 보임");
+{ let DY=null; try{ DY=require("../src/diff_dyn.js"); }catch(e){}
+  if(!DY){ console.log("  diff_dyn.js 없음 — 건너뜀"); } else {
+    const o=Object.assign({},base,{seed:SEED+50,zone:[0,1,1],rot:0.9,cx:252.3,cy:259.6,scale:0.04,dyn:DY,g0:40,peak:1500}); const A=analyze(o);
+    const has200=A.truth.some(t=>Math.abs(t.h[0])===2&&t.h[1]===0&&t.h[2]===0||(t.h[0]===0&&Math.abs(t.h[1])===2&&t.h[2]===0)||(t.h[0]===0&&t.h[1]===0&&Math.abs(t.h[2])===2));
+    const K=DI.rankSpots(A.L,phases,{scale:o.scale,scaleErr:0.03,distortion:0.01,maxIdx:5,gmax:15,w:o.w,h:o.h,mask:A.bs.mask,dynamic:false}); const Dn=DI.rankSpots(A.L,phases,{scale:o.scale,scaleErr:0.03,distortion:0.01,maxIdx:5,gmax:15,w:o.w,h:o.h,mask:A.bs.mask,dynamic:true,kV:200});
+    const ks=K.cands.find(c=>c.phaseName==="Si_Fd-3m"&&sameZone(c.zone,[0,1,1])), ds=Dn.cands.find(c=>c.phaseName==="Si_Fd-3m"&&sameZone(c.zone,[0,1,1]));
+    ok(has200&&ks&&ks.forb>0.005,`운동학 채점은 (200) 이중 회절 스폿을 '금지 자리 세기' ${ks&&(ks.forb*100).toFixed(1)} % 로 벌점`);
+    ok(ds&&ds.dyn&&ds.dyn.forb<ks.forb*0.2&&ds.rho>ks.rho,`동역학 채점: 금지 벌점 ${ds&&(ds.dyn.forb*100).toFixed(2)} %, ρ ${ds&&ds.rho.toFixed(3)} (운동학 ${ks&&ks.rho.toFixed(3)})`);
+    ok(Dn.cands[0].phaseName==="Si_Fd-3m"&&sameZone(Dn.cands[0].zone,[0,1,1]),`동역학 1 위 ${Dn.cands[0].phaseName} [${Dn.cands[0].zone}] (score ${Dn.cands[0].score.toFixed(3)}; 운동학 점수 ${ks.score.toFixed(3)} → ${ds.score.toFixed(3)})`); } }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail){ console.log(fails.join("\n")); process.exit(1); }

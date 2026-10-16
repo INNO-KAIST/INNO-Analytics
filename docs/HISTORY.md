@@ -5,6 +5,12 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-17 Diffraction v1.1 — 큰 영상 속도 · 동역학 세기(Bloch-wave) · 스케일바 숫자 읽기 · Energy Diagram 터치**(modules/diffraction/SPEC.md §3b):
+  큰 영상은 줄여(≤ 1024) 찾고 원래 해상도에서 다듬음 — 4096² 스폿 9.8 s/415 MB → 1.1 s/212 MB, 링 17.6 → 2.6 s, 결과 차 0.05 % 안.
+  상 찾기 세기: 상위 12 후보를 Bloch-wave(ZOLZ, Bethe, 두께 10–80 nm 평균)로 — 이중 회절·Gjønnes–Moodie 소멸 반영, 독립 Bloch 1e-6·다중 슬라이스 0.1–2 %·Hirsch 소멸 거리 5 % 안. 포화 스폿은 ρ 에서 뺌. 화면 Intensities: Dynamical/Kinematic.
+  스케일바 이름표 OCR(diff_ocr.js): 시험 780 장 98.7 %, 확신 ≥ 0.9 오답 0.14 %, 실측 "5 1/nm" → 값 미리 채움.
+  Energy Diagram: 손가락 탭 = 풍선, 밖 탭·스크롤 = 닫힘.
+  시험: core 58 · pattern 29 · index 33 · real 23 · pack 277 · db 139 · dyn 79 · ocr 18 · ui_diff 49 · touch 72 · 기존 그대로.
 - **10-17 Diffraction 탭 v1.0 — SAED 자동 해석(REDI 기능 + 보강) · Phase DB(연구실 공유)**(modules/diffraction/SPEC.md):
   Lattice FFT 탭을 Diffraction 으로 넓힘(키 lattice 유지, 휴대폰 Diffr.) — FFT (HRTEM) · SAED · Phase DB. 파일에 따라 모드 자동(역공간 교정·DIFFRACTION 태그·이름·밝기 분포).
   결정학 코어(공간군 530 설정·IT C 4.3.2.2 전자 산란 인자·CIF·정대축 2D 격자) = gemmi·pymatgen 과 일치. 패턴 읽기: 덧그림·빔스토퍼·포화 덩어리·국소 잡음 스폿·Friedel 중심(반 격자점 배제)·여러 격자·방사 왜곡·링 타원.

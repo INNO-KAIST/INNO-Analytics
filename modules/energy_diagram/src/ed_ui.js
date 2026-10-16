@@ -634,8 +634,15 @@ function drawProcs(M,colX,cw,y,P,lanes){
 /* ---------------- 상호작용 ---------------- */
 function bindSVG(svg){
   if(!svg) return;
-  svg.addEventListener("pointermove",e=>{ const t=e.target.closest(".tipable"); if(t) showTip(t,e.clientX,e.clientY); else hideTip(); });
-  svg.addEventListener("pointerleave",hideTip);
+  // 마우스: 올리면 풍선. 손가락(touch): hover 가 없으므로 탭 = 풍선 (손가락이 떨어질 때의 pointerleave 로 바로 닫히지 않게 touch 는 무시)
+  svg.addEventListener("pointermove",e=>{ if(e.pointerType==="touch") return; const t=e.target.closest(".tipable"); if(t) showTip(t,e.clientX,e.clientY); else hideTip(); });
+  svg.addEventListener("pointerleave",e=>{ if(e.pointerType==="touch") return; hideTip(); });
+  let TD=null;
+  svg.addEventListener("pointerdown",e=>{ if(e.pointerType!=="touch") return; TD={x:e.clientX,y:e.clientY,t:e.target.closest(".tipable"),time:Date.now()}; });
+  svg.addEventListener("pointerup",e=>{ if(e.pointerType!=="touch"||!TD) return; const d=Math.hypot(e.clientX-TD.x,e.clientY-TD.y); const tap=d<12&&Date.now()-TD.time<700; const t=TD.t; TD=null;
+    if(!tap) return; const x=e.clientX, y=e.clientY; // 탭 뒤 click 이 도식을 다시 그리며 풍선을 닫으므로 그다음에 연다
+    if(t) setTimeout(()=>{ showTip(t,x,y); TIP_TOUCH=true; },30); else hideTip(); });
+  svg.addEventListener("pointercancel",()=>{ TD=null; });
   svg.addEventListener("focusin",e=>{ const t=e.target.closest(".tipable"); if(t){ const r=t.getBoundingClientRect(); showTip(t,r.right,r.top+r.height/2); } });
   svg.addEventListener("focusout",hideTip);
   const act=e=>{
@@ -677,7 +684,11 @@ function delProc(u){ S.procs=S.procs.filter(p=>p.uid!==u); if(S.sel===u) S.sel=n
 
 /* ---------------- 툴팁 ---------------- */
 function ensureTip(){ TIP=document.getElementById("edTip"); if(!TIP){ TIP=document.createElement("div"); TIP.id="edTip"; TIP.className="ed-tip"; TIP.setAttribute("role","tooltip"); document.body.appendChild(TIP); } }
-function hideTip(){ if(TIP) TIP.classList.remove("on"); }
+function hideTip(){ if(TIP) TIP.classList.remove("on"); TIP_TOUCH=false; }
+/* 손가락으로 연 풍선: 도식 밖을 누르거나 쪽을 스크롤하면 닫음 */
+let TIP_TOUCH=false;
+if(typeof document!=="undefined"){ document.addEventListener("pointerdown",e=>{ if(!TIP_TOUCH) return; if(e.target.closest&&(e.target.closest(".tipable")||e.target.closest("#edTip"))) return; hideTip(); },true);
+  window.addEventListener("scroll",()=>{ if(TIP_TOUCH) hideTip(); },{passive:true}); }
 function showTip(t,x,yv){
   const html=tipHTML(t); if(!html){ hideTip(); return; }
   TIP.innerHTML=html; TIP.classList.add("on");

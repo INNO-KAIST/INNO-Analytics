@@ -74,7 +74,7 @@ assert os.path.exists(f'{XP}/xps_lib.js'), 'xps_lib.js 없음: python3 -I module
 xlib=rd(f'{XP}/xps_lib.js'); xio=rd(f'{XP}/xps_io.js'); xcore=rd(f'{XP}/xps_core.js'); xui=rd(f'{XP}/xps_ui.js')
 icore=''.join(rd(os.path.join(IM,'core',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'core'))) if f.endswith('.js'))
 iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js')+'\n'+rd(f'{IM}/img_lif.js')+'\n'+rd(f'{IM}/img_oir.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
-DFS=[('diff-src-sg','diff_sg.js'),('diff-src-scat','diff_scat.js'),('diff-src-core','diff_core.js'),('diff-src-pattern','diff_pattern.js'),('diff-src-index','diff_index.js'),('diff-pack','diff_pack.js'),('diff-db','diff_db.js'),('diff-db-ui','diff_db_ui.js'),('diff-work','diff_work.js'),('diff-ui','diff_ui.js')]
+DFS=[('diff-src-sg','diff_sg.js'),('diff-src-scat','diff_scat.js'),('diff-src-core','diff_core.js'),('diff-src-dyn','diff_dyn.js'),('diff-src-ocr','diff_ocr.js'),('diff-src-pattern','diff_pattern.js'),('diff-src-index','diff_index.js'),('diff-pack','diff_pack.js'),('diff-db','diff_db.js'),('diff-db-ui','diff_db_ui.js'),('diff-work','diff_work.js'),('diff-ui','diff_ui.js')]
 dfjs=[(i,rd(f'{DF}/{fn}')) for i,fn in DFS if os.path.exists(f'{DF}/{fn}')]
 for name,src in tuple(dfjs)+(('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
     assert '</script' not in src.lower(), name+': script 종료 태그'

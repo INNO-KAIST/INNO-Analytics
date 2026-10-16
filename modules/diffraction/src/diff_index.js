@@ -64,6 +64,9 @@ DI.verifyZone=function(fit,cand,opt){ opt=opt||{}; const ph=cand.phase; const ce
    score = FOM + 5·forb + (1 − ρ)  (작을수록 좋음). 운동학 세기는 영역축 동역학 회절에서 순서만 대략 맞으므로 ρ 는 순위만 쓴다 */
 DI.spearman=function(a,b){ const n=a.length; if(n<3) return 0; const rk=v=>{ const o=v.map((x,i)=>[x,i]).sort((p,q)=>p[0]-q[0]); const r=new Array(n); let i=0; while(i<n){ let j=i; while(j+1<n&&o[j+1][0]===o[i][0]) j++; const m=(i+j)/2; for(let k=i;k<=j;k++) r[o[k][1]]=m; i=j+1; } return r; };
   const ra=rk(a), rb=rk(b); const ma=(n-1)/2; let sab=0,saa=0,sbb=0; for(let i=0;i<n;i++){ sab+=(ra[i]-ma)*(rb[i]-ma); saa+=(ra[i]-ma)**2; sbb+=(rb[i]-ma)**2; } return saa&&sbb?sab/Math.sqrt(saa*sbb):0; };
+/* 세기 순위 상관: 포화 스폿은 세기 하한이라 뺀다 (4 개 미만이면 null → 점수에서 중립 0.5) */
+DI.rhoUnsat=function(rows,Io,Ip){ const a=[], b=[]; rows.forEach((r,i)=>{ if(r.spot&&r.spot.saturated) return; a.push(Io[i]); b.push(Ip[i]); }); return a.length>=4?DI.spearman(a,b):null; };
+const rhoTerm=r=>r==null?0.5:(1-r);
 DI.rankSpots=function(fit,phases,opt){ opt=opt||{}; const meas=DI.measured(fit,opt); const C=DI.matchSpots(meas,phases,Object.assign({},opt,{top:opt.nVerify||80}));
   // 예측 위치가 영상 밖·가린 곳이면 '빠짐' 으로 세지 않는다
   const W=opt.w, H=opt.h, M=opt.mask; const PF=opt.posFit||fit; const mk=c=>(W&&H)?(h=>{ const q=DI.predictPx(PF,c,h); const x=Math.round(q.x), y=Math.round(q.y); if(x<4||y<4||x>=W-4||y>=H-4) return true; return !!(M&&M[y*W+x]); }):null;
@@ -71,8 +74,22 @@ DI.rankSpots=function(fit,phases,opt){ opt=opt||{}; const meas=DI.measured(fit,o
     c.verify=V; c.hasF=!!(c.phase.atoms&&c.phase.atoms.length);
     // 빠진 강한 반사: 관측 범위 안 예측 세기 중 관측 안 된 비율 (세기 가중)
     const zI=V.missing.reduce((a,m)=>a+m.I,0), oI=V.rows.reduce((a,r)=>a+(r.I>=0.02?r.I:0),0); c.missFrac=zI+oI>0?zI/(zI+oI):0;
-    if(c.hasF){ c.forb=forb/tot; c.rho=DI.spearman(Io,Ip); c.score=c.fom+5*c.forb+(1-c.rho)+3*c.missFrac; } else { c.forb=null; c.rho=null; c.missFrac=null; c.score=c.fom+1; } }
-  C.sort((a,b)=>a.score-b.score); return {meas,cands:C}; };
+    if(c.hasF){ c.forb=forb/tot; c.rho=DI.rhoUnsat(V.rows,Io,Ip); c.score=c.fom+5*c.forb+rhoTerm(c.rho)+3*c.missFrac; } else { c.forb=null; c.rho=null; c.missFrac=null; c.score=c.fom+1; } }
+  C.sort((a,b)=>a.score-b.score);
+  // 동역학(Bloch-wave, ZOLZ, 두께 10–80 nm 평균) 세기로 상위 후보 다시 채점 — 이중 회절·Gjønnes–Moodie 소멸 반영 (docs-dyn.md §6)
+  const DY=(typeof DIFF_DYN!=="undefined")?DIFF_DYN:(G.DIFF_DYN||null); const nDyn=opt.dynamic===false||!DY?0:(opt.nDyn||12);
+  for(const c of C.slice(0,nDyn)){ if(!c.hasF) continue; const V=c.verify; if(!V.rows.length) continue;
+    let D=null; try{ const gObs=Math.max(...V.rows.map(r=>1/r.d))*1.05; D=DY.zoneAverage(c.phase,c.zone,{kV:opt.kV||200,gmax:gObs,tRange:opt.tRange||[10,80]}); }catch(e){ c.dynError=String(e.message||e); continue; }
+    const Io=V.rows.map(r=>Math.max(0,r.spot.I)), tot=Io.reduce((a,b)=>a+b,0)||1; const Id=[]; let forb=0;
+    V.rows.forEach((r,i)=>{ const b=DY.beamOf(D,r.h); Id.push(b?b.Irel:0); const w=!b?1:(b.dynZero&&!b.gmExtinct)?1:b.gmExtinct?0.3:0; forb+=w*Io[i];
+      r.Id=b?b.Irel:0; r.dd=!!(b&&b.kinForbidden&&b.nRoute>0&&!b.gmExtinct); r.gm=!!(b&&b.gmExtinct); r.dz=!b||(!!b.dynZero&&!b.gmExtinct); });
+    forb/=tot; const rho=DI.rhoUnsat(V.rows,Io,Id); const got=new Set(V.rows.map(r=>r.h.join(","))); const isM=mk(c); let zI=0,oI=0; const dmiss=[];
+    for(const b of D.beams){ if(b.Irel<0.02) continue; if(isM&&isM(b.h)) continue; if(got.has(b.h.join(","))) oI+=b.Irel; else { zI+=b.Irel; dmiss.push({h:b.h,d:1/b.g,I:b.Irel}); } }
+    const miss=zI+oI>0?zI/(zI+oI):0; dmiss.sort((p,q)=>q.I-p.I);
+    c.kin={rho:c.rho,forb:c.forb,miss:c.missFrac,score:c.score}; c.dyn={rho,forb,miss,missing:dmiss.slice(0,12),nBeams:D.meta.nBeams,kV:opt.kV||200,tRange:opt.tRange||[10,80]};
+    c.rho=rho; c.forb=forb; c.missFrac=miss; c.score=c.fom+5*forb+rhoTerm(rho)+3*miss; }
+  if(nDyn){ const head=C.slice(0,nDyn).sort((a,b)=>a.score-b.score); C.splice(0,nDyn,...head); }
+  return {meas,cands:C}; };
 
 /* 화소 위치 예측: 관측 기저(px) 로 hkl → (x,y). h = n1 h1 + n2 h2 를 풀어 n 을 얻는다 */
 DI.predictPx=function(fit,cand,h){ const a=cand.h1, b=cand.h2; // 최소제곱 (정수 해가 있으면 정확)

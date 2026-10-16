@@ -80,6 +80,8 @@ def run(pg,tag):
         mode=pg.evaluate('document.querySelector("#dfMode .active").dataset.m'); chk(mode=='saed','FeCr tif: SAED chosen',mode)
         if mode=='saed':
             wait_res(pg); bar=pg.evaluate('DIFF_UI._S().res.scaleBar'); chk(bar and abs(bar['lenPx']-177)<=1,'FeCr: scale bar 177 px found',bar)
+            lab=pg.evaluate('(()=>{ const S=DIFF_UI._S(); return {lab:S.res.scaleLabel,val:S.barVal,ocr:!!S.barFromOCR}; })()')
+            chk(lab['lab'] and lab['lab']['text']=='5 1/nm' and lab['val']==5 and lab['ocr'],'FeCr: scale label "5 1/nm" read and prefilled (not "SAD 1")',lab)
             pg.click('#dfCal button[data-c="bar"]'); pg.wait_for_timeout(200); pg.fill('#dfBarVal','5'); pg.dispatch_event('#dfBarVal','change'); pg.wait_for_timeout(300)
             sc=pg.evaluate('DIFF_UI._S().barVal'); chk(sc==5,'FeCr: bar value accepted',sc)
             pg.select_option('#dfTopN','16'); pg.wait_for_timeout(300); wait_res(pg)
