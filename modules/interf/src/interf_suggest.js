@@ -142,7 +142,7 @@ function compute(opt){
 
 /* ---------------- 화면 ---------------- */
 const pct=v=>!isFinite(v)?"—":v<0.001?"<0.1 %":v<0.1?(100*v).toFixed(1)+" %":(100*v).toFixed(0)+" %";
-const badge=c=>c.purity>=0.9?'<span class="badge ok">clean</span>':c.purity>=0.6?'<span class="badge warn">overlap 보정</span>':'<span class="badge risk">deconvolution 필요</span>';
+const badge=c=>c.purity>=0.9?'<span class="badge ok">clean</span>':c.purity>=0.6?'<span class="badge warn">overlap-corrected</span>':'<span class="badge risk">needs deconvolution</span>';
 const G1=n=>n.replace(/^(K|L|M)([a-z])(\d?)$/,(m,f,g,d)=>f+({a:"α",b:"β",g:"γ",l:"ℓ",n:"η"}[g]||g)+d);
 const lname=l=>{ const ps=l.nm.split("+").map(G1); if(ps.length>1){ const pre=ps[0].replace(/\d+$/,""); if(ps.every(q=>q.replace(/\d+$/,"")===pre)) return `${l.el} ${pre}${ps.map(q=>q.slice(pre.length)||"").join(",")}`; } return `${l.el} ${ps.join("+")}`; };
 function spark(R,c){
@@ -175,31 +175,31 @@ function html(R){
   const rows=R.out.map(o=>{
     if(!o.best) return `<tr><td class="l"><b>${esc(o.el)}</b></td><td class="l" colspan="${meas?7:6}"><span class="muted">${o.noSignal?"맞춘 신호가 없습니다 — 이 스펙트럼에서 검출되지 않거나 범위 밖입니다":"범위 안에 쓸 만한 라인이 없습니다"}</span></td></tr>`;
     const c=o.best, l=c.line, a=o.alt;
-    const notes=[]; if(o.famUnsure) notes.push(`<span class="badge info" title="K/L/M 계열 사이 intensity 비는 모형 오차가 커서, 차이가 3배 안쪽이면 실측으로 확인해야 합니다">계열 선택은 실측 확인</span>`);
-    if(o.close) notes.push(`<span class="badge info" title="alternative의 예상 상대오차가 25 % 안쪽으로 가깝습니다 — 둘 다 쓸 만합니다">alternative와 비슷</span>`);
-    if(c.err>0.5) notes.push(`<span class="badge risk" title="예상 상대오차가 50 %를 넘습니다 — 계수 시간을 늘리거나 ROI 를 넓히세요">${meas?"이 스펙트럼으론 신호 부족":"신호 부족"}</span>`);
-    if(c.unexpl) notes.push(`<span class="badge warn" title="모형(선택 원소 + 배경)이 설명하지 못한 counts 가 window 안에 3σ 이상, 신호의 10 % 이상 남았습니다. 원인 후보: 목록에 없는 원소, 선 모양 차이(특히 M 계열 상대세기), escape·sum peak">window residual 큼</span>`);
-    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인하세요${o.alt&&o.alt.line.fam==="L"?` (alternative ${esc(lname(o.alt.line))})`:""}">M 계열</span>`);
+    const notes=[]; if(o.famUnsure) notes.push(`<span class="badge info" title="K/L/M 계열 사이 intensity 비는 모형 오차가 커서, 차이가 3배 안쪽이면 실측으로 확인해야 합니다">Verify series</span>`);
+    if(o.close) notes.push(`<span class="badge info" title="alternative의 예상 상대오차가 25 % 안쪽으로 가깝습니다 — 둘 다 쓸 만합니다">Similar to alternative</span>`);
+    if(c.err>0.5) notes.push(`<span class="badge risk" title="예상 상대오차가 50 %를 넘습니다 — 계수 시간을 늘리거나 ROI 를 넓히세요">${meas?"Low signal in this spectrum":"Low signal"}</span>`);
+    if(c.unexpl) notes.push(`<span class="badge warn" title="모형(선택 원소 + 배경)이 설명하지 못한 counts 가 window 안에 3σ 이상, 신호의 10 % 이상 남았습니다. 원인 후보: 목록에 없는 원소, 선 모양 차이(특히 M 계열 상대세기), escape·sum peak">Large window residual</span>`);
+    if(l.fam==="M") notes.push(`<span class="badge gray" title="M 계열 상대세기 DB 가 부정확합니다 — 정량이면 L 계열과 교차 확인하세요${o.alt&&o.alt.line.fam==="L"?` (alternative ${esc(lname(o.alt.line))})`:""}">M series</span>`);
     return `<tr><td class="l"><b>${esc(o.el)}</b></td>
       <td class="l" style="max-width:220px;white-space:normal"><b>${esc(lname(l))}</b> <span class="muted">${l.e.toFixed(3)} keV</span><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">${badge(c)} ${notes.join(" ")}</div></td>
       <td class="num">${pct(c.err)}</td><td class="num">${pct(c.purity)}</td>
       ${meas?`<td class="num">${Math.round(c.S).toLocaleString()}${c.pb!=null?`<br><span class="muted">P/B ${c.pb.toFixed(c.pb<10?1:0)}</span>`:""}</td>`:""}
-      <td class="l">${c.top&&c.top.frac>=0.01?`${esc(c.top.line?lname(c.top.line):c.top.key)}<br><span class="muted">window 의 ${pct(c.top.frac)}</span>`:'<span class="muted">없음</span>'}</td>
-      <td class="l">${a?`${esc(lname(a.line))} <span class="muted">${a.line.e.toFixed(3)}</span><br><span class="muted">오차 ${pct(a.err)} · purity ${pct(a.purity)}</span>`:'<span class="muted">—</span>'}</td>
+      <td class="l">${c.top&&c.top.frac>=0.01?`${esc(c.top.line?lname(c.top.line):c.top.key)}<br><span class="muted">${pct(c.top.frac)} of window</span>`:'<span class="muted">None</span>'}</td>
+      <td class="l">${a?`${esc(lname(a.line))} <span class="muted">${a.line.e.toFixed(3)}</span><br><span class="muted">Error ${pct(a.err)} · purity ${pct(a.purity)}</span>`:'<span class="muted">—</span>'}</td>
       <td>${spark(R,c)}</td></tr>`; }).join("");
-  const all=R.out.filter(o=>o.cands.length).map(o=>`<tr><th class="l" colspan="7" style="padding-top:10px">${esc(o.el)} — 후보 ${o.cands.length}개</th></tr>${o.cands.map((c,k)=>candRow(c,R,k)).join("")}`).join("");
-  return `<div class="card" id="ifSug"><h3>원소별 추천 라인 <span class="hint">예상 상대오차가 가장 작은 라인 = intensity 최대 · interference 최소의 절충</span>
+  const all=R.out.filter(o=>o.cands.length).map(o=>`<tr><th class="l" colspan="7" style="padding-top:10px">${esc(o.el)} — ${o.cands.length} candidates</th></tr>${o.cands.map((c,k)=>candRow(c,R,k)).join("")}`).join("");
+  return `<div class="card" id="ifSug"><h3>Recommended Line per Element <span class="hint">예상 상대오차가 가장 작은 라인 = intensity 최대 · interference 최소의 절충</span>
       <span style="flex:1"></span><button class="btn sm" id="ifSugCsv">CSV</button></h3>
     <div class="note ${meas?"okay":"warn"}" style="margin-bottom:8px">${head}</div>
-    <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">원소</th><th class="l">추천 라인</th><th title="계수 통계 + 겹친 선 차감 오차 + 배경 차감 오차${meas?"":" — 모형 모드는 가장 밝은 선 1e5 counts 로 둔 명목값"}">예상 상대오차${meas?"":" (명목)"}</th>
-      <th title="window 안 counts 중 이 원소 fraction">purity</th>${meas?"<th>counts (window)</th>":""}<th class="l">주 interference</th><th class="l">alternative</th><th class="l">window</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">Element</th><th class="l">Recommended line</th><th title="계수 통계 + 겹친 선 차감 오차 + 배경 차감 오차${meas?"":" — 모형 모드는 가장 밝은 선 1e5 counts 로 둔 명목값"}">Expected rel. error${meas?"":" (nominal)"}</th>
+      <th title="window 안 counts 중 이 원소 fraction">purity</th>${meas?"<th>counts (window)</th>":""}<th class="l">Main interference</th><th class="l">Alternative</th><th class="l">window</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="font-size:12px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent);opacity:.75;border-radius:2px;vertical-align:-1px"></i> 그 원소</span>
-      <span><i style="display:inline-block;width:10px;height:10px;background:var(--warn);opacity:.55;border-radius:2px;vertical-align:-1px"></i> 다른 원소 (interference)</span>
-      ${meas?`<span><i style="display:inline-block;width:10px;height:10px;background:var(--grid);border-radius:2px;vertical-align:-1px"></i> 배경</span><span>— 실측</span>`:""}
-      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent-soft);border-radius:2px;vertical-align:-1px"></i> 적분 window (±${WIN}·FWHM)</span><span>가로축 = 라인 ± 3·FWHM</span></div>
-    <details class="if-more" style="margin-top:8px"><summary>원소별 후보 전체 · 판정 방법</summary>
-      <div class="tblwrap" style="margin-top:6px"><table class="tbl"><thead><tr><th class="l">라인</th><th>E [keV]</th><th>${meas?"counts":"상대 intensity"}</th><th>purity</th><th>예상 상대오차</th><th class="l">주 interference</th><th>판정</th></tr></thead><tbody>${all}</tbody></table></div>
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent);opacity:.75;border-radius:2px;vertical-align:-1px"></i> This element</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--warn);opacity:.55;border-radius:2px;vertical-align:-1px"></i> Other elements (interference)</span>
+      ${meas?`<span><i style="display:inline-block;width:10px;height:10px;background:var(--grid);border-radius:2px;vertical-align:-1px"></i> Background</span><span>— measured</span>`:""}
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent-soft);border-radius:2px;vertical-align:-1px"></i> Integration window (±${WIN}·FWHM)</span><span>x-axis = line ± 3·FWHM</span></div>
+    <details class="if-more" style="margin-top:8px"><summary>All Candidates per Element · Method</summary>
+      <div class="tblwrap" style="margin-top:6px"><table class="tbl"><thead><tr><th class="l">Line</th><th>E [keV]</th><th>${meas?"counts":"Relative intensity"}</th><th>purity</th><th>Expected rel. error</th><th class="l">Main interference</th><th>Verdict</th></tr></thead><tbody>${all}</tbody></table></div>
       <ul class="muted" style="margin:8px 0 0 18px;font-size:12px;line-height:1.55">
         <li>window = 라인 에너지 ± ${WIN}·FWHM(E) (선의 84 %). 그 안에서 원소 신호 S, 다른 원소 선 B<sub>int</sub>, 배경 B<sub>bg</sub> 를 셉니다.</li>
         <li>예상 상대오차 = √(S + B<sub>int</sub> + B<sub>bg</sub> + Σ(δ·B<sub>f</sub>)² + (${DBG}·B<sub>bg</sub>)²) / S. δ(겹친 선을 빼낼 때의 line ratio 불확도) = K ${DELTA.K}, L ${DELTA.L}, M ${DELTA.M}.</li>
@@ -217,9 +217,9 @@ function readOpts(){ const q=id=>document.getElementById(id); const P=state.spec
   return {els,fw,emax,kV,compTxt,S}; }
 function setup(root){ const row=root.querySelector("#ifRun"); if(!row) return; const card=row.closest(".card"); const P=state.spec;
   const d=document.createElement("div"); d.className="row"; d.style.cssText="gap:10px;align-items:flex-end;margin-top:8px";
-  d.innerHTML=`<label class="f" style="flex:1;min-width:240px" title="스펙트럼 파일이 없을 때만 씁니다. 파일이 열려 있으면 실측 counts 를 씁니다">조성 (선택 · 상대 원자비, 파일 없을 때만 사용)
+  d.innerHTML=`<label class="f" style="flex:1;min-width:240px" title="스펙트럼 파일이 없을 때만 씁니다. 파일이 열려 있으면 실측 counts 를 씁니다">Composition (optional · relative atomic ratio, used only without a file)
       <input type="text" id="ifComp" value="${esc(P.ifComp||"")}" placeholder="예: Na 1, Yb 0.78, Tm 0.02, Lu 0.2, F 4 — 비우면 같은 비율"></label>
-    <label class="f">가속전압 [kV]<input type="number" id="ifKV" class="mono" style="width:80px" value="${P.ifKV||200}" min="30" max="300" step="10"></label>`;
+    <label class="f">Accel. voltage [kV]<input type="number" id="ifKV" class="mono" style="width:80px" value="${P.ifKV||200}" min="30" max="300" step="10"></label>`;
   row.closest(".row").after(d); }
 function after(){ const out=document.getElementById("ifOut"); if(!out) return; const o=readOpts();
   const old=[...out.childNodes]; out.innerHTML="";
@@ -231,8 +231,8 @@ function after(){ const out=document.getElementById("ifOut"); if(!out) return; c
       downloadText(rows.map(r=>r.join(",")).join("\n"),"eds_line_recommendation.csv","text/csv"); }; }
   if(o.els.length<2) return;             /* 원소 하나면 겹침 목록이 없다 */
   const det=document.createElement("details"); det.className="card if-all";
-  const h3=old.map(n=>n.querySelector&&n.querySelector("h3")).find(Boolean); const m=h3&&h3.textContent.match(/겹침\s*(\d+)건/);
-  det.innerHTML=`<summary style="cursor:pointer;font-weight:600">전체 겹침 목록 ${m?`(${m[1]}건)`:"(없음)"} <span class="muted" style="font-weight:400">— 모든 라인쌍의 ΔE/FWHM 판정</span></summary>`;
+  const h3=old.map(n=>n.querySelector&&n.querySelector("h3")).find(Boolean); const m=h3&&h3.textContent.match(/(?:겹침\s*(\d+)건|Overlaps\s*\((\d+)\))/);
+  det.innerHTML=`<summary style="cursor:pointer;font-weight:600">All overlaps ${m?`(${m[1]||m[2]})`:"(none)"} <span class="muted" style="font-weight:400">— 모든 라인쌍의 ΔE/FWHM 판정</span></summary>`;
   const inner=document.createElement("div"); inner.style.marginTop="8px"; old.forEach(n=>{ if(n.classList&&n.classList.contains("card")){ n.classList.remove("card"); n.style.padding="0"; n.style.border="0"; n.style.boxShadow="none"; } inner.appendChild(n); }); det.appendChild(inner); out.appendChild(det); }
 window.IF_SUG={setup,after,compute,_last:()=>LAST,_detEff:detEff,_famYield:famYield};
 })();

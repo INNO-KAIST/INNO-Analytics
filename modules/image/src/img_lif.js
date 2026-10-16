@@ -121,11 +121,11 @@ async function readLIF(name,u8,ctx){
     const bit=C[0].dt===1?32:bps===1?8:bps===2?16:32;
     const info=[["Series",P.s.path+(P.nM>1?` (tile ${P.m+1}/${P.nM})`:"")],["Dimensions",D.map(d=>`${DIMN[d.id]||"dim"+d.id}${d.n}`).join(" ")+` · C${nc}`],["Bit depth",`${C[0].res}-bit${C[0].dt===1?" float":""} (${bps*8}-bit 저장)`]];
     const w2=[];
-    if(fy.id!==2){ info.push(["영상 면",`${DIMN[fx.id]||fx.id}–${DIMN[fy.id]||fy.id} (세로 = ${DIMN[fy.id]||fy.id})`]);
+    if(fy.id!==2){ info.push(["Image plane",`${DIMN[fx.id]||fx.id}–${DIMN[fy.id]||fy.id} (세로 = ${DIMN[fy.id]||fy.id})`]);
       if(!spatial(fy)){ const st=fy.n>1&&fy.len>0?Math.abs(fy.len)/(fy.n-1):NaN; info.push([`세로 간격 (${DIMN[fy.id]||fy.id})`,st>0?`${+st.toPrecision(6)} ${fy.unit}`:"?"]);
         w2.push(`세로 축이 공간이 아닙니다 (${DIMN[fy.id]||fy.id}) — 화소 높이는 화소 너비와 같게 두었습니다 (세로 ${fy.unit||"단위"} 간격은 Image Info)`); } }
     if(tDs.length>1||tDs.some(d=>d.id!==4)) info.push(["T",`${tDs.map(d=>`${DIMN[d.id]||"dim"+d.id} ${d.n}`).join(" × ")} 을 T 하나로`]);
-    if(zD&&zD.n===1&&tDs.some(d=>d.id!==4&&d.n>1)) info.push(["차원 배치","Z 가 1 장이라 Bio-Formats 는 λ 등을 Z 로 둡니다 — 여기서는 T (화소는 같음)"]);
+    if(zD&&zD.n===1&&tDs.some(d=>d.id!==4&&d.n>1)) info.push(["Dimension layout","Z 가 1 장이라 Bio-Formats 는 λ 등을 Z 로 둡니다 — 여기서는 T (화소는 같음)"]);
     const tD=tDs.find(d=>d.id===4); if(tD&&tD.n>1&&tD.unit==="s"&&tD.len>0) info.push(["Frame interval",`${+(tD.len/(tD.n-1)).toPrecision(6)} s`]);
     if(zs.length<nz) w2.push(`Z ${nz} 장 중 ${zs.length} 장만 읽었습니다`); if(ts.length<nt) w2.push(`T ${nt} 장 중 ${ts.length} 장만 읽었습니다`);
     if(cut) w2.push(`파일이 잘려 ${cut} 면의 끝부분을 0 으로 채웠습니다 (자료 ${blk.avail}/${blk.size} 바이트)`);

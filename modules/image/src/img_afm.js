@@ -137,7 +137,7 @@ function readGWY(name,u8){
     else for(let i=0;i<W*H;i++) p[i]=raw[i]*du.f;
     const xr=c.xreal!=null?c.xreal:1, yr=c.yreal!=null?c.yreal:1;
     const cal=calOf(xr/W,yr/H,uxy,"Gwyddion xreal/xres");
-    const inf=[["Channel",label],...info]; if(!isMask) inf.push(["값 단위",du.unit?(du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit):"(없음)"]);
+    const inf=[["Channel",label],...info]; if(!isMask) inf.push(["Value unit",du.unit?(du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit):"(없음)"]);
     if(c.xoff||c.yoff) inf.push(["Offset (x, y)",`${g6(c.xoff||0)}, ${g6(c.yoff||0)} ${unitStr(uxy)}`]);
     return {name:`${name} · ${label}`,w:W,h:H,bit:isMask?8:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info:inf,warn:[],valueUnit:isMask?"":du.unit,siScale:isMask?1:du.f,siUnit:isMask?"":du.base,metaText:meta};
   };
@@ -156,8 +156,8 @@ function readGWY(name,u8){
     const raw=new Float64Array(W*H*Z); for(let i=0;i<raw.length;i++) raw[i]=f64(D,i);
     const du=dispUnit({p10:0,u:uw.u},raw); const planes=[]; for(let z=0;z<Z;z++){ const p=new Float32Array(W*H); for(let i=0;i<W*H;i++) p[i]=raw[z*W*H+i]*du.f; planes.push(p); }
     const cal=calOf((c.xreal!=null?c.xreal:1)/W,(c.yreal!=null?c.yreal:1)/H,uxy,"Gwyddion brick xreal/xres");
-    const zr=(c.zreal!=null?c.zreal:1)/Z; const inf=[["Volume",title],["값 단위",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"],["z 축",`${Z} 단계, 간격 ${g6(zr)} ${unitStr(uzz)||"(단위 없음)"}`]];
-    if(c.calibration) inf.push(["z 보정","고르지 않은 z 눈금(calibration)이 있습니다 — z 간격은 평균값"]);
+    const zr=(c.zreal!=null?c.zreal:1)/Z; const inf=[["Volume",title],["Value unit",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"],["Z axis",`${Z} 단계, 간격 ${g6(zr)} ${unitStr(uzz)||"(단위 없음)"}`]];
+    if(c.calibration) inf.push(["Z calibration","고르지 않은 z 눈금(calibration)이 있습니다 — z 간격은 평균값"]);
     const img={name:`${name} · ${title}`,w:W,h:H,bit:32,rgb:false,nc:1,nz:Z,nt:1,order:"czt",planes,cal,calCandidates:[],info:inf,warn:[],valueUnit:du.unit,siScale:du.f,siUnit:du.base,metaText:gwyMetaText(C[`/brick/${id}/meta`])};
     if(isOnly(uzz,"m")) img.zStep=zr*1e6;
     imgs.push(img);
@@ -183,7 +183,7 @@ function readGSF(name,u8){
   const du=dispUnit({p10:0,u:uz.u},raw); const p=new Float32Array(W*Hh); for(let i=0;i<W*Hh;i++) p[i]=raw[i]*du.f;
   const num=k=>{ const v=parseFloat(H[k]); return isFinite(v)&&v>0?v:1; };
   const cal=calOf(num("XReal")/W,num("YReal")/Hh,uxy,"GSF XReal/XRes");
-  const nn=p.reduce((a,v)=>a+(v!==v?1:0),0); const info=[["Title",H.Title||""],["값 단위",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"]];
+  const nn=p.reduce((a,v)=>a+(v!==v?1:0),0); const info=[["Title",H.Title||""],["Value unit",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"]];
   return {images:[{name:H.Title?`${name} · ${H.Title}`:name,w:W,h:Hh,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info,warn:nn?[`NaN ${nn} 화소 (Gwyddion 은 이 화소를 mask 로 봄)`]:[],valueUnit:du.unit,siScale:du.f,siUnit:du.base,metaText:hdr}],warn:[]};
 }
 
@@ -268,8 +268,8 @@ function readNanoscope(name,u8){
     const idn=get(L,"@2:Image Data")||get(L,"@3:Image Data")||get(L,"@4:Image Data"); const iname=idn?(idn.hvStr||idn.soft):(get(L,"Image data")||{}).hvStr;
     const dir=(get(L,"Line Direction")||{}).hvStr; const label=(iname||"Channel")+(dir?` (${dir})`:"");
     const cal=calOf(xr/W,yr/H,uo,"Nanoscope Scan Size / Samps·Lines");
-    const info=[["Channel",iname||""],["Soft scale",idn&&idn.soft||""],["Line Direction",dir||""],["Version","0x"+version.toString(16)],["원시 자료",`${bpp*8}-bit 정수 (눈금 Bytes/pixel=${qbpp})`],
-      ["값 = 원시 × ",`${g6(k)} ${sc.base}/LSB  (${sc.how})`],["값 단위",du.f!==1?`${du.unit} (× ${g6(du.f)})`:du.unit||"(없음)"],["Scan Size",ss]];
+    const info=[["Channel",iname||""],["Soft scale",idn&&idn.soft||""],["Line Direction",dir||""],["Version","0x"+version.toString(16)],["Raw data",`${bpp*8}-bit 정수 (눈금 Bytes/pixel=${qbpp})`],
+      ["Value = raw ×",`${g6(k)} ${sc.base}/LSB  (${sc.how})`],["Value unit",du.f!==1?`${du.unit} (× ${g6(du.f)})`:du.unit||"(없음)"],["Scan Size",ss]];
     return {name:`${name} · ${label}`,w:W,h:H,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[pl],cal,calCandidates:[],info,warn:[],valueUnit:du.unit,siScale:du.f,siUnit:du.base,metaText:header};
   }
   function nsScale(L){
@@ -333,7 +333,7 @@ function readARDF(name,u8){
       const uz=unitParse(units); const kz=Math.pow(10,uz.p10); if(kz!==1) for(let i=0;i<raw.length;i++) raw[i]*=kz;
       const du=dispUnit({p10:0,u:uz.u},raw); const p=new Float32Array(W*H); for(let i=0;i<W*H;i++) p[i]=raw[i]*du.f;
       const cal=calOf(dx,dy,unitParse(xu),"ARDF IDEF 간격 (x, y step)");
-      const info=[["Channel",title],["IDEF 단위",`x ${xu}, y ${yu}, 값 ${units||"(없음)"}`],["값 단위",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"]];
+      const info=[["Channel",title],["IDEF units",`x ${xu}, y ${yu}, 값 ${units||"(없음)"}`],["Value unit",du.f!==1?`${du.unit} (파일 ${du.base} × ${g6(du.f)})`:du.unit||"(없음)"]];
       ["ImagingMode","FastScanSize","SlowScanSize","ScanRate","SpringConstant","InvOLS","FMapScanPoints","FMapScanLines","Date","Time"].forEach(k=>{ if(nv[k]!=null) info.push([k,nv[k]]); });
       imgs.push({name:`${name} · ${title}`,w:W,h:H,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info,warn:empty?[`비어 있는 줄 ${empty} 개(중단된 주사?)는 NaN 으로 두었습니다`]:[],valueUnit:du.unit,siScale:du.f,siUnit:du.base,metaText:(inote?inote+"\n\n":"")+notes});
     } else if(e.name==="VOLM"){

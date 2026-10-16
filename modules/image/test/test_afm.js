@@ -59,6 +59,7 @@ async function folder(D,label){
 
   await folder(path.join(__dirname,"io","afm"),"합성 (정답: 손 계산·gwyfile·magic-afm, 모두 Gwyddion 과 대조)");
   await folder(path.join(__dirname,"..","ref","real","afm"),"실측 (정답: Gwyddion 2.64 · gwyfile)");
+  await folder(path.join(__dirname,"..","ref","real","ibw"),"실측 Asylum Cypher IBW (연구실 측정 — 저장소에 없음; 정답: Gwyddion 2.64, python3 -I ref/gen_afm_real.py ref/real/ibw)");
 
   /* ---------- 손상·변형 파일은 분명한 오류 ---------- */
   console.log("\n== 손상·변형 파일");

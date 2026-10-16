@@ -1,4 +1,4 @@
-# Image Analysis 탭 — SPEC v1.4 (2026-10-16)
+# Image Analysis 탭 — SPEC v1.5 (2026-10-17)
 
 ImageJ 를 본뜬 영상 분석 탭. 계산 결과가 ImageJ 와 같도록 ImageJ 1.54u 의 알고리즘을 옮겼다.
 ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LICENSE.txt`). 옮긴 원본 파일은 각 함수 머리말에 적었다.
@@ -85,17 +85,17 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
   XML 머리·memory block 머리 안에서 잘림 → 분명한 오류/알림. 잘못된 문자 참조(&#x110000;)는 U+FFFD.
 - 고르기 창: series 마다 크기가 다르면 Z·T 는 가장 큰 값으로 묻고 series 마다 그 안의 것만(메모리 계산도 series 별). 잎 이름이 겹치면 경로(맨 위 요소 뺌)로 이름. metaText = 첫 영상 요소의 XML.
 
-## 3b-3. Olympus/Evident OIR·POIR (v1.4 — 실측 파일 미검증)
-- 형식 지식: oirfile(BSD-3, © C. Gohlke — 머리말에 고지). Bio-Formats 7.3.1 은 블랙박스로만 실행. 공개 실측 .oir 가 없어 **합성 파일 45 개**로만 확인했다 —
-  oirfile 과 Bio-Formats 가 같게 읽는 경우는 그 값이 정답, 둘이 다르면 근거를 적고 한쪽을 따름(λ 축·float 깊이·선 주사·참조 영상 = oirfile, 가운데 빠진 면의 위치·z step = Bio-Formats). 모든 OIR 영상에 '실측 미검증' 알림.
-- 블록: OLYMPUSRAWFORMAT 머리 → 끝의 block index(표지 없으면 머리가 맞는지 확인하고 사용, 잃으면 앞에서부터 차례로 읽고 알림) → UID+PIXEL 짝, FRAMEPROPERTIES, METADATA(여러 XML, 이름공간으로 구분).
-  한 면의 PIXEL 블록은 index 순서로 잇는다(UID 끝 번호는 거꾸로 갈 때 알림만). 같은 UID 두 번 = 첫 것 + 알림. 면 바이트가 넘치면(선 주사가 아니면) 높이 유지 + 알림.
-- 차원: C·Z·T·λ(λ 는 T 에 이음, λ 가 빠르게). 같은 축 설정이 여럿이면 마지막(oirfile). 4 바이트 깊이 = float32, 값이 float 로 맞지 않으면(대부분 subnormal·NaN·∞·>1e29) uint32 + 알림(Bio-Formats 는 uint32).
-- 보정: 화소 µm, z step = 같은 T·λ 안 frame 위치 간격의 중앙값 — 설정(length z·축 step)과 1 % 넘게 다르면 설정 + 알림(Z drift 보정 파일에서 oirfile 은 틀림). frame interval·λ 범위·방출 파장은 Info.
-  채널 이름 = 채널 바로 아래 name, 순서 = order 속성, GUID 대소문자 무시. 채널 색 = 방출 파장(LUT XML 은 형식을 몰라 읽지 않음). RGB 는 이름(R·G·B)으로 맞춤. System·Software·Objective Info.
-- 손상: 빠진 면 = 0 + 알림, 설정보다 면이 적음(보조 파일 `_00001…` 에 나머지) → 알림(보조 파일은 읽지 않음), 보조 파일만 열면 분명한 오류, 참조(REF_) 블록만 있는 파일 = 참조 영상 + 알림.
-- POIR(ZIP): stored·deflate, data descriptor, UTF-8 이름(아니면 '항목 N'). ZIP64·암호화는 분명한 오류. 메모리 한도는 묶음 전체, 고르기 창에 안쪽 파일 이름, 뒤 창 취소 시 앞 영상 유지.
-- 시험: `node test/test_oir.js` (54). 실측 FV3000/FV4000 파일이 생기면 먼저 oirfile·Bio-Formats·앱 세 쪽으로 읽어 위 가정(블록 순서·UID·λ·4 바이트 깊이·선 주사)을 확인할 것.
+## 3b-3. Olympus/Evident OIR·POIR (v1.5 — 공개 실측 13 파일로 검증)
+- 형식 지식: oirfile(BSD-3, © C. Gohlke — 머리말에 고지). Bio-Formats 7.3.1 은 블랙박스로만 실행.
+- **실측 검증**(`ref/real/oir`, OME 시험 자료 서버의 FV4000 공개 파일 13 개, CC BY 4.0 — 저장소·배포에 올리지 않음, `ref/gen_oir_real.py`):
+  화상이 있는 12 파일 모든 면이 oirfile = Bio-Formats(λ 파일 제외) = 앱 (면별 SHA-1), 그중 3 파일은 함께 배포된 OME-TIFF 와도 같음. 크기·채널 이름·화소 크기·z step(10⁻⁶)·frame interval(10⁻⁴)·참조 영상 일치.
+  λ 파일은 Bio-Formats 가 λ1 면을 모든 칸에 되풀이(결함) → oirfile 을 따르고 파일의 LAMBDA 위치(122/122 프레임)로 확인. Map(지도) 파일 = 화소 없음 → 타일 파일을 열라는 분명한 오류.
+- 실측에서 고친 것: ZSTACK 축 정의가 둘(쓰인 것 paramEnable=true + 안 쓰인 'Range')인 파일에서 엉뚱한 쪽을 써 'Z 4/21' 거짓 알림 → paramEnable 우선(oirfile 은 마지막 것이라 틀림).
+  frame 이름(l001z002…)으로 (t, λ) 안의 z 간격·t 첫 프레임 간격, LUT 앞의 채널 GUID 로 채널 색, UID 머리의 면 안 위치·길이로 블록 배치, 잘린 파일 차례 읽기(BMP·NULL 블록·UID 검사).
+- 차원: C·Z·T·λ(λ 는 T 에 이음, λ 가 빠르게). 4 바이트 깊이 = float32, 값이 float 로 맞지 않으면 uint32 + 알림. 참조 영상(REF_LSM0, 파일 맨 앞) = 둘째 영상 — 보정은 본 영상 값을 붙이고 알림.
+- 손상·보조: 빠진 면 = 0 + 알림, 설정보다 면이 적음 → 알림(보조 파일 `_00001…` 은 읽지 않음), 보조 파일만 열면 분명한 오류.
+- POIR(ZIP): stored·deflate, data descriptor, UTF-8 이름. ZIP64·암호화는 분명한 오류. 메모리 한도는 묶음 전체.
+- 실측 미검증(합성만): 선 주사, RGB/COLOR2D, 4 바이트 깊이, 보조 파일, POIR, 참조 영상 보정, 카메라 영상. 시험: `node test/test_oir.js` (70, 실측 15 포함).
 
 ## 3c. Registration (StackReg)
 - 엔진 `75_stackreg.js` = pystackreg 0.2.8 C++(TurboReg ANSI-C 이식, 허용 라이선스 — 머리말에 원문·논문 인용) 를 연산 순서까지 옮김. Java TurboReg/StackReg(재배포 제한 라이선스)는 옮기지 않았다.
@@ -111,6 +111,10 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
 ## 3d. AFM·SPM 형식 (v1.3)
 - 해석 규칙의 기준은 Gwyddion 2.64 의 가져오기 모듈(modules/file/nanoscope.c·gwyfile.c·gsffile.c·ardf.c). 코드는 옮기지 않고 동작을 맞췄으며, 시험 정답은 그 모듈이 같은 파일을 읽은 값이다.
   `gwyddion --convert-to-gwy` 는 GTK 를 초기화하지 않아 ARDF 모듈이 실패하므로, 모듈을 직접 부르는 작은 변환기(`ref/gwyconv`)로 GWY 를 쓰고 gwyfile(독립 파이썬 파서)로 읽는다.
+- **Asylum IBW (Cypher·MFP-3D, AR 소프트웨어 Igor)**: 한 wave 에 여러 채널, wave 단위는 하나(m) → 채널 이름([Nap]<종류>(Trace|Retrace))으로 단위를 정한다:
+  Height·ZSensor·Amplitude·Deflection = m(→ nm), Phase = deg, Potential·Voltage·Bias·UserIn = V, Current = A(→ pA·nA), Frequency = Hz, Capacitance = F. 모르는 종류는 단위 없이 + 알림.
+  연구실 실측 Cypher 5 파일(AC topography·KPFM(SKPM)·C-AFM·EFM·FM-EFM, AR 16.23·18.40) 48 채널: 화소(방향 포함)·단위·화소 크기 = Gwyddion 2.64 (`ref/real/ibw`, 저장소·배포에 올리지 않음).
+  .ARDF 는 AR 의 Force Map(힘 곡선 지도) 전용 — 영상 주사는 .ibw 로 저장된다.
 - **값 단위**: 영상 값은 물리량으로 바꾼다. 길이(m)는 늘 nm, N·Pa·A·F·S 는 중앙값 크기에 맞는 접두어(nN·MPa 등), 그 밖(V·deg·Hz·단위 없음)은 그대로. 배율은 정보 칸에 적고, 마우스 아래 값에 단위를 붙인다.
   같은 물리량을 남기는 연산(필터·회전·자르기·정합·평균/최대 투영 등, `KEEP_UNIT`)만 단위를 이어받고, 형 변환의 눈금 바꾸기·문턱·FFT·곱셈 등은 지운다. 되돌리면 단위도 돌아온다.
 - **Nanoscope**: 머리 길이 = 앞 8 필드 안 `\Data length`. 값 = 원시 정수 / 256^(Bytes/pixel) × `@2:Z scale`(또는 `@4:`)의 hard value × soft scale(`@Sens. …`, 단위 곱 — 예 V × nm/V = nm).
@@ -220,8 +224,12 @@ TIFF spacing 단위(nm 보정에서 z step 1000 배) · CZI 의 RGB 채널 + 회
   채널 이름·순서·GUID 대소문자, index 표지 없음, frame interval, RGB 순서, 선 주사 판정, 참조 영상만, ZIP64·암호화·이름, 진행 표시 다시 그리기, 채널 색·Info.
 - 함께 찾은 결함: Remove Outliers 가 NaN 있는 32-bit 에서 ImageJ 와 80 화소 다름(§3g), 영상 고르기 칸을 건드리지 않고 실행하면 보이는 첫 영상이 아니라 '없음'(Image Calculator 포함).
 
+## 6f. v1.5 (2026-10-17)
+- 화면 골격 영어(문서 `docs/UI-English-style.md`): ImageJ 메뉴·대화 상자 이름, 패널·표·버튼. 알림·설명·경고는 한국어. 연산 id·매개변수 키·상태·저장 형식·.ijm 은 그대로.
+- IBW 값 단위(§3d), OIR 실측 검증(§3b-3).
+
 ## 7. 한계 (다음 단계)
-- vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 은 실측 파일로 검증하지 않았다(합성만), 보조 파일(_00001…)을 함께 읽지 않는다. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
+- vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 보조 파일(_00001…)을 함께 읽지 않는다. 선 주사·RGB OIR 은 실측 미검증. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
 - 3D 연산(3D skeletonize·필터), bilinear·비강체(elastic) 정합은 없다.
 - 2.4×10⁷ 화소를 넘는 영상은 전체를 볼 때 줄여 보이고(확대하면 원래 해상도), 문턱 겹쳐 그림은 줄인 해상도.
 - 터치 두 손가락 확대 없음.

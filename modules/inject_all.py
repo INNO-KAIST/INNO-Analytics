@@ -15,8 +15,20 @@ def R(desc,pat,rep,flags=0):
     assert n==1, f'[{desc}] 일치 {n}개 (1개여야 함)'
     s=re.sub(pat,rep,s,flags=flags)
 # XPS 는 맨 왼쪽(사용자 요청 10-15), Energy Diagram·DRE 는 메타데이터 뒤
-R('탭 목록',r'\[(?:\["xps","XPS"\],)?\["image","이미지"\],(?:\["imgx","Image Analysis"\],)?(.*?)\["meta","메타데이터"\](?:,\["energy","Energy Diagram"\])?(?:,\["dre","DRE"\])?(?:,\["xps","XPS"\])?\];',
-  r'[["xps","XPS"],["image","이미지"],["imgx","Image Analysis"],\1["meta","메타데이터"],["energy","Energy Diagram"],["dre","DRE"]];')
+# 탭 이름은 영어(docs/UI-English-style.md). 옛 한글 이름·옛 영어 이름·이미 주입된 판본 모두 같은 결과가 나오도록 라벨은 [^"]* 로 받는다.
+# 키(xps,image,imgx,maps,spectrum,lattice,interf,meta,energy,dre)는 바꾸지 않는다.
+TAB_LIST='const VIEWS=[["xps","XPS"],["image","EM Image"],["imgx","Image Analysis"],["maps","EDS Maps"],["spectrum","EDS Spectrum"],["lattice","Lattice FFT"],["interf","EDS Interference"],["meta","EM Metadata"],["energy","Energy Diagram"],["dre","DRE Kinetics"]];'
+_L=r'"[^"]*"'
+R('탭 목록',r'const VIEWS=\[(?:\["xps",'+_L+r'\],)?\["image",'+_L+r'\],(?:\["imgx",'+_L+r'\],)?\["maps",'+_L+r'\],\["spectrum",'+_L+r'\],\["lattice",'+_L+r'\],\["interf",'+_L+r'\],\["meta",'+_L+r'\](?:,\["energy",'+_L+r'\])?(?:,\["dre",'+_L+r'\])?(?:,\["xps",'+_L+r'\])?\];',
+  lambda m:TAB_LIST)
+# 휴대폰 하단 탭(열 10개, 폭 ≈39px): 짧은 이름. 라벨 글자는 DOM 에 남기고(접근성·테스트) CSS 가 data-short 를 보여 준다.
+NAV_SHORT_JS='const NAV_SHORT={xps:"XPS",image:"EM Img",imgx:"Analysis",maps:"Maps",spectrum:"Spectra",lattice:"FFT",interf:"Interf.",meta:"Meta",energy:"Energy",dre:"DRE"};'
+if 'const NAV_SHORT=' not in s:
+    s=s.replace(TAB_LIST, TAB_LIST+'\n/* 휴대폰 하단 탭용 짧은 이름 — 키가 없으면 전체 이름 */\n'+NAV_SHORT_JS,1)
+else:
+    s,_n=re.subn(r'const NAV_SHORT=\{[^}]*\};',lambda m:NAV_SHORT_JS,s); assert _n==1, 'NAV_SHORT 일치 %d개'%_n
+R('탭 버튼 라벨(짧은 이름)',r'return `<button data-v="\$\{k\}" class="\$\{state\.view===k\?"active":""\}"(?: aria-label="\$\{esc\(t\)\}")? \$\{dis\}>(?:<span class="nl" data-short="\$\{esc\(NAV_SHORT\[k\]\|\|t\)\}">\$\{t\}</span>|\$\{t\})\$\{cnt\}</button>`;',
+  lambda m:'return `<button data-v="${k}" class="${state.view===k?"active":""}" aria-label="${esc(t)}" ${dis}><span class="nl" data-short="${esc(NAV_SHORT[k]||t)}">${t}</span>${cnt}</button>`;')
 R('파일 없이 열리는 탭',r'if\(!rec && state\.view!=="interf"(?: && state\.view!=="energy")?(?: && state\.view!=="dre")?(?: && state\.view!=="xps")?(?: && state\.view!=="imgx")?\)\{ renderWelcome\(root\); return; \}',
   'if(!rec && state.view!=="interf" && state.view!=="energy" && state.view!=="dre" && state.view!=="xps" && state.view!=="imgx"){ renderWelcome(root); return; }')
 R('탭 분기',r'    else if\(state\.view==="interf"\) renderInterf\(root\);\n(?:    else if\(state\.view==="energy"\) window\.ED_UI\.render\(root\);\n)?(?:    else if\(state\.view==="dre"\) window\.DRE_UI\.render\(root\);\n)?(?:    else if\(state\.view==="xps"\) window\.XPS_UI\.render\(root\);\n)?(?:    else if\(state\.view==="imgx"\) window\.IMG_UI\.render\(root\);\n)?',
@@ -37,7 +49,13 @@ css=rd(f'{ED}/ed.css')+'\n'+rd(f'{DR}/dre.css')+'\n'+rd(f'{XP}/xps.css')+'\n'+rd
 #nav button[data-v="dre"]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 20h18'/%3E%3Cpath d='M4 19c5 0 7-1 9-5s3-9 7-10'/%3E%3Ccircle cx='8' cy='18' r='1'/%3E%3Ccircle cx='13' cy='14' r='1'/%3E%3Ccircle cx='17' cy='6' r='1'/%3E%3C/svg%3E")}
 #nav button[data-v="xps"]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 20h18'/%3E%3Cpath d='M3 18c3 0 4-1 5-6s2-8 3-8 2 6 3 9 2 5 7 5'/%3E%3Cpath d='M14 13c1-3 2-5 3-5'/%3E%3C/svg%3E")}
 #nav button[data-v="imgx"]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2.2'/%3E%3Ccircle cx='15.5' cy='14' r='3'/%3E%3Ccircle cx='8' cy='16.5' r='1.3'/%3E%3C/svg%3E")}
-@media (max-width:720px){ #nav button{font-size:9.5px!important} }
+@media (max-width:720px){ #nav button{font-size:9.5px!important}
+  #nav button .nl{font-size:0;line-height:0;display:block;max-width:100%}
+  #nav button .nl::after{content:attr(data-short);font-size:9.5px;line-height:1.2;white-space:nowrap;letter-spacing:-.2px} }
+/* 탭 이름이 영어로 길어졌다 — 데스크톱에서 두 줄로 꺾이지 않도록 좌우 여백을 줄인다 */
+@media (min-width:721px){ #nav button{padding-left:10px;padding-right:10px} }
+@media (min-width:721px) and (max-width:1500px){ #nav button{font-size:13px;padding-left:8px;padding-right:8px} }
+@media (max-width:380px){ #nav button .nl::after{font-size:8.5px;letter-spacing:-.3px} }
 '''
 head='<!-- INNO-ED:BEGIN css -->\n<style id="ed-css">\n'+css+'</style>\n<!-- INNO-ED:END -->\n'
 i=s.index('</head>'); s=s[:i]+head+s[i:]

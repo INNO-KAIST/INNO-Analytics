@@ -7,8 +7,7 @@ const D=path.join(__dirname,"io","oir"), SJ=path.join(D,"synth.json");
 let pass=0, fail=0; const fails=[]; const ok=(c,m,d)=>{ if(c) pass++; else { fail++; fails.push("✗ "+m+(d?" — "+d:"")); } console.log((c?"  ✓ ":"  ✗ ")+m+(d&&!c?" — "+d:"")); };
 const f32=k=>{ const b=fs.readFileSync(path.join(D,k+".f32")); return new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)); };
 const rd=f=>new Uint8Array(fs.readFileSync(path.join(D,f)));
-const UNV="실측 FluoView 파일로 아직 검증하지 않은 읽기";
-const allWarn=r=>(r.warn||[]).join(" | ")+" | "+r.images.map(im=>(im.warn||[]).filter(w=>!w.includes(UNV)).join(" | ")).join(" | ");
+const allWarn=r=>(r.warn||[]).join(" | ")+" | "+r.images.map(im=>(im.warn||[]).join(" | ")).join(" | ");
 const rel=(a,b)=>Math.abs(a-b)<=1e-9*Math.max(Math.abs(a),Math.abs(b));
 function cmpPlanes(im,tr,sel){ // sel: {z:[...], t:[...], nz, nt} → 정답에서 그 면만
   const N=im.w*im.h; let bad=0, first=-1; const nc=im.nc;
@@ -37,7 +36,7 @@ function cmpPlanes(im,tr,sel){ // sel: {z:[...], t:[...], nz, nt} → 정답에�
     if(sp.chNames&&!sp.rgb&&JSON.stringify(im.chNames)!==JSON.stringify(sp.chNames)) ex+=` 채널 이름 ${JSON.stringify(im.chNames)} ≠ ${JSON.stringify(sp.chNames)}`;
     if(sp.warn&&!allWarn(r).includes(sp.warn)) ex+=` 알림에 '${sp.warn}' 없음 (${allWarn(r)})`;
     if(!sp.warn&&!sp.choose&&allWarn(r).replace(/[ |]/g,"")) ex+=` 뜻밖의 알림: ${allWarn(r)}`;
-    if(!r.images.every(i=>(i.warn||[]).some(w=>w.includes(UNV)))) ex+=" '아직 검증하지 않은 읽기' 알림 없음";
+    if(allWarn(r).includes("아직 검증하지 않은 읽기")) ex+=" 일괄 '미검증' 알림이 남아 있음";
     if(sp.fi){ const fi=(im.info.find(x=>x[0]==="Frame interval")||[])[1]||""; if(!fi.startsWith(sp.fi)) ex+=` frame interval '${fi}' ≠ ${sp.fi}`; }
     if(sp.chLut&&JSON.stringify(im.chLut)!==JSON.stringify(sp.chLut)) ex+=` chLut ${JSON.stringify(im.chLut)} ≠ ${JSON.stringify(sp.chLut)}`;
     if(sp.choose&&!(asked&&asked.kind==="oir"&&asked.nz===sp.nz&&asked.nt===sp.nt&&asked.nc===sp.nc&&asked.w===sp.w)) ex+=` 고르기 창 ${JSON.stringify(asked)}`;
@@ -79,5 +78,36 @@ function cmpPlanes(im,tr,sel){ // sel: {z:[...], t:[...], nz, nt} → 정답에�
   // 손상: UID 가 PIXEL 과 짝이 아닌 블록 · 이상한 UID
   { const u8=rd("gray12.oir").slice(); const s=Buffer.from(u8).toString("latin1"); const k=s.indexOf("_0_1_"); u8[k+5]="Z".charCodeAt(0); // GUID 를 망가뜨림
     let m=null; try{ await IO.readFile("bad.oir",u8,{}); }catch(e){ m=e.message; } ok(m&&/UID/.test(m),"화소 블록 이름(UID) 손상 → 분명한 오류",m); }
+  // ============ 실측 OIR (ref/real/oir, CC BY 4.0) — 정답 = ref/gen_oir_real.py (oirfile = Bio-Formats [= ome.tif], λ 는 oirfile) ============
+  { const RD=path.join(__dirname,"..","ref","real","oir"), TJ=path.join(RD,"truth","truth.json"); const crypto=require("crypto");
+    if(!fs.existsSync(TJ)) console.log("실측 OIR·정답 없음 — 건너뜀 (python3 -I ref/gen_oir_real.py ref/real/oir <bf jar> <BFDump>)");
+    else { const truth=JSON.parse(fs.readFileSync(TJ,"utf8"));
+      const sha=P=>{ const u=new Uint16Array(P.length); for(let i=0;i<P.length;i++) u[i]=P[i]; return crypto.createHash("sha1").update(Buffer.from(u.buffer)).digest("hex"); };
+      for(const [f,t] of Object.entries(truth)){ const fp=path.join(RD,f); if(!fs.existsSync(fp)){ console.log("  (없음) "+f); continue; }
+        const u8=new Uint8Array(fs.readFileSync(fp)); let r=null, err=null; const t0=Date.now();
+        try{ r=await IO.readFile(f,u8,{choose:async()=>({})}); }catch(e){ err=e.message; }
+        if(t.error){ ok(err&&err.includes(t.error),`실측 ${f}: 분명한 오류 (${t.decisions[0]})`,err||"오류 없음"); continue; }
+        if(err){ ok(false,`실측 ${f}`,"오류: "+err); continue; }
+        const im=r.images[0]; let ex="";
+        if(im.w!==t.w||im.h!==t.h||im.nc!==t.nc||im.nz!==t.nz||im.nt!==t.nt) ex+=` 크기 앱 ${im.w}×${im.h} c${im.nc} z${im.nz} t${im.nt} / 정답 ${t.w}×${t.h} c${t.nc} z${t.nz} t${t.nt}`;
+        else { let bad=0, first=-1; im.planes.forEach((P,q)=>{ if(sha(P)!==t.sha[q]){ bad++; if(first<0) first=q; } }); if(bad) ex+=` 다른 면 ${bad}/${t.sha.length} (첫 ${first})`; }
+        if(im.bit!==t.bit) ex+=` bit ${im.bit}`;
+        if(JSON.stringify(im.chNames)!==JSON.stringify(t.chNames)) ex+=` 채널 이름 ${JSON.stringify(im.chNames)} ≠ ${JSON.stringify(t.chNames)}`;
+        { const um=im.cal?im.cal.pw*IO.unitToM(im.cal.unit)/1e-6:null; if(!rel(um||0,t.px)) ex+=` 화소 ${um} ≠ ${t.px}`; }
+        if(t.nz>1?!(Math.abs(im.zStep-t.zStep)<=1e-6*t.zStep):im.zStep) ex+=` z step ${im.zStep} ≠ ${t.zStep}`;
+        if(t.fi){ const fi=parseFloat((im.info.find(x=>x[0]==="Frame interval")||[])[1]||"NaN"); if(!(Math.abs(fi-t.fi)<=1e-4*t.fi)) ex+=` frame interval ${fi} ≠ ${t.fi}`; }
+        if(t.nl>1&&!/λ/.test((im.info.find(x=>x[0]==="λ")||[])[0]||"")) ex+=" λ 정보 없음";
+        if(t.ref){ const ri=r.images[1]; if(!ri||ri.w!==t.ref.w||ri.h!==t.ref.h||ri.nc!==t.ref.nc) ex+=" 참조 영상 크기"; else ri.planes.forEach((P,q)=>{ if(sha(P)!==t.ref.sha[q]) ex+=` 참조 면 ${q} 다름`; }); }
+        const W=allWarn(r); const wantAx=f.startsWith("coupe"); // 계획 200 장 중 35 장 (실측 파일의 ZSTACK 축 maxSize 200)
+        if(/획득 설정보다 면이 적습니다/.test(W)!==wantAx) ex+=` '획득 설정보다 적음' 알림 ${wantAx?"없음":"잘못 뜸"}: ${W}`;
+        ok(!ex,`실측 ${f.slice(0,48)} ${t.w}×${t.h} c${t.nc} z${t.nz} t${t.nt}${t.nl>1?` (λ${t.nl}·T${t.nt0})`:""}${t.ref?" + 참조":""} [${t.truth}] ${Date.now()-t0} ms`,ex); }
+      // 실측 파일의 채널 색 (채널 GUID 가 붙은 LUT XML 의 이름)
+      for(const [f,want] of [["1202-interval_10sec_sequence_frame.oir",["Green","Red"]],["tiling-sample-brain-section_A01_G001_0001.oir",["Cyan","Red"]]]){ const fp=path.join(RD,f); if(!fs.existsSync(fp)) continue;
+        const r=await IO.readFile(f,new Uint8Array(fs.readFileSync(fp)),{}); ok(JSON.stringify(r.images[0].chLut)===JSON.stringify(want),`실측 ${f.slice(0,40)}: 채널 색 = LUT XML 이름 ${want}`,JSON.stringify(r.images[0].chLut)); }
+      // 잘린 실측 파일: 끝 5 MB 잘림 → block index 없음 → 차례 읽기 (실측 파일은 METADATA 블록이 앞·끝에 둘)
+      { const fp=path.join(RD,"venus stack.oir"); if(fs.existsSync(fp)){ const u8=new Uint8Array(fs.readFileSync(fp)); const t=truth["venus stack.oir"]; let m=null, r=null;
+          try{ r=await IO.readFile("v.oir",u8.slice(0,u8.length-5e6),{}); }catch(e){ m=e.message; }
+          let good=0; if(r){ const im=r.images[0]; im.planes.forEach((P,q)=>{ if(q<t.sha.length&&sha(P)===t.sha[q]) good++; }); }
+          ok(r&&/index/.test(allWarn(r))&&/잘렸/.test(allWarn(r))&&good>=60&&r.images[0].chNames[0]==="CH3","실측 venus stack 끝 5 MB 잘림 → 차례 읽기 (앞쪽 METADATA 블록은 남음) · 앞 면들 = 정답 + 알림",m||`${good} 면 같음; ${allWarn(r).slice(0,200)}`); } } } }
   console.log(`\n${pass} 통과, ${fail} 실패`); if(fail){ console.log(fails.join("\n")); process.exit(1); }
 })();

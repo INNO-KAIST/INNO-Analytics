@@ -42,7 +42,7 @@ with sync_playwright() as p:
     a = getp(); chk(np.array_equal(a, np.fromfile(os.path.join(REF, 'in', 'g8.f32'), np.float32)), '되돌리기 4 번 → 원본')
     # 2) Process 패널 + Preview 화면
     pg.evaluate("(()=>{ const S=IMG_UI._state(); S.ui.panel='process'; S.ui.proc='unsharp'; S.ui.preview=true; IMG_UI.rerender(); })()"); pg.wait_for_timeout(900)
-    res['preview_on'] = pg.evaluate('document.querySelector("#imStatus").textContent.includes("미리 보기")'); chk(res['preview_on'], 'Preview 표시')
+    res['preview_on'] = pg.evaluate('document.querySelector("#imStatus").textContent.includes("Preview")'); chk(res['preview_on'], 'Preview 표시')
     pg.screenshot(path=os.path.join(out, '02_process_preview.png'))
     pg.evaluate("(()=>{ const S=IMG_UI._state(); S.ui.preview=false; S.ui.panel='threshold'; S.ui.thr.method='Otsu'; S.ui.thr.dark=true; S.ui.thr.manual=false; IMG_UI.rerender(); })()"); pg.wait_for_timeout(700)
     thr = pg.evaluate('[IMG_UI._state().ui.thr.lower,IMG_UI._state().ui.thr.upper]'); rt = [c for c in man['cases'] if c['name'] == 'thr_g8'][0]['thr']['Otsu|dark']
@@ -114,7 +114,7 @@ with sync_playwright() as p:
     v0 = pg.evaluate('(()=>{ const im=IMG_UI._cur(); return im.ops.length; })()')
     pg.evaluate("document.querySelector('#imApply').click()"); pg.wait_for_function('!document.querySelector("#imProg")||document.querySelector("#imProg").hidden', timeout=30000); pg.wait_for_timeout(500)
     v1 = pg.evaluate('(()=>{ const im=IMG_UI._cur(); return {ops:im.ops.length, pv:IMG_UI._state().ui.preview, status:document.querySelector("#imStatus").textContent}; })()')
-    chk(v1['ops'] == v0 + 1 and not v1['pv'] and '미리 보기' not in v1['status'], 'Preview 중 Apply → 적용되고 Preview 꺼짐', v1)
+    chk(v1['ops'] == v0 + 1 and not v1['pv'] and 'Preview' not in v1['status'], 'Preview 중 Apply → 적용되고 Preview 꺼짐', v1)
     # Z Project: hyperstack 은 t 를 유지, RGB 합은 3 채널
     sel('tij_hyper.tif'); pg.evaluate("IMG_UI._run('zproject',{method:'max',float:false})"); pg.wait_for_timeout(800)
     zp = pg.evaluate('(()=>{ const im=IMG_UI._cur(); return [im.name,im.nc,im.nz,im.nt,IMG_UI._px.get(im.id).length]; })()')

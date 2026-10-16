@@ -46,12 +46,12 @@ const PRESETS = [
    p:[["PH",0,"2F7/2","2F5/2"],["ET",[0,"2F5/2","2F7/2"],[1,"5I8","5I6"]],["MPR",1,"5I6","5I7"],
       ["ET",[0,"2F5/2","2F7/2"],[1,"5I6","5F4"]],["ET",[0,"2F5/2","2F7/2"],[1,"5I7","5F5"]]],
    ref:"Auzel (2004); Yb→Ho ⁵I₆ 전달은 포논 보조(불일치 ≈1,700 cm⁻¹)"},
-  {name:"β-NaYF₄:Nd,Yb — 808 nm (조성만)",f:"β-NaYF4:5%Nd,10%Yb",l:[808],p:[["PH",0,"4I9/2","4F5/2"],["MPR",0,"4F5/2","4F3/2"]],ref:""},
-  {name:"β-NaGdF₄:Yb,Tm@NaGdF₄:Tb — Gd 이동 (조성만)",f:"β-NaGdF4:49%Yb,1%Tm@NaGdF4:15%Tb",l:[980],p:[],ref:"Wang et al., Nat. Mater. 10, 968 (2011)"},
-  {name:"Y₂O₃:5%Eu³⁺ (조성만)",f:"Y2O3:5%Eu",l:[394],p:[],ref:""},
-  {name:"CaF₂:Eu²⁺ (조성만)",f:"CaF2:Eu2+",l:[365],p:[],ref:""},
-  {name:"K₂SiF₆:Mn⁴⁺ (조성만)",f:"K2SiF6:Mn4+",l:[455],p:[],ref:""},
-  {name:"Al₂O₃:Cr³⁺ 루비 (조성만)",f:"Al2O3:Cr3+",l:[532],p:[],ref:""}
+  {name:"β-NaYF₄:Nd,Yb — 808 nm (composition only)",f:"β-NaYF4:5%Nd,10%Yb",l:[808],p:[["PH",0,"4I9/2","4F5/2"],["MPR",0,"4F5/2","4F3/2"]],ref:""},
+  {name:"β-NaGdF₄:Yb,Tm@NaGdF₄:Tb — Gd migration (composition only)",f:"β-NaGdF4:49%Yb,1%Tm@NaGdF4:15%Tb",l:[980],p:[],ref:"Wang et al., Nat. Mater. 10, 968 (2011)"},
+  {name:"Y₂O₃:5%Eu³⁺ (composition only)",f:"Y2O3:5%Eu",l:[394],p:[],ref:""},
+  {name:"CaF₂:Eu²⁺ (composition only)",f:"CaF2:Eu2+",l:[365],p:[],ref:""},
+  {name:"K₂SiF₆:Mn⁴⁺ (composition only)",f:"K2SiF6:Mn4+",l:[455],p:[],ref:""},
+  {name:"Al₂O₃:Cr³⁺ ruby (composition only)",f:"Al2O3:Cr3+",l:[532],p:[],ref:""}
 ];
 
 /* ---------------- 화학식 적용 ---------------- */
@@ -199,7 +199,13 @@ function palette(forceLight){
     T:d?{ET:"#5cc9bf",ETU:"#c69be6",CR:"#f0a35e",EM:"#a9b6ad",BET:"#ef8c86",CET:"#8fb3e6",MPR:"#9aa79f",RAD:"#c3cfc5"}
        :{ET:"#0f7c74",ETU:"#7b3fa0",CR:"#b4580f",EM:"#6a7872",BET:"#b23a3a",CET:"#2f5f9e",MPR:"#7b8983",RAD:"#4a5a56"}};
 }
-const TYPE_SHORT={ET:"ET",ETU:"ETU",CR:"CR",EM:"EM",BET:"BET",CET:"CET",GSA:"GSA",ESA:"ESA",RAD:"방출",MPR:"MPR"};
+const TYPE_SHORT={ET:"ET",ETU:"ETU",CR:"CR",EM:"EM",BET:"BET",CET:"CET",GSA:"GSA",ESA:"ESA",RAD:"RAD",MPR:"MPR"};
+/* ed_core.js 가 한국어로 돌려주는 화면 라벨(등급 이름·과정 종류 이름·색 이름)을 화면용 영어로 바꾼다 — core 는 건드리지 않는다 */
+const TYPE_NAME={ET:"Energy transfer (ET)",ETU:"Energy transfer upconversion (ETU)",CR:"Cross-relaxation (CR)",EM:"Energy migration (EM)",BET:"Back energy transfer (BET)",CET:"Cooperative energy transfer (CET)",GSA:"Ground-state absorption (GSA)",ESA:"Excited-state absorption (ESA)",RAD:"Radiative transition (emission)",MPR:"Multiphonon relaxation (MPR)"};
+const typeName=t=>TYPE_NAME[t]||t;
+const gradeName=c=>c.edge?"resonant (Stark edge)":(C.GRADE_EN[c.grade]||c.gradeName);
+const BAND_EN={"보라":"Violet","파랑":"Blue","초록":"Green","노랑":"Yellow","주황":"Orange","빨강":"Red","근적외(NIR-I/II)":"NIR (NIR-I/II)","단파 적외(SWIR)":"SWIR"};
+const bandEn=nm=>{ const b=C.bandName(nm); return BAND_EN[b]||b; };
 
 /* ---------------- 렌더 진입 ---------------- */
 function render(root){
@@ -209,12 +215,12 @@ function render(root){
   const wrap=document.createElement("div"); wrap.className="ed";
   wrap.innerHTML=`
   <div class="card ed-top">
-    <h3>조성 <span class="hint">화학식(코어@셸) 또는 주기율표에서 이온 선택</span></h3>
+    <h3>Composition <span class="hint">화학식(코어@셸) 또는 주기율표에서 이온 선택</span></h3>
     <div class="ed-formrow">
-      <input type="text" id="edF" spellcheck="false" autocomplete="off" aria-label="화학식" placeholder="예: β-NaYF4:20%Yb,2%Er@NaYF4 · NaY0.78Yb0.2Er0.02F4 · K2SiF6:Mn4+" value="${esc(S.formula)}">
-      <button class="btn primary" id="edApply">적용</button>
-      <select class="ed-sel" id="edPreset" aria-label="프리셋"><option value="">프리셋…</option>${PRESETS.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("")}</select>
-      <button class="btn" id="edPTbtn" aria-expanded="false" aria-controls="edPTbox">주기율표</button>
+      <input type="text" id="edF" spellcheck="false" autocomplete="off" aria-label="Formula" placeholder="e.g. β-NaYF4:20%Yb,2%Er@NaYF4 · NaY0.78Yb0.2Er0.02F4 · K2SiF6:Mn4+" value="${esc(S.formula)}">
+      <button class="btn primary" id="edApply">Apply</button>
+      <select class="ed-sel" id="edPreset" aria-label="Preset"><option value="">Preset…</option>${PRESETS.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("")}</select>
+      <button class="btn" id="edPTbtn" aria-expanded="false" aria-controls="edPTbox">Periodic table</button>
     </div>
     <div id="edPTbox" hidden></div>
     <div class="ed-chips" id="edChips"></div>
@@ -224,17 +230,17 @@ function render(root){
   <div class="ed-main">
     <div class="card ed-diag">
       <div class="ed-tools">
-        <div class="seg" id="edMode" role="tablist" aria-label="편집 모드">
-          <button data-m="view">보기</button><button data-m="et">에너지 전달</button><button data-m="ph">광흡수</button><button data-m="em">방출·이완</button>
+        <div class="seg" id="edMode" role="tablist" aria-label="Edit mode">
+          <button data-m="view">View</button><button data-m="et">Energy transfer</button><button data-m="ph">Absorption</button><button data-m="em">Emission &amp; relaxation</button>
         </div>
         <span class="sp"></span>
-        <label class="ed-tog"><input type="checkbox" id="edStark"> Stark 폭</label>
-        <label class="ed-tog"><input type="checkbox" id="edAll"> 모든 라벨</label>
-        <label class="ed-tog"><input type="checkbox" id="edNums"> 수치</label>
-        <select class="ed-sel" id="edEmis" aria-label="방출 표시" title="대표 방출: 문헌 대표 전이 중 지금 과정으로 population이 쌓이는 준위에서 나오는 것만"><option value="main">방출: population 준위</option><option value="lit">방출: 문헌 대표 전체</option><option value="all">방출: 가능한 전체</option><option value="none">방출 숨김</option></select>
-        <select class="ed-sel" id="edEmax" aria-label="에너지 축 상한"><option value="auto">축: 자동</option>${[15000,20000,25000,30000,40000,52000].map(v=>`<option value="${v}">≤ ${v/1000}k cm⁻¹</option>`).join("")}</select>
-        <select class="ed-sel" id="edUnit" aria-label="축 단위"><option value="cm">cm⁻¹</option><option value="eV">eV</option></select>
-        <select class="ed-sel" id="edExport" aria-label="내보내기"><option value="">내보내기…</option><option value="svg">SVG (도식)</option><option value="png">PNG (도식, 3×)</option><option value="csv">CSV (과정 표)</option><option value="json">JSON (도식 저장)</option><option value="import">JSON 불러오기…</option></select>
+        <label class="ed-tog"><input type="checkbox" id="edStark"> Stark width</label>
+        <label class="ed-tog"><input type="checkbox" id="edAll"> All labels</label>
+        <label class="ed-tog"><input type="checkbox" id="edNums"> Values</label>
+        <select class="ed-sel" id="edEmis" aria-label="Emission display" title="대표 방출: 문헌 대표 전이 중 지금 과정으로 population이 쌓이는 준위에서 나오는 것만"><option value="main">Emission: populated levels</option><option value="lit">Emission: all literature-typical</option><option value="all">Emission: all possible</option><option value="none">Hide emission</option></select>
+        <select class="ed-sel" id="edEmax" aria-label="Energy axis maximum"><option value="auto">Axis: auto</option>${[15000,20000,25000,30000,40000,52000].map(v=>`<option value="${v}">≤ ${v/1000}k cm⁻¹</option>`).join("")}</select>
+        <select class="ed-sel" id="edUnit" aria-label="Axis unit"><option value="cm">cm⁻¹</option><option value="eV">eV</option></select>
+        <select class="ed-sel" id="edExport" aria-label="Export"><option value="">Export…</option><option value="svg">SVG (diagram)</option><option value="png">PNG (diagram, 3×)</option><option value="csv">CSV (process table)</option><option value="json">JSON (save diagram)</option><option value="import">Import JSON…</option></select>
         <input type="file" id="edImport" accept=".json,application/json" hidden>
       </div>
       <div class="ed-prompt" id="edPrompt" aria-live="polite"></div>
@@ -294,8 +300,8 @@ const HOSTEL=new Set(["Li","Na","K","Rb","Cs","Mg","Ca","Sr","Ba","Sc","Y","La",
 function renderPT(box){
   const Z={}; let z=0; const ALL=ELORDER(); ALL.forEach(e=>Z[e]=++z);
   const cell=el=>{ const act=!!C.OX[el]; const cls=act?"act":(HOSTEL.has(el)?"host":"");
-    return `<button type="button" data-el="${el}" class="${cls}" title="${act?"광학 활성 — 산화수 선택":(HOSTEL.has(el)?"호스트 원소":"준위 데이터 없음")}"><span>${el}</span><small>${Z[el]||""}</small></button>`; };
-  let h='<div class="ed-pt" role="group" aria-label="주기율표">';
+    return `<button type="button" data-el="${el}" class="${cls}" title="${act?"Optically active — pick oxidation state":(HOSTEL.has(el)?"Host element":"No level data")}"><span>${el}</span><small>${Z[el]||""}</small></button>`; };
+  let h='<div class="ed-pt" role="group" aria-label="Periodic table">';
   for(let r=1;r<=6;r++){ for(let c=1;c<=18;c++){ const e=PT.find(x=>x[1]===r&&x[2]===c); h+= e?cell(e[0]):'<span class="gap"></span>'; } }
   h+='<span class="gap"></span><span class="gap"></span><div class="lnrow" style="display:grid;grid-template-columns:repeat(15,minmax(0,1fr));gap:inherit;margin-top:6px">'+LNROW.map(cell).join("")+'<span></span></div>';
   h+='</div><div class="ed-ptpop" id="edPTpop"><span class="muted">색이 칠해진 원소 = 준위 데이터 보유 (Ln³⁺ 전체, Sm²⁺·Eu²⁺·Tm²⁺·Yb²⁺, Cr³⁺·Mn²⁺·Mn⁴⁺·Ni²⁺)</span></div>';
@@ -305,7 +311,7 @@ function renderPT(box){
     const el=b.dataset.el, pop=$q(box,"#edPTpop"), ox=C.OX[el];
     if(!ox){ pop.innerHTML=`<span class="muted"><b>${el}</b>: ${HOSTEL.has(el)?"호스트 구성 원소 — 광학 준위 없음(화학식에 넣으면 호스트로 인식)":"준위 데이터가 없습니다"}</span>`; return; }
     pop.innerHTML=`<b>${el}</b>`+ox.map(q=>{ const k=C.ionKey(el,q), d=C.IONS[k]; return `<button class="btn sm" data-k="${k}">${C.ionLabel(k)} <span class="muted">${d?d.conf:""}</span></button>`; }).join("")+
-      `<span class="muted">열로 추가</span>`;
+      `<span class="muted">Add as column</span>`;
     pop.querySelectorAll("button[data-k]").forEach(x=>x.onclick=()=>addIonColumn(x.dataset.k));
   });
 }
@@ -313,13 +319,13 @@ function ELORDER(){ return ("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca 
 
 function renderChips(){
   const el=$q(ROOT,"#edChips"); if(!el) return;
-  if(!S.cols.length){ el.innerHTML='<span class="muted">이온 없음</span>'; return; }
+  if(!S.cols.length){ el.innerHTML='<span class="muted">No ions</span>'; return; }
   el.innerHTML=S.cols.map((c,i)=>{
-    const d=C.IONS[c.ion]; const conc=(c.conc||[]).map((x,k)=>x==null?null:`${fmt(x,x<1?2:(x%1?1:0))}%${c.layers&&c.layers.length>1?"·"+(c.layers[k]==="core"?"코어":"셸"):""}`).filter(Boolean).join(", ");
+    const d=C.IONS[c.ion]; const conc=(c.conc||[]).map((x,k)=>x==null?null:`${fmt(x,x<1?2:(x%1?1:0))}%${c.layers&&c.layers.length>1?"·"+(c.layers[k]==="core"?"core":"shell"):""}`).filter(Boolean).join(", ");
     const est=d.kind==="d"||(d.band&&true)&&d.kind!=="ln3";
     const dup=S.cols.filter(x=>x.ion===c.ion).length>1 ? ` #${S.cols.filter((x,k)=>x.ion===c.ion&&k<=i).length}`:"";
     return `<span class="ed-ion ${d.kind!=="ln3"?"est":""}" data-i="${i}"><b>${C.ionLabel(c.ion)}${dup}</b><span class="c">${esc(conc||d.conf)}</span>
-      <button data-a="l" aria-label="왼쪽으로" title="왼쪽으로" ${i?"":"disabled"}>◂</button><button data-a="r" aria-label="오른쪽으로" title="오른쪽으로" ${i<S.cols.length-1?"":"disabled"}>▸</button><button data-a="d" aria-label="같은 이온 열 복제" title="같은 이온 열 하나 더 (동종 이온 간 CR·ETU 를 두 열로 그리기)">⧉</button><button class="x" data-a="x" aria-label="열 제거" title="열 제거">×</button></span>`;
+      <button data-a="l" aria-label="Move left" title="Move left" ${i?"":"disabled"}>◂</button><button data-a="r" aria-label="Move right" title="Move right" ${i<S.cols.length-1?"":"disabled"}>▸</button><button data-a="d" aria-label="Duplicate ion column" title="같은 이온 열 하나 더 (동종 이온 간 CR·ETU 를 두 열로 그리기)">⧉</button><button class="x" data-a="x" aria-label="Remove column" title="Remove column">×</button></span>`;
   }).join("");
   el.querySelectorAll(".ed-ion").forEach(ch=>ch.addEventListener("click",e=>{
     const b=e.target.closest("button[data-a]"); if(!b||b.disabled) return; const i=+ch.dataset.i;
@@ -333,20 +339,20 @@ function renderChips(){
 function renderHost(){
   const el=$q(ROOT,"#edHost"); if(!el) return;
   const H=S.host;
-  const layers=(S.layers||[]).map(l=>`${l.tag} ${esc(l.host||l.hostKey||"")}`).join(" · ");
+  const layers=(S.layers||[]).map(l=>`${esc(String(l.tag||"").replace(/^코어/,"Core").replace(/^셸/,"Shell"))} ${esc(l.host||l.hostKey||"")}`).join(" · ");
   el.innerHTML=`<span>${layers?`<b>${layers}</b>`:""}</span>
     <label title="최대 포논 에너지 — multiphonon 이완과 포논 보조 판정의 기준">ħω<sub>max</sub> <input type="number" id="edW" min="50" max="1500" step="10" value="${H.w||""}"> cm⁻¹</label>
-    ${H.est?'<span class="badge warn" title="'+esc(H.src)+'">추정</span>':(H.src?'<span class="badge gray" title="'+esc(H.src)+'">출처</span>':"")}
+    ${H.est?'<span class="badge warn" title="'+esc(H.src)+'">Est.</span>':(H.src?'<span class="badge gray" title="'+esc(H.src)+'">Source</span>':"")}
     <label>T <input type="number" id="edT" min="4" max="900" step="1" value="${H.T||295}"> K</label>
     <span class="muted">kT = ${fmt(C.KT_PER_K*(H.T||295))} cm⁻¹</span>`;
-  $q(el,"#edW").onchange=e=>{ const v=+e.target.value; if(v>0){ S.host.w=v; S.host.user=true; S.host.est=true; S.host.src="사용자 입력"; save(); rerender(); } };
+  $q(el,"#edW").onchange=e=>{ const v=+e.target.value; if(v>0){ S.host.w=v; S.host.user=true; S.host.est=true; S.host.src="User input"; save(); rerender(); } };
   $q(el,"#edT").onchange=e=>{ const v=+e.target.value; if(v>0){ S.host.T=v; save(); rerender(); } };
 }
 function renderWarn(){
   const el=$q(ROOT,"#edWarn"); if(!el) return;
   const notes=[]; S.warn.forEach(w=>notes.push(`<div class="note warn">${esc(w)}</div>`));
   S.cols.forEach(c=>(c.notes||[]).forEach(n=>notes.push(`<div class="note">${C.ionLabel(c.ion)} — ${esc(n)}</div>`)));
-  if(S.presetRef) notes.push(`<div class="note">프리셋 메커니즘 근거: ${esc(S.presetRef)}</div>`);
+  if(S.presetRef) notes.push(`<div class="note">Preset mechanism reference: ${esc(S.presetRef)}</div>`);
   el.innerHTML=notes.join("");
 }
 function renderTools(){
@@ -359,10 +365,10 @@ function renderPrompt(){
   const el=$q(ROOT,"#edPrompt"); if(!el) return;
   if(!PICK){ el.innerHTML= S.cols.length?'<span class="muted">준위·화살표에 마우스를 올리면 수치가 보입니다.</span>':""; return; }
   const n=PICK.steps.length;
-  const T={et:["① donor 출발 준위(여기 상태)","② donor 도착 준위 (같은 이온, 아래)","③ acceptor 출발 준위 (다른 열 또는 같은 열)","④ acceptor 도착 준위 (위) — 색 테두리 = resonant 등급"],
-           ph:["① 흡수 출발 준위","② 흡수 도착 준위 (같은 이온, 위)"],
-           em:["① 출발 준위","② 도착 준위 (같은 이온, 아래)"]}[PICK.kind];
-  el.innerHTML=`<span class="step">${T[Math.min(n,T.length-1)]}</span>${n?'<button class="btn sm" id="edUndo">한 단계 취소</button>':""}<span class="muted">Esc = 처음부터</span>`;
+  const T={et:["① Donor initial level (excited state)","② Donor final level (same ion, lower)","③ Acceptor initial level (other or same column)","④ Acceptor final level (upper) — colored outline = resonance grade"],
+           ph:["① Absorption initial level","② Absorption final level (same ion, upper)"],
+           em:["① Initial level","② Final level (same ion, lower)"]}[PICK.kind];
+  el.innerHTML=`<span class="step">${T[Math.min(n,T.length-1)]}</span>${n?'<button class="btn sm" id="edUndo">Undo step</button>':""}<span class="muted">Esc = restart</span>`;
   const u=$q(el,"#edUndo"); if(u) u.onclick=()=>{ PICK.steps.pop(); rerender(); };
 }
 
@@ -370,7 +376,7 @@ function renderPrompt(){
 const GEO={top:58,bot:34,axisL:66,strip:12,colMin:150,colMax:400,lab:58};
 function drawSVG(){
   const wrap=$q(ROOT,"#edWrap"); if(!wrap) return;
-  if(!MODEL.cols.length){ wrap.innerHTML=`<div class="ed-empty">화학식을 입력하거나 프리셋·주기율표에서 이온을 고르세요.<br><span class="muted">준위값: LaF₃:Ln³⁺ (Carnall et al., J. Chem. Phys. 90, 3443 (1989))</span></div>`; return; }
+  if(!MODEL.cols.length){ wrap.innerHTML=`<div class="ed-empty"><b>No composition yet</b><br>화학식을 입력하거나 프리셋·주기율표에서 이온을 고르세요.<br><span class="muted">준위값: LaF₃:Ln³⁺ (Carnall et al., J. Chem. Phys. 90, 3443 (1989))</span></div>`; return; }
   wrap.innerHTML=svgMarkup(palette(),Math.max(320,wrap.clientWidth||900),true);
   bindSVG(wrap.firstElementChild);
 }
@@ -386,7 +392,7 @@ function svgMarkup(P,avail,interactive){
   const y=E=>GEO.top+(1-E/Emax)*plotH;
   const colX=i=>GEO.axisL+i*cw;
   const out=[];
-  out.push(`<svg class="ed-svg ${PICK?"m-"+PICK.kind:""}" id="edSvg" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="에너지 준위 도식">`);
+  out.push(`<svg class="ed-svg ${PICK?"m-"+PICK.kind:""}" id="edSvg" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Energy level diagram">`);
   out.push(`<defs>${arrowDefs(P)}</defs>`);
   out.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${P.bg}"/>`);
   /* 축 */
@@ -468,7 +474,7 @@ function drawColumn(m,i,x0,cw,y,P,picked,M){
   const conc=(m.c.conc||[]).filter(v=>v!=null).map(v=>`${fmt(v,v<1?2:(v%1?1:0))}%`).join(", ");
   const same=S.cols.filter(c=>c.ion===m.c.ion); const idx=same.length>1?` #${same.indexOf(m.c)+1}`:"";
   o.push(`<text x="${(bx0+bx1)/2+10}" y="22" font-size="15" font-weight="700" text-anchor="middle" fill="${P.ink}">${esc(C.ionLabel(m.c.ion))}${idx}</text>`);
-  o.push(`<text x="${(bx0+bx1)/2+10}" y="38" font-size="10.5" text-anchor="middle" fill="${P.muted}">${esc([d.conf,conc,d.kind!=="ln3"?"호스트 의존":""].filter(Boolean).join(" · "))}</text>`);
+  o.push(`<text x="${(bx0+bx1)/2+10}" y="38" font-size="10.5" text-anchor="middle" fill="${P.muted}">${esc([d.conf,conc,d.kind!=="ln3"?"host-dependent":""].filter(Boolean).join(" · "))}</text>`);
   const keys=keyLevels(m,M);
   const vis=m.lv.filter(l=>l.E<=M.Emax+1);
   /* 라벨 배치(겹침 회피) */
@@ -595,7 +601,7 @@ function drawProcs(M,colX,cw,y,P,lanes){
       const mdY=(yd1+yd2)/2, maY=(ya1+ya2)/2;
       const cxm=(xd+xa)/2, cym=Math.min(mdY,maY)-Math.max(18,Math.abs(xa-xd)*0.12);
       const sameX=Math.abs(xa-xd)<2;
-      o.push(`<g class="proc tipable${sel?" sel":""}" data-tip="proc" data-u="${p.p.uid}" tabindex="0" role="button" aria-label="${esc((C.TYPE_INFO[p.type]||{}).name||p.type)} ${p.n}">`);
+      o.push(`<g class="proc tipable${sel?" sel":""}" data-tip="proc" data-u="${p.p.uid}" tabindex="0" role="button" aria-label="${esc(typeName(p.type))} ${p.n}">`);
       o.push(`<line x1="${xd}" x2="${xd}" y1="${yd1}" y2="${yd2}" stroke="transparent" stroke-width="12"/><line x1="${xa}" x2="${xa}" y1="${ya1}" y2="${ya2}" stroke="transparent" stroke-width="12"/>`);
       if(dFirst||sel){ const dc=dMixed&&!sel?P.ink2:col; o.push(arrow(xd,yd1,yd2,dc,{marker:dMixed&&!sel?"edA_ink":"edA_"+(P.T[p.type]?p.type:"ET"),w,dash:"6 3"})); }
       o.push(arrow(xa,ya1,ya2,col,{marker:"edA_"+(P.T[p.type]?p.type:"ET"),w,dash:"6 3"}));
@@ -682,76 +688,76 @@ function showTip(t,x,yv){
 const E3 = E => `${fmt(E)} cm⁻¹ · ${fmt(C.cm2eV(E),3)} eV`;
 function tipHTML(t){
   const M=MODEL, k=t.dataset.tip;
-  if(k==="strip") return `<h4>광자 색 띠</h4>바닥(0)에서 그 높이까지 전이할 때의 광자 파장 색. 눈금: 2000·1000·800·700·600·500·400·300·250 nm`;
+  if(k==="strip") return `<h4>Photon color strip</h4>바닥(0)에서 그 높이까지 전이할 때의 광자 파장 색. 눈금: 2000·1000·800·700·600·500·400·300·250 nm`;
   if(k==="lv"){
     const m=M.byUid[t.dataset.c]; const l=m&&m.byId[t.dataset.id]; if(!l) return "";
     return levelTip(m,l);
   }
   if(k==="auto"){ const x=M.photons[+t.dataset.k]; if(!x) return "";
-    return photonTip(x.m,x.from,x.to,x.nm,x.c,"자동 후보 (활성 광원 기준)"); }
+    return photonTip(x.m,x.from,x.to,x.nm,x.c,"Auto candidate (based on active sources) — 활성 광원 기준"); }
   if(k==="em"){ const e=M.emis[+t.dataset.k]; if(!e) return "";
-    return `<h4>${esc(C.ionLabel(e.m.c.ion))} ${C.termHTML(e.pair?e.pair.join("+"):e.up.t)} → ${C.termHTML(e.lo.t)} · 방출</h4>
-      <table><tr><td class="k">λ (바리센터)</td><td><b>${fmt(e.nm,1)} nm</b> · ${C.bandName(e.nm)}</td></tr>
-      ${e.typ?`<tr><td class="k">문헌 대표값</td><td>${e.typ} nm</td></tr>`:""}
-      <tr><td class="k">에너지</td><td>${E3(C.nm2cm(e.nm))}</td></tr>
-      ${e.up.kind==="f"&&e.lo.kind==="f"?`<tr><td class="k">Stark 창</td><td>${fmt(C.cm2nm(e.up.hi-e.lo.lo),1)}–${fmt(C.cm2nm(Math.max(1,e.up.lo-e.lo.hi)),1)} nm</td></tr>`:""}</table>
+    return `<h4>${esc(C.ionLabel(e.m.c.ion))} ${C.termHTML(e.pair?e.pair.join("+"):e.up.t)} → ${C.termHTML(e.lo.t)} · Emission</h4>
+      <table><tr><td class="k">λ (barycenter)</td><td><b>${fmt(e.nm,1)} nm</b> · ${bandEn(e.nm)}</td></tr>
+      ${e.typ?`<tr><td class="k">Literature value</td><td>${e.typ} nm</td></tr>`:""}
+      <tr><td class="k">Energy</td><td>${E3(C.nm2cm(e.nm))}</td></tr>
+      ${e.up.kind==="f"&&e.lo.kind==="f"?`<tr><td class="k">Stark window</td><td>${fmt(C.cm2nm(e.up.hi-e.lo.lo),1)}–${fmt(C.cm2nm(Math.max(1,e.up.lo-e.lo.hi)),1)} nm</td></tr>`:""}</table>
       <div class="s">${esc(e.src||"")}${e.up.kind==="band"?" · 밴드 방출은 흡수 에너지에서 Stokes 이동을 뺀 값":""}</div>`; }
   if(k==="proc"){ const p=M.procs.find(x=>x.p.uid===t.dataset.u); if(!p) return ""; return procTip(p); }
   return "";
 }
 function levelTip(m,l){
-  const g=l.ground?"바닥 준위":(l.regime==="rad"?"복사 우세 (metastable)":l.regime==="mixed"?"복사·multiphonon 경쟁":l.regime==="mpr"?"multiphonon 이완 우세":"—");
-  const srcN={e:"실측 (모든 Stark 준위 관측, Carnall 1989)",c:"계산 (Carnall 1989 계산 Stark 준위 평균)",q:"재계산 (Carnall 파라미터, qlanth 해밀토니안)",f:"자유 이온 계산 (강한 J 혼합)",n:"NIST 자유 이온",ts:"Tanabe–Sugano (입력한 Dq·B·C)",band:"호스트 의존 밴드 (매개변수)"}[l.src]||"";
+  const g=l.ground?"Ground level":(l.regime==="rad"?"Radiative-dominant (metastable)":l.regime==="mixed"?"Radiative / multiphonon competition":l.regime==="mpr"?"Multiphonon-dominant":"—");
+  const srcN={e:"Measured (all Stark levels observed, Carnall 1989)",c:"Calculated (mean of Carnall 1989 calculated Stark levels)",q:"Recalculated (Carnall parameters, qlanth Hamiltonian)",f:"Free-ion calculation (strong J mixing)",n:"NIST free ion",ts:"Tanabe–Sugano (entered Dq·B·C)",band:"Host-dependent band (parameter)"}[l.src]||"";
   return `<h4>${esc(C.ionLabel(m.c.ion))} ${C.termHTML(l.t)}</h4><table>
-   <tr><td class="k">에너지</td><td><b>${E3(l.E)}</b></td></tr>
-   ${!l.ground?`<tr><td class="k">바닥에서 λ</td><td>${fmt(C.cm2nm(l.E-m.lv[0].E),1)} nm</td></tr>`:""}
-   ${l.hi-l.lo>1?`<tr><td class="k">${l.kind==="f"?"Stark 범위":"폭(근사)"}</td><td>${fmt(l.lo)}–${fmt(l.hi)} cm⁻¹</td></tr>`:""}
-   ${!l.ground&&l.gap!=null?`<tr><td class="k">아래 간격</td><td>${fmt(l.gap)} cm⁻¹ (가장자리) · p = ${l.p!=null?fmt(l.p,1):"—"} 포논</td></tr>`:""}
-   <tr><td class="k">이완</td><td>${g}${l.cascade&&l.cascade!==l.id?` → ${C.termHTML(m.byId[l.cascade]?m.byId[l.cascade].t:l.cascade)}로 cascade`:""}</td></tr>
-   ${l.comp?`<tr><td class="k">조성</td><td>${esc(l.comp)}</td></tr>`:""}
+   <tr><td class="k">Energy</td><td><b>${E3(l.E)}</b></td></tr>
+   ${!l.ground?`<tr><td class="k">λ from ground</td><td>${fmt(C.cm2nm(l.E-m.lv[0].E),1)} nm</td></tr>`:""}
+   ${l.hi-l.lo>1?`<tr><td class="k">${l.kind==="f"?"Stark range":"Width (approx.)"}</td><td>${fmt(l.lo)}–${fmt(l.hi)} cm⁻¹</td></tr>`:""}
+   ${!l.ground&&l.gap!=null?`<tr><td class="k">Gap below</td><td>${fmt(l.gap)} cm⁻¹ (edge) · p = ${l.p!=null?fmt(l.p,1):"—"} phonons</td></tr>`:""}
+   <tr><td class="k">Relaxation</td><td>${g}${l.cascade&&l.cascade!==l.id?` → cascades to ${C.termHTML(m.byId[l.cascade]?m.byId[l.cascade].t:l.cascade)}`:""}</td></tr>
+   ${l.comp?`<tr><td class="k">Composition</td><td>${esc(l.comp)}</td></tr>`:""}
   </table><div class="s">${esc(srcN)}${l.note?" · "+esc(l.note):""}</div>`;
 }
 function photonTip(m,F,T,nm,c,sub){
-  if(!c) return `<h4>${esc(C.ionLabel(m.c.ion))} ${C.termHTML(F.t)} → ${C.termHTML(T.t)}</h4>필요 파장 ${fmt(C.cm2nm(T.E-F.E),1)} nm — 활성 광원 없음`;
+  if(!c) return `<h4>${esc(C.ionLabel(m.c.ion))} ${C.termHTML(F.t)} → ${C.termHTML(T.t)}</h4>필요 파장 ${fmt(C.cm2nm(T.E-F.E),1)} nm — 활성 광원 없음 (no active source)`;
   return `<h4>${F.ground?"GSA":"ESA"} · ${esc(C.ionLabel(m.c.ion))} ${C.termHTML(F.t)} → ${C.termHTML(T.t)}</h4><table>
-   <tr><td class="k">광원</td><td><b>${nm} nm</b> (${fmt(C.nm2cm(nm))} cm⁻¹)</td></tr>
-   <tr><td class="k">전이 창</td><td>${fmt(c.w.lo)}–${fmt(c.w.hi)} cm⁻¹ (중심 ${fmt(c.w.E)}, ${fmt(C.cm2nm(c.w.E),1)} nm)</td></tr>
-   <tr><td class="k">판정</td><td><span class="gr g${c.grade}">${c.gradeName}</span> δ = ${fmt(c.delta)} cm⁻¹${c.nPh!=null&&c.delta>0?` (${fmt(c.nPh,1)} ħω)`:""}</td></tr>
-   ${c.delta>0?`<tr><td class="k">포논</td><td>${c.endo?`흡수 필요(anti-Stokes) · exp(−δ/kT) = ${c.boltz.toExponential(1)}`:"방출(Stokes, 남는 에너지)"}</td></tr>`:""}
+   <tr><td class="k">Source</td><td><b>${nm} nm</b> (${fmt(C.nm2cm(nm))} cm⁻¹)</td></tr>
+   <tr><td class="k">Transition window</td><td>${fmt(c.w.lo)}–${fmt(c.w.hi)} cm⁻¹ (center ${fmt(c.w.E)}, ${fmt(C.cm2nm(c.w.E),1)} nm)</td></tr>
+   <tr><td class="k">Grade</td><td><span class="gr g${c.grade}">${gradeName(c)}</span> δ = ${fmt(c.delta)} cm⁻¹${c.nPh!=null&&c.delta>0?` (${fmt(c.nPh,1)} ħω)`:""}</td></tr>
+   ${c.delta>0?`<tr><td class="k">Phonon</td><td>${c.endo?`absorption required (anti-Stokes) · exp(−δ/kT) = ${c.boltz.toExponential(1)}`:"emission (Stokes, excess energy)"}</td></tr>`:""}
   </table><div class="s">${esc(sub||"")}</div>`;
 }
 function procTip(p){
-  if(p.broken) return "<h4>해석 불가</h4>이 과정이 가리키는 준위가 현재 열에 없습니다";
+  if(p.broken) return "<h4>Unresolved</h4>이 과정이 가리키는 준위가 현재 열에 없습니다";
   if(p.kind==="ET"){
     const c=p.c;
-    return `<h4>${p.n}. ${esc((C.TYPE_INFO[p.type]||{}).name||p.type)}${p.type!==p.auto?` <span class="k">(자동 판정: ${p.auto})</span>`:""}</h4><table>
+    return `<h4>${p.n}. ${esc(typeName(p.type))}${p.type!==p.auto?` <span class="k">(auto: ${p.auto})</span>`:""}</h4><table>
      <tr><td class="k">donor</td><td>${esc(C.ionLabel(p.md.c.ion))} ${C.termHTML(p.Df.t)}→${C.termHTML(p.Dt.t)} · ${fmt(c.dw.E)} cm⁻¹${p.p.coop?" ×2":""} (${fmt(C.cm2nm(c.dw.E),0)} nm)</td></tr>
      <tr><td class="k">acceptor</td><td>${esc(C.ionLabel(p.ma.c.ion))} ${C.termHTML(p.Af.t)}→${C.termHTML(p.At.t)} · ${fmt(c.aw.E)} cm⁻¹ (${fmt(C.cm2nm(c.aw.E),0)} nm)</td></tr>
-     <tr><td class="k">ΔE (중심)</td><td><b>${c.dE>0?"+":""}${fmt(c.dE)} cm⁻¹</b> · ${fmt(c.dE/C.CM_PER_EV*1000,0)} meV</td></tr>
-     <tr><td class="k">판정</td><td><span class="gr g${c.grade}">${c.gradeName}</span>${c.delta>0?` δ = ${fmt(c.delta)} cm⁻¹ (${c.nPh!=null?fmt(c.nPh,1)+" ħω":""})`:""}</td></tr>
-     ${c.delta>0?`<tr><td class="k">포논</td><td>${c.endo?`endothermic — 포논 흡수 필요, exp(−δ/kT) = ${c.boltz.toExponential(1)}`:"발열 — 남는 에너지를 포논으로 방출"}</td></tr>`:""}
-    </table><div class="s">Stark 창: donor ${fmt(c.dw.lo)}–${fmt(c.dw.hi)}, acceptor ${fmt(c.aw.lo)}–${fmt(c.aw.hi)} cm⁻¹. ${esc((C.TYPE_INFO[p.type]||{}).desc||"")}</div>`;
+     <tr><td class="k">ΔE (center)</td><td><b>${c.dE>0?"+":""}${fmt(c.dE)} cm⁻¹</b> · ${fmt(c.dE/C.CM_PER_EV*1000,0)} meV</td></tr>
+     <tr><td class="k">Grade</td><td><span class="gr g${c.grade}">${gradeName(c)}</span>${c.delta>0?` δ = ${fmt(c.delta)} cm⁻¹ (${c.nPh!=null?fmt(c.nPh,1)+" ħω":""})`:""}</td></tr>
+     ${c.delta>0?`<tr><td class="k">Phonon</td><td>${c.endo?`endothermic — phonon absorption required, exp(−δ/kT) = ${c.boltz.toExponential(1)}`:"exothermic — excess energy emitted as phonons"}</td></tr>`:""}
+    </table><div class="s">Stark windows: donor ${fmt(c.dw.lo)}–${fmt(c.dw.hi)}, acceptor ${fmt(c.aw.lo)}–${fmt(c.aw.hi)} cm⁻¹. ${esc((C.TYPE_INFO[p.type]||{}).desc||"")}</div>`;
   }
-  if(p.kind==="PH") return photonTip(p.m,p.F,p.T,p.nm,p.c,p.p.nm?"지정 광원":"활성 광원 중 가장 잘 맞는 것");
-  return `<h4>${p.n}. ${p.kind==="MPR"?"multiphonon 이완":"복사 전이"} · ${esc(C.ionLabel(p.m.c.ion))} ${C.termHTML(p.F.t)} → ${C.termHTML(p.T.t)}</h4>
-    <table><tr><td class="k">간격</td><td>${fmt(p.F.E-p.T.E)} cm⁻¹ · ${fmt(p.nm,1)} nm</td></tr>
-    <tr><td class="k">가장자리 간격</td><td>${fmt(Math.max(0,p.F.lo-p.T.hi))} cm⁻¹${MODEL.cx.hw?` = ${fmt(Math.max(0,p.F.lo-p.T.hi)/MODEL.cx.hw,1)} ħω`:""}</td></tr></table>`;
+  if(p.kind==="PH") return photonTip(p.m,p.F,p.T,p.nm,p.c,p.p.nm?"Specified source":"Best-matching active source");
+  return `<h4>${p.n}. ${p.kind==="MPR"?"Multiphonon relaxation":"Radiative transition"} · ${esc(C.ionLabel(p.m.c.ion))} ${C.termHTML(p.F.t)} → ${C.termHTML(p.T.t)}</h4>
+    <table><tr><td class="k">Gap</td><td>${fmt(p.F.E-p.T.E)} cm⁻¹ · ${fmt(p.nm,1)} nm</td></tr>
+    <tr><td class="k">Edge gap</td><td>${fmt(Math.max(0,p.F.lo-p.T.hi))} cm⁻¹${MODEL.cx.hw?` = ${fmt(Math.max(0,p.F.lo-p.T.hi)/MODEL.cx.hw,1)} ħω`:""}</td></tr></table>`;
 }
 
 /* ---------------- 옆 패널 ---------------- */
 function renderLasers(){
   const el=$q(ROOT,"#edLasCard"); if(!el) return; const P=palette();
   const pa=MODEL.pa;
-  el.innerHTML=`<h3>여기 광원 <span class="hint">GSA·ESA 자동 후보의 기준</span></h3>
-   <div class="ed-lasers">${S.lasers.map((nm,i)=>`<span class="ed-laser"><i style="background:${C.wlColor(nm,P.dark)}"></i>${nm} nm<button data-i="${i}" aria-label="${nm} nm 제거">×</button></span>`).join("")}
-   <input type="number" id="edLasIn" min="150" max="5000" step="1" placeholder="nm 추가" aria-label="여기 파장 추가 (nm)">
-   <label class="ed-tog"><input type="checkbox" id="edGsa" ${S.show.gsa?"checked":""}> 자동 후보 표시</label></div>
-   ${pa.map(r=>`<div class="ed-pa"><b>photon avalanche 루프 후보 · ${esc(C.ionLabel(r.m.c.ion))} · ${r.nm} nm</b><br>
-     GSA ${C.termHTML(r.gsa.to.t)} <span class="gr g${r.gsa.c.grade}">${r.gsa.c.gradeName}</span> ·
-     ESA ${C.termHTML(r.M.t)}→${C.termHTML(r.U.t)} <span class="gr g${r.esa.grade}">${r.esa.gradeName}</span>${r.U.id!==r.H.id?` ⇝ ${C.termHTML(r.H.t)}`:""} ·
-     CR ${C.termHTML(r.H.t)}+${C.termHTML(MODEL.cols[r.m.i].lv[0].t)}→${C.termHTML(r.X.t)}+${C.termHTML(r.Y.t)} <span class="gr g${r.cr.grade}">${r.cr.gradeName}</span>
+  el.innerHTML=`<h3>Excitation sources <span class="hint">GSA·ESA 자동 후보의 기준</span></h3>
+   <div class="ed-lasers">${S.lasers.map((nm,i)=>`<span class="ed-laser"><i style="background:${C.wlColor(nm,P.dark)}"></i>${nm} nm<button data-i="${i}" aria-label="Remove ${nm} nm">×</button></span>`).join("")}
+   <input type="number" id="edLasIn" min="150" max="5000" step="1" placeholder="Add nm" aria-label="Add excitation wavelength (nm)">
+   <label class="ed-tog"><input type="checkbox" id="edGsa" ${S.show.gsa?"checked":""}> Show auto candidates</label></div>
+   ${pa.map(r=>`<div class="ed-pa"><b>Photon avalanche loop candidate · ${esc(C.ionLabel(r.m.c.ion))} · ${r.nm} nm</b><br>
+     GSA ${C.termHTML(r.gsa.to.t)} <span class="gr g${r.gsa.c.grade}">${gradeName(r.gsa.c)}</span> ·
+     ESA ${C.termHTML(r.M.t)}→${C.termHTML(r.U.t)} <span class="gr g${r.esa.grade}">${gradeName(r.esa)}</span>${r.U.id!==r.H.id?` ⇝ ${C.termHTML(r.H.t)}`:""} ·
+     CR ${C.termHTML(r.H.t)}+${C.termHTML(MODEL.cols[r.m.i].lv[0].t)}→${C.termHTML(r.X.t)}+${C.termHTML(r.Y.t)} <span class="gr g${r.cr.grade}">${gradeName(r.cr)}</span>
      <div class="muted" style="margin-top:4px">준위 구조상 필요 조건만 점검 — 실제 avalanche 여부는 σ<sub>ESA</sub>/σ<sub>GSA</sub>, CR 속도(농도), metastable 수명에 달림 (Joubert, Opt. Mater. 11, 181 (1999); Lee et al., Nature 589, 230 (2021)).</div>
-     <div class="row" style="margin-top:6px">${S.procs.some(p=>p.grp==="pa:"+r.m.c.uid+"|"+r.nm)?`<button class="btn sm" data-parm="${r.m.c.uid}|${r.nm}">도식에서 이 루프 제거</button><span class="muted">도식에 있음</span>`:`<button class="btn sm" data-pa="${r.m.c.uid}|${r.nm}">도식에 루프 추가</button>`}</div></div>`).join("")}`;
+     <div class="row" style="margin-top:6px">${S.procs.some(p=>p.grp==="pa:"+r.m.c.uid+"|"+r.nm)?`<button class="btn sm" data-parm="${r.m.c.uid}|${r.nm}">Remove this loop from diagram</button><span class="muted">In diagram</span>`:`<button class="btn sm" data-pa="${r.m.c.uid}|${r.nm}">Add loop to diagram</button>`}</div></div>`).join("")}`;
   el.querySelectorAll(".ed-laser button").forEach(b=>b.onclick=()=>{ S.lasers.splice(+b.dataset.i,1); S.lasersUser=true; save(); rerender(); });
   const inp=$q(el,"#edLasIn");
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ const v=Math.round(+inp.value); if(v>=150&&v<=5000&&!S.lasers.includes(v)){ S.lasers.push(v); S.lasers.sort((a,b)=>a-b); S.lasersUser=true; save(); rerender(); } } });
@@ -772,7 +778,7 @@ function renderLasers(){
 }
 function procLabel(p){
   const L=m=>esc(C.ionLabel(m.c.ion));
-  if(p.broken) return "해석 불가";
+  if(p.broken) return "Unresolved";
   if(p.kind==="ET") return `${L(p.md)} ${C.termHTML(p.Df.t)}→${C.termHTML(p.Dt.t)} ⇒ ${p.md===p.ma?"":L(p.ma)+" "}${C.termHTML(p.Af.t)}→${C.termHTML(p.At.t)}`;
   return `${L(p.m)} ${C.termHTML(p.F.t)}→${C.termHTML(p.T.t)}${p.kind==="PH"&&p.nm?` · ${p.nm} nm`:""}`;
 }
@@ -780,12 +786,12 @@ function typeBadge(t){ const P=palette(); const c=P.T[t]||(t==="GSA"||t==="ESA"?
 function renderProcs(){
   const el=$q(ROOT,"#edProcCard"); if(!el) return;
   const ps=MODEL.procs;
-  el.innerHTML=`<h3>과정 <span class="hint">${ps.length}개</span>${ps.length?'<button class="btn xs" id="edProcClr" style="margin-left:auto" title="도식에 넣은 과정을 모두 지운다 (준위·이온은 그대로)">모두 지우기</button>':""}</h3>`+(ps.length?`<table class="ed-tbl"><thead><tr><th>#</th><th>종류</th><th>과정</th><th class="num">ΔE</th><th>판정</th><th></th></tr></thead><tbody>`+
+  el.innerHTML=`<h3>Processes <span class="hint">${ps.length}</span>${ps.length?'<button class="btn xs" id="edProcClr" style="margin-left:auto" title="도식에 넣은 과정을 모두 지운다 (준위·이온은 그대로)">Clear all</button>':""}</h3>`+(ps.length?`<table class="ed-tbl"><thead><tr><th>#</th><th>Type</th><th>Process</th><th class="num">ΔE</th><th>Grade</th><th></th></tr></thead><tbody>`+
     ps.map(p=>{ const c=p.c; const dE=p.kind==="ET"?c.dE:(p.kind==="PH"&&c?c.dE:null);
-      const gr=(p.kind==="ET"||p.kind==="PH")&&c?`<span class="gr g${c.grade}">${c.gradeName}</span>`:(p.kind==="PH"?'<span class="gr g4">광원 없음</span>':"");
-      return `<tr data-u="${p.p.uid}" class="${S.sel===p.p.uid?"sel":""}"><td>${p.n}</td><td>${typeBadge(p.type)}</td><td>${procLabel(p)}</td><td class="num">${dE==null?"":(dE>0?"+":"")+fmt(dE)}</td><td>${gr}</td><td><button class="btn xs" data-pdel="${p.p.uid}" aria-label="과정 삭제" title="삭제">×</button></td></tr>`; }).join("")+
+      const gr=(p.kind==="ET"||p.kind==="PH")&&c?`<span class="gr g${c.grade}">${gradeName(c)}</span>`:(p.kind==="PH"?'<span class="gr g4">No source</span>':"");
+      return `<tr data-u="${p.p.uid}" class="${S.sel===p.p.uid?"sel":""}"><td>${p.n}</td><td>${typeBadge(p.type)}</td><td>${procLabel(p)}</td><td class="num">${dE==null?"":(dE>0?"+":"")+fmt(dE)}</td><td>${gr}</td><td><button class="btn xs" data-pdel="${p.p.uid}" aria-label="Delete process" title="Delete">×</button></td></tr>`; }).join("")+
     `</tbody></table><div class="muted" style="margin-top:6px">ΔE = donor(또는 광자) − acceptor 전이 에너지 [cm⁻¹]. 양수면 남는 에너지를 포논으로 방출.</div>`:
-    `<div class="muted">‘에너지 전달’·‘광흡수’·‘방출·이완’ 모드에서 준위를 차례로 누르거나, 아래 ‘경로 제안’에서 추가하세요.</div>`);
+    `<div class="muted">‘Energy transfer’·‘Absorption’·‘Emission &amp; relaxation’ 모드에서 준위를 차례로 누르거나, 아래 ‘Path suggestions’에서 추가하세요.</div>`);
   el.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=e=>{ if(e.target.closest("button[data-pdel]")) return; S.sel=tr.dataset.u; rerender(); });
   el.querySelectorAll("button[data-pdel]").forEach(b=>b.onclick=()=>delProc(b.dataset.pdel));
   const clr=$q(el,"#edProcClr"); if(clr) clr.onclick=()=>{ if(!confirm(`도식의 과정 ${S.procs.length}개를 모두 지울까요? (준위·이온은 그대로)`)) return; S.procs=[]; S.sel=null; save(); rerender(); note("과정을 모두 지웠습니다"); };
@@ -797,23 +803,23 @@ function renderDetail(){
   if(String(sel).startsWith("lv:")){
     const [cu,id]=sel.slice(3).split("|"); const m=MODEL.byUid[cu]; const l=m&&m.byId[id];
     if(!l){ el.hidden=true; return; }
-    el.innerHTML=`<h3>준위</h3>`+levelTip(m,l).replace("<h4>","<div style='font-weight:700;margin-bottom:4px'>").replace("</h4>","</div>")+dParamsHTML(m);
+    el.innerHTML=`<h3>Level</h3>`+levelTip(m,l).replace("<h4>","<div style='font-weight:700;margin-bottom:4px'>").replace("</h4>","</div>")+dParamsHTML(m);
     bindDParams(el,m); return;
   }
   const p=MODEL.procs.find(x=>x.p.uid===sel); if(!p){ el.hidden=true; return; }
   let body="";
   if(p.kind==="ET"){
     body=procTip(p).replace(/<h4>.*?<\/h4>/,"")+
-    `<div class="row"><label class="muted">종류 <select class="ed-sel" id="edType">${["auto","ET","ETU","CR","EM","BET","CET"].map(t=>`<option value="${t}" ${(t==="auto"&&!p.p.type)||t===p.p.type?"selected":""}>${t==="auto"?"자동 ("+p.auto+")":t}</option>`).join("")}</select></label>
-     <label class="ed-tog"><input type="checkbox" id="edCoop" ${p.p.coop?"checked":""}> 협동(donor 2개)</label></div>`;
+    `<div class="row"><label class="muted">Type <select class="ed-sel" id="edType">${["auto","ET","ETU","CR","EM","BET","CET"].map(t=>`<option value="${t}" ${(t==="auto"&&!p.p.type)||t===p.p.type?"selected":""}>${t==="auto"?"Auto ("+p.auto+")":t}</option>`).join("")}</select></label>
+     <label class="ed-tog"><input type="checkbox" id="edCoop" ${p.p.coop?"checked":""}> Cooperative (2 donors)</label></div>`;
   } else if(p.kind==="PH"){
-    body=procTip(p).replace(/<h4>.*?<\/h4>/,"")+`<div class="row"><label class="muted">광원 <select class="ed-sel" id="edPhNm"><option value="">자동 (가장 잘 맞는 것)</option>${S.lasers.map(nm=>`<option value="${nm}" ${p.p.nm===nm?"selected":""}>${nm} nm</option>`).join("")}</select></label></div>`;
+    body=procTip(p).replace(/<h4>.*?<\/h4>/,"")+`<div class="row"><label class="muted">Source <select class="ed-sel" id="edPhNm"><option value="">Auto (best match)</option>${S.lasers.map(nm=>`<option value="${nm}" ${p.p.nm===nm?"selected":""}>${nm} nm</option>`).join("")}</select></label></div>`;
   } else {
-    body=procTip(p).replace(/<h4>.*?<\/h4>/,"")+`<div class="row"><div class="seg" id="edRk"><button data-k="RAD" class="${p.kind==="RAD"?"active":""}">복사</button><button data-k="MPR" class="${p.kind==="MPR"?"active":""}">multiphonon</button></div></div>`;
+    body=procTip(p).replace(/<h4>.*?<\/h4>/,"")+`<div class="row"><div class="seg" id="edRk"><button data-k="RAD" class="${p.kind==="RAD"?"active":""}">Radiative</button><button data-k="MPR" class="${p.kind==="MPR"?"active":""}">Multiphonon</button></div></div>`;
   }
   el.innerHTML=`<h3>${p.n}. ${typeBadge(p.type)} <span style="font-weight:500">${procLabel(p)}</span></h3>${body}
-   <div class="row"><textarea id="edNote" placeholder="메모 (근거 논문 등)">${esc(p.p.note||"")}</textarea></div>
-   <div class="row right"><button class="btn sm" id="edDel">삭제</button></div>`;
+   <div class="row"><textarea id="edNote" placeholder="Note (reference etc.)">${esc(p.p.note||"")}</textarea></div>
+   <div class="row right"><button class="btn sm" id="edDel">Delete</button></div>`;
   const ty=$q(el,"#edType"); if(ty) ty.onchange=e=>{ p.p.type=e.target.value==="auto"?null:e.target.value; save(); rerender(); };
   const co=$q(el,"#edCoop"); if(co) co.onchange=e=>{ p.p.coop=e.target.checked; save(); rerender(); };
   const pn=$q(el,"#edPhNm"); if(pn) pn.onchange=e=>{ p.p.nm=e.target.value?+e.target.value:null; save(); rerender(); };
@@ -829,9 +835,9 @@ function dParamsHTML(m){
       <span class="muted">Dq/B ${fmt(p.Dq/p.B,2)} · C/B ${fmt(p.C/p.B,2)} · β = B/B₀ ${fmt(p.B/d.B0,2)}</span></div>
       <div class="muted" style="margin-top:4px">기본값: ${esc(d.preset)}${d.est?" (추정)":""}. 팔면체·스핀-궤도 무시. 격자 범위 Dq/B 0.05–4.0, C/B 3.4–5.6.</div>`; }
   if(d.band){ const b=Object.assign({},d.band,m.c.band||{});
-    return `<div class="ed-dparam"><b>${esc(b.label)} 밴드</b><label>첫 흡수 <input type="number" data-b="E" value="${b.E==null?"":b.E}" step="100"> cm⁻¹</label>
+    return `<div class="ed-dparam"><b>${esc(b.label)} band</b><label>First absorption <input type="number" data-b="E" value="${b.E==null?"":b.E}" step="100"> cm⁻¹</label>
       <label>Stokes <input type="number" data-b="stokes" value="${b.stokes||0}" step="100"></label>
-      <span class="muted">${b.E?fmt(C.cm2nm(b.E),0)+" nm":"값 필요"}</span></div><div class="muted" style="margin-top:4px">${esc(b.note||"")}</div>`; }
+      <span class="muted">${b.E?fmt(C.cm2nm(b.E),0)+" nm":"Value needed"}</span></div><div class="muted" style="margin-top:4px">${esc(b.note||"")}</div>`; }
   return "";
 }
 function bindDParams(el,m){
@@ -843,9 +849,9 @@ const sugSig=()=>JSON.stringify([S.cols.map(c=>c.uid+c.ion+JSON.stringify(c.p||0
 function renderSug(){
   const el=$q(ROOT,"#edSugCard"); if(!el) return;
   if(SUG && SUGSIG!==sugSig()) SUG=null;       /* 조성·호스트가 바뀌면 제안은 무효 */
-  el.innerHTML=`<h3>경로 제안 <span class="hint">Stark 창 겹침 ≤ 2ħω, population 가능한 준위만</span></h3>
-    <div class="row"><button class="btn sm" id="edSugRun">${SUG?"다시 찾기":"찾기"}</button>
-    <div class="seg" id="edSugF">${["all","ET","ETU","CR","BET","EM"].map(t=>`<button data-f="${t}" class="${SUGF===t?"active":""}">${t==="all"?"전체":t}</button>`).join("")}</div></div>
+  el.innerHTML=`<h3>Path suggestions <span class="hint">Stark 창 겹침 ≤ 2ħω, population 가능한 준위만</span></h3>
+    <div class="row"><button class="btn sm" id="edSugRun">${SUG?"Find again":"Find"}</button>
+    <div class="seg" id="edSugF">${["all","ET","ETU","CR","BET","EM"].map(t=>`<button data-f="${t}" class="${SUGF===t?"active":""}">${t==="all"?"All":t}</button>`).join("")}</div></div>
     <div class="ed-sug" id="edSugList"></div>`;
   $q(el,"#edSugRun").onclick=()=>{ runSug(); renderSug(); };
   $q(el,"#edSugF").onclick=e=>{ const b=e.target.closest("button[data-f]"); if(!b) return; SUGF=b.dataset.f; renderSug(); };
@@ -854,8 +860,8 @@ function renderSug(){
   const items=SUG.filter(s=>SUGF==="all"||s.c.type===SUGF);
   list.innerHTML=items.length?items.map((s,i)=>{ const md=MODEL.cols[s.di], ma=MODEL.cols[s.ai];
     return `<div class="it">${typeBadge(s.c.type)}<div class="tx">${esc(C.ionLabel(md.c.ion))} ${C.termHTML(s.Di.t)}→${C.termHTML(s.Df.t)} ⇒ ${esc(C.ionLabel(ma.c.ion))} ${C.termHTML(s.Ai.t)}→${C.termHTML(s.Af.t)}
-      <div class="mt"><span class="gr g${s.c.grade}">${s.c.gradeName}</span> ΔE ${s.c.dE>0?"+":""}${fmt(s.c.dE)} cm⁻¹${s.c.endo?" · endothermic":""}</div></div>
-      <button class="btn sm" data-s="${SUG.indexOf(s)}" aria-label="도식에 추가">＋</button></div>`; }).join(""):`<div class="muted">해당 종류 없음</div>`;
+      <div class="mt"><span class="gr g${s.c.grade}">${gradeName(s.c)}</span> ΔE ${s.c.dE>0?"+":""}${fmt(s.c.dE)} cm⁻¹${s.c.endo?" · endothermic":""}</div></div>
+      <button class="btn sm" data-s="${SUG.indexOf(s)}" aria-label="Add to diagram">＋</button></div>`; }).join(""):`<div class="muted">None of this type</div>`;
   list.querySelectorAll("button[data-s]").forEach(b=>b.onclick=()=>{
     const s=SUG[+b.dataset.s]; const md=MODEL.cols[s.di], ma=MODEL.cols[s.ai];
     let acol=ma.c.uid;
@@ -877,33 +883,33 @@ function renderInter(){
   const hw=M.cx.hw, T=M.cx.T||295; const keep=all.filter(x=>x.N==null||x.N<=INT_MAXN);
   /* 방향별 행렬: 행 = donor 출발 준위, 열 = acceptor 출발 준위, 칸 = δ 가 가장 작은 조합 */
   const dirs={}; keep.forEach(x=>{ const k=x.di+">"+x.ai; (dirs[k]=dirs[k]||[]).push(x); });
-  const cell=x=>`<span class="gr g${x.c.grade}">${x.N!=null?(x.c.delta?`N ${fmt(x.N,1)}`:"공명"):esc(x.c.gradeName)}</span>${x.c.endo?`<span class="muted"> ↑${x.boltz.toExponential(0)}</span>`:""}`;
+  const cell=x=>`<span class="gr g${x.c.grade}">${x.N!=null?(x.c.delta?`N ${fmt(x.N,1)}`:"Resonant"):esc(gradeName(x.c))}</span>${x.c.endo?`<span class="muted"> ↑${x.boltz.toExponential(0)}</span>`:""}`;
   const mats=Object.entries(dirs).map(([k,L])=>{ const [di,ai]=k.split(">").map(Number); const md=M.cols[di], ma=M.cols[ai];
     const rows=[...new Map(L.map(x=>[x.Di.id,x.Di])).values()].sort((a,b)=>b.E-a.E), cols=[...new Map(L.map(x=>[x.Ai.id,x.Ai])).values()].sort((a,b)=>a.E-b.E);
     const best=(r,c)=>L.filter(x=>x.Di.id===r.id&&x.Ai.id===c.id)[0];
     return `<div class="ed-int-dir"><div class="h"><b>${esc(C.ionLabel(md.c.ion))}</b> → <b>${esc(C.ionLabel(ma.c.ion))}</b> <span class="muted">donor 여기 준위(행)가 acceptor 준위(열)를 올린다${L.some(x=>x.c.type==="BET")?" · back transfer 포함":""}</span></div>
-      <div class="tblwrap"><table class="ed-tbl ed-int"><thead><tr><th>${esc(C.ionLabel(md.c.ion))} donor ∖ ${esc(C.ionLabel(ma.c.ion))} acceptor</th>${cols.map(c=>`<th>${C.termHTML(c.t)}${c.ground?' <span class="muted">(바닥)</span>':""}</th>`).join("")}</tr></thead>
+      <div class="tblwrap"><table class="ed-tbl ed-int"><thead><tr><th>${esc(C.ionLabel(md.c.ion))} donor ∖ ${esc(C.ionLabel(ma.c.ion))} acceptor</th>${cols.map(c=>`<th>${C.termHTML(c.t)}${c.ground?' <span class="muted">(ground)</span>':""}</th>`).join("")}</tr></thead>
       <tbody>${rows.map(r=>`<tr><th>${C.termHTML(r.t)} <span class="muted">${fmt(r.E)}</span></th>${cols.map(c=>{ const x=best(r,c); return x?`<td class="${INT_SEL===k+"|"+r.id+"|"+c.id?"sel":""}"><button class="ed-int-c" data-int="${k}|${r.id}|${c.id}" title="${esc(`${C.ionLabel(md.c.ion)} ${x.Di.t}→${x.Df.t} ⇒ ${C.ionLabel(ma.c.ion)} ${x.Ai.t}→${x.Af.t} · ${x.c.type} · δ ${Math.round(x.c.delta)} cm⁻¹`)}">${cell(x)}</button></td>`:`<td class="muted">—</td>`; }).join("")}</tr>`).join("")}</tbody></table></div></div>`; }).join("");
   /* 선택한 칸(없으면 전체 상위)의 조합 목록 */
-  let list=keep, cap="δ 가 작은 순 상위 12";
-  if(INT_SEL){ const [k,r,c]=INT_SEL.split("|"); const [di,ai]=k.split(">").map(Number); list=keep.filter(x=>x.di===di&&x.ai===ai&&x.Di.id===r&&x.Ai.id===c); cap="선택한 칸의 모든 조합"; }
+  let list=keep, cap="Top 12 by smallest δ";
+  if(INT_SEL){ const [k,r,c]=INT_SEL.split("|"); const [di,ai]=k.split(">").map(Number); list=keep.filter(x=>x.di===di&&x.ai===ai&&x.Di.id===r&&x.Ai.id===c); cap="All combinations in the selected cell"; }
   const items=list.slice(0,INT_SEL?40:12).map(x=>{ const md=M.cols[x.di], ma=M.cols[x.ai]; return `<div class="it">${typeBadge(x.c.type)}<div class="tx">${esc(C.ionLabel(md.c.ion))} ${C.termHTML(x.Di.t)}→${C.termHTML(x.Df.t)} ⇒ ${esc(C.ionLabel(ma.c.ion))} ${C.termHTML(x.Ai.t)}→${C.termHTML(x.Af.t)}
-      <div class="mt"><span class="gr g${x.c.grade}">${esc(x.c.gradeName)}</span> δ ${fmt(x.c.delta)} cm⁻¹${x.N!=null?` · 포논 ${fmt(x.N,1)}개`:""} · ΔE ${x.c.dE>0?"+":""}${fmt(x.c.dE)}${x.c.endo?` · endothermic, detailed balance ×${x.boltz.toExponential(1)} (${T} K)`:""}</div></div>
-      <button class="btn sm" data-intadd="${all.indexOf(x)}" aria-label="도식에 추가">＋</button></div>`; }).join("");
+      <div class="mt"><span class="gr g${x.c.grade}">${esc(gradeName(x.c))}</span> δ ${fmt(x.c.delta)} cm⁻¹${x.N!=null?` · ${fmt(x.N,1)} phonons`:""} · ΔE ${x.c.dE>0?"+":""}${fmt(x.c.dE)}${x.c.endo?` · endothermic, detailed balance ×${x.boltz.toExponential(1)} (${T} K)`:""}</div></div>
+      <button class="btn sm" data-intadd="${all.indexOf(x)}" aria-label="Add to diagram">＋</button></div>`; }).join("");
   const accC=(()=>{ const m=M.cols.find(q=>q.c.ion!==M.cols[0].c.ion); const v=m&&(m.c.conc||[]).find(q=>q!=null); return v!=null?v:""; })();
   const nre=/Lu/.test(S.host&&S.host.name||"")?1.42e22:/Y/.test(S.host&&S.host.name||"")?1.37e22:"";
-  el.innerHTML=`<h3>이온 간 상호작용 <span class="hint">서로 다른 이온 사이 · 필요 포논 수 ≤ <select class="ed-sel" id="edIntN">${[2,4,6,8].map(n=>`<option ${n===INT_MAXN?"selected":""}>${n}</option>`).join("")}</select></span></h3>
+  el.innerHTML=`<h3>Inter-ion Interactions <span class="hint">between different ions · required phonons ≤ <select class="ed-sel" id="edIntN">${[2,4,6,8].map(n=>`<option ${n===INT_MAXN?"selected":""}>${n}</option>`).join("")}</select></span></h3>
     ${mats||`<div class="muted">포논 ${INT_MAXN}개 안쪽의 조합이 없습니다.</div>`}
     <div class="muted" style="margin:6px 0 4px">칸 = 그 두 준위 사이에서 에너지가 가장 잘 맞는 조합. N = Stark 창 간격 δ / ħω${hw?` (ħω ${fmt(hw)} cm⁻¹)`:""}, ↑ = endothermic(포논 흡수)의 detailed balance 인자. 칸을 누르면 아래에 모든 조합이 나온다.</div>
-    <div class="ed-sug"><div class="muted" style="margin-bottom:4px">${cap}${INT_SEL?` <button class="btn xs" id="edIntClr">전체 보기</button>`:""}</div>${items||'<div class="muted">없음</div>'}</div>
-    <details class="ed-src" style="margin-top:8px"><summary>확률로 읽을 수 있나 — 절대 전달 확률 계산</summary>
+    <div class="ed-sug"><div class="muted" style="margin-bottom:4px">${cap}${INT_SEL?` <button class="btn xs" id="edIntClr">Show all</button>`:""}</div>${items||'<div class="muted">None</div>'}</div>
+    <details class="ed-src" style="margin-top:8px"><summary>Absolute transfer probability (Förster)</summary>
       <div class="muted" style="margin:6px 0">위 표는 <b>에너지 조건만</b> 본 상대 순위다. 실제 전달 속도는 (1) 두 전이의 선세기와 선모양의 겹침, (2) 이온 간 거리 분포에 각각 수 자릿수씩 좌우되는데, 이 둘은 준위 에너지만으로 정해지지 않는다.
         예: Yb→Tm ³H₆→³H₅ 는 δ 가 1,000 cm⁻¹ 를 넘는 phonon-assisted 전달인데도 실측에서 효율적이다. 그래서 여기서 '확률'을 내면 신뢰도가 낮다.
         측정된(또는 문헌의 같은 호스트) microparameter C<sub>DA</sub> 가 있으면 아래에서 정적 Förster 평균으로 전달 효율을 계산한다.</div>
-      <div class="row" style="flex-wrap:wrap;gap:8px"><label class="ed-f">C<sub>DA</sub> [cm⁶ s⁻¹] <input type="number" id="edCda" step="any" placeholder="예: 1e-40"></label>
-        <label class="ed-f">donor 고유 수명 τ<sub>D</sub> [ms] <input type="number" id="edTauD" step="any" placeholder="acceptor 없는 시료"></label>
-        <label class="ed-f">acceptor 농도 [%] <input type="number" id="edNApct" step="any" value="${accC}"></label>
-        <label class="ed-f">양이온 자리 밀도 [cm⁻³] <input type="number" id="edNsite" step="any" value="${nre}" placeholder="예: NaYF₄ 1.37e22"></label></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px"><label class="ed-f">C<sub>DA</sub> [cm⁶ s⁻¹] <input type="number" id="edCda" step="any" placeholder="e.g. 1e-40"></label>
+        <label class="ed-f">Donor intrinsic lifetime τ<sub>D</sub> [ms] <input type="number" id="edTauD" step="any" placeholder="acceptor-free sample"></label>
+        <label class="ed-f">Acceptor concentration [%] <input type="number" id="edNApct" step="any" value="${accC}"></label>
+        <label class="ed-f">Cation site density [cm⁻³] <input type="number" id="edNsite" step="any" value="${nre}" placeholder="e.g. NaYF₄ 1.37e22"></label></div>
       <div id="edFr" class="muted" style="margin-top:6px"></div>
       <div class="muted" style="margin-top:4px">식: R₀⁶ = C<sub>DA</sub>·τ<sub>D</sub>, c₀ = 3/(2π<sup>3/2</sup>R₀³), γ = (√π/2)·N<sub>A</sub>/c₀, η = √π γ e<sup>γ²</sup> erfc γ — dipole–dipole, acceptor 무작위 분포, donor 간 이동 없음 (Förster 1949; Inokuti & Hirayama 1965). Yb³⁺ 처럼 donor 간 energy migration 이 빠르면 이 값은 <b>하한</b>이다.</div>
     </details>`;
@@ -915,25 +921,25 @@ function renderInter(){
     if(S.procs.some(q=>q.kind==="ET"&&sameProc(q,p))) return; S.procs.push(p); S.sel=p.uid; save(); rerender(); });
   const calc=()=>{ const Cda=+$q(el,"#edCda").value, tau=+$q(el,"#edTauD").value/1e3, pct=+$q(el,"#edNApct").value, ns=+$q(el,"#edNsite").value; const o=$q(el,"#edFr");
     if(!(Cda>0&&tau>0&&pct>0&&ns>0)){ o.textContent="네 값을 모두 넣으면 계산합니다."; return; } const r=C.forsterEff(Cda,tau,pct/100*ns);
-    o.innerHTML=`R₀ = <b>${fmt(r.R0*1e7,2)} nm</b> · c₀ = ${r.c0.toExponential(2)} cm⁻³ · γ = ${fmt(r.gamma,3)} · 전달 효율 η = <b>${fmt(100*r.eta,1)} %</b> · 평균 전달 속도 ≈ η/((1−η)τ<sub>D</sub>) = ${r.eta<1?(r.eta/((1-r.eta)*tau)).toExponential(2):"∞"} s⁻¹`; };
+    o.innerHTML=`R₀ = <b>${fmt(r.R0*1e7,2)} nm</b> · c₀ = ${r.c0.toExponential(2)} cm⁻³ · γ = ${fmt(r.gamma,3)} · transfer efficiency η = <b>${fmt(100*r.eta,1)} %</b> · mean transfer rate ≈ η/((1−η)τ<sub>D</sub>) = ${r.eta<1?(r.eta/((1-r.eta)*tau)).toExponential(2):"∞"} s⁻¹`; };
   ["#edCda","#edTauD","#edNApct","#edNsite"].forEach(id=>$q(el,id).oninput=calc); calc();
 }
 function renderSrc(){
   const el=$q(ROOT,"#edSrcCard"); if(!el) return; const R=window.ED_DATA.refs;
-  el.innerHTML=`<details class="ed-src"><summary>데이터 출처와 가정</summary><ul>
-   <li><b>Ln³⁺ 준위</b>: ${esc(R.ln3)} 준위선 = multiplet barycenter, 옅은 띠 = Stark 범위. 다른 호스트에서는 수십–수백 cm⁻¹ 이동.</li>
-   <li><b>multiphonon 판정</b>: p = (아래 준위와의 가장자리 간격)/ħω<sub>max</sub>. p&lt;${C.P_MPR} multiphonon 우세(옅은 선), ${C.P_MPR}–${C.P_RAD} 경쟁, ≥${C.P_RAD} 복사 우세(굵은 선) — 경험칙이며 호스트·온도에 따라 경계가 움직임.</li>
-   <li><b>resonant 판정</b>: donor·acceptor 전이의 Stark 창(가능한 Stark–Stark 조합 전체)이 겹치면 resonant. 중심 불일치가 ħω 보다 크면 ‘Stark 끝’. 겹치지 않으면 간격 δ 를 ħω 로 나눠 1-·2-·3–4 포논, 그 이상 non-resonant. endothermic(포논 흡수 필요)은 exp(−δ/kT) 를 따로 표시. 상온에서 위쪽 Stark 준위의 population은 Boltzmann 분포로 줄어들므로 창 가장자리 resonance는 실제보다 유리하게 보일 수 있음.</li>
-   <li><b>종류 자동 판정</b>: acceptor 가 바닥에서 출발 → donor 도 바닥으로 가면 ET, 중간 준위로 가면 CR, sensitizer 이온(Yb³⁺·Nd³⁺·Ce³⁺)으로 되돌아가면 BET. acceptor 가 여기 상태에서 출발 → ETU. 같은 전이의 맞교환 → EM.</li>
-   <li><b>dⁿ 이온</b>: ${esc(R.ts)} 선폭은 근사(스핀 허용 ±1,200 cm⁻¹).</li>
-   <li><b>2가·5d</b>: ${esc(R.nist)} ${esc(R.dorenbos)} 5d 밴드는 호스트 의존 매개변수.</li>
-   <li><b>포논 에너지</b>: ${esc(S.host.src||"—")}</li></ul></details>`;
+  el.innerHTML=`<details class="ed-src"><summary>Data sources &amp; assumptions</summary><ul>
+   <li><b>Ln³⁺ levels</b>: ${esc(R.ln3)} 준위선 = multiplet barycenter, 옅은 띠 = Stark 범위. 다른 호스트에서는 수십–수백 cm⁻¹ 이동.</li>
+   <li><b>Multiphonon criterion</b>: p = (아래 준위와의 가장자리 간격)/ħω<sub>max</sub>. p&lt;${C.P_MPR} multiphonon 우세(옅은 선), ${C.P_MPR}–${C.P_RAD} 경쟁, ≥${C.P_RAD} 복사 우세(굵은 선) — 경험칙이며 호스트·온도에 따라 경계가 움직임.</li>
+   <li><b>Resonance criterion</b>: donor·acceptor 전이의 Stark 창(가능한 Stark–Stark 조합 전체)이 겹치면 resonant. 중심 불일치가 ħω 보다 크면 ‘Stark 끝’. 겹치지 않으면 간격 δ 를 ħω 로 나눠 1-·2-·3–4 포논, 그 이상 non-resonant. endothermic(포논 흡수 필요)은 exp(−δ/kT) 를 따로 표시. 상온에서 위쪽 Stark 준위의 population은 Boltzmann 분포로 줄어들므로 창 가장자리 resonance는 실제보다 유리하게 보일 수 있음.</li>
+   <li><b>Automatic type assignment</b>: acceptor 가 바닥에서 출발 → donor 도 바닥으로 가면 ET, 중간 준위로 가면 CR, sensitizer 이온(Yb³⁺·Nd³⁺·Ce³⁺)으로 되돌아가면 BET. acceptor 가 여기 상태에서 출발 → ETU. 같은 전이의 맞교환 → EM.</li>
+   <li><b>dⁿ ions</b>: ${esc(R.ts)} 선폭은 근사(스핀 허용 ±1,200 cm⁻¹).</li>
+   <li><b>Divalent · 5d</b>: ${esc(R.nist)} ${esc(R.dorenbos)} 5d 밴드는 호스트 의존 매개변수.</li>
+   <li><b>Phonon energy</b>: ${esc(S.host.src||"—")}</li></ul></details>`;
 }
 function renderLegend(){
   const el=$q(ROOT,"#edLegend"); if(!el) return; const P=palette();
   const ln=(c,d,w)=>`<svg width="26" height="10"><line x1="1" x2="25" y1="5" y2="5" stroke="${c}" stroke-width="${w||2}" ${d?`stroke-dasharray="${d}"`:""}/></svg>`;
-  el.innerHTML=`<span>${ln(P.ink,"",2)}복사 우세</span><span>${ln(P.ink2,"",1.4)}경쟁</span><span>${ln(P.faint,"",1.1)}multiphonon 우세</span>
-   <span>${ln(C.wlColor(980,P.dark),"",2.6)}광흡수 resonant</span><span>${ln(C.wlColor(980,P.dark),"5 3",2.6)}포논 보조</span><span>${ln(C.wlColor(980,P.dark),"2 3",1.6)}3포논 이상</span>
+  el.innerHTML=`<span>${ln(P.ink,"",2)}Radiative-dominant</span><span>${ln(P.ink2,"",1.4)}Competing</span><span>${ln(P.faint,"",1.1)}Multiphonon-dominant</span>
+   <span>${ln(C.wlColor(980,P.dark),"",2.6)}Absorption, resonant</span><span>${ln(C.wlColor(980,P.dark),"5 3",2.6)}Phonon-assisted</span><span>${ln(C.wlColor(980,P.dark),"2 3",1.6)}≥3 phonons</span>
    ${["ET","ETU","CR","BET","EM"].map(t=>`<span>${ln(P.T[t],"6 3",2)}${t}</span>`).join("")}<span><svg width="26" height="10"><path d="M1 5 Q4 1 7 5 T13 5 T19 5 T25 5" fill="none" stroke="${P.T.MPR}" stroke-width="1.5"/></svg>MPR</span>`;
 }
 

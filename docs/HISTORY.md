@@ -5,6 +5,13 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-17 화면 영어 통일 · OIR 실측 검증 · Asylum IBW 단위** :
+  탭 이름 XPS · EM Image · Image Analysis · EDS Maps · EDS Spectrum · Lattice FFT · EDS Interference · EM Metadata · Energy Diagram · DRE Kinetics('이미지'→EM Image 로 Image Analysis 와 구분),
+  제목·메뉴·버튼·표 머리는 영어, 설명·알림·경고는 한국어(docs/UI-English-style.md). 휴대폰 아래 탭은 짧은 이름(EM Img·Analysis·Maps·Spectra·FFT·Interf.·Meta·Energy·DRE), 390·360 px 가로 넘침 없음.
+  OIR: OME 시험 자료 서버의 FV4000 공개 파일 13 개(CC BY 4.0)로 검증 — 12 파일 모든 면 = oirfile = Bio-Formats(λ 는 BF 결함), 3 파일은 OME-TIFF 와도 같음. 실측에서 ZSTACK 정의 둘 중 엉뚱한 것을 쓰던 결함 등 수정, '실측 미검증' 알림 제거.
+  IBW: 연구실 Cypher 실측 5 파일(AC topo·KPFM·C-AFM·EFM·FM-EFM) — 값이 단위 없는 원시 수로 보이던 결함 → 채널 이름으로 단위(nm·deg·V·pA·Hz), 48 채널 = Gwyddion 2.64. .ARDF 는 Force Map 전용(영상은 .ibw).
+  배포 도구: analytics_src(공개 소스 백업)에서 'real' 폴더(실측 시험 자료) 제외.
+  시험: node 378 · LIF 47 · OIR 70 · AFM 217 · Skeleton 102 · ImageJ 경계 47 · Color 17 · 실측 135 · XPS 145 · Chromium(Image·검수·XPS·DRE·셸 18).
 - **10-16 Image Analysis v1.4 — Analyze Skeleton(clean-room), Leica LIF, Olympus OIR, 큰 창 Median·Remove Outliers, Wand Worker**(SPEC §3b-2·3b-3·3f·3g·6e):
   Analyze Skeleton: 처음 이식본이 Fiji(GPL-3) 절차를 그대로 옮긴 것으로 판정 → 명세 작성자(소스 본 쪽)와 구현자(소스를 보지 않음)를 나눈 clean-room 으로 새로 씀, 이식본은 지움.
   Fiji jar 블랙박스 대조 고정 102(가지치기 52) + 무작위 수천 경우 일치, 가지치기 4 방식·Prune ends 추가, Longest shortest path 크기 제한 없음(Fiji 는 꼭짓점 8 494 나무에 1 212 s, 앱은 꼭짓점 52 k 나무 0.9 s — 같은 결과).

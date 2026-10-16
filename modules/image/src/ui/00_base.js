@@ -64,7 +64,7 @@ async function loadSaved(){
 let MSGS=[];
 function note(m,k,act){ MSGS.unshift({m:String(m),k:k||"",act:act||null}); MSGS=MSGS.slice(0,8); drawMsg(); if(!ROOT||!$q(ROOT,"#imMsg")){ if(typeof toast==="function") toast(m,k==="warn"?"warn":k); } }
 function drawMsg(){ const el=ROOT&&$q(ROOT,"#imMsg"); if(!el) return; if(!MSGS.length){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false; const m=MSGS[0], old=MSGS.slice(1);
-  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="닫기">×</button></div>${old.length?`<details class="old"><summary>이전 알림 ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="Close">×</button></div>${old.length?`<details class="old"><summary>Earlier notices ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
   $q(el,"#imMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); }; const b=$q(el,"#imMsgA"); if(b) b.onclick=()=>{ const f=m.act.fn; m.act=null; drawMsg(); f(); }; }
 const _cf={}; function confirm2(k,msg){ const n=Date.now(); if(_cf[k]&&n-_cf[k]<4000){ delete _cf[k]; return true; } _cf[k]=n; note(msg,"warn"); return false; }
 

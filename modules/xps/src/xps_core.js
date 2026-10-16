@@ -51,21 +51,21 @@ function lgamma(x){
    1) Lineshape (넓이 1, SPEC §1)
    ============================================================ */
 const SHAPES={
-  GLS:{name:"GL 합 (pseudo-Voigt · Avantage Sum)",p:["F","m"]},
-  GLP:{name:"GL 곱 (Avantage Product · Casa GL)",p:["F","m"]},
-  V:{name:"Voigt (G⊗L 합성곱)",p:["wG","wL"]},
-  DS:{name:"Doniach–Šunjić ⊗ G (금속 비대칭)",p:["alpha","wL","wG"]},
-  LA:{name:"LA(α,β) ⊗ G (Casa LA 형태)",p:["F","alpha","beta","wG"]},
-  GLT:{name:"GL 합 + 지수 꼬리",p:["F","m","T","tau"]},
+  GLS:{name:"GL sum (pseudo-Voigt · Avantage Sum)",p:["F","m"]},
+  GLP:{name:"GL product (Avantage Product · Casa GL)",p:["F","m"]},
+  V:{name:"Voigt (G⊗L convolution)",p:["wG","wL"]},
+  DS:{name:"Doniach–Šunjić ⊗ G (asymmetric, metals)",p:["alpha","wL","wG"]},
+  LA:{name:"LA(α,β) ⊗ G (CasaXPS LA style)",p:["F","alpha","beta","wG"]},
+  GLT:{name:"GL sum + exponential tail",p:["F","m","T","tau"]},
 };
 const PDEF={   // 기본 한계·이름·단위
-  be:{lab:"BE",u:"eV"}, area:{lab:"넓이",u:"CPS·eV",lo:0,hi:Infinity},
-  F:{lab:"FWHM",u:"eV",lo:0.05,hi:10}, m:{lab:"L 비율",u:"",lo:0,hi:1},
+  be:{lab:"BE",u:"eV"}, area:{lab:"Area",u:"CPS·eV",lo:0,hi:Infinity},
+  F:{lab:"FWHM",u:"eV",lo:0.05,hi:10}, m:{lab:"L frac.",u:"",lo:0,hi:1},
   wG:{lab:"G FWHM",u:"eV",lo:0,hi:8}, wL:{lab:"L FWHM",u:"eV",lo:0.005,hi:8},
   alpha:{lab:"α",u:"",lo:0,hi:0.45}, beta:{lab:"β",u:"",lo:0.55,hi:20},
-  T:{lab:"꼬리 비율",u:"",lo:0,hi:1}, tau:{lab:"꼬리 길이",u:"eV",lo:0.02,hi:20},
-  dE:{lab:"Δ(SO)",u:"eV",lo:0.05,hi:40}, r:{lab:"넓이 비",u:"",lo:0.01,hi:5}, q:{lab:"폭 배율",u:"",lo:0.3,hi:3},
-  c0:{lab:"배경 c₀",u:"CPS",lo:-Infinity,hi:Infinity}, k:{lab:"Shirley k",u:"1/eV",lo:0,hi:Infinity}, s:{lab:"배경 기울기",u:"CPS/eV",lo:-Infinity,hi:Infinity},
+  T:{lab:"Tail frac.",u:"",lo:0,hi:1}, tau:{lab:"Tail len.",u:"eV",lo:0.02,hi:20},
+  dE:{lab:"Δ(SO)",u:"eV",lo:0.05,hi:40}, r:{lab:"Area ratio",u:"",lo:0.01,hi:5}, q:{lab:"Width fac.",u:"",lo:0.3,hi:3},
+  c0:{lab:"Bkg c₀",u:"CPS",lo:-Infinity,hi:Infinity}, k:{lab:"Shirley k",u:"1/eV",lo:0,hi:Infinity}, s:{lab:"Bkg slope",u:"CPS/eV",lo:-Infinity,hi:Infinity},
 };
 const LA_ALPHA_LO=0.55;
 function gauss(x,F){ return (2/F)*Math.sqrt(LN2/PI)*Math.exp(-4*LN2*x*x/(F*F)); }
@@ -273,7 +273,7 @@ function bgStatic(E,y,bg){
   if(t==="none") return new Float64Array(E.length);
   return null;   // active
 }
-const BG_TYPES={linear:"Linear",shirley:"Shirley (반복)",smart:"Smart (Shirley·데이터 초과 금지)",tougaard:"Tougaard (U2/U3)",active:"Shirley — 피팅 안에서 함께",none:"없음"};
+const BG_TYPES={linear:"Linear",shirley:"Shirley",smart:"Smart",tougaard:"Tougaard (U2/U3)",active:"Shirley (in-fit)",none:"None"};
 
 /* ============================================================
    4) 문제 구성 · 매개변수 벡터 · 제약/연결
@@ -1017,7 +1017,7 @@ function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {com
    관심 값(BE·넓이 %·FWHM)이 선택에 따라 얼마나 흔들리는지 — 분석자의 주관을 숫자로(모형 불확도).
    요인: 배경 종류 · 끝점 평균 점 수(정적 배경만) · 낮은/높은 BE 창 끝 ±dw.
    ============================================================ */
-const SENS_BG_LABEL={smart:"Smart",shirley:"Shirley",active:"Shirley 피팅 안(+기울기)",tougaard:"Tougaard",linear:"Linear"};
+const SENS_BG_LABEL={smart:"Smart",shirley:"Shirley",active:"Shirley (in-fit, +slope)",tougaard:"Tougaard",linear:"Linear"};
 function sensBg(base,type,n){
   // 지금 배경과 같은 종류면 사용자의 제약(예: 기울기 고정)을 그대로 — 0 번 변형이 사용자가 실제로 맞춘 모형이어야 한다.
   // 다른 종류로 바꿀 때만 그 종류의 기본값(피팅 안 Shirley 는 기울기 자유)

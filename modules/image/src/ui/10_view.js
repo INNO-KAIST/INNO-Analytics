@@ -190,7 +190,7 @@ function drawRois(im,ox,v){ if(S.ui.showAll!==false) roiList(im).forEach(r=>{ if
 /* ---------- 도구·포인터 ---------- */
 const TOOLS=[["rect","Rectangle","M3 5h18v14H3z"],["oval","Oval","M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z"],["poly","Polygon","M4 18 7 5l9 3 4 9-9 3z"],["free","Freehand","M4 15c3-9 6 4 9-3s5-3 7 1"],
   ["line","Straight line (profile)","M4 19 20 5"],["angle","Angle","M4 19h16M4 19 15 6"],["point","Multi-point (count)","M7 8h.01M15 7h.01M10 15h.01M17 16h.01"],["wand","Wand (tracing)","M4 20 14 10M15 4v3M18 6l-2 2M20 9h-3"],
-  ["scale","Set Scale (선을 축척 막대에)","M3 17h18M3 13v8M21 13v8M8 17v-2M13 17v-2"],["hand","Scroll (Space)","M8 13V6a1.5 1.5 0 0 1 3 0v6V4a1.5 1.5 0 0 1 3 0v8V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"],["zoom","Zoom (클릭 확대, Alt+클릭 축소)","M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-6-6M7 10h6M10 7v6"]];
+  ["scale","Set Scale (draw a line on the scale bar)","M3 17h18M3 13v8M21 13v8M8 17v-2M13 17v-2"],["hand","Scrolling tool (Space)","M8 13V6a1.5 1.5 0 0 1 3 0v6V4a1.5 1.5 0 0 1 3 0v8V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"],["zoom","Zoom (click = in, Alt+click = out)","M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-6-6M7 10h6M10 7v6"]];
 let DRAG=null, SPACE=false, HOVER=null;
 function evPos(e){ const cv=$q(ROOT,"#imOverlay"); const r=cv.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
 function hitHandle(im,r,sx,sy){ const v=viewOf(im); const H=handlesOf(r); for(let k=0;k<H.length;k++){ const [hx,hy]=toScr(v,H[k][0],H[k][1]); if(Math.abs(hx-sx)<=5&&Math.abs(hy-sy)<=5) return k; } return -1; }
@@ -276,7 +276,7 @@ function drawStatus(){
     else if(a.type==="angle"&&a.pts.length===3) s+=`<span class="roi">angle ${roiAngle(a).toFixed(2)}°</span>`;
     else if(a.type==="point") s+=`<span class="roi">${a.pts.length} points</span>`;
     else { const b=roiBounds(a); s+=`<span class="roi">${a.type} ${Math.round(b.w)}×${Math.round(b.h)} px${im.cal?` (${g4(b.w*c.pw)}×${g4(b.h*c.ph)} ${c.unit})`:""}</span>`; } }
-  if(PREVIEW.plane) s+=`<span class="pv">미리 보기 — 적용 전</span>`;
+  if(PREVIEW.plane) s+=`<span class="pv">Preview — not applied</span>`;
   el.innerHTML=s;
 }
 /* 선 ROI 의 프로파일 (캔버스 아래 작은 그래프) */
@@ -284,7 +284,7 @@ function profileOf(im,r){ const p=curPlaneOf(im); const [a,b]=r.pts; const pr=IC
 function drawProfileMini(){
   const el=ROOT&&$q(ROOT,"#imProfile"); if(!el) return; const im=cur(); const a=im&&activeRoi(im);
   if(!a||a.type!=="line"){ el.hidden=true; return; } el.hidden=false; const pr=profileOf(im,a);
-  el.innerHTML=`<div class="ph"><b>Line profile</b><span class="muted xs">width ${S.ui.lw||1} px · ${pr.y.length} points</span><span class="sp"></span><button class="btn xs" id="imProfAdd">Plots 에 추가</button><button class="btn xs" id="imProfCsv">CSV</button></div>${svgXY([{name:"profile",x:pr.x,y:pr.y}],{w:640,h:150,xl:`distance (${pr.unit})`,yl:"gray value"})}`;
+  el.innerHTML=`<div class="ph"><b>Line profile</b><span class="muted xs">width ${S.ui.lw||1} px · ${pr.y.length} points</span><span class="sp"></span><button class="btn xs" id="imProfAdd">Add to Plots</button><button class="btn xs" id="imProfCsv">CSV</button></div>${svgXY([{name:"profile",x:pr.x,y:pr.y}],{w:640,h:150,xl:`distance (${pr.unit})`,yl:"gray value"})}`;
   $q(el,"#imProfAdd").onclick=()=>{ S.plots.push({id:uid(),kind:"xy",title:"Profile — "+im.name,xl:`distance (${pr.unit})`,yl:"gray value",series:[{name:"profile",x:pr.x,y:pr.y}]}); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); drawBottom(); };
   $q(el,"#imProfCsv").onclick=()=>downloadText(`profile_${im.name}.csv`,"distance_"+pr.unit+",value\n"+pr.x.map((x,i)=>x+","+pr.y[i]).join("\n"));
 }

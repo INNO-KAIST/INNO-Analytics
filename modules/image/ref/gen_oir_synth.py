@@ -1,16 +1,14 @@
 """합성 Olympus/Evident OIR (FluoView FV3000/FV4000) + 정답 — test/io/oir/ 에 쓴다.
-공개된 실측 .oir 시료가 없어 합성 파일로만 시험한다. 정답 = oirfile(C. Gohlke) 과 Bio-Formats 7.3.1 이 같은 값을 읽은 경우만.
-· 파일 구조(블록 index·UID/PIXEL 짝·METADATA/FRAMEPROPERTIES XML)는 oirfile 이 읽는 대로, 블록을 놓는 차례와 XML 요소 이름은
-  Bio-Formats 를 블랙박스로 시험해(어느 바이트를 읽는지·어느 XML 요소를 찾는지 관찰) 두 구현이 모두 읽도록 맞췄다 — Bio-Formats 원본 코드는 보지 않았다.
-· 둘이 다르게 읽는 경우는 synth.json 의 'disagree' 에 적고, 앱이 따를 쪽을 'follow' 에 적는다.
-· Bio-Formats 7.3.1 블랙박스 관찰 (I/O 위치 추적·XML DOM 질의 기록·공개 API 로만):
-  - 16 바이트부터 u32 -1 표지를 찾고 4 바이트를 건너뛴 뒤 블록을 차례로 읽는다 (index 는 쓰지 않음) → 표지를 머리 뒤에 둔다.
-  - XML 은 '<?xml' 을 찾아 앞의 u32 를 길이로 읽는다. 바로 읽은 FRAMEPROPERTIES 뒤에는 u32 하나를 더 건너뜀 → 첫 FRAMEPROPERTIES 뒤 4 바이트 틈.
-  - 화소 블록 사이에 FRAMEPROPERTIES 가 끼면 다음 UID 를 놓친다 → 둘째 면부터의 FRAMEPROPERTIES 는 화소 뒤에 모은다.
-  - lsmimage 에서 commonimage:imageInfo/width·height, commonphase:channel(id·order·name·imageDefinition depth·bitCounts·length x·y·z),
-    commonimage:axis(commonparam:axis·maxSize·startPosition·step) 를 찾는다; FRAMEPROPERTIES 는 lsmframe:frameProperties/commonframe:imageDefinition/base:width…
-    와 commonframe:general/base:name(없으면 오류). commonimage:acquisition 이 있으면 채널 수가 0 이 되어(필요 요소 미상) 넣지 않았다.
-  - 실측 파일의 블록 차례는 알 수 없다 — 위 배치는 두 구현이 모두 읽는 한 가지일 뿐이다.
+실측 파일(ref/real/oir, 13 개 — ref/gen_oir_real.py)이 다루지 못하는 경계 사례(RGB·float·선 주사·빠진 면·잘림·POIR·이상한 UID 등)를 합성으로 시험한다.
+정답 = oirfile(C. Gohlke) 과 Bio-Formats 7.3.1 이 같은 값을 읽은 경우만; 다르면 synth.json 의 'disagree' 와 따를 쪽('truth') 을 적는다.
+· 블록 배치는 실측 FV4000 파일에서 본 그대로 (2026-10-17, ref/real/oir):
+  머리 96 바이트 (48 + [블록 수, 0, 1, 0, u64 BMP 위치, 'FNIO'…, 3, 2, -1, -1]) | REF_ 참조 영상 UID·PIXEL | 첫 면 FRAMEPROPERTIES → UID·PIXEL…
+  | METADATA | 둘째 면부터 [NULL(5) · FRAMEPROPERTIES · UID·PIXEL…] | NULL · BMP · METADATA | block index (0xFFFFFFFF + u64 위치).
+  UID 블록 = [len][3][u32 면 안 위치][u32 PIXEL 길이][u32 UID 길이][UID]; FRAMEPROPERTIES = [40 바이트 머리][XML] (이름·id = UID 앞부분, 예 l001z002_0_1);
+  METADATA 항목 = [40 바이트 머리][XML], LUT 는 [u32 36][채널 GUID][u32 길이][XML]; lsmimage 의 축 정의는 commonimage:acquisition/imagingParam 안에
+  paramEnable="true" (쓰인 것) + paramEnable="false" (쓰이지 않은 Range, maxSize 21) 두 개, 획득 채널(xsi:type lsmimage:NormalChannel)은 다른 GUID.
+  처음(실측 파일이 없던 때)의 배치 — 4 바이트 틈·FRAMEPROPERTIES 를 끝에 모으기 — 는 이 실측 배치로 바꿨다 (그 틈은 FRAMEPROPERTIES 의 40 바이트 머리를 몰라 생긴 것).
+· Bio-Formats 는 블랙박스로만 (I/O 위치 추적·XML DOM 질의 기록·공개 API) 썼다 — 원본 코드는 보지 않았다.
 사용: python3 -I ref/gen_oir_synth.py <bioformats_package.jar> <BFDump 컴파일 폴더>"""
 import sys, os, json, struct, subprocess, tempfile, shutil
 import numpy as np
@@ -38,9 +36,14 @@ def lsm_xml(sp):
         n = sp.get('maxSize', {}).get(a, sp['n' + a.lower()])
         if n > 1 or a in sp.get('axes_enabled', ''):
             st, step = sp.get(a + '0', 0.0), sp.get(a + 'step', 1.0)
-            axes += (f'<commonimage:axis enable="true"><commonparam:axis>{AX[a]}</commonparam:axis><commonparam:maxSize>{n}</commonparam:maxSize>'
+            pe = ' xsi:type="commonparam:ZAxisParam" paramEnable="true"' if a == 'Z' else ''
+            axes += (f'<commonparam:axis enable="true"{pe}><commonparam:axis>{AX[a]}</commonparam:axis>'
                      f'<commonparam:startPosition>{st}</commonparam:startPosition><commonparam:endPosition>{st + (n - 1) * step}</commonparam:endPosition>'
-                     f'<commonparam:step>{step}</commonparam:step></commonimage:axis>')
+                     f'<commonparam:step>{step}</commonparam:step><commonparam:maxSize>{n}</commonparam:maxSize></commonparam:axis>')
+            if a == 'Z':  # 실측 FV4000: 쓰이지 않은 "Range" 정의가 뒤따른다 (paramEnable="false", 200→220 µm, step 1, maxSize 21)
+                axes += ('<commonparam:axis xsi:type="commonparam:ZAxisParam" enable="true" paramEnable="false"><commonparam:axis>ZSTACK</commonparam:axis>'
+                         '<commonparam:startPosition>200.0</commonparam:startPosition><commonparam:endPosition>220.0</commonparam:endPosition><commonparam:step>1.0</commonparam:step>'
+                         '<commonparam:maxSize>21</commonparam:maxSize><commonparam:paramName>Range</commonparam:paramName></commonparam:axis>')
     chs = ''
     for c in range(sp['nc']):
         nm = sp['names'][c]; wl = sp.get('wl', [(None, None)] * sp['nc'])[c]
@@ -50,11 +53,15 @@ def lsm_xml(sp):
                 f'<commonphase:imageDefinition><commonphase:depth>{sp["depth"]}</commonphase:depth><commonphase:bitCounts>{sp["bits"]}</commonphase:bitCounts></commonphase:imageDefinition>'
                 f'<commonphase:length><commonparam:x>{sp["px"]}</commonparam:x><commonparam:y>{sp["py"]}</commonparam:y>{zl}</commonphase:length>{wls}'
                 f'<fvCommonphase:pinholeDiameter>100.0</fvCommonphase:pinholeDiameter></commonphase:channel>')
-    return (f'<?xml version="1.0" encoding="UTF-8"?><lsmimage:imageProperties {NS}>'
+    acq = ''.join(f'<commonphase:channel xsi:type="lsmimage:NormalChannel" id="{sp["acq_guids"][c] if sp.get("acq_guids") else guid(100 + c)}" order="{sp["order"][c]}" enable="true">'
+                  f'<commonphase:name>{sp["names"][c]}</commonphase:name></commonphase:channel>' for c in range(sp['nc']))
+    # 실측 배치: imageInfo(채널·크기) 뒤에 commonimage:acquisition — 축 정의는 imagingParam 안, 획득 채널(다른 GUID, enable)은 acquisition 안
+    return (f'<?xml version="1.0" encoding="ASCII"?><lsmimage:imageProperties {NS} xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
             f'<commonimage:general><base:creationDateTime>2026-09-17T14:03:21.512+09:00</base:creationDateTime></commonimage:general>'
-            f'<commonimage:imageInfo><commonimage:width>{W}</commonimage:width><commonimage:height>{H}</commonimage:height>{axes}'
-            f'<commonphase:phase><commonphase:group>{chs}</commonphase:group></commonphase:phase></commonimage:imageInfo>'
-            f'<commonimage:length><commonparam:x>{sp["px"]}</commonparam:x><commonparam:y>{sp["py"]}</commonparam:y></commonimage:length>'
+            f'<commonimage:system><commonimage:systemName>FV4000</commonimage:systemName><commonimage:systemVersion>3.1.1.67</commonimage:systemVersion></commonimage:system>'
+            f'<commonimage:imageInfo><commonphase:phase><commonphase:group>{chs}</commonphase:group></commonphase:phase>'
+            f'<commonimage:width>{W}</commonimage:width><commonimage:height>{H}</commonimage:height></commonimage:imageInfo>'
+            f'<commonimage:acquisition xsi:type="lsmimage:LSMAcquisition"><commonimage:imagingParam xsi:type="lsmparam:LSMImagingParam">{axes}</commonimage:imagingParam>{acq}</commonimage:acquisition>'
             f'</lsmimage:imageProperties>').encode()
 
 
@@ -63,16 +70,18 @@ def fileinfo_xml():
             'xmlns:base="http://www.olympus.co.jp/hpf/model/base"><base:version>2.1.2.0</base:version><fileinfo:system>FV31S-SW</fileinfo:system></fileinfo:fileInfo>').encode()
 
 
-def lut_xml(g):
-    return (f'<?xml version="1.0" encoding="UTF-8"?><lut:LUT xmlns:lut="http://www.olympus.co.jp/hpf/model/lut"><lut:channelId>{g}</lut:channelId>'
-            f'<lut:linear>true</lut:linear><lut:data></lut:data></lut:LUT>').encode()
+def lut_xml(g, k=0):
+    """실측 LUT XML 모양 (lut:name 이 색 이름). 채널과의 연결은 XML 앞의 [36][GUID] 머리 (xml_block)."""
+    nm = ['Green', 'Red', 'Cyan', 'Blue', 'Gray'][k % 5]
+    return (f'<?xml version="1.0" encoding="ASCII"?><lut:LUT xmlns:lut="http://www.olympus.co.jp/hpf/model/lut" version="2.3"><lut:name>{nm}</lut:name>'
+            f'<lut:resolution>65536</lut:resolution><lut:linear>true</lut:linear></lut:LUT>').encode()
 
 
-def frame_xml(sp, pos):
+def frame_xml(sp, pos, name=None):
     ax = ''.join(f'<commonframe:axisValue><commonframe:axisType>{t}</commonframe:axisType><commonframe:position>{p}</commonframe:position></commonframe:axisValue>' for t, p in pos)
     return (f'<?xml version="1.0" encoding="UTF-8"?><lsmframe:frameProperties xmlns:lsmframe="http://www.olympus.co.jp/hpf/model/lsmframe" '
-            f'xmlns:commonframe="http://www.olympus.co.jp/hpf/model/commonframe" xmlns:base="http://www.olympus.co.jp/hpf/model/base">'
-            f'<commonframe:general><base:name>{sp.get("base", "Image")}</base:name></commonframe:general><commonframe:imageDefinition><base:width>{sp["W"]}</base:width>'
+            f'xmlns:commonframe="http://www.olympus.co.jp/hpf/model/commonframe" xmlns:base="http://www.olympus.co.jp/hpf/model/base" id="{name or "_0_1"}">'
+            f'<commonframe:general><base:name>{name or "_0_1"}</base:name></commonframe:general><commonframe:imageDefinition><base:width>{sp["W"]}</base:width>'
             f'<base:height>{sp["H"]}</base:height><base:depth>{sp["depth"]}</base:depth><base:bitCounts>{sp["bits"]}</base:bitCounts>'
             f'<base:colorType>{sp.get("colortype", "GlayScale")}</base:colorType></commonframe:imageDefinition>{ax}</lsmframe:frameProperties>').encode()
 
@@ -97,58 +106,80 @@ def imgdef_xml(w, h):
 
 
 def xml_block(t, *xs):
-    c = b''.join(I(len(x)) + x for x in xs); return I(len(c), t) + c
+    """METADATA(0)·FRAMEPROPERTIES(1) 블록. 실측 배치: XML 마다 40 바이트 머리 [u32 ×9][u32 XML 길이]
+    (FRAMEPROPERTIES: 1,2,1,4,3400,1,1,1,1 · METADATA 항목: 종류,2,1,1,0,1,1,2,1). LUT 항목은 (b'LUT', 채널 GUID, xml) — [u32 36][GUID][u32 길이] 가 앞에 붙는다."""
+    c = b''
+    for k, x in enumerate(xs):
+        if isinstance(x, tuple):  # LUT: 채널 GUID 머리
+            g = x[1].encode(); c += I(5, 2, 1, 1, 1, 1, 1, 1, 1) + I(36) + g + I(len(x[2])) + x[2]
+        elif t == 1: c += I(1, 2, 1, 4, 3400, 1, 1, 1, 1, len(x)) + x
+        else: c += I(k + 1, 2, 1, 1, 0, 1, 1, 2, 1, len(x)) + x
+    return I(len(c), t) + c
 
 
-def pix_pair(u, p):
-    return [(I(len(u) + 12, 3, 0, 0, len(u)) + u, b''), (I(len(p), 4) + p, b'')]
+def pix_pair(u, p, at=0):
+    """UID 블록 [len][3][u32 면 안 위치][u32 PIXEL 길이][u32 UID 길이][UID] + PIXEL 블록 (실측 배치)"""
+    return [(I(len(u) + 12, 3, at, len(p), len(u)) + u, b''), (I(len(p), 4) + p, b'')]
 
 
 def assemble(blocks):
-    out = bytearray(48) + I(-1, 0); offs = []  # -1 표지 + u32 (Bio-Formats 는 16 바이트부터 -1 을 찾고 4 바이트 건너뜀)
+    """실측 배치: 머리 96 바이트 (48 + [블록 수, 0, 1, 0, -1, -1, 'FNIO'…, 3, 2, -1, -1]) — Bio-Formats 는 16 바이트부터 -1 을 찾아 4 바이트 넘긴 96 에서 블록을 읽기 시작"""
+    out = bytearray(96); offs = []  # 머리 뒤 첫 -1 은 @88 (Bio-Formats 가 찾는 표지)
     for b, gap in blocks:
         offs.append(len(out)); out += b + gap
     idx = len(out); out += I(-1) + b''.join(struct.pack('<Q', o) for o in offs) + struct.pack('<Q', 0)
     out[0:48] = b'OLYMPUSRAWFORMAT' + struct.pack('<IIIIQQ', 12, 0, 1, 2, len(out), idx)
+    bmp = next((o for o, (b, _) in zip(offs, blocks) if b[4:8] == I(2)), None)  # @64 = u64 BMP 썸네일 블록 위치 (없으면 -1,-1 — 실측 Map 파일)
+    out[48:96] = struct.pack('<IIII', len(offs), 0, 1, 0) + (struct.pack('<Q', bmp) if bmp else I(-1, -1)) + struct.pack('<IIIIii', 1330990150, 1464158550, 3, 2, -1, -1)
     return bytes(out)
 
 
+# 2×2 24-bit BMP 썸네일 (실측: 블록 내용이 'BMP ' + BMP 파일)
+BMP = b'BMP ' + b'BM' + struct.pack('<IHHI', 70, 0, 0, 54) + struct.pack('<IiiHHIIiiII', 40, 2, 2, 1, 24, 0, 16, 2835, 2835, 0, 0) + bytes(16)
+
+
+def frame_name(sp, t, l, z):
+    return (f'l{l + 1:03d}' if sp['nl'] > 1 else '') + (f'z{z + 1:03d}' if sp['nz'] > 1 else '') + (f't{t + 1:03d}' if sp['nt'] > 1 else '') + '_0_1'
+
+
 def build(sp, split_t=None):
-    """블록 배치: 머리 48 | -1 표지 | 첫 면 FRAMEPROPERTIES + 틈 | [METADATA (meta_early)] | UID PIXEL… | 나머지 FRAMEPROPERTIES | METADATA | block index
+    """실측 배치 (FV4000 시료 13 개에서 본 차례): 머리 96 | REF_ 참조 영상 UID·PIXEL | 첫 면 FRAMEPROPERTIES(이름 = UID 앞부분) → 채널마다 UID·PIXEL…
+    | METADATA | 둘째 면부터 [NULL(5) · FRAMEPROPERTIES · UID·PIXEL…] | NULL · BMP · METADATA | block index
     split_t: 이 T 부터의 면은 보조 파일(이름_00001)로 — (본 파일, 보조 파일, 자료)"""
     W, H, nc, nz, nt, nl, dep = (sp[k] for k in ['W', 'H', 'nc', 'nz', 'nt', 'nl', 'depth'])
     dt = {1: '<u1', 2: '<u2', 4: '<f4'}[dep]
     Hd = sp.get('lines', H)  # 선 주사: 면 자료의 줄 수 (FRAMEPROPERTIES height 보다 많음)
     mx = (1 << sp['bits']) - 1 if dep < 4 else 1000.0
     data = (rng.random((nt, nl, nz, nc, Hd, W)) * 1e3).astype(dt) if dep == 4 else rng.integers(0, mx + 1, (nt, nl, nz, nc, Hd, W)).astype(dt)
-    blocks, later, comp = [], [], []  # (블록 바이트, 블록 뒤 틈) — FRAMEPROPERTIES 뒤에는 4 바이트 틈 (Bio-Formats 가 XML 다음에 u32 하나를 건너뜀)
+    blocks, comp = [], []
     skip = set(sp.get('drop', []))
-    meta = (xml_block(0, fileinfo_xml(), lsm_xml(sp), *[lut_xml(g) for g in sp['guids']], *([imgdef_xml(*sp['ref'])] if sp.get('ref') else [])), b'')
+    meta = (xml_block(0, fileinfo_xml(), lsm_xml(sp), *[(b'LUT', g, lut_xml(g, k)) for k, g in enumerate(sp['guids'])], *([imgdef_xml(*sp['ref'])] if sp.get('ref') else [])), b'')
+    if sp.get('ref'):  # 참조 영상 (실측: 파일 맨 앞) — REF_LSM0_<GUID>_<블록>
+        rw, rh = sp['ref']; sp['refdata'] = rng.integers(0, 4096, (nc, rh, rw)).astype(dt)
+        for c in range(nc): blocks += pix_pair(f'REF_LSM0_{sp["guids"][c]}_0'.encode(), sp['refdata'][c].tobytes())
+    next_after_first = (0, 0, 1) if nz > 1 else (0, 1, 0) if nl > 1 else (1, 0, 0)
     for t in range(nt):
         dst = comp if split_t is not None and t >= split_t else blocks
         for l in range(nl):
             for z in range(nz):
+                if (t, l, z) != (0, 0, 0):
+                    if (t, l, z) == next_after_first and dst is blocks: dst.append(meta)
+                    dst.append((I(0, 5), b''))
                 if sp['frames'] or (t, l, z) == (0, 0, 0):
                     pos = []
                     if nz > 1: pos.append(('ZSTACK', round(sp.get('Z0', 0.0) + z * sp.get('Zstep', 1.0), 6)))
                     if nt > 1: pos.append(('TIMELAPSE', round((sp.get('T0', 0.0) + t * sp.get('Tstep', 1.0)) * 1000, 3)))
                     if nl > 1: pos.append(('LAMBDA', round(sp.get('L0', 0.0) + l * sp.get('Lstep', 1.0), 3)))
-                    fb = (xml_block(1, frame_xml(sp, pos)), I(0))
-                    if (t, l, z) == (0, 0, 0):
-                        blocks.append(fb)
-                        if sp.get('meta_early'): blocks.append(meta)
-                    else: (comp if dst is comp else later).append(fb)
+                    dst.append((xml_block(1, frame_xml(sp, pos, frame_name(sp, t, l, z))), b''))
                 for c in range(nc):
                     raw = data[t, l, z, c].tobytes(); nb = sp['blocks']
                     rows = [Hd * k // nb for k in range(nb + 1)]
                     for b in range(nb):
                         if (t, l, z, c, b) in skip: continue
-                        dst += pix_pair(uid(sp, t, l, z, c, b), raw[rows[b] * W * dep:rows[b + 1] * W * dep])
-    if sp.get('ref'):  # 참조(개관) 영상 — REF_LSM0_<GUID>_<블록>
-        rw, rh = sp['ref']; sp['refdata'] = rng.integers(0, 4096, (nc, rh, rw)).astype(dt)
-        for c in range(nc): blocks += pix_pair(f'REF_LSM0_{sp["guids"][c]}_0'.encode(), sp['refdata'][c].tobytes())
-    blocks += later  # 둘째 면부터의 FRAMEPROPERTIES 는 화소 뒤에 모아 둔다 (화소 블록 사이에 두면 Bio-Formats 가 다음 UID 를 놓침)
-    if not sp.get('meta_early'): blocks.append(meta)
+                        dst += pix_pair(uid(sp, t, l, z, c, b), raw[rows[b] * W * dep:rows[b + 1] * W * dep], rows[b] * W * dep)
+    blocks.append((I(0, 5), b''))
+    blocks.append((I(len(BMP), 2) + BMP, b''))  # 실측: NULL · BMP 썸네일 · METADATA 차례로 파일 끝
+    blocks.append(meta)
     if split_t is not None: return assemble(blocks), assemble(comp), data
     return assemble(blocks), data
 
@@ -203,9 +234,9 @@ CASES = [
     ('wide.oir', spec(W=515, H=3, px=0.0621, py=0.0621), '너비 515', {}),
     ('c2z4big.oir', spec(W=64, H=48, nc=2, nz=4, nt=3, Zstep=1.25, Tstep=10), 'C2·Z4·T3 64×48 (Z·T 고르기 시험)', {'choose': {'z': [1, 3], 't': [0, 2]}}),
     ('rgb8.oir', spec(nc=3, depth=1, bits=8, colortype='RGB', names=['R', 'G', 'B'], W=6, H=4), 'RGB 8-bit (colorType RGB, 표본별 GUID)',
-     {'follow': 'oirfile', 'why': 'Bio-Formats 는 colorType 을 보지 않아 3 채널 회색으로 읽음 — 화소는 같고, 앱은 oirfile 처럼 RGB 로 연다', 'rgb': True, 'pixels_only': True}),
+     {'follow': 'oirfile', 'why': 'Bio-Formats 는 colorType 을 보지 않아 3 채널 회색으로 읽음 — 화소는 같고, 앱은 oirfile 처럼 RGB 로 연다', 'rgb': True, 'pixels_only': True, 'warn': 'RGB(colorType RGB)'}),
     ('noframes.oir', spec(nz=3, Zstep=0.8, frames=False), '면마다 FRAMEPROPERTIES 없음 (위치는 첫 면 하나)',
-     {'follow': 'Bio-Formats', 'why': 'oirfile 은 면 위치가 하나뿐이면 Z 간격을 버리고 축 설정 step 도 안 씀; Bio-Formats 는 0.8 µm — 앱은 축 설정 step 을 쓴다', 'zStep': 0.8}),
+     {'follow': 'oirfile', 'why': '실측 파일은 면마다 FRAMEPROPERTIES 가 있음. 없으면 Bio-Formats 7.3.1 은 첫 면만 (Z 1) 읽고, oirfile 은 Z 3 이지만 Z 간격을 버림 — 앱은 oirfile 화소 + 설정 값 length z 0.8 µm', 'zStep': 0.8}),
     ('miss_mid.oir', spec(nz=4, Zstep=0.5, drop=[(0, 0, 2, 0, 0)]), 'Z 4 중 가운데(z3) PIXEL 블록 없음',
      {'follow': 'Bio-Formats', 'why': 'oirfile 은 있는 Z 번호만 모아 Z 3 으로 당김(z4 가 z3 자리로); Bio-Formats 는 Z 4, 빠진 면 = 0 — 앱은 번호 자리를 지킨다', 'warn': '0 으로 채웠습니다'}),
     ('miss_last.oir', spec(nz=4, Zstep=0.5, drop=[(0, 0, 3, 0, 0)]), 'Z 4 중 마지막 면 없음 (중단된 획득)', {'warn': '획득 설정보다 면이 적습니다'}),
@@ -218,7 +249,7 @@ CASES = [
     ('linescan.oir', spec(W=16, H=1, lines=40, blocks=4, axes_enabled='T', maxSize={'T': 40}), '선 주사 (면 높이 1, 40 줄을 블록 4 개로)',
      {'follow': 'oirfile', 'why': 'Bio-Formats 7.3.1 은 Y 1 줄만 읽음; oirfile 은 PIXEL 자료 길이로 40 줄 (kymograph) — 앱은 oirfile', 'warn': '선 주사'}),
     ('ref.oir', spec(nc=2, ref=(12, 10)), '참조(개관) 영상 REF_ 블록 포함',
-     {'follow': 'oirfile', 'why': 'Bio-Formats 7.3.1 은 REF_ 블록을 본 영상 채널 자료로 덮어씀; oirfile 은 따로 둠 — 앱은 본 영상 + 참조 영상 2 개', 'ref': True, 'warn': '참조 영상'}),
+     {'follow': 'oirfile', 'why': '실측처럼 REF_ 블록이 파일 맨 앞이면 Bio-Formats 도 본 영상은 같게 읽음 (본 화소 뒤에 두면 덮어씀); 참조 영상은 oirfile 만 따로 냄 — 앱은 본 영상 + 참조 영상 2 개', 'ref': True, 'warn': '참조 영상'}),
 ]
 
 
@@ -229,8 +260,8 @@ def write_truth(key, arr):
 def review_probes(out, table):
     """독립 검토(2026-10-16)에서 나온 경계 사례 — 정답 = 만든 자료를 앱 규칙대로 놓은 것. oirfile·Bio-Formats 결과는 함께 적는다."""
     r = np.random.default_rng(1)
-    def frame(sp, pos=()): return (xml_block(1, frame_xml(sp, list(pos))), I(0))
-    def meta(sp, lsm=None, extra=()): return (xml_block(0, fileinfo_xml(), lsm if lsm is not None else lsm_xml(sp), *[lut_xml(x) for x in sp['guids']], *extra), b'')
+    def frame(sp, pos=(), name=None): return (xml_block(1, frame_xml(sp, list(pos), name)), b'')
+    def meta(sp, lsm=None, extra=()): return (xml_block(0, fileinfo_xml(), lsm if lsm is not None else lsm_xml(sp), *[(b'LUT', x, lut_xml(x, k)) for k, x in enumerate(sp['guids'])], *extra), b'')
     def run(fn, blocks, app, desc, rec, asm=assemble):
         fp = os.path.join(D, fn); open(fp, 'wb').write(asm(blocks)); write_truth(fn, np.asarray(app, np.float32).reshape(-1))
         a = np.asarray(app, np.float32)
@@ -254,12 +285,13 @@ def review_probes(out, table):
     sp3 = spec(); d3 = r.integers(0, 4096, (6, 8)).astype('<u2'); one = lambda u='_0_1_': pix_pair(f'{u}{sp3["guids"][0]}_0'.encode(), d3.tobytes())
     lsm = lsm_xml(sp3).replace(b'<fvCommonphase:pinholeDiameter>', b'<opticalelement:dye><opticalelement:name>Alexa Fluor 488</opticalelement:name></opticalelement:dye><fvCommonphase:pinholeDiameter>')
     run('p3_nestedname.oir', [frame(sp3)] + one() + [meta(sp3, lsm=lsm)], d3, '채널 안에 염료 name 이 또 있음 → 바로 아래 name (Bio-Formats 와 같음; oirfile 은 안쪽 마지막 name)', dict(w=8, h=6, nc=1, nz=1, nt=1, chNames=['CH1']))
-    # p4: ZSTACK 축 정의 2 개 (step 9.0 · 0.5), length z 없음, 면 위치 하나 → 마지막 정의의 step (oirfile 과 같음)
+    # p4: 실측처럼 ZSTACK 정의 2 개 — 쓰인 것(paramEnable="true", step 0.5, maxSize 3) 뒤에 쓰이지 않은 Range(paramEnable="false", step 1, maxSize 21).
+    #     length z 없음, 면 위치 하나 → step 0.5, '획득 설정보다 적음' 알림 없음 (oirfile 은 마지막 정의 = step 1·maxSize 21)
     sp4 = spec(nz=3, Zstep=0.5); d4 = r.integers(0, 4096, (3, 6, 8)).astype('<u2')
-    lsm = lsm_xml(sp4).replace(b'<commonparam:z>0.5</commonparam:z>', b'').replace(b'<commonimage:axis enable="true">', b'<commonimage:axis enable="true"><commonparam:axis>ZSTACK</commonparam:axis><commonparam:maxSize>3</commonparam:maxSize><commonparam:step>9.0</commonparam:step></commonimage:axis><commonimage:axis enable="true">', 1)
+    lsm = lsm_xml(sp4).replace(b'<commonparam:z>0.5</commonparam:z>', b'')
     bl = [frame(sp4)]
     for z in range(3): bl += pix_pair(f'z{z + 1:03d}_0_1_{sp4["guids"][0]}_0'.encode(), d4[z].tobytes())
-    run('p4_twoaxes.oir', bl + [meta(sp4, lsm=lsm)], d4, 'ZSTACK 축 정의 2 개 → 마지막 것 (oirfile 과 같음; Bio-Formats 는 오류)', dict(w=8, h=6, nc=1, nz=3, nt=1, zStep=0.5, chNames=['CH1']))
+    run('p4_twoaxes.oir', bl + [meta(sp4, lsm=lsm)], d4, 'ZSTACK 정의 2 개 (paramEnable true·false) → paramEnable="true" 것 (실측 FV4000 배치; oirfile 은 마지막 것)', dict(w=8, h=6, nc=1, nz=3, nt=1, zStep=0.5, chNames=['CH1']))
     def nomarker(blocks):
         b = bytearray(assemble(blocks)); idx = struct.unpack('<Q', b[40:48])[0]; b[idx:idx + 4] = b'\0\0\0\0'; return bytes(b)
     run('p5_nomarker.oir', [frame(sp3)] + one() + [meta(sp3)], d3, 'block index 에 0xFFFFFFFF 표지 없음 (위치는 맞음)', dict(w=8, h=6, nc=1, nz=1, nt=1, chNames=['CH1']), asm=nomarker)
@@ -326,7 +358,7 @@ if __name__ == '__main__':
         if only and fn not in only: continue
         sp['base'] = fn[:-4]; b, data = build(sp); fp = os.path.join(D, fn); open(fp, 'wb').write(b)
         a, sizes, sc, names = oir_canon(fp)
-        with oirfile.OirFile(fp) as o: chn = [c.name for c in o.channels]
+        with oirfile.OirFile(fp) as o: chn = [next((c.name for c in o.channels if c.id == g), g) for g in o._get_ordered_channel_guids()]  # 화소가 있는 채널만 (acquisition 채널 제외)
         # 만든 자료를 oirfile 이 보여야 할 모양으로: 채널 = order 속성 순, 빠진 면 = 0 (가운데) 또는 없음 (끝)
         want = data.astype(np.float32)[:, :, :, np.argsort(sp['order'], kind='stable')]
         for (t, l, z, c, bb) in sp.get('drop', []): want[t, l, z, c] = 0
@@ -349,6 +381,8 @@ if __name__ == '__main__':
         if sp.get('wl'):  # 방출 파장 → 표시 색 (앱 규칙), 채널은 order 순
             lut = lambda w: 'Blue' if w < 470 else 'Cyan' if w < 505 else 'Green' if w < 560 else 'Yellow' if w < 590 else 'Red' if w < 700 else 'Magenta'
             rec['chLut'] = [lut(sum(sp['wl'][i]) / 2) for i in np.argsort(sp['order'], kind='stable')]
+        # 채널 색 = 채널 GUID 가 붙은 LUT XML 의 이름 (실측 배치) — 방출 파장보다 먼저
+        if not exp.get('rgb'): rec['chLut'] = [{'Gray': 'Grays'}.get(n, n) for n in (['Green', 'Red', 'Cyan', 'Blue', 'Gray'][i % 5] for i in np.argsort(sp['order'], kind='stable'))]
         for k in ('warn', 'choose'): 
             if k in exp: rec[k] = exp[k]
         dis = []
@@ -385,14 +419,14 @@ if __name__ == '__main__':
         out['noindex.oir'] = dict(desc='block index 가 잘림 (끝 일부만 남음)', w=8, h=6, nc=1, nz=4, nt=1, bit=16, px=0.31, zStep=0.5, chNames=['CH1'], key='noindex.oir', warn='index',
                                   truth=f'만든 자료 = Bio-Formats({"같음" if bf_ok else "다름"}); {oe}', disagree=[oe])
         table.append(('noindex.oir', '8×6 Z4', oe, 'ok' if bf_ok else 'X', '만든 자료'))
-        k = b.find(b'z003_0_1'); cut = k + 47 + 8 + 40  # z3 면 PIXEL 안에서 잘림 → 메타데이터(파일 끝)도 없음 → 분명한 오류
+        k = b.find(b'z003_0_1_' + sp['guids'][0].encode()); cut = k + 47 + 8 + 40  # z3 면 PIXEL 안에서 잘림 (실측 배치: 첫 면 뒤 METADATA 는 남음)
         open(os.path.join(D, 'trunc_pix.oir'), 'wb').write(b[:cut])
         S, err = bfdump(os.path.join(D, 'trunc_pix.oir'))
         try: oir_canon(os.path.join(D, 'trunc_pix.oir')); oe = 'oirfile 읽음'
         except Exception as e: oe = f'oirfile 실패 ({type(e).__name__})'
         tp = data[0, 0, :3, 0].astype(np.float32).reshape(-1).copy(); tp[2 * 48 + (cut - (k + 47 + 8)) // 2:] = 0  # z3 은 앞 20 화소만
         write_truth('trunc_pix.oir', tp)
-        out['trunc_pix.oir'] = dict(desc='z3 PIXEL 안에서 잘림 (index·메타데이터 없음 → 화소만)', w=8, h=6, nc=1, nz=3, nt=1, bit=16, px=None, zStep=0, chNames=['CH1'], key='trunc_pix.oir', warn='메타데이터(lsmimage)가 없습니다', nometa=True,
+        out['trunc_pix.oir'] = dict(desc='z3 PIXEL 안에서 잘림 (index·끝 METADATA 없음, 첫 면 뒤 METADATA 는 남음)', w=8, h=6, nc=1, nz=3, nt=1, bit=16, px=0.31, zStep=0.5, chNames=['CH1'], chLut=['Green'], key='trunc_pix.oir', warn='잘렸',
                                     truth=f'만든 자료 (잘린 뒤 = 0); {oe}; Bio-Formats {"오류: " + err if err else "읽음"}', disagree=[oe, f'Bio-Formats: {err or "읽음"}'])
         table.append(('trunc_pix.oir', '8×6 Z3(/4)', oe, 'err' if err else '?', '만든 자료 (화소만)'))
         open(os.path.join(D, 'header_only.oir'), 'wb').write(b[:40])

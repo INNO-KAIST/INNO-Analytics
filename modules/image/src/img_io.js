@@ -340,6 +340,13 @@ function fromRec(rec,name,kind){
 }
 
 /* ============================================================ Igor IBW (v5) ============================================================ */
+/* Asylum Research(Igor IBW) 채널 이름 → 물리 단위. 이름 = [Nap]<종류>[숫자](Trace|Retrace).
+   Gwyddion 2.64 igorfile 이 같은 파일에 붙이는 단위와 같다(실측 Cypher: Height·ZSensor·Amplitude·Deflection = m, Phase = deg, Potential = V, Current = A, Frequency = Hz).
+   모르는 종류는 null — 값은 그대로 두고 알린다(wave 하나에 단위가 하나라 추측하지 않음). */
+const AR_UNIT=[[/^(Height|ZSensor|Z|Amplitude|Deflection|Amp)\d*$/i,"m"],[/^Phase\d*$/i,"deg"],[/^(Potential|SurfacePotential|Voltage|Bias|UserIn|UserCalc|Input)\w*$/i,"V"],
+  [/^Current\d*$/i,"A"],[/^(Frequency|Freq)\d*$/i,"Hz"],[/^Capacitance\d*$/i,"F"]];
+IO.arChannelUnit=function(label){ const b=String(label||"").replace(/^Nap/,"").replace(/(Trace|Retrace)$/,""); for(const [re,u] of AR_UNIT) if(re.test(b)) return u; return null; };
+
 function readIBW(name,u8){
   const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength); let le=true; let ver=dv.getUint16(0,true); if(ver>10){ le=false; ver=dv.getUint16(0,false); }
   if(ver!==5) throw new Error("Igor IBW 버전 "+ver+" 은 아직 읽지 않습니다 (버전 5 만)");
@@ -362,8 +369,18 @@ function readIBW(name,u8){
   const info=[["Wave",bname]]; const nv={}; note.split(/\n/).forEach(l=>{ const i=l.indexOf(":"); if(i>0) nv[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
   ["ImagingMode","ScanSize","ScanRate","SetPoint","DriveAmplitude","DriveFrequency","SpringConstant","InvOLS","Date","Time"].forEach(kk=>{ if(nv[kk]!=null) info.push([kk,nv[kk]]); });
   const chLab=labels[2]&&labels[2].length>1?labels[2].slice(1):null;
-  const imgs=planes.map((p,l)=>({name:nl>1?`${name} · ${chLab&&chLab[l]?chLab[l]:"layer "+(l+1)}`:name,w:nx,h:ny,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info,warn:[],metaText:note,
-    channelLabel:chLab?chLab[l]:null}));
+  // 값 단위: Asylum 은 한 wave 에 여러 채널(높이·위상·전위·전류…)을 담고 wave 단위는 하나(m) — 채널 이름으로 정한다 (Gwyddion igorfile 과 같은 결과)
+  const dataUnits=td.decode(u8.subarray(wh+148,wh+152)).replace(/\0.*$/,"")||"";
+  const isAR=nv.ImagingMode!=null||nv.MicroscopeModel!=null;
+  const imgs=planes.map((p,l)=>{ const lab=chLab?chLab[l]:null; let u=null, uwarn=null;
+    if(isAR&&lab){ u=IO.arChannelUnit(lab); if(u==null) uwarn=`채널 '${lab}' 의 물리 단위를 모릅니다 — 값은 파일의 수 그대로(단위 없음)`; }
+    else if(nl===1) u=dataUnits||null;
+    let valueUnit="", siScale=1, siUnit="", iinfo=info;
+    if(u&&IO._unitParse&&IO._dispUnit){ const uo=IO._unitParse(u); const du=IO._dispUnit({p10:0,u:uo.u},p); const f=du.f*Math.pow(10,uo.p10);
+      if(f!==1) for(let i=0;i<p.length;i++) p[i]*=f; valueUnit=du.unit; siScale=f; siUnit=du.base;
+      iinfo=info.concat([["Value unit",f!==1?`${du.unit} (파일 ${u} × ${+f.toPrecision(6)})`:du.unit]]); }
+    return {name:nl>1?`${name} · ${lab||"layer "+(l+1)}`:name,w:nx,h:ny,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info:iinfo,warn:uwarn?[uwarn]:[],metaText:note,
+      channelLabel:lab,valueUnit,siScale,siUnit}; });
   void sfB;
   return {images:imgs,warn:iwarn};
 }

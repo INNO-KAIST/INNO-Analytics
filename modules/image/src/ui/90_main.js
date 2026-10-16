@@ -11,18 +11,18 @@ function build(root){
   ROOT=root;
   root.innerHTML=`<div class="imx">
     <div class="card im-top">
-      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF·ND2·CZI·PNG·JPEG·DM3/DM4·MRC·EMD·GWY·Nanoscope·ARDF·IBW·SXM·NPY·텍스트 … 여러 개·폴더째 끌어다 놓아도 됩니다">파일 열기<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
-        <button class="btn sm" id="imFmts" title="읽는 형식">형식</button><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
-      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Ctrl+Z">되돌리기</button><button class="btn sm" id="imSaveT" title="ImageJ 호환 TIFF (보정·스택 포함)">TIFF 저장</button><button class="btn sm" id="imSaveP" title="보이는 그대로(LUT·겹쳐 그린 것·축척 막대) 원래 해상도 PNG">PNG 내보내기</button><button class="btn sm" id="imClose" title="현재 영상 닫기">닫기</button><button class="btn sm" id="imClear" title="모두 지우기 (두 번 눌러 확인)">모두 지우기</button></div>
+      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF, ND2, CZI, PNG, JPEG, DM3/DM4, MRC, EMD, GWY, Nanoscope, ARDF, IBW, SXM, NPY, text … — you can also drop several files or whole folders here">Open files<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
+        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF (calibration and stacks included)">Save TIFF</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
     </div>
     <div class="im-main">
       <div class="card im-list" id="imList"></div>
       <div class="card im-center">
         <div class="im-toolbar" id="imTools"></div>
-        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>여기에 놓기</div></div>
+        <div class="im-canvaswrap" id="imCanvasWrap"><canvas id="imCanvas"></canvas><canvas id="imOverlay"></canvas><div class="im-drop" id="imDropHint" hidden>Drop here</div></div>
         <div class="im-stackbar" id="imStack"></div>
         <div class="im-status" id="imStatus"></div>
-        <div class="im-prog" id="imProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="imStop">중단</button></div>
+        <div class="im-prog" id="imProg" hidden><span class="t"></span><div class="bar"><i></i></div><button class="btn xs" id="imStop">Stop</button></div>
         <div class="im-msg" id="imMsg" hidden></div>
         <div class="im-profile" id="imProfile" hidden></div>
       </div>
@@ -54,17 +54,17 @@ function thumbOf(im){ const k=im.id+"|"+im.ver+"|"+JSON.stringify(im.disp)+"|"+i
   try{ const sc=Math.max(1,Math.floor(Math.max(im.w,im.h)/112)); const src=renderRegion(im,{x:0,y:0,w:im.w,h:im.h,sc}); const s=56/Math.max(im.w,im.h); const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(im.w*s)); c.height=Math.max(1,Math.round(im.h*s)); // 작은 표본에서 바로 (전체 표시를 다시 만들지 않음)
     const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(src,0,0,c.width,c.height); const url=c.toDataURL(); THUMB.set(im.id,{k,url}); return url; }catch(e){ return ""; } }
 function drawSide(){ const el=ROOT&&$q(ROOT,"#imList"); if(!el) return;
-  if(!S.images.length){ el.innerHTML=`<div class="im-dropbox" id="imDrop">여기에 영상 파일을 놓거나<br><b>눌러서 열기</b><br><span class="xs">TIFF · ND2 · CZI · PNG · DM3 · MRC · EMD · GWY · Nanoscope · ARDF · IBW · SXM …</span></div>
-    <ol class="im-steps0"><li><b>열기</b> — SEM·TEM·AFM·광학 영상. 화소 크기는 메타데이터에서 자동으로</li><li><b>보정 확인</b> — 없으면 Set Scale 도구로 축척 막대에 선</li><li><b>Threshold</b> → <b>Analyze Particles</b> — 크기 분포·면적 분율</li><li><b>Macro</b> — 같은 처리를 다른 영상·파일에 batch</li></ol>`; $q(el,"#imDrop").onclick=()=>$q(ROOT,"#imFin").click(); return; }
+  if(!S.images.length){ el.innerHTML=`<div class="im-dropbox" id="imDrop">Drop image files here<br><b>or click to open</b><br><span class="xs">TIFF · ND2 · CZI · PNG · DM3 · MRC · EMD · GWY · Nanoscope · ARDF · IBW · SXM …</span></div>
+    <ol class="im-steps0"><li><b>Open</b> — SEM·TEM·AFM·광학 영상. 화소 크기는 메타데이터에서 자동으로</li><li><b>Check the scale</b> — 없으면 Set Scale 도구로 축척 막대에 선</li><li><b>Threshold</b> → <b>Analyze Particles</b> — 크기 분포·면적 분율</li><li><b>Macro</b> — 같은 처리를 다른 영상·파일에 batch</li></ol>`; $q(el,"#imDrop").onclick=()=>$q(ROOT,"#imFin").click(); return; }
   const depth=im=>{ let d=0, p=im.parent; while(p&&byId(p)&&d<4){ d++; p=byId(p).parent; } return d; };
-  el.innerHTML=`<div class="im-lh"><b>Images</b><span class="muted xs">${S.images.length}</span></div>`+S.images.map(im=>`<div class="it ${im.id===S.sel?"sel":""}" data-id="${im.id}" style="padding-left:${6+depth(im)*12}px" title="${esc(im.name)}"><img src="${thumbOf(im)}" alt=""><div class="tx"><div class="nm">${esc(im.name)}</div><div class="xs muted">${im.w}×${im.h} · ${im.rgb?"RGB":im.bit+"-bit"}${isStack(im)?` · ${im.nz*im.nt}`:""}${im.nc>1&&!im.rgb?` · ${im.nc}ch`:""}${im.cal?` · ${g4(im.cal.pw)} ${esc(im.cal.unit)}`:` · <span class="warnc">no scale</span>`}</div></div><button class="x" data-x="${im.id}" title="닫기">×</button></div>`).join("");
+  el.innerHTML=`<div class="im-lh"><b>Images</b><span class="muted xs">${S.images.length}</span></div>`+S.images.map(im=>`<div class="it ${im.id===S.sel?"sel":""}" data-id="${im.id}" style="padding-left:${6+depth(im)*12}px" title="${esc(im.name)}"><img src="${thumbOf(im)}" alt=""><div class="tx"><div class="nm">${esc(im.name)}</div><div class="xs muted">${im.w}×${im.h} · ${im.rgb?"RGB":im.bit+"-bit"}${isStack(im)?` · ${im.nz*im.nt}`:""}${im.nc>1&&!im.rgb?` · ${im.nc}ch`:""}${im.cal?` · ${g4(im.cal.pw)} ${esc(im.cal.unit)}`:` · <span class="warnc">no scale</span>`}</div></div><button class="x" data-x="${im.id}" title="Close">×</button></div>`).join("");
   $a(el,".it").forEach(d=>d.onclick=e=>{ if(e.target.dataset.x){ closeImage(e.target.dataset.x); rerender(); return; } if(S.sel!==d.dataset.id){ S.sel=d.dataset.id; clearPreview(); invalidate(); save(); rerender(); } }); }
 
 /* ---------- 도구 막대 ---------- */
 function drawTools(){ const el=ROOT&&$q(ROOT,"#imTools"); if(!el) return; const im=cur();
   el.innerHTML=`<div class="tools">${TOOLS.map(([k,l,d])=>`<button class="tb ${S.ui.tool===k?"on":""}" data-t="${k}" title="${esc(l)}">${svgI(d)}</button>`).join("")}</div>
     <div class="sp"></div>
-    ${im?`<span class="im-name">${esc(im.name)}</span><button class="btn xs" id="imZo" title="−">−</button><button class="btn xs" id="imZ1" title="100 %">1:1</button><button class="btn xs" id="imZf" title="화면에 맞추기">Fit</button><button class="btn xs" id="imZi" title="+">+</button><button class="btn xs" id="imSn" title="선택 해제 (Esc)">Select none</button>`:""}`;
+    ${im?`<span class="im-name">${esc(im.name)}</span><button class="btn xs" id="imZo" title="−">−</button><button class="btn xs" id="imZ1" title="100 %">1:1</button><button class="btn xs" id="imZf" title="Fit to window">Fit</button><button class="btn xs" id="imZi" title="+">+</button><button class="btn xs" id="imSn" title="Select none (Esc)">Select none</button>`:""}`;
   $a(el,"[data-t]").forEach(b=>b.onclick=()=>{ S.ui.tool=b.dataset.t; save(); drawTools(); if(S.ui.tool==="wand"&&S.ui.panel!=="threshold"&&cur()&&!IC.isBinary(curPlaneOf(cur()))) note("Wand: Threshold 탭이 열려 있으면 그 범위로, 아니면 클릭한 값(± Measure 탭의 tolerance)으로 따라갑니다"); });
   if(!im) return; const q=s=>$q(el,s);
   q("#imZo").onclick=()=>zoomStep(im,-1); q("#imZi").onclick=()=>zoomStep(im,1); q("#imZf").onclick=()=>{ fitView(im); draw(); };
@@ -104,9 +104,9 @@ async function loadFiles(list){
   if(n){ const im=cur(); note(`영상 ${n}개를 열었습니다${side.length?` (옆 파일 ${side.length}개 메타데이터 사용)`:""}${im&&!im.cal?" — 화소 크기가 없습니다: Adjust ▸ Set Scale":""}`,im&&!im.cal?"warn":"ok"); }
   errs.slice(0,6).forEach(e=>note(e,"warn"));
 }
-function showFormats(){ modal(`<div class="im-h">읽는 형식</div><table class="im-kv sm">${IO.FORMATS.map(([a,b,c])=>`<tr><td><b>${esc(a)}</b><div class="xs muted">.${esc(b.split(",").join(" ."))}</div></td><td>${esc(c)}</td></tr>`).join("")}</table>
+function showFormats(){ modal(`<div class="im-h">Supported Formats</div><table class="im-kv sm">${IO.FORMATS.map(([a,b,c])=>`<tr><td><b>${esc(a)}</b><div class="xs muted">.${esc(b.split(",").join(" ."))}</div></td><td>${esc(c)}</td></tr>`).join("")}</table>
   <div class="xs muted">화소 크기 출처: ImageJ·OME 메타데이터, SEM 장비 태그(Zeiss 34118, FEI/Thermo 34680·34682, TESCAN 50431), Hitachi·JEOL 옆 .txt(같은 이름으로 함께 열기), DM·MRC·EMD 보정, Nikon ND2 dCalibration, Zeiss CZI Scaling, Igor wave scaling, Nanonis SCAN_RANGE. TIFF·PNG 해상도 태그는 기본값인 경우가 많아 '후보'로만 보입니다.</div>
-  <div class="im-row"><span class="sp"></span><button class="btn sm" data-close>닫기</button></div>`); }
+  <div class="im-row"><span class="sp"></span><button class="btn sm" data-close>Close</button></div>`); }
 function modal(html){ const m=$q(ROOT,"#imModal"); m.hidden=false; m.innerHTML=`<div class="box">${html}</div>`; m.onclick=e=>{ if(e.target===m||e.target.dataset.close!=null){ m.hidden=true; m.innerHTML=""; } }; return m; }
 /* 큰 현미경 파일(nd2·czi): 위치/scene·Z·T 고르기 — 작은 파일은 묻지 않고 전부 */
 let IMPORT_Q=Promise.resolve(); // 고르기 창은 한 번에 하나 (열기 중 또 끌어 놓아도 앞 파일이 사라지지 않게)
@@ -116,12 +116,12 @@ function askImport1(o){ const posB=o.posBytes||[...Array(o.positions)].map(()=>o
   hideProg();
   return new Promise(res=>{ const gb=b=>b>=1e9?(b/1e9).toFixed(2)+" GB":b>=1e6?(b/1e6).toFixed(0)+" MB":Math.max(1,Math.round(b/1e3))+" KB";
     const rng=(id,n,lab)=>n>1?`<div class="im-row"><b style="width:18px">${lab}</b><label class="im-f"><span>from</span><input type="number" id="${id}a" value="1" min="1" max="${n}" style="width:64px"></label><label class="im-f"><span>to</span><input type="number" id="${id}b" value="${n}" min="1" max="${n}" style="width:64px"></label><label class="im-f"><span>step</span><input type="number" id="${id}s" value="1" min="1" max="${n}" style="width:56px"></label><span class="xs muted">/ ${n}</span></div>`:"";
-    const pos=o.positions>1?`<div class="im-h sm">${o.kind==="czi"?"Scene":"XY position"} <span class="muted xs">${o.positions}</span><span class="sp"></span><button class="btn xs" id="ipAll">모두</button><button class="btn xs" id="ipNone">없음</button></div>
+    const pos=o.positions>1?`<div class="im-h sm">${o.kind==="czi"?"Scene":"XY position"} <span class="muted xs">${o.positions}</span><span class="sp"></span><button class="btn xs" id="ipAll">All</button><button class="btn xs" id="ipNone">None</button></div>
       <div class="im-list ip-list">${[...Array(o.positions).keys()].map(i=>`<label class="im-chk"><input type="checkbox" class="ipP" value="${i}" ${i<64?"checked":""}> ${esc(o.posNames[i]||String(i+1))}</label>`).join("")}</div>`:"";
     const m=modal(`<div class="im-h">Import — ${esc(o.name)}</div>
-      <div class="xs muted">${o.posBytes&&o.positions>1?"scene 마다 크기 다름":`${o.w}×${o.h} px`} · C ${o.nc} · Z ${o.nz} · T ${o.nt}${o.positions>1?` · ${o.kind==="czi"?"scene":"위치"} ${o.positions}`:""} — 전부 열면 ${gb(total)} (32-bit 메모리)</div>
+      <div class="xs muted">${o.posBytes&&o.positions>1?"scene 마다 크기 다름":`${o.w}×${o.h} px`} · C ${o.nc} · Z ${o.nz} · T ${o.nt}${o.positions>1?` · ${o.kind==="czi"?"scene":"position"} ${o.positions}`:""} — 전부 열면 ${gb(total)} (32-bit 메모리)</div>
       ${pos}${rng("ipZ",o.nz,"Z")}${rng("ipT",o.nt,"T")}
-      <div class="im-row"><span class="xs" id="ipInfo"></span><span class="sp"></span><button class="btn sm" data-close>취소</button><button class="btn primary sm" id="ipOk">Open</button></div>`);
+      <div class="im-row"><span class="xs" id="ipInfo"></span><span class="sp"></span><button class="btn sm" data-close>Cancel</button><button class="btn primary sm" id="ipOk">Open</button></div>`);
     const g=q=>$q(m,q); const seq=(id,n)=>{ if(n<=1) return [0]; const a=clamp(Math.round(+g(`#${id}a`).value||1),1,n), b=clamp(Math.round(+g(`#${id}b`).value||n),a,n), st=Math.max(1,Math.round(+g(`#${id}s`).value||1)); const r=[]; for(let i=a;i<=b;i+=st) r.push(i-1); return r; };
     const pick=()=>{ const p=o.positions>1?$a(m,".ipP").filter(x=>x.checked).map(x=>+x.value):[0]; return {p,z:seq("ipZ",o.nz),t:seq("ipT",o.nt)}; };
     const cnt=(list,n)=>n<=1?1:list.filter(v=>v<n).length; /* 위치마다 Z·T 수가 다르면(posNz·posNt) 그 위치 안의 것만 셈 */
@@ -136,7 +136,7 @@ function askRaw(name,size){ return new Promise(res=>{ const m=modal(`<div class=
   <div class="im-row"><label class="im-f"><span>Type</span><select class="im-sel" id="rwT">${[["u8","8-bit"],["u16","16-bit unsigned"],["i16","16-bit signed"],["u32","32-bit unsigned"],["i32","32-bit signed"],["f32","32-bit float"],["f64","64-bit float"]].map(([a,b])=>`<option value="${a}">${b}</option>`).join("")}</select></label><label class="im-chk"><input type="checkbox" id="rwLE" checked> Little-endian</label></div>
   <div class="im-row"><label class="im-f"><span>Width</span><input type="number" id="rwW" value="512"></label><label class="im-f"><span>Height</span><input type="number" id="rwH" value="512"></label><label class="im-f"><span>Images</span><input type="number" id="rwN" value="1"></label></div>
   <div class="im-row"><label class="im-f"><span>Offset</span><input type="number" id="rwO" value="0"></label><label class="im-f"><span>Gap</span><input type="number" id="rwG" value="0"></label><span class="xs muted" id="rwInfo"></span></div>
-  <div class="im-row"><span class="sp"></span><button class="btn sm" data-close>취소</button><button class="btn primary sm" id="rwOk">Open</button></div>`);
+  <div class="im-row"><span class="sp"></span><button class="btn sm" data-close>Cancel</button><button class="btn primary sm" id="rwOk">Open</button></div>`);
   const g=s=>$q(m,s); const info=()=>{ const sz={u8:1,u16:2,i16:2,u32:4,i32:4,f32:4,f64:8}[g("#rwT").value]; const need=+g("#rwO").value+(+g("#rwW").value)*(+g("#rwH").value)*sz*(+g("#rwN").value)+(+g("#rwG").value)*((+g("#rwN").value)-1); g("#rwInfo").textContent=`필요 ${need.toLocaleString()} B${need>size?" — 파일보다 큼":""}`; };
   $a(m,"input,select").forEach(e=>e.oninput=info); info();
   g("#rwOk").onclick=()=>{ const o={type:g("#rwT").value,le:g("#rwLE").checked,w:+g("#rwW").value,h:+g("#rwH").value,n:+g("#rwN").value||1,offset:+g("#rwO").value||0,gap:+g("#rwG").value||0}; m.hidden=true; res(o); };

@@ -1,13 +1,18 @@
-import asyncio, json
+"""DRE 탭 UI 시험 (Playwright). 사용: python3 ui_dre.py <빌드한 html> <스크린샷 폴더>
+  예: python3 ui_dre.py /tmp/out.html /tmp/shots   (modules/inject_all.py 로 만든 html)
+  인자를 생략하면 아래 기본 경로를 쓴다. 화면 글은 영어 골격(탭·버튼·라벨)이므로 선택자는 id / data-* 만 쓴다."""
+import asyncio, json, sys
 from playwright.async_api import async_playwright
-OUT='/home/claude/dre/shots'
+HTML=sys.argv[1] if len(sys.argv)>1 else '/home/claude/dre/out.html'
+OUT=sys.argv[2] if len(sys.argv)>2 else '/home/claude/dre/shots'
+import os; os.makedirs(OUT,exist_ok=True)
 async def main():
     async with async_playwright() as p:
         b=await p.chromium.launch(); ctx=await b.new_context(viewport={'width':1440,'height':950},accept_downloads=True); pg=await ctx.new_page()
         errs=[]; pg.on('pageerror',lambda e:errs.append('pageerror '+str(e)))
         pg.on('console',lambda m: errs.append('console '+m.text) if m.type=='error' and 'ERR_TUNNEL' not in m.text else None)
         pg.on('dialog',lambda d: asyncio.ensure_future(d.accept()))
-        await pg.goto('file:///home/claude/dre/out.html'); await pg.wait_for_timeout(500)
+        await pg.goto('file://'+HTML); await pg.wait_for_timeout(500)
         await pg.click('#nav button[data-v="dre"]'); await pg.wait_for_timeout(400)
         await pg.screenshot(path=f'{OUT}/d0_lee.png',full_page=True)
         # 합성 데이터
