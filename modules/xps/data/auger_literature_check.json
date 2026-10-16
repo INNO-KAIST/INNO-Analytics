@@ -1,0 +1,24 @@
+{
+ "source": "NIST X-ray Photoelectron Spectroscopy Database, NIST Standard Reference Database 20, Version 5.0 (A.V. Naumkin, A. Kraut-Vass, S.W. Gaarenstroom, C.J. Powell), https://srdata.nist.gov/xps/ ; records cited individually below. 'Powe10' = C.J. Powell, recommended Auger-electron kinetic energies for elemental solids (NIST SRD 20 records R-xx). Also ASTM E2108-00 Table 3 (after M.P. Seah, I.S. Gilmore, G. Beamson, Surf. Interface Anal. 26, 642 (1998)).",
+ "notes": "Kinetic energies (eV) read via WebFetch 2026-10-15 from NIST SRD 20 pages SpectralByElm/<El>, XPSSummaryPage/<id>. Used only to cross-check the Avantage Auger kinetic energies; never written to the output. Elemental (metal) values unless noted; compound values shift by several eV.",
+ "checks": [
+  {"el":"Cu","transition":"L3M45M45(1G)","ke":918.62,"ref":"NIST SRD20 record 2580; Seah, Smith, Anthony, Surf. Interface Anal. 15, 293 (1990)"},
+  {"el":"Cu","transition":"L3VV","ke":918.67,"ref":"ASTM E2108-00 Table 3: Cu L3VV BE 567.93 eV for Al Ka (1486.6 eV) -> KE 918.67; Mg Ka BE 334.90 (1253.6 eV) -> KE 918.70"},
+  {"el":"Ag","transition":"M4N45N45","ke":357.81,"ref":"NIST SRD20 record 2586; Seah, Smith, Anthony (1990)"},
+  {"el":"Ag","transition":"M5N45N45(1G)","ke":351.60,"ref":"NIST SRD20 record 33098; Gaarenstroom & Winograd, J. Chem. Phys. 67, 3500 (1977)"},
+  {"el":"Zn","transition":"L3M45M45(1G)","ke":992.00,"ref":"NIST SRD20 record 32890; Gaarenstroom & Winograd (1977)"},
+  {"el":"Cd","transition":"M5N45N45(1G)","ke":377.30,"ref":"NIST SRD20 record 33105; Gaarenstroom & Winograd (1977)"},
+  {"el":"Ni","transition":"L3VV","ke":846.10,"ref":"NIST SRD20 record R-72 (Powe10)"},
+  {"el":"Co","transition":"L3VV","ke":773.40,"ref":"NIST SRD20 record R-70 (Powe10)"},
+  {"el":"Fe","transition":"L3VV","ke":702.70,"ref":"NIST SRD20 record R-69 (Powe10)"},
+  {"el":"Ge","transition":"L3M45M45(1G)","ke":1145.50,"ref":"NIST SRD20 record R-80 (Powe10)"},
+  {"el":"In","transition":"M4N45N45","ke":410.20,"ref":"NIST SRD20 record R-96 (Powe10)"},
+  {"el":"In","transition":"M5N45N45(1G)","ke":402.60,"ref":"NIST SRD20 record 33113"},
+  {"el":"Sn","transition":"M4N45N45","ke":437.20,"ref":"NIST SRD20 record R-97 (Powe10)"},
+  {"el":"Sn","transition":"M5N45N45(1G)","ke":429.00,"ref":"NIST SRD20 record 33130"},
+  {"el":"Pd","transition":"M5N45N45(1G)","ke":327.40,"ref":"NIST SRD20 record R-93 (Powe10)"},
+  {"el":"Mg","transition":"KL23L23(1D)","ke":1185.20,"ref":"NIST SRD20 record R-59 (Powe10), Mg metal"},
+  {"el":"Na","transition":"KL23L23(1D)","ke":989.80,"ref":"NIST SRD20 records 32339 (Na2CO3), 32319 (NaHCO3) - compound value; Na metal 994.3-994.5 (records 32442, 32441)"},
+  {"el":"F","transition":"KL23L23(1D)","ke":655.6,"ref":"NIST SRD20 record 32357 (ZnF2); range 655.4-659.3 in fluorides (records 32359, 32348)"}
+ ]
+}

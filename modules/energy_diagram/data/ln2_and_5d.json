@@ -1,0 +1,313 @@
+{
+ "meta": {
+  "description": "Divalent lanthanides and 4f-5d levels: free-ion references (NIST), host data with sources, Dorenbos empirical relations. Energies in cm-1 unless stated; nm are vacuum-equivalent 1e7/E unless the source quotes air wavelengths.",
+  "caveat": "Host values were extracted from open web pages with an automated reader; each carries 'verify' where the primary number was not seen verbatim in a table."
+ },
+ "free_ions": {
+  "Ce3+ (Ce IV)": {
+   "source": "NIST Atomic Spectra Database (Kramida, Ralchenko, Reader & NIST ASD Team), physics.nist.gov/asd, levels retrieved 2026-09-29 via WebFetch (automated text extraction — spot-check against the live table before publication)",
+   "levels": [
+    {
+     "config": "4f",
+     "term": "2F5/2",
+     "E": 0
+    },
+    {
+     "config": "4f",
+     "term": "2F7/2",
+     "E": 2253
+    },
+    {
+     "config": "5d",
+     "term": "2D3/2",
+     "E": 49737,
+     "nm": 201.1
+    },
+    {
+     "config": "5d",
+     "term": "2D5/2",
+     "E": 52226
+    },
+    {
+     "config": "6s",
+     "term": "2S1/2",
+     "E": 86602
+    }
+   ],
+   "note": "Free-ion lowest 4f->5d = 49,737 cm-1 (6.17 eV). Dorenbos papers use E_free(Ce3+) = 6.12 eV (49,340 cm-1) as reference for the redshift D — recalled standard value, verify (Dorenbos, J. Lumin. 91, 91 (2000)). A secondary source quotes \"the cerium 5d levels of the free ion, at 6.35 eV\" (Sr2SiS4 paper, Materials 6, 3663 (2013)) — that number appears to be a centroid-type value."
+  },
+  "Eu2+ (Eu III)": {
+   "source": "NIST Atomic Spectra Database (Kramida, Ralchenko, Reader & NIST ASD Team), physics.nist.gov/asd, levels retrieved 2026-09-29 via WebFetch (automated text extraction — spot-check against the live table before publication)",
+   "levels": [
+    {
+     "config": "4f7",
+     "term": "8S7/2",
+     "E": 0
+    },
+    {
+     "config": "4f6(7F)5d",
+     "term": "8H3/2",
+     "E": 33856.22
+    },
+    {
+     "config": "4f6(7F)5d",
+     "term": "8H5/2",
+     "E": 34394.41
+    },
+    {
+     "config": "4f6(7F)6s",
+     "term": "8F1/2",
+     "E": 46096.4
+    }
+   ],
+   "note": "Dorenbos uses 34,000 cm-1 (4.215 eV) for the free-ion first f-d transition; quoted as \"34004 cm-1 for the free Eu2+ ion\" in arXiv:1709.00311 (Jia et al., citing Dorenbos J. Lumin. 104, 239 (2003))."
+  },
+  "Sm2+ (Sm III)": {
+   "source": "NIST Atomic Spectra Database (Kramida, Ralchenko, Reader & NIST ASD Team), physics.nist.gov/asd, levels retrieved 2026-09-29 via WebFetch (automated text extraction — spot-check against the live table before publication)",
+   "levels": [
+    {
+     "term": "7F0",
+     "E": 0
+    },
+    {
+     "term": "7F1",
+     "E": 293.45
+    },
+    {
+     "term": "7F2",
+     "E": 813.55
+    },
+    {
+     "term": "7F3",
+     "E": 1492.66
+    },
+    {
+     "term": "7F4",
+     "E": 2277.88
+    },
+    {
+     "term": "7F5",
+     "E": 3131.54
+    },
+    {
+     "term": "7F6",
+     "E": 4026.99
+    },
+    {
+     "term": "5D0",
+     "E": 14533
+    },
+    {
+     "config": "4f5(6H)5d",
+     "term": "7H2",
+     "E": 26283.55,
+     "note": "lowest 4f55d level"
+    }
+   ]
+  },
+  "Tm2+ (Tm III)": {
+   "source": "NIST Atomic Spectra Database (Kramida, Ralchenko, Reader & NIST ASD Team), physics.nist.gov/asd, levels retrieved 2026-09-29 via WebFetch (automated text extraction — spot-check against the live table before publication)",
+   "levels": [
+    {
+     "term": "2F7/2",
+     "E": 0
+    },
+    {
+     "term": "2F5/2",
+     "E": 8774.02,
+     "nm": 1139.7
+    },
+    {
+     "config": "4f12(3H6)5d",
+     "J": "9/2",
+     "E": 22897.47,
+     "note": "lowest 4f12 5d level"
+    }
+   ]
+  },
+  "Yb2+ (Yb III)": {
+   "source": "NIST Atomic Spectra Database (Kramida, Ralchenko, Reader & NIST ASD Team), physics.nist.gov/asd, levels retrieved 2026-09-29 via WebFetch (automated text extraction — spot-check against the live table before publication)",
+   "levels": [
+    {
+     "term": "1S0",
+     "E": 0
+    },
+    {
+     "config": "4f13(2F7/2)5d",
+     "J": 2,
+     "E": 33385.8,
+     "note": "lowest 4f13 5d level"
+    }
+   ]
+  }
+ },
+ "dorenbos_relations": {
+  "redshift_definition": "D(n+,A) = E_free(Ln, first f->d) - E(Ln, A) (host-induced lowering of first 4f->5d absorption); for a given host A, D is nearly the same for all Ln of the same charge (Dorenbos).",
+  "Eu2_vs_Ce3": "D(2+,A) = 0.64 D(3+,A) - 0.233 eV",
+  "E_Eu2_vs_E_Ce3": "E(Eu2+,A) = 0.64 E(Ce3+,A) + 0.53 eV (first f-d transition energies)",
+  "CFS": "eps_CFS(Eu2+) = 0.77 eps_CFS(Ce3+)",
+  "source": "Relations quoted in Materials 6, 3663 (2013) [Sr2SiS4 Ce/Eu paper, eqs. 1,3,4] and arXiv:1709.00311 eq. 36, both citing P. Dorenbos, J. Lumin. 104, 239 (2003) \"Energy of the first 4f7->4f65d transition of Eu2+ in inorganic compounds\" (and Dorenbos J. Phys.: Condens. Matter 15, 575 (2003) for the Ce3+/Eu2+ relation — verify which paper each equation originates from).",
+  "consistency_check": "With E_free(Eu2+)=4.215 eV and E_free(Ce3+)=6.12 eV the two forms are equivalent: 4.215 - (0.64*(6.12-E_Ce) - 0.233) = 0.64 E_Ce + 0.53 eV (checked: 4.215+0.233-0.64*6.12 = 0.531)."
+ },
+ "hosts": [
+  {
+   "ion": "Ce3+",
+   "host": "LaF3",
+   "quantity": "5d->4f emission (laser)",
+   "value_nm": 286,
+   "range_nm": [
+    275,
+    315
+   ],
+   "source": "\"Optically pumped Ce:LaF3 laser at 286 nm\", Opt. Lett. 5, 339 (1980) (Ehrlich, Moulton, Osgood) — abstract: tuning ~275–315 nm"
+  },
+  {
+   "ion": "Ce3+",
+   "host": "LaF3",
+   "quantity": "lowest 4f->5d absorption",
+   "value_nm_approx": 250,
+   "E_cm1_approx": 40000,
+   "source": "User-supplied estimate (~40,000 cm-1 = 250 nm); consistent with 250 nm Ce3+ excitation used in Frontiers in Chemistry 13, 1501039 (2025) (LaF3:Ce/Gd/Eu) and the 245 nm Ce3+ absorption noted in Radzhabov & Shendrik arXiv:1511.00385. Exact band maximum from Dorenbos J. Lumin. 91, 91 (2000) (fluorides) NOT verified in this session.",
+   "verified": false
+  },
+  {
+   "ion": "Ce3+",
+   "host": "CeF3",
+   "quantity": "5d1..5d5 excitation features",
+   "value_eV": [
+    5.01,
+    5.3,
+    5.66,
+    5.97,
+    6.45
+   ],
+   "source": "Materials 14, 4243 (2021) \"Energy Structure and Luminescence of CeF3 Crystals\" (dips in CeF3 spectra correlated with 5d1..5d5 maxima); emission 282/305 nm (regular Ce3+) and 290/340 nm bands"
+  },
+  {
+   "ion": "Ce3+",
+   "host": "alpha-NaYF4 (cubic)",
+   "quantity": "absorption max / emission",
+   "absorption_nm": 300,
+   "emission_nm": 332,
+   "components_nm": {
+    "5d->2F5/2": 330,
+    "5d->2F7/2": 350
+   },
+   "source": "Chin. Opt. Lett. 14, 061601 (2016) \"Ce3+ ion-doped alpha-NaYF4 single crystal for UV laser\" (abstract)"
+  },
+  {
+   "ion": "Ce3+",
+   "host": "beta-NaYF4",
+   "quantity": "5d levels",
+   "value": null,
+   "source": "Not obtained — gap."
+  },
+  {
+   "ion": "Eu2+",
+   "host": "CaF2",
+   "quantity": "first f-d absorption / emission",
+   "absorption_eV": 3.06,
+   "absorption_nm": 405.2,
+   "emission_eV": 2.92,
+   "emission_nm": 424.6,
+   "stokes_cm1": 1047,
+   "source": "arXiv:1709.00311 (Jia et al., first-principles study of Eu2+ phosphors) Table I experimental column, citing its ref. [62]. The emission 2.92 eV (≈425 nm) matches the classic CaF2:Eu2+ blue band."
+  },
+  {
+   "ion": "Eu2+",
+   "host": "CaF2",
+   "quantity": "Dorenbos-model estimate of D(2+)",
+   "value_eV": 1.155,
+   "note": "computed here: D = 4.215 eV - 3.06 eV"
+  },
+  {
+   "ion": "Eu2+",
+   "host": "LaF3",
+   "quantity": "absorption bands",
+   "value_nm": [
+    245,
+    330,
+    380
+   ],
+   "emission_nm": 600,
+   "note": "anomalous (impurity-trapped exciton) red emission at 600 nm, 2.2 us at 7.5 K; 245 nm band partly Ce3+ contamination",
+   "source": "E. A. Radzhabov, R. Yu. Shendrik, arXiv:1511.00385 \"Anomalous europium luminescence in LaF3\""
+  },
+  {
+   "ion": "Eu2+",
+   "host": "NaYF4",
+   "quantity": "f-d band",
+   "value": null,
+   "source": "Not obtained — gap (Eu2+ is rarely stabilized in NaYF4)."
+  },
+  {
+   "ion": "Sm2+",
+   "host": "SrF2",
+   "quantity": "4f6 5D0 lines and 4f55d",
+   "lines_nm": {
+    "5D0->7F0 (MD/ED-forbidden, very weak)": 683.8,
+    "5D0->7F1 (magnetic dipole)": 696.7,
+    "4f55d(T1u)->7F0": 675.6,
+    "4f55d(A1u)->7F0": 663.5
+   },
+   "derived": {
+    "E_5D0_cm1": 14624.2,
+    "E_7F1_cm1": 270.8
+   },
+   "source": "Inorganics 14, 115 (2026?) MDPI \"Photoluminescence of X-Ray-Generated Sm2+ in Co-Precipitated SrF2:Sm3+ Nanocrystals\" (automated extraction; year per MDPI volume 14 — verify). Radzhabov, Opt. Mater. 85, 127 (2018) gives a narrow line at 697.2 nm (SrF2) / 696.8 nm (BaF2) — the same 696-697 nm line, which MDPI assigns to 5D0->7F1.",
+   "note": "In cubic (Oh) SrF2 sites 5D0->7F0 is strictly forbidden; the prominent ~697 nm line is 5D0->7F1 (MD). The full 7F_J manifold in SrF2/CaF2 (Wood & Kaiser, Phys. Rev. 126, 2079 (1962); Axe & Sorokin, Phys. Rev. 130, 945 (1963)) was not retrieved — gap; free-ion 7F_J from NIST given above are a close proxy (host shifts are tens of cm-1)."
+  },
+  {
+   "ion": "Sm2+",
+   "host": "CaF2",
+   "quantity": "emission",
+   "value_nm": 710,
+   "note": "5d->4f broadband dominates (4f55d below 5D0 in CaF2); weak lines 703.5, 691.5 nm",
+   "source": "E. A. Radzhabov, Opt. Mater. 85, 127 (2018), \"Spectroscopy of divalent samarium in alkaline-earth fluorides\" (automated extraction)"
+  },
+  {
+   "ion": "Tm2+",
+   "host": "CaF2/SrF2/BaF2",
+   "quantity": "2F5/2->2F7/2 emission",
+   "CaF2_lines_nm": [
+    1120,
+    1180
+   ],
+   "ground_splitting_cm1": {
+    "CaF2": 557.8,
+    "SrF2": 464.6,
+    "BaF2": 395.7
+   },
+   "fd_absorption_nm": {
+    "eg": [
+     360,
+     700
+    ],
+    "t2g": [
+     250,
+     350
+    ]
+   },
+   "df_emission_nm": [
+    650,
+    780
+   ],
+   "source": "E. Radzhabov, R. Shendrik, V. Pankratov, J. Lumin. 252, 119271 (2022) \"Emission of Tm2+ in alkaline-earth fluoride crystals\" (automated extraction; \"near 1120 / 1180 nm\")."
+  },
+  {
+   "ion": "Yb2+",
+   "host": "alkaline-earth fluorides",
+   "quantity": "long-wavelength 4f-5d bands",
+   "value_nm": [
+    360,
+    310
+   ],
+   "source": "quoted in Radzhabov & Shendrik arXiv:1511.00385 citing Moine et al. (1989)"
+  }
+ ],
+ "gaps": [
+  "Sm2+ 7F_J / 5D1 / 5D2 crystal-field levels in SrF2, CaF2, BaFCl (primary: Wood & Kaiser 1962; Axe & Sorokin 1963; BaFCl hole-burning papers) not retrieved.",
+  "Ce3+ 5d1..5 band positions in LaF3 and beta-NaYF4 from Dorenbos compilations not verified.",
+  "Eu2+ in NaYF4/LiYF4 not obtained."
+ ]
+}

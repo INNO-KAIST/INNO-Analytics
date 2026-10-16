@@ -1,0 +1,123 @@
+/* ============ INNO Analytics — Energy Diagram ============ */
+.ed{--ed-gap:14px}
+.ed .ed-top{display:flex;flex-direction:column;gap:10px}
+.ed .ed-formrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ed .ed-formrow input[type=text]{flex:1 1 320px;min-width:0;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font-size:14px;font-family:"DM Sans","Noto Sans KR",system-ui,sans-serif}
+.ed .ed-formrow input[type=text]:focus{outline:2px solid var(--focus,var(--accent));outline-offset:1px}
+.ed select.ed-sel{padding:6px 8px;border:1px solid var(--line2);border-radius:8px;font-size:13px;max-width:100%}
+.ed .ed-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ed .ed-ion{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line2);border-radius:999px;background:var(--card);padding:2px 4px 2px 10px;font-size:13px}
+.ed .ed-ion b{font-weight:700;color:var(--ink)}
+.ed .ed-ion .c{color:var(--muted);font-size:11.5px;margin-left:4px}
+.ed .ed-ion button{border:none;background:none;color:var(--muted);width:22px;height:22px;border-radius:999px;cursor:pointer;font-size:12px;line-height:1;padding:0}
+.ed .ed-ion button:hover{background:var(--chip);color:var(--ink)}
+.ed .ed-ion button.x:hover{background:var(--risk-soft);color:var(--risk)}
+.ed .ed-ion.est{border-style:dashed}
+.ed .ed-host{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--ink2)}
+.ed .ed-host label{display:inline-flex;gap:5px;align-items:center}
+.ed .ed-host input[type=number]{width:74px;padding:4px 6px;border:1px solid var(--line2);border-radius:6px;font-size:12.5px}
+.ed .ed-warn{display:flex;flex-direction:column;gap:4px}
+.ed .ed-warn .note{padding:6px 10px;font-size:12px}
+/* 주기율표 */
+.ed .ed-pt{display:grid;grid-template-columns:repeat(18,minmax(0,1fr));gap:3px;max-width:880px;margin-top:4px}
+.ed .ed-pt .gap{grid-column:span 1}
+.ed .ed-pt button{aspect-ratio:1/1;min-width:0;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:0;font-size:12px;font-weight:600;color:var(--faint);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;position:relative}
+.ed .ed-pt button small{font-size:8.5px;font-weight:500;opacity:.8}
+.ed .ed-pt button.act{color:var(--accent-strong,var(--accent));border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--accent-soft)}
+.ed .ed-pt button.host{color:var(--ink2)}
+.ed .ed-pt button:hover{border-color:var(--accent)}
+.ed .ed-pt button.on{outline:2px solid var(--accent);outline-offset:0}
+.ed .ed-pt .lnrow{grid-column:3 / span 15}
+.ed .ed-ptpop{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;min-height:30px;font-size:12.5px}
+.ed .ed-ptpop .btn{padding:4px 10px}
+/* 본문 격자 */
+.ed .ed-main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:var(--ed-gap);align-items:start}
+@media (max-width:1180px){.ed .ed-main{grid-template-columns:minmax(0,1fr)}}
+.ed .ed-side{display:flex;flex-direction:column;gap:0;min-width:0}
+.ed .ed-diag{padding:12px 12px 10px}
+.ed .ed-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.ed .ed-tools .sp{flex:1}
+.ed .ed-tools .seg button{padding:5px 11px;font-size:12.5px}
+.ed .ed-tog{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);cursor:pointer;user-select:none}
+.ed .ed-prompt{min-height:22px;font-size:12.5px;color:var(--ink2);margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ed .ed-prompt .step{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent-strong,var(--accent));border-radius:999px;padding:2px 10px;font-weight:600}
+.ed .ed-svgwrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.ed svg.ed-svg{display:block;font-family:"DM Sans","Noto Sans KR",system-ui,sans-serif;user-select:none;-webkit-user-select:none}
+.ed svg .lvhit{cursor:default}
+.ed svg.m-et .lvhit,.ed svg.m-ph .lvhit,.ed svg.m-em .lvhit{cursor:pointer}
+.ed svg .lvhit:focus{outline:none}
+.ed svg .lvhit:focus-visible + .lvfocus,.ed svg g.lv:focus-visible .lvfocus{display:block}
+.ed svg .proc{cursor:pointer}
+.ed svg .proc:focus{outline:none}
+.ed svg .dim{opacity:.22}
+.ed .ed-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:8px;align-items:center}
+.ed .ed-legend span{display:inline-flex;gap:5px;align-items:center}
+.ed .ed-legend svg{flex:none}
+/* 옆 패널 */
+.ed .ed-side .card{padding:12px 14px}
+.ed .ed-side .card>h3{margin-bottom:8px}
+.ed .ed-lasers{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ed .ed-laser{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 4px 2px 9px;font-size:12.5px;font-weight:600;border:1px solid var(--line2);background:var(--card)}
+.ed .ed-laser i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.ed .ed-laser button{border:none;background:none;color:var(--muted);width:20px;height:20px;border-radius:999px;cursor:pointer;padding:0}
+.ed .ed-laser button:hover{background:var(--risk-soft);color:var(--risk)}
+.ed .ed-lasers input{width:86px;padding:4px 7px;border:1px solid var(--line2);border-radius:6px;font-size:12.5px}
+.ed table.ed-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.ed table.ed-tbl th{font-weight:600;color:var(--muted);text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);font-size:11.5px}
+.ed table.ed-tbl td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.ed table.ed-tbl tr.sel td{background:var(--accent-soft)}
+.ed table.ed-tbl tbody tr{cursor:pointer}
+.ed table.ed-tbl tbody tr:hover td{background:var(--chip)}
+.ed table.ed-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ed .tb{display:inline-block;min-width:34px;text-align:center;border-radius:5px;padding:1px 5px;font-size:10.5px;font-weight:700;color:#fff;letter-spacing:.02em}
+.ed .gr{display:inline-block;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:700;white-space:nowrap}
+.ed .gr.g0{background:var(--ok-soft);color:var(--ok)}
+.ed .gr.g1{background:var(--ok-soft);color:var(--ok)}
+.ed .gr.g2{background:var(--info-soft);color:var(--info)}
+.ed .gr.g3{background:var(--warn-soft);color:var(--warn)}
+.ed .gr.g4{background:var(--risk-soft);color:var(--risk)}
+.ed .ed-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px}
+.ed .ed-kv dt{color:var(--muted)}
+.ed .ed-kv dd{margin:0;font-variant-numeric:tabular-nums}
+.ed .ed-det .row{margin-top:8px}
+.ed .ed-det textarea{width:100%;min-height:44px;border:1px solid var(--line2);border-radius:6px;padding:6px;font-size:12.5px;resize:vertical}
+.ed .ed-sug{max-height:380px;overflow:auto;margin-top:6px}
+.ed .ed-sug .it{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-bottom:1px solid var(--line);font-size:12.5px}
+.ed .ed-sug .it .tx{flex:1;min-width:0}
+.ed .ed-sug .it .mt{color:var(--muted);font-size:11.5px}
+.ed .ed-pa{border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));background:var(--accent-soft);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:8px}
+.ed .ed-pa b{color:var(--accent-strong,var(--accent))}
+.ed details.ed-src summary{cursor:pointer;font-weight:600;font-size:13px}
+.ed details.ed-src ul{margin:8px 0 0 16px;padding:0;font-size:12px;color:var(--ink2);line-height:1.55}
+.ed .ed-empty{padding:26px 12px;text-align:center;color:var(--muted);font-size:13px}
+.ed .ed-dparam{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-top:6px}
+.ed .ed-dparam input{width:70px;padding:3px 5px;border:1px solid var(--line2);border-radius:5px;font-size:12px}
+/* 툴팁 */
+.ed-tip{position:fixed;z-index:80;max-width:340px;background:var(--card);color:var(--ink);border:1px solid var(--line2);border-radius:9px;box-shadow:var(--shadow-lg,0 10px 30px rgba(0,0,0,.2));padding:9px 11px;font-size:12px;line-height:1.5;pointer-events:none;opacity:0;transition:opacity .08s}
+.ed-tip.on{opacity:1}
+.ed-tip h4{margin:0 0 4px;font-size:13px;font-weight:700}
+.ed-tip .k{color:var(--muted)}
+.ed-tip table{border-collapse:collapse}
+.ed-tip td{padding:0 8px 0 0;vertical-align:top;font-variant-numeric:tabular-nums}
+.ed-tip .s{color:var(--muted);font-size:11px;margin-top:4px}
+@media (max-width:720px){
+  .ed .ed-pt{gap:2px}
+  .ed .ed-pt button{font-size:10px;border-radius:4px}
+  .ed .ed-pt button small{display:none}
+  .ed .ed-tools .seg{width:100%}
+  .ed .ed-tools .seg button{flex:1}
+}
+
+.ed input[type=checkbox]{width:auto;margin:0}
+.ed .ed-tools select.ed-sel{padding:5px 6px;font-size:12.5px}
+.ed svg.m-et .proc,.ed svg.m-ph .proc,.ed svg.m-em .proc{pointer-events:none}
+/* 이온 간 상호작용 */
+.ed .ed-int-dir{margin:6px 0 10px}
+.ed .ed-int-dir .h{font-size:12.5px;margin-bottom:4px}
+.ed table.ed-int th,.ed table.ed-int td{font-size:11.5px;padding:3px 6px;text-align:center;white-space:nowrap}
+.ed table.ed-int tbody th{text-align:left;font-weight:600}
+.ed table.ed-int td.sel{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+.ed .ed-int-c{background:none;border:0;padding:0;cursor:pointer;font:inherit;color:inherit}
+.ed .ed-int-c:focus-visible{outline:2px solid var(--focus);border-radius:4px}
+.ed label.ed-f{display:inline-flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--muted)}
+.ed label.ed-f input{width:130px}

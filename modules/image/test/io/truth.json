@@ -1,0 +1,700 @@
+{
+"t8.tif": {
+"shape": [
+37,
+53
+]
+},
+"t16.tif": {
+"shape": [
+37,
+53
+]
+},
+"t32.tif": {
+"shape": [
+37,
+53
+]
+},
+"t16be.tif": {
+"shape": [
+37,
+53
+]
+},
+"t8_lzw.tif": {
+"shape": [
+37,
+53
+]
+},
+"t16_lzw_pred.tif": {
+"shape": [
+37,
+53
+]
+},
+"t32_deflate_fpred.tif": {
+"shape": [
+37,
+53
+]
+},
+"t16_packbits.tif": {
+"shape": [
+37,
+53
+]
+},
+"t8_tiled.tif": {
+"shape": [
+37,
+53
+]
+},
+"t32_tiled_deflate.tif": {
+"shape": [
+37,
+53
+]
+},
+"t16_big.tif": {
+"shape": [
+37,
+53
+]
+},
+"trgb.tif": {
+"shape": [
+37,
+53,
+3
+]
+},
+"trgb_planar.tif": {
+"shape": [
+3,
+37,
+53
+]
+},
+"trgb_lzw.tif": {
+"shape": [
+37,
+53,
+3
+]
+},
+"tstack16.tif": {
+"shape": [
+4,
+37,
+53
+]
+},
+"t8_strips.tif": {
+"shape": [
+37,
+53
+]
+},
+"tij_hyper.tif": {
+"shape": [
+3,
+2,
+2,
+37,
+53
+],
+"nc": 2,
+"nz": 2,
+"nt": 3,
+"pw": 0.125,
+"unit": "µm"
+},
+"tome.ome.tif": {
+"shape": [
+2,
+37,
+53
+],
+"nc": 2,
+"pw": 0.25,
+"unit": "µm"
+},
+"tome_czyx.ome.tif": {
+"shape": [
+3,
+2,
+37,
+53
+],
+"nc": 2,
+"nz": 3
+},
+"tfei.tif": {
+"shape": [
+37,
+53
+],
+"pw": 2.5,
+"unit": "nm",
+"databar": 7
+},
+"tzeiss.tif": {
+"shape": [
+37,
+53
+],
+"pw": 3.906,
+"unit": "nm"
+},
+"thitachi.tif": {
+"shape": [
+37,
+53
+],
+"pw": 1.984375,
+"unit": "nm"
+},
+"tres.tif": {
+"shape": [
+37,
+53
+],
+"cand": 5.0
+},
+"p8.png": {
+"shape": [
+37,
+53
+]
+},
+"p16.png": {
+"shape": [
+37,
+53
+]
+},
+"p16i.png": {
+"shape": [
+37,
+53
+]
+},
+"prgb.png": {
+"shape": [
+37,
+53,
+3
+]
+},
+"p4.png": {
+"shape": [
+37,
+53
+]
+},
+"n32.npy": {
+"shape": [
+37,
+53
+]
+},
+"n16stk.npy": {
+"shape": [
+4,
+37,
+53
+]
+},
+"txt.csv": {
+"shape": [
+10,
+12
+]
+},
+"afm.ibw#0": {
+"shape": [
+37,
+53
+],
+"pw": 18.867924528301888,
+"unit": "nm"
+},
+"afm.ibw#1": {
+"shape": [
+37,
+53
+],
+"pw": 18.867924528301888,
+"unit": "nm"
+},
+"afm.ibw#2": {
+"shape": [
+37,
+53
+],
+"pw": 18.867924528301888,
+"unit": "nm"
+},
+"scan.sxm#0": {
+"shape": [
+37,
+53
+],
+"pw": 3.7735849056603774,
+"unit": "nm"
+},
+"scan.sxm#1": {
+"shape": [
+37,
+53
+],
+"pw": 3.7735849056603774,
+"unit": "nm"
+},
+"scan.sxm#2": {
+"shape": [
+37,
+53
+],
+"pw": 3.7735849056603774,
+"unit": "nm"
+},
+"scan.sxm#3": {
+"shape": [
+37,
+53
+],
+"pw": 3.7735849056603774,
+"unit": "nm"
+},
+"n_single12.nd2": {
+"shape": [
+1,
+24,
+33
+],
+"nc": 1,
+"nz": 1,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"DAPI"
+],
+"pw": 0.1083,
+"unit": "µm"
+},
+"n_t3z4c2.nd2": {
+"shape": [
+24,
+24,
+33
+],
+"nc": 2,
+"nz": 4,
+"nt": 3,
+"fmt": "nd2",
+"names": [
+"FITC",
+"TRITC"
+],
+"pw": 0.25,
+"unit": "µm",
+"zstep": 0.5
+},
+"n_z4t3c2.nd2": {
+"shape": [
+24,
+24,
+33
+],
+"nc": 2,
+"nz": 4,
+"nt": 3,
+"fmt": "nd2",
+"names": [
+"Ch0",
+"Ch1"
+],
+"zstep": 0.3
+},
+"n_lossless.nd2": {
+"shape": [
+6,
+24,
+33
+],
+"nc": 2,
+"nz": 1,
+"nt": 3,
+"fmt": "nd2",
+"names": [
+"Ch0",
+"Ch1"
+],
+"pw": 0.5,
+"unit": "µm"
+},
+"n_pad.nd2": {
+"shape": [
+1,
+24,
+33
+],
+"nc": 1,
+"nz": 1,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+]
+},
+"n_rgb.nd2": {
+"shape": [
+3,
+24,
+33
+],
+"nz": 1,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"rgb": true,
+"pw": 1.25,
+"unit": "µm"
+},
+"n_rgb16.nd2": {
+"shape": [
+3,
+24,
+33
+],
+"nc": 3,
+"nz": 1,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"R",
+"G",
+"B"
+]
+},
+"n_f32.nd2": {
+"shape": [
+2,
+24,
+33
+],
+"nc": 1,
+"nz": 1,
+"nt": 2,
+"fmt": "nd2",
+"names": [
+"Ch0"
+]
+},
+"n_p2z3.nd2#0": {
+"shape": [
+3,
+24,
+33
+],
+"nc": 1,
+"nz": 3,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.65,
+"unit": "µm"
+},
+"n_p2z3.nd2#1": {
+"shape": [
+3,
+24,
+33
+],
+"nc": 1,
+"nz": 3,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.65,
+"unit": "µm"
+},
+"n_missing.nd2": {
+"shape": [
+3,
+24,
+33
+],
+"nc": 1,
+"nz": 1,
+"nt": 3,
+"fmt": "nd2",
+"names": [
+"Ch0"
+]
+},
+"n_p8z4.nd2#0": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#1": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#2": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#3": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#4": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#5": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#6": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_p8z4.nd2#7": {
+"shape": [
+4,
+24,
+33
+],
+"nc": 1,
+"nz": 4,
+"nt": 1,
+"fmt": "nd2",
+"names": [
+"Ch0"
+],
+"pw": 0.2,
+"unit": "µm",
+"zstep": 0.25
+},
+"n_netime.nd2": {
+"shape": [
+5,
+24,
+33
+],
+"nc": 1,
+"nz": 1,
+"nt": 5,
+"fmt": "nd2",
+"names": [
+"Ch0"
+]
+},
+"c_c2z3t2.czi": {
+"shape": [
+12,
+20,
+28
+],
+"fmt": "czi",
+"nc": 2,
+"nz": 3,
+"nt": 2,
+"pw": 0.1,
+"unit": "µm",
+"names": [
+"DAPI",
+"GFP"
+]
+},
+"c_zstd1.czi": {
+"shape": [
+2,
+20,
+28
+],
+"fmt": "czi",
+"nc": 2
+},
+"c_zstd0_8.czi": {
+"shape": [
+1,
+20,
+28
+],
+"fmt": "czi"
+},
+"c_f32.czi": {
+"shape": [
+1,
+20,
+28
+],
+"fmt": "czi",
+"pw": 0.05,
+"unit": "µm"
+},
+"c_bgr24.czi": {
+"shape": [
+3,
+20,
+28
+],
+"fmt": "czi",
+"rgb": true
+},
+"c_mosaic.czi": {
+"shape": [
+1,
+20,
+28
+],
+"fmt": "czi",
+"mosaic": true
+},
+"c_scenes.czi#0": {
+"shape": [
+1,
+20,
+28
+],
+"fmt": "czi",
+"pw": 0.2,
+"unit": "µm"
+},
+"c_scenes.czi#1": {
+"shape": [
+1,
+24,
+26
+],
+"fmt": "czi",
+"pw": 0.2,
+"unit": "µm"
+},
+"c_mix_rgb_gray.czi#0": {
+"shape": [
+1,
+20,
+28
+],
+"fmt": "czi",
+"nc": 1,
+"names": [
+"DAPI"
+]
+},
+"c_mix_rgb_gray.czi#1": {
+"shape": [
+3,
+20,
+28
+],
+"fmt": "czi",
+"rgb": true
+}
+}

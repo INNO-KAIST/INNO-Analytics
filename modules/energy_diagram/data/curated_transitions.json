@@ -1,0 +1,1086 @@
+{
+ "meta": {
+  "description": "Curated optical transitions of Ln3+ in fluoride hosts used in UCNP/PA literature. typical_nm = commonly reported peak; lambda_bary_nm_LaF3 = barycenter-to-barycenter vacuum wavelength from LaF3 data; lambda_window = full span from highest-upper-to-lowest-lower Stark combinations.",
+  "flagged_outside_window": [
+   [
+    "Gd3+",
+    "6I7/2",
+    "8S7/2",
+    275,
+    [
+     278.0,
+     278.5
+    ]
+   ]
+  ]
+ },
+ "transitions": [
+  {
+   "ion": "Tm3+",
+   "upper": "1D2",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 449.8,
+   "dE_bary_cm1": 22232,
+   "lambda_window_nm_LaF3": [
+    444.6,
+    452.9
+   ],
+   "typical_nm": 450,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "1G4",
+   "lower": "3H6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 473.8,
+   "dE_bary_cm1": 21105,
+   "lambda_window_nm_LaF3": [
+    464.8,
+    484.9
+   ],
+   "typical_nm": 475,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "1I6",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 341.9,
+   "dE_bary_cm1": 29249,
+   "lambda_window_nm_LaF3": [
+    337.2,
+    346.8
+   ],
+   "typical_nm": 347,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "1D2",
+   "lower": "3H6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 359.4,
+   "dE_bary_cm1": 27824,
+   "lambda_window_nm_LaF3": [
+    355.7,
+    362.3
+   ],
+   "typical_nm": 360,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "1G4",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 644.6,
+   "dE_bary_cm1": 15513,
+   "lambda_window_nm_LaF3": [
+    629.0,
+    662.3
+   ],
+   "typical_nm": 650,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3H4",
+   "lower": "3H6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 799.5,
+   "dE_bary_cm1": 12508,
+   "lambda_window_nm_LaF3": [
+    775.6,
+    824.2
+   ],
+   "typical_nm": 800,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "3H4 = the ~12,600 cm-1 level (older literature: 3F4)"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3F4",
+   "lower": "3H6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1788.3,
+   "dE_bary_cm1": 5592,
+   "lambda_window_nm_LaF3": [
+    1682.1,
+    1925.7
+   ],
+   "typical_nm": 1800,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "broad, ~1.6–2.0 µm"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3P0",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 335.9,
+   "dE_bary_cm1": 29775,
+   "lambda_window_nm_LaF3": [
+    333.4,
+    337.1
+   ],
+   "typical_nm": null,
+   "typical_source": null,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "reference only"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "1G4",
+   "lower": "3H5",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 774.5,
+   "dE_bary_cm1": 12912,
+   "lambda_window_nm_LaF3": [
+    756.5,
+    801.7
+   ],
+   "typical_nm": null,
+   "typical_source": null,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "~780 nm, overlaps 3H4 emission"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3H4",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1445.9,
+   "dE_bary_cm1": 6916,
+   "lambda_window_nm_LaF3": [
+    1374.2,
+    1512.4
+   ],
+   "typical_nm": 1470,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "S-band"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3H5",
+   "lower": "3H6",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 1220.6,
+   "dE_bary_cm1": 8193,
+   "lambda_window_nm_LaF3": [
+    1166.6,
+    1270.2
+   ],
+   "typical_nm": null,
+   "typical_source": null,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "~1200 nm absorption; used in 1064/1150 nm pumping of Tm PA"
+  },
+  {
+   "ion": "Tm3+",
+   "upper": "3F2+3F3",
+   "lower": "3H6",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 685.2,
+   "dE_bary_cm1": 14594,
+   "lambda_window_nm_LaF3": [
+    655.0,
+    709.1
+   ],
+   "typical_nm": 690,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "2H11/2",
+   "lower": "4I15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 523.0,
+   "dE_bary_cm1": 19120,
+   "lambda_window_nm_LaF3": [
+    515.0,
+    531.3
+   ],
+   "typical_nm": 520,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4S3/2",
+   "lower": "4I15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 544.9,
+   "dE_bary_cm1": 18353,
+   "lambda_window_nm_LaF3": [
+    538.0,
+    552.1
+   ],
+   "typical_nm": 540,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4F9/2",
+   "lower": "4I15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 656.4,
+   "dE_bary_cm1": 15234,
+   "lambda_window_nm_LaF3": [
+    644.0,
+    669.0
+   ],
+   "typical_nm": 655,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "2G9/2",
+   "lower": "4I15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 407.7,
+   "dE_bary_cm1": 24529,
+   "lambda_window_nm_LaF3": [
+    402.2,
+    413.9
+   ],
+   "typical_nm": 410,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "UCNP literature calls this upper level 2H9/2; Carnall LaF3 label 2G9/2 (~24,700 cm-1)"
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4I13/2",
+   "lower": "4I15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1542.7,
+   "dE_bary_cm1": 6482,
+   "lambda_window_nm_LaF3": [
+    1465.6,
+    1623.1
+   ],
+   "typical_nm": 1530,
+   "typical_source": "user-supplied typical value (task brief)",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4I11/2",
+   "lower": "4I15/2",
+   "type": "abs/em",
+   "lambda_bary_nm_LaF3": 988.0,
+   "dE_bary_cm1": 10121,
+   "lambda_window_nm_LaF3": [
+    962.0,
+    1014.4
+   ],
+   "typical_nm": 980,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "resonant with Yb 2F5/2"
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4S3/2",
+   "lower": "4I13/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 842.4,
+   "dE_bary_cm1": 11871,
+   "lambda_window_nm_LaF3": [
+    834.4,
+    852.2
+   ],
+   "typical_nm": 850,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4I9/2",
+   "lower": "4I15/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 807.9,
+   "dE_bary_cm1": 12378,
+   "lambda_window_nm_LaF3": [
+    785.5,
+    835.0
+   ],
+   "typical_nm": 800,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Er3+",
+   "upper": "4G11/2",
+   "lower": "4I15/2",
+   "type": "em/abs",
+   "lambda_bary_nm_LaF3": 379.0,
+   "dE_bary_cm1": 26387,
+   "lambda_window_nm_LaF3": [
+    374.4,
+    383.4
+   ],
+   "typical_nm": 380,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Yb3+",
+   "upper": "2F5/2",
+   "lower": "2F7/2",
+   "type": "abs/em",
+   "lambda_bary_nm_LaF3": 972.4,
+   "dE_bary_cm1": 10284,
+   "lambda_window_nm_LaF3": [
+    940.4,
+    1012.4
+   ],
+   "typical_nm": 980,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "absorption peak ~976 nm, emission 975–1030 nm"
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5S2+5F4",
+   "lower": "5I8",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 540.9,
+   "dE_bary_cm1": 18487,
+   "lambda_window_nm_LaF3": [
+    531.6,
+    550.0
+   ],
+   "typical_nm": 540,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5F5",
+   "lower": "5I8",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 647.0,
+   "dE_bary_cm1": 15457,
+   "lambda_window_nm_LaF3": [
+    635.6,
+    658.8
+   ],
+   "typical_nm": 645,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5S2+5F4",
+   "lower": "5I7",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 744.3,
+   "dE_bary_cm1": 13436,
+   "lambda_window_nm_LaF3": [
+    733.7,
+    752.6
+   ],
+   "typical_nm": 750,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5I6",
+   "lower": "5I8",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1168.0,
+   "dE_bary_cm1": 8562,
+   "lambda_window_nm_LaF3": [
+    1131.3,
+    1202.9
+   ],
+   "typical_nm": 1180,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5I7",
+   "lower": "5I8",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1979.8,
+   "dE_bary_cm1": 5051,
+   "lambda_window_nm_LaF3": [
+    1885.7,
+    2095.1
+   ],
+   "typical_nm": 2000,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "~1.95–2.1 µm"
+  },
+  {
+   "ion": "Ho3+",
+   "upper": "5G6",
+   "lower": "5I8",
+   "type": "abs/em",
+   "lambda_bary_nm_LaF3": 451.6,
+   "dE_bary_cm1": 22142,
+   "lambda_window_nm_LaF3": [
+    445.4,
+    458.5
+   ],
+   "typical_nm": 450,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4F3/2",
+   "lower": "4I9/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 875.8,
+   "dE_bary_cm1": 11418,
+   "lambda_window_nm_LaF3": [
+    859.5,
+    901.6
+   ],
+   "typical_nm": 880,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4F3/2",
+   "lower": "4I11/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1050.9,
+   "dE_bary_cm1": 9516,
+   "lambda_window_nm_LaF3": [
+    1035.6,
+    1067.3
+   ],
+   "typical_nm": 1060,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "1053–1064 nm depending on host"
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4F3/2",
+   "lower": "4I13/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1328.9,
+   "dE_bary_cm1": 7525,
+   "lambda_window_nm_LaF3": [
+    1296.0,
+    1367.2
+   ],
+   "typical_nm": 1330,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4F5/2+2H9/2",
+   "lower": "4I9/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 798.9,
+   "dE_bary_cm1": 12517,
+   "lambda_window_nm_LaF3": [
+    775.1,
+    826.7
+   ],
+   "typical_nm": 800,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "808 nm pump band"
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4G5/2+2G7/2",
+   "lower": "4I9/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 579.6,
+   "dE_bary_cm1": 17255,
+   "lambda_window_nm_LaF3": [
+    568.0,
+    595.2
+   ],
+   "typical_nm": 580,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Nd3+",
+   "upper": "4F7/2+4S3/2",
+   "lower": "4I9/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 743.4,
+   "dE_bary_cm1": 13451,
+   "lambda_window_nm_LaF3": [
+    729.1,
+    768.4
+   ],
+   "typical_nm": 740,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "3P0",
+   "lower": "3H4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 482.8,
+   "dE_bary_cm1": 20711,
+   "lambda_window_nm_LaF3": [
+    477.9,
+    488.7
+   ],
+   "typical_nm": 480,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "3P0",
+   "lower": "3H6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 607.7,
+   "dE_bary_cm1": 16456,
+   "lambda_window_nm_LaF3": [
+    597.1,
+    620.6
+   ],
+   "typical_nm": 610,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "3P0",
+   "lower": "3F2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 636.5,
+   "dE_bary_cm1": 15712,
+   "lambda_window_nm_LaF3": [
+    633.3,
+    639.1
+   ],
+   "typical_nm": 640,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "1D2",
+   "lower": "3H4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 594.7,
+   "dE_bary_cm1": 16814,
+   "lambda_window_nm_LaF3": [
+    582.4,
+    608.9
+   ],
+   "typical_nm": 600,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "3P0",
+   "lower": "3F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 717.9,
+   "dE_bary_cm1": 13930,
+   "lambda_window_nm_LaF3": [
+    713.8,
+    726.0
+   ],
+   "typical_nm": 720,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Pr3+",
+   "upper": "1G4",
+   "lower": "3H4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 1023.0,
+   "dE_bary_cm1": 9775,
+   "lambda_window_nm_LaF3": [
+    950.9,
+    1080.1
+   ],
+   "typical_nm": 1010,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5D0",
+   "lower": "7F1",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 590.8,
+   "dE_bary_cm1": 16925,
+   "lambda_window_nm_LaF3": [
+    588.9,
+    592.5
+   ],
+   "typical_nm": 592,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "magnetic dipole"
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5D0",
+   "lower": "7F2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 614.9,
+   "dE_bary_cm1": 16262,
+   "lambda_window_nm_LaF3": [
+    611.6,
+    618.2
+   ],
+   "typical_nm": 613,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "hypersensitive ED"
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5D0",
+   "lower": "7F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 694.7,
+   "dE_bary_cm1": 14395,
+   "lambda_window_nm_LaF3": [
+    680.3,
+    703.3
+   ],
+   "typical_nm": 700,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5D1",
+   "lower": "7F1",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 535.2,
+   "dE_bary_cm1": 18686,
+   "lambda_window_nm_LaF3": [
+    533.3,
+    536.8
+   ],
+   "typical_nm": 535,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5L6",
+   "lower": "7F0",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 395.9,
+   "dE_bary_cm1": 25259,
+   "lambda_window_nm_LaF3": [
+    392.7,
+    398.9
+   ],
+   "typical_nm": 394,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Eu3+",
+   "upper": "5D2",
+   "lower": "7F0",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 464.4,
+   "dE_bary_cm1": 21531,
+   "lambda_window_nm_LaF3": [
+    463.7,
+    465.0
+   ],
+   "typical_nm": 465,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D4",
+   "lower": "7F6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 488.9,
+   "dE_bary_cm1": 20454,
+   "lambda_window_nm_LaF3": [
+    485.6,
+    493.6
+   ],
+   "typical_nm": 490,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D4",
+   "lower": "7F5",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 543.5,
+   "dE_bary_cm1": 18400,
+   "lambda_window_nm_LaF3": [
+    539.0,
+    549.7
+   ],
+   "typical_nm": 545,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D4",
+   "lower": "7F4",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 584.2,
+   "dE_bary_cm1": 17117,
+   "lambda_window_nm_LaF3": [
+    577.8,
+    594.6
+   ],
+   "typical_nm": 585,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D4",
+   "lower": "7F3",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 620.5,
+   "dE_bary_cm1": 16116,
+   "lambda_window_nm_LaF3": [
+    615.0,
+    624.3
+   ],
+   "typical_nm": 620,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D3",
+   "lower": "7F5",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 414.0,
+   "dE_bary_cm1": 24152,
+   "lambda_window_nm_LaF3": [
+    411.4,
+    417.5
+   ],
+   "typical_nm": 415,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "5D3 blue lines (low-concentration)"
+  },
+  {
+   "ion": "Tb3+",
+   "upper": "5D3",
+   "lower": "7F6",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 381.6,
+   "dE_bary_cm1": 26206,
+   "lambda_window_nm_LaF3": [
+    379.5,
+    384.3
+   ],
+   "typical_nm": 380,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Sm3+",
+   "upper": "4G5/2",
+   "lower": "6H5/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 559.2,
+   "dE_bary_cm1": 17883,
+   "lambda_window_nm_LaF3": [
+    554.2,
+    565.0
+   ],
+   "typical_nm": 562,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Sm3+",
+   "upper": "4G5/2",
+   "lower": "6H7/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 594.4,
+   "dE_bary_cm1": 16824,
+   "lambda_window_nm_LaF3": [
+    586.7,
+    603.2
+   ],
+   "typical_nm": 598,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Sm3+",
+   "upper": "4G5/2",
+   "lower": "6H9/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 640.4,
+   "dE_bary_cm1": 15616,
+   "lambda_window_nm_LaF3": [
+    631.5,
+    650.0
+   ],
+   "typical_nm": 645,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Sm3+",
+   "upper": "4G5/2",
+   "lower": "6H11/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 699.5,
+   "dE_bary_cm1": 14296,
+   "lambda_window_nm_LaF3": [
+    688.5,
+    710.9
+   ],
+   "typical_nm": 705,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Dy3+",
+   "upper": "4F9/2",
+   "lower": "6H15/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 475.7,
+   "dE_bary_cm1": 21022,
+   "lambda_window_nm_LaF3": [
+    468.2,
+    482.1
+   ],
+   "typical_nm": 480,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Dy3+",
+   "upper": "4F9/2",
+   "lower": "6H13/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 569.3,
+   "dE_bary_cm1": 17564,
+   "lambda_window_nm_LaF3": [
+    560.0,
+    575.5
+   ],
+   "typical_nm": 575,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Dy3+",
+   "upper": "4F9/2",
+   "lower": "6H11/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 656.4,
+   "dE_bary_cm1": 15234,
+   "lambda_window_nm_LaF3": [
+    646.2,
+    665.0
+   ],
+   "typical_nm": 665,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Gd3+",
+   "upper": "6P7/2",
+   "lower": "8S7/2",
+   "type": "em",
+   "lambda_bary_nm_LaF3": 310.8,
+   "dE_bary_cm1": 32176,
+   "lambda_window_nm_LaF3": [
+    310.5,
+    311.0
+   ],
+   "typical_nm": 311,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "UV-B line used in UCNP (Yb/Tm/Gd)"
+  },
+  {
+   "ion": "Gd3+",
+   "upper": "6I7/2",
+   "lower": "8S7/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 278.3,
+   "dE_bary_cm1": 35938,
+   "lambda_window_nm_LaF3": [
+    278.0,
+    278.5
+   ],
+   "typical_nm": 275,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": false,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "typical 275 nm refers to the whole 6I_J group (6I7/2..6I17/2 span ~272–278 nm in LaF3)"
+  },
+  {
+   "ion": "Gd3+",
+   "upper": "6D9/2",
+   "lower": "8S7/2",
+   "type": "abs",
+   "lambda_bary_nm_LaF3": 251.9,
+   "dE_bary_cm1": 39694,
+   "lambda_window_nm_LaF3": [
+    251.6,
+    252.2
+   ],
+   "typical_nm": 253,
+   "typical_source": "commonly reported value in UCNP/lanthanide literature — not individually source-verified in this compilation",
+   "typical_within_LaF3_window": true,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": ""
+  },
+  {
+   "ion": "Ce3+",
+   "upper": "2F7/2",
+   "lower": "2F5/2",
+   "type": "ir",
+   "lambda_bary_nm_LaF3": 4299.2,
+   "dE_bary_cm1": 2326,
+   "lambda_window_nm_LaF3": [
+    3514.9,
+    5319.1
+   ],
+   "typical_nm": null,
+   "typical_source": null,
+   "provenance": "lambda_bary/window computed from ln3_laf3.json (Carnall 1989 LaF3 data; vacuum wavelengths). Fluoride hosts (NaYF4, LiYF4) shift lines by typically <~1%.",
+   "comment": "intra-4f, ~4.5 µm"
+  }
+ ]
+}

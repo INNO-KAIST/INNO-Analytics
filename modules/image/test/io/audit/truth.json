@@ -1,0 +1,96 @@
+{
+"ij_minmax.tif": {
+"shape": [
+21,
+34
+],
+"display": [
+100,
+3000
+]
+},
+"ome_2series.ome.tif#0": {
+"shape": [
+2,
+21,
+34
+],
+"nc": 2,
+"pw": 0.2,
+"unit": "µm"
+},
+"ome_2series.ome.tif#1": {
+"shape": [
+2,
+21,
+34
+],
+"nc": 2,
+"pw": 0.4,
+"unit": "µm"
+},
+"ome_z.ome.tif": {
+"shape": [
+3,
+21,
+34
+],
+"nz": 3,
+"zstep": 0.5
+},
+"rgb_u2.npy": {
+"shape": [
+3,
+21,
+34
+],
+"nc": 3
+},
+"semi_comma.txt": {
+"shape": [
+6,
+5
+]
+},
+"naninf.csv": {
+"shape": [
+6,
+5
+]
+},
+"ij_signed16.tif": {
+"shape": [
+21,
+34
+]
+},
+"pal4.tif": {
+"shape": [
+3,
+21,
+34
+],
+"rgb": true
+},
+"i64.tif": {
+"shape": [
+21,
+34
+]
+},
+"ij_rgbstack.tif": {
+"shape": [
+9,
+21,
+34
+],
+"rgb": true,
+"nz": 3
+},
+"trunc.tif": {
+"expect_error": "잘렸거나"
+},
+"short.png": {
+"expect_error": "짧습니다"
+}
+}

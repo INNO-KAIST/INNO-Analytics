@@ -1,0 +1,32 @@
+{
+ "meta": {"description": "Maximum (cut-off) phonon energies of host lattices, cm-1. Values are as quoted by the cited secondary source, which names its primary reference. Note: different papers quote Raman maxima vs. LO/effective phonons, so spreads of ±50-100 cm-1 between sources are normal.",
+          "sources": {
+            "PCCP2023": "Phys. Chem. Chem. Phys. 25, 11986 (2023), 'Absolute quantum yield for understanding upconversion and downshift luminescence in PbF2:Er3+,Yb3+ crystals' (open access, pubs.rsc.org d3cp00936j)",
+            "LSA2020": "Light: Science & Applications (2020), doi:10.1038/s41377-020-00346-z, 'Understanding and tuning blue-to-near-infrared photon cutting by the Tm3+/Yb3+ couple'",
+            "SciRep2016": "Sci. Rep. 6, 31207 (2016), Tm3+-doped Bi2O3-GeO2-Ga2O3 glasses",
+            "Ermeneux2000": "F. S. Ermeneux et al., Phys. Rev. B 61, 3915 (2000), 'Multiphonon relaxation in YVO4 single crystals'",
+            "WikiGLS": "Wikipedia, 'Gallium lanthanum sulfide glass' (uncited statement)"}},
+ "hosts": [
+  {"host": "beta-NaYF4", "E_ph_cm1": 360, "source": "PCCP2023", "primary": "H. Wu et al., J. Phys. Chem. C 122, 9611 (2018)"},
+  {"host": "NaYF4 (phase not stated)", "E_ph_cm1": 370, "source": "LSA2020", "primary": "ref. 38 of LSA2020"},
+  {"host": "LaF3", "E_ph_cm1": 350, "source": "PCCP2023", "primary": "M. J. Weber, Phys. Rev. 157, 262 (1967)"},
+  {"host": "LiYF4", "E_ph_cm1": 460, "source": "PCCP2023", "primary": "S. A. Miller, H. E. Rast, H. H. Caspers, J. Chem. Phys. 52, 4172 (1970); R. Moncorge, Ann. Chim. Sci. Mat. 28, 5 (2003)"},
+  {"host": "CaF2", "E_ph_cm1": 320, "source": "PCCP2023", "primary": "D. G. Mead, G. R. Wilkinson, J. Phys. C 10, 1063 (1977)", "note": "Raman-active T2g mode; IR LO phonon of CaF2 is higher (~460-470 cm-1), so energy-gap-law fits sometimes use larger values"},
+  {"host": "SrF2", "E_ph_cm1": 284, "source": "PCCP2023", "primary": "Mead & Wilkinson 1977", "note": "Raman T2g mode"},
+  {"host": "BaF2", "E_ph_cm1": 240, "source": "PCCP2023", "primary": "Mead & Wilkinson 1977", "note": "Raman T2g mode"},
+  {"host": "PbF2", "E_ph_cm1": 257, "source": "PCCP2023", "primary": "P. Zhang et al., Opt. Lett. 39, 3942 (2014)"},
+  {"host": "Y2O3", "E_ph_cm1": 600, "source": "LSA2020", "primary": "ref. 37 of LSA2020"},
+  {"host": "YAG (Y3Al5O12)", "E_ph_cm1": 860, "source": "LSA2020", "primary": "refs. 35,36 of LSA2020"},
+  {"host": "YBO3", "E_ph_cm1": 1050, "source": "LSA2020", "primary": "refs. 33,34 of LSA2020"},
+  {"host": "YVO4", "E_ph_cm1": 950, "source": "Ermeneux2000", "note": "highest phonon from phonon/vibronic spectra (automated extraction of the paper page)"},
+  {"host": "silicate glass", "E_ph_cm1": 1000, "approx": true, "source": "SciRep2016", "primary": "ref. 16 of SciRep2016"},
+  {"host": "germanate glass", "E_ph_cm1": 900, "approx": true, "source": "SciRep2016", "primary": "ref. 13 of SciRep2016"},
+  {"host": "tellurite glass", "E_ph_cm1": 750, "approx": true, "source": "SciRep2016", "primary": "ref. 17 of SciRep2016"},
+  {"host": "bismuthate glass", "E_ph_cm1": 440, "approx": true, "source": "SciRep2016", "primary": "refs. 23,24 of SciRep2016"},
+  {"host": "Ga-La-S chalcogenide glass", "E_ph_cm1": 450, "approx": true, "source": "WikiGLS", "note": "uncited on Wikipedia; treat as indicative"},
+  {"host": "phosphate glass", "E_ph_cm1": null, "note": "Not verified in this session. ~1200 cm-1 is the value commonly attributed to C. B. Layne, W. H. Lowdermilk, M. J. Weber, Phys. Rev. B 16, 10 (1977) - verify before use."},
+  {"host": "NaGdF4", "E_ph_cm1": null, "note": "Not obtained from a verifiable source (expected close to beta-NaYF4)."},
+  {"host": "NaLuF4", "E_ph_cm1": null, "note": "Not obtained from a verifiable source."},
+  {"host": "KY3F10", "E_ph_cm1": null, "note": "Not obtained; Crystals 14, 762 (2024) only states fluorides are typically < 550 cm-1."}
+ ]
+}

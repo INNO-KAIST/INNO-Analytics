@@ -1,0 +1,4 @@
+[SemImageFile]
+InstructName=SU8230
+PixelSize=1.984375
+Magnification=50000

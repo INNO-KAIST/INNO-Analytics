@@ -1,0 +1,428 @@
+{
+"g_multi.gwy": {
+"images": [
+{
+"w": 32,
+"h": 24,
+"xreal": 3e-06,
+"yreal": 2.25e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height 높이",
+"file": "g_multi.gwy#0.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 3e-06,
+"yreal": 2.25e-06,
+"uxy": "m",
+"uz": "",
+"kind": "mask",
+"title": "Height 높이 · mask",
+"file": "g_multi.gwy#1.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 3e-06,
+"yreal": 2.25e-06,
+"uxy": "m",
+"uz": "V",
+"kind": "data",
+"title": "Phase signal",
+"file": "g_multi.gwy#2.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 3e-06,
+"yreal": 2.25e-06,
+"uxy": "m",
+"uz": "Pa",
+"kind": "data",
+"title": "Modulus",
+"file": "g_multi.gwy#3.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 4e-08,
+"yreal": 3e-08,
+"uxy": "m",
+"uz": "N/m",
+"kind": "data",
+"title": "Stiffness",
+"file": "g_multi.gwy#4.f64"
+},
+{
+"w": 10,
+"h": 8,
+"nz": 5,
+"xreal": 1e-06,
+"yreal": 8e-07,
+"zreal": 2.5e-06,
+"uxy": "m",
+"uz": "m",
+"uzz": "m",
+"kind": "brick",
+"title": "z-stack volume",
+"file": "g_multi.gwy#5.f64"
+}
+],
+"warn": [
+"그래프"
+]
+},
+"g_old.gwy": {
+"images": [
+{
+"w": 9,
+"h": 6,
+"xreal": 9e-07,
+"yreal": 6e-07,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Channel 0",
+"file": "g_old.gwy#0.f64"
+}
+],
+"warn": [
+"GWYO"
+]
+},
+"s_a.gsf": {
+"images": [
+{
+"w": 13,
+"h": 10,
+"xreal": 1.3e-06,
+"yreal": 1e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Topo s_a.gsf",
+"file": "s_a.gsf#0.f64"
+}
+],
+"nan": 0
+},
+"s_b.gsf": {
+"images": [
+{
+"w": 13,
+"h": 10,
+"xreal": 1.3e-06,
+"yreal": 1e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Topo s_b.gsf",
+"file": "s_b.gsf#0.f64"
+}
+],
+"nan": 1
+},
+"s_c.gsf": {
+"images": [
+{
+"w": 13,
+"h": 10,
+"xreal": 1.3e-06,
+"yreal": 1e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Topo s_c.gsf",
+"file": "s_c.gsf#0.f64"
+}
+],
+"nan": 0
+},
+"s_d.gsf": {
+"images": [
+{
+"w": 13,
+"h": 10,
+"xreal": 1.3e-06,
+"yreal": 1e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Topo s_d.gsf",
+"file": "s_d.gsf#0.f64"
+}
+],
+"nan": 0
+},
+"ns_v531.spm": {
+"images": [
+{
+"w": 32,
+"h": 24,
+"xreal": 2e-06,
+"yreal": 1.5e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_v531.spm#0.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 2e-06,
+"yreal": 1.5e-06,
+"uxy": "m",
+"uz": "deg",
+"kind": "data",
+"title": "Phase",
+"file": "ns_v531.spm#1.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 2e-06,
+"yreal": 1.5e-06,
+"uxy": "m",
+"uz": "V",
+"kind": "data",
+"title": "Potential",
+"file": "ns_v531.spm#2.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_v92_32bit.spm": {
+"images": [
+{
+"w": 32,
+"h": 24,
+"xreal": 5.000000000000001e-07,
+"yreal": 5.000000000000001e-07,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "ZSensor",
+"file": "ns_v92_32bit.spm#0.f64"
+},
+{
+"w": 32,
+"h": 24,
+"xreal": 5.000000000000001e-07,
+"yreal": 5.000000000000001e-07,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "DeflectionError",
+"file": "ns_v92_32bit.spm#1.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_aspect.spm": {
+"images": [
+{
+"w": 32,
+"h": 16,
+"xreal": 4e-06,
+"yreal": 2e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_aspect.spm#0.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_globalres.spm": {
+"images": [
+{
+"w": 64,
+"h": 48,
+"xreal": 6e-06,
+"yreal": 4.5e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_globalres.spm#0.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_fv_magic.spm": {
+"images": [
+{
+"w": 24,
+"h": 16,
+"xreal": 2e-06,
+"yreal": 2e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_fv_magic.spm#0.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_misc.spm": {
+"images": [
+{
+"w": 24,
+"h": 16,
+"xreal": 3e-06,
+"yreal": 3e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_misc.spm#0.f64"
+},
+{
+"w": 24,
+"h": 16,
+"xreal": 3e-06,
+"yreal": 3e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "OldZ",
+"file": "ns_misc.spm#1.f64"
+},
+{
+"w": 24,
+"h": 16,
+"xreal": 3e-06,
+"yreal": 3e-06,
+"uxy": "m",
+"uz": "deg",
+"kind": "data",
+"title": "PhaseX",
+"file": "ns_misc.spm#2.f64"
+},
+{
+"w": 24,
+"h": 16,
+"xreal": 3e-06,
+"yreal": 3e-06,
+"uxy": "m",
+"uz": "",
+"kind": "data",
+"title": "Nope",
+"file": "ns_misc.spm#3.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"ns_aspect_local.spm": {
+"images": [
+{
+"w": 32,
+"h": 16,
+"xreal": 4e-06,
+"yreal": 2e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "ns_aspect_local.spm#0.f64"
+}
+],
+"src": "hand formula = Gwyddion"
+},
+"a_fmap.ardf": {
+"images": [
+{
+"w": 16,
+"h": 16,
+"xreal": 1.6e-06,
+"yreal": 1.6e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "a_fmap.ardf#0.f64"
+},
+{
+"w": 16,
+"h": 16,
+"xreal": 1.6e-06,
+"yreal": 1.6e-06,
+"uxy": "m",
+"uz": "N",
+"kind": "data",
+"title": "Adhesion",
+"file": "a_fmap.ardf#1.f64"
+},
+{
+"w": 16,
+"h": 16,
+"xreal": 1.6e-06,
+"yreal": 1.6e-06,
+"uxy": "m",
+"uz": "Pa",
+"kind": "data",
+"title": "YoungsModulus",
+"file": "a_fmap.ardf#2.f64"
+}
+],
+"src": "magic-afm (첫 줄이 아래 → 뒤집음) = Gwyddion",
+"warn": [
+"VOLM"
+]
+},
+"a_rect.ardf": {
+"images": [
+{
+"w": 20,
+"h": 12,
+"xreal": 1e-06,
+"yreal": 1.2e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "a_rect.ardf#0.f64"
+}
+],
+"src": "magic-afm (첫 줄이 아래 → 뒤집음)",
+"warn": [
+"VOLM"
+]
+},
+"a_pad.ardf": {
+"images": [
+{
+"w": 16,
+"h": 16,
+"xreal": 1.6e-06,
+"yreal": 1.6e-06,
+"uxy": "m",
+"uz": "m",
+"kind": "data",
+"title": "Height",
+"file": "a_pad.ardf#0.f64"
+},
+{
+"w": 16,
+"h": 16,
+"xreal": 1.6e-06,
+"yreal": 1.6e-06,
+"uxy": "m",
+"uz": "deg",
+"kind": "data",
+"title": "Phase",
+"file": "a_pad.ardf#1.f64"
+}
+],
+"src": "magic-afm (첫 줄이 아래 → 뒤집음) = Gwyddion",
+"warn": [
+"VOLM"
+]
+}
+}

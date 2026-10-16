@@ -1,0 +1,255 @@
+{
+ "lineshape unit area max|A-1| (quad over R)": {
+  "value": 2.475797344914099e-14,
+  "ok": true
+ },
+ "FWHM == F for GLS, GLP(m=0,1), GLT(T=0)": {
+  "value": 7.438494264988549e-15,
+  "ok": true
+ },
+ "Voigt numeric FWHM vs Olivero-Longbothum (rel; spec claims <=2e-4, true worst case ~2.37e-4)": {
+  "value": 0.00023644881597462142,
+  "ok": true
+ },
+ "limits (max rel dev)": {
+  "value": {
+   "V(wG=1e-7)->L": 1.1161179193627622e-14,
+   "V(wL=1e-7)->G": 1.1742964941021834e-07,
+   "LA(1,1,0)->L": 3.1390816482077686e-16,
+   "LA(1,1,wG)->V(wG,F)": 6.445869225125914e-16,
+   "DS(a=0)/pi->V": 5.697128404423529e-16,
+   "DS(a=0,wG=0)/pi->L": 2.0927210988051793e-16,
+   "GLP(m=0)->G": 1.949963059978991e-16,
+   "GLP(m=1)->L": 1.9183276739047477e-16,
+   "GLT(T=0)->GLS": 0.0
+  },
+  "ok": 1.0
+ },
+ "convolutions: fine-grid / closed form vs adaptive quad (rel to max)": {
+  "value": {
+   "DS0.1,0.3,0.6": 1.530595525436312e-16,
+   "DS0.3,0.2,0.5": 3.4932703439382404e-16,
+   "DS0.45,0.4,0.4": 1.41666422236845e-16,
+   "DS0.05,0.1,0.8": 2.1279618025181401e-16,
+   "LA1.2,2.5,1.2,0.4": 2.4321011262633947e-11,
+   "LA0.6,0.6,5,0.3": 1.7014195434002308e-12,
+   "LA2,20,0.8,1.0": 4.6611812751459117e-08,
+   "GLTtail1,0.3,0.5": 8.172926570077916e-15,
+   "GLTtail0.8,1.0,0.2": 7.167673506207051e-15,
+   "GLTtail1.5,0.5,3.0": 1.4378878830687806e-16,
+   "GLTtail1.0,0.2,0.05": 2.562375291343878e-16
+  },
+  "ok": true
+ },
+ "DS region integral: analytic-inner vs nested quad (rel)": {
+  "value": {
+   "0.1,0.3,0.6,(-3, 6)": 2.220446049250313e-16,
+   "0.3,0.2,0.5,(-2, 9)": 2.220446049250313e-16,
+   "0.45,0.4,0.0,(-3, 5)": 4.18420853520729e-12
+  },
+  "ok": true
+ },
+ "Shirley/smart converged (iterations)": {
+  "value": {
+   "C1s_281-292.5_shirley": 5,
+   "C1s_281-292.5_smart": 5,
+   "C1s_280-296_shirley": 6,
+   "C1s_280-296_smart": 6,
+   "O1s_526-535.5_shirley": 6,
+   "O1s_526-535.5_smart": 6,
+   "Co2p_772-808_shirley": 13,
+   "Co2p_772-808_smart": 8,
+   "Co2p_773-789_shirley": 10,
+   "Co2p_773-789_smart": 7,
+   "Co3p_55.5-66_shirley": 13,
+   "Co3p_55.5-66_smart": 9,
+   "Ta4f_21-30.5_shirley": 5,
+   "Ta4f_21-30.5_smart": 5,
+   "Ba4d_84.5-94.5_shirley": 5,
+   "Ba4d_84.5-94.5_smart": 5,
+   "syn_flat_shirley": 0,
+   "syn_flat_smart": 0,
+   "syn_shirley_gauss": 11
+  },
+  "ok": true
+ },
+ "Shirley fixed-point residual max|T(B)-B|/|dy|": {
+  "value": 1.9625888889467962e-08,
+  "ok": true
+ },
+ "synthetic backgrounds vs analytic expectation (abs)": {
+  "value": {
+   "syn_flat_linear": 0.0,
+   "syn_flat_shirley": 0.0,
+   "syn_flat_smart": 0.0,
+   "syn_flat_U2": 0.0,
+   "syn_flat_U3": 0.0,
+   "syn_shirley_gauss": 8.258780326286796e-07,
+   "syn_linear_ramp": 2.2737367544323206e-13
+  },
+  "ok": true
+ },
+ "third-party background agreement (max|dB|/|y_end-y_start|, n_end=1)": {
+  "value": {
+   "C1s_281-292.5 shirley vs lmfitxps": 8.138655049421862e-14,
+   "C1s_280-296 shirley vs lmfitxps": 0.0,
+   "O1s_526-535.5 shirley vs lmfitxps": 8.642306228986132e-16,
+   "O1s_526-535.5 tougaard U2 vs lmfitxps": 5.776734595471415e-07,
+   "O1s_526-535.5 tougaard U3 vs lmfitxps": 7.172632326916998e-07,
+   "Co2p_772-808 shirley vs lmfitxps": 1.2246695282038232e-14,
+   "Co2p_772-808 tougaard U2 vs lmfitxps": 5.081850290642232e-07,
+   "Co2p_772-808 tougaard U3 vs lmfitxps": 7.085499904275932e-07,
+   "Co2p_772-808 shirley vs pynxtools-xps": "ValueError('Maximum number of iterations exceeded before convergence.')",
+   "Co2p_773-789 shirley vs lmfitxps": 4.126938477960469e-15,
+   "Co2p_773-789 tougaard U2 vs lmfitxps": 7.076448515603011e-07,
+   "Co2p_773-789 tougaard U3 vs lmfitxps": 5.232577610134361e-07,
+   "Co3p_55.5-66 shirley vs lmfitxps": 6.937888198067968e-16,
+   "Co3p_55.5-66 tougaard U2 vs lmfitxps": 9.096254795778839e-07,
+   "Co3p_55.5-66 tougaard U3 vs lmfitxps": 5.212827865668052e-07,
+   "Ta4f_21-30.5 shirley vs lmfitxps": 3.4669870078638543e-15,
+   "Ta4f_21-30.5 tougaard U2 vs lmfitxps": 6.775002503145218e-07,
+   "Ta4f_21-30.5 tougaard U3 vs lmfitxps": 7.33525089273864e-07,
+   "Ba4d_84.5-94.5 shirley vs lmfitxps": 1.5550639499588417e-15,
+   "Ba4d_84.5-94.5 tougaard U2 vs lmfitxps": 6.13222043397178e-07,
+   "Ba4d_84.5-94.5 tougaard U3 vs lmfitxps": 6.137405444823529e-07
+  },
+  "ok": true
+ },
+ "third-party background notes": {
+  "value": {
+   "C1s_281-292.5 tougaard U2": "s<0 clamped (SPEC 2 v1.1), not compared",
+   "C1s_281-292.5 tougaard U3": "s<0 clamped (SPEC 2 v1.1), not compared",
+   "C1s_281-292.5 shirley vs pynxtools-xps (different algorithm)": 0.22684995053902313,
+   "C1s_280-296 tougaard U2": "s<0 clamped (SPEC 2 v1.1), not compared",
+   "C1s_280-296 tougaard U3": "s<0 clamped (SPEC 2 v1.1), not compared",
+   "C1s_280-296 shirley vs pynxtools-xps (different algorithm)": 0.32690992933805896,
+   "O1s_526-535.5 shirley vs pynxtools-xps (different algorithm)": 0.1410892587153064,
+   "Co2p_773-789 shirley vs pynxtools-xps (different algorithm)": 0.3075400274415116,
+   "Co3p_55.5-66 shirley vs pynxtools-xps (different algorithm)": 0.3467012672298083,
+   "Ta4f_21-30.5 shirley vs pynxtools-xps (different algorithm)": 0.1031482505400622,
+   "Ba4d_84.5-94.5 shirley vs pynxtools-xps (different algorithm)": 0.051860794207464526
+  },
+  "ok": null
+ },
+ "fit optimality (Powell polish from reported optimum; |dchi2|, |grad|*sigma)": {
+  "value": {
+   "syn1_GLS_linear": {
+    "chi2": 86.20728100423426,
+    "powell_improvement": 1.1368683772161603e-13,
+    "max_abs_grad_x_sigma": 6.565840801526138e-07
+   },
+   "syn2_C1s_3GLS_shirley": {
+    "chi2": 560.2515970842343,
+    "powell_improvement": 4.5707224671787117e-08,
+    "max_abs_grad_x_sigma": 0.0005724126246640005
+   },
+   "syn3_Co2p_Voigt_doublet": {
+    "chi2": 325.1802183420723,
+    "powell_improvement": -1.2505552149377763e-12,
+    "max_abs_grad_x_sigma": 2.988491924384976e-07
+   },
+   "syn4_DS_metal_GLS_oxide": {
+    "chi2": 287.84984726048185,
+    "powell_improvement": -5.115907697472721e-13,
+    "max_abs_grad_x_sigma": 3.53069040947735e-07,
+    "DS mu fine-vs-quad rel": 5.055236273394679e-16
+   },
+   "syn5_LA_asym_linear": {
+    "chi2": 305.51844288187624,
+    "powell_improvement": -2.2737367544323206e-13,
+    "max_abs_grad_x_sigma": 1.2231180868778575e-06
+   },
+   "syn6_active_shirley_2GLS": {
+    "chi2": 271.9959309928143,
+    "powell_improvement": 2.2072299543651752e-10,
+    "max_abs_grad_x_sigma": 2.9005609247175114e-05
+   },
+   "syn7_GLP_GLT_smart": {
+    "chi2": 228.4761053191723,
+    "powell_improvement": 3.126388037344441e-13,
+    "max_abs_grad_x_sigma": 5.972051390768671e-07
+   },
+   "real1_C1s_4GLS_smart": {
+    "chi2": 767.2555416448351,
+    "powell_improvement": 1.9110757421003655e-10,
+    "max_abs_grad_x_sigma": 7.190337339350778e-05
+   },
+   "real2_O1s_3GLS_shirley": {
+    "chi2": 2709.9728447537987,
+    "powell_improvement": 6.873506208648905e-09,
+    "max_abs_grad_x_sigma": 0.0008008962403882506
+   },
+   "real3_Ta4f_2doublets_GLS_shirley": {
+    "chi2": 926.5058432533273,
+    "powell_improvement": 1.77351466845721e-11,
+    "max_abs_grad_x_sigma": 2.4312799608157892e-05
+   }
+  },
+  "ok": true
+ },
+ "global-minimum recheck (different seed, more starts): chi2_recheck - chi2_fixture": {
+  "value": {
+   "syn1_GLS_linear": {
+    "n_starts": 100,
+    "chi2_fixture": 86.20728100423426,
+    "chi2_recheck": 86.20728100716595,
+    "diff": 2.931685116891458e-09
+   },
+   "syn2_C1s_3GLS_shirley": {
+    "n_starts": 100,
+    "chi2_fixture": 560.2515970842343,
+    "chi2_recheck": 560.2515984729856,
+    "diff": 1.3887513432564447e-06
+   },
+   "syn3_Co2p_Voigt_doublet": {
+    "n_starts": 100,
+    "chi2_fixture": 325.1802183420723,
+    "chi2_recheck": 325.1802183421514,
+    "diff": 7.912603905424476e-11
+   },
+   "syn4_DS_metal_GLS_oxide": {
+    "n_starts": 24,
+    "chi2_fixture": 287.84984726048185,
+    "chi2_recheck": 287.84984726171,
+    "diff": 1.228158907906618e-09
+   },
+   "syn5_LA_asym_linear": {
+    "n_starts": 40,
+    "chi2_fixture": 305.51844288187624,
+    "chi2_recheck": 305.5184428738672,
+    "diff": -8.009067187231267e-09
+   },
+   "syn6_active_shirley_2GLS": {
+    "n_starts": 100,
+    "chi2_fixture": 271.9959309928143,
+    "chi2_recheck": 271.99593094483816,
+    "diff": -4.797612973561627e-08
+   },
+   "syn7_GLP_GLT_smart": {
+    "n_starts": 100,
+    "chi2_fixture": 228.4761053191723,
+    "chi2_recheck": 228.47610526878134,
+    "diff": -5.0390951855661115e-08
+   },
+   "real1_C1s_4GLS_smart": {
+    "n_starts": 100,
+    "chi2_fixture": 767.2555416448351,
+    "chi2_recheck": 767.2555416297446,
+    "diff": -1.509056346549187e-08
+   },
+   "real2_O1s_3GLS_shirley": {
+    "n_starts": 100,
+    "chi2_fixture": 2709.9728447537987,
+    "chi2_recheck": 2709.9728444886887,
+    "diff": -2.651099748618435e-07
+   },
+   "real3_Ta4f_2doublets_GLS_shirley": {
+    "n_starts": 100,
+    "chi2_fixture": 926.5058432533272,
+    "chi2_recheck": 926.5058436965842,
+    "diff": 4.432570221979404e-07
+   }
+  },
+  "ok": true
+ }
+}
