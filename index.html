@@ -44731,7 +44731,7 @@ IC.roundTo=function(data,bit){
 /* 마스크(Uint8Array, 0/255 또는 0/1) 안 화소만 바꾸고 나머지는 원래 값으로 */
 IC.applyMask=function(orig,res,mask){ if(!mask) return res; for(let i=0;i<res.length;i++) if(!mask[i]) res[i]=orig[i]; return res; };
 
-IC.minMax=function(d,mask){ let mn=Infinity,mx=-Infinity; for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; const v=d[i]; if(v!==v) continue; if(v<mn) mn=v; if(v>mx) mx=v; } return [mn,mx]; };
+IC.minMax=function(d,mask){ let mn=Infinity,mx=-Infinity; for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) continue; if(v<mn) mn=v; if(v>mx) mx=v; } if(mn===Infinity){ mn=0; mx=0; } return [mn,mx]; }; // ImageJ FloatProcessor.findMinAndMax: NaN·±∞ 제외
 
 /* ---------- 히스토그램 (ImageJ ImageStatistics 규칙) ----------
    8-bit : 0..255 의 256 칸.
@@ -44740,9 +44740,9 @@ IC.histogram=function(p,mask,nBins,range){
   const d=p.data; nBins=nBins||256;
   if(p.bit===8&&!range){ const h=new Float64Array(256); let n=0; for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; h[d[i]|0]++; n++; } return {h,min:0,max:256,binSize:1,n}; }
   let [mn,mx]=range||IC.minMax(d,mask); const h=new Float64Array(nBins); let n=0;
-  if(!(mx>mn)){ for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; if(d[i]===d[i]){ h[0]++; n++; } } return {h,min:mn,max:mx,binSize:0,n}; }
+  if(!(mx>mn)){ for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; const v=d[i]; if(v===v&&v!==Infinity&&v!==-Infinity){ h[0]++; n++; } } return {h,min:mn,max:mx,binSize:0,n}; }
   const sc=nBins/(mx-mn);
-  for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; const v=d[i]; if(v!==v) continue; let k=Math.floor((v-mn)*sc); if(k<0) k=0; if(k>=nBins) k=nBins-1; h[k]++; n++; }
+  for(let i=0;i<d.length;i++){ if(mask&&!mask[i]) continue; const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) continue; let k=Math.floor((v-mn)*sc); if(k<0) k=0; if(k>=nBins) k=nBins-1; h[k]++; n++; }
   return {h,min:mn,max:mx,binSize:(mx-mn)/nBins,n};
 };
 
@@ -44753,8 +44753,8 @@ IC.to8bitScaled=function(p,min,max){
   if(p.bit===8){ out.set(d); return out; }
   if(p.bit===16){ const mn=Math.trunc(min), mx=Math.trunc(max); const sc=256/(mx-mn+1);
     for(let i=0;i<d.length;i++){ let v=d[i]-mn; if(v<0) v=0; v=Math.floor(v*sc+0.5); if(v>255) v=255; out[i]=v; } return out; }
-  const sc=255/(max-min);
-  for(let i=0;i<d.length;i++){ let v=d[i]-min; if(!(v>=0)) v=0; v=Math.floor(v*sc+0.5); if(v>255) v=255; out[i]=v; }
+  const sc=max>min?255/(max-min):0; // min=max 이면 0 (NaN 이 8-bit 에 들어가지 않게)
+  for(let i=0;i<d.length;i++){ let v=d[i]-min; if(!(v>=0)) v=0; v=Math.floor(v*sc+0.5); if(v>255||v!==v) v=v>255?255:0; out[i]=v; }
   return out;
 };
 
@@ -44762,15 +44762,15 @@ IC.to8bitScaled=function(p,min,max){
    mask: Uint8Array(w*h) — null 이면 rect 전체. rect={x,y,w,h} (없으면 영상 전체).
    cal = {pw, ph} (화소 크기). 반환: area, mean, stdDev(n-1), min, max, median, mode, skewness, kurtosis,
    xCentroid, yCentroid (화소 중심 = +0.5), xCM, yCM, rawIntDen, intDen, n */
-IC.stats=function(p,mask,rect,cal,local){ // local=true: mask 가 rect 크기(rect 좌표)
+IC.stats=function(p,mask,rect,cal,local,opt){ // local=true: mask 가 rect 크기(rect 좌표). opt.noMedian: 중앙값·최빈값 생략(빠름)
   const W=p.w, d=p.data; rect=rect||{x:0,y:0,w:p.w,h:p.h}; cal=cal||{pw:1,ph:1};
   let n=0,s1=0,s2=0,s3=0,s4=0,xs=0,ys=0,xsw=0,ysw=0,mn=Infinity,mx=-Infinity;
-  const vals=[];
+  const keep=!(opt&&opt.noMedian); const vals=keep?new Float32Array(rect.w*rect.h):null; let nv=0; // 형식 배열 정렬 (JS 배열 + 비교 함수보다 수십 배 빠름)
   for(let y=rect.y;y<rect.y+rect.h;y++){
     for(let x=rect.x;x<rect.x+rect.w;x++){
-      const i=y*W+x; if(mask&&!(local?mask[(y-rect.y)*rect.w+(x-rect.x)]:mask[i])) continue; const v=d[i]; if(v!==v) continue;
+      const i=y*W+x; if(mask&&!(local?mask[(y-rect.y)*rect.w+(x-rect.x)]:mask[i])) continue; const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) continue; // ImageJ FloatStatistics: ±Float.MAX 안의 값만
       n++; s1+=v; const v2=v*v; s2+=v2; s3+=v*v2; s4+=v2*v2; xs+=x; ys+=y; xsw+=x*v; ysw+=y*v;
-      if(v<mn) mn=v; if(v>mx) mx=v; vals.push(v);
+      if(v<mn) mn=v; if(v>mx) mx=v; if(keep) vals[nv++]=v;
     }
   }
   const r={n,area:n*cal.pw*cal.ph,min:n?mn:NaN,max:n?mx:NaN};
@@ -44783,9 +44783,7 @@ IC.stats=function(p,mask,rect,cal,local){ // local=true: mask 가 rect 크기(re
   r.xCentroid=(xs/n+0.5)*cal.pw; r.yCentroid=(ys/n+0.5)*cal.ph;
   r.xCM=s1!==0?(xsw/s1+0.5)*cal.pw:NaN; r.yCM=s1!==0?(ysw/s1+0.5)*cal.ph:NaN;
   r.rawIntDen=s1; r.intDen=r.area*mean;
-  vals.sort((a,b)=>a-b);
-  r.median=IC._median(vals,p.bit);
-  r.mode=IC._mode(vals,p.bit,mn,mx);
+  if(keep){ const sv=vals.subarray(0,nv).sort(); r.median=IC._median(sv,p.bit); r.mode=IC._mode(sv,p.bit,mn,mx); } else { r.median=NaN; r.mode=NaN; }
   return r;
 };
 /* 중앙값: 8/16-bit 는 ImageJ 처럼 히스토그램에서 (누적 ≥ n/2 인 첫 값), float 는 정렬 후 가운데(짝수면 두 값 평균) */
@@ -44801,7 +44799,7 @@ IC._mode=function(sorted,bit,mn,mx){
   // float: 256 칸 히스토그램의 최빈 칸 중심 (ImageJ FloatStatistics: histMin+(mode+0.5)*binSize)
   if(!(mx>mn)) return mn; const nb=256, h=new Float64Array(nb), sc=nb/(mx-mn);
   for(const v of sorted){ let k=Math.floor((v-mn)*sc); if(k>=nb) k=nb-1; h[k]++; }
-  let m=0; for(let k=1;k<nb;k++) if(h[k]>h[m]) m=k; return mn+(m+0.5)*(mx-mn)/nb;
+  let m=0; for(let k=1;k<nb;k++) if(h[k]>h[m]) m=k; const bs=(mx-mn)/nb; return mn+m*bs+(bs!==1?bs/2:0); // ImageJ: 칸 폭이 정확히 1 이면 반 칸을 더하지 않음
 };
 
 /* 선택 비트 수로 변환 (Image ▸ Type)
@@ -44995,7 +44993,8 @@ function slideMinMax(a,off,n,r,out,isMax){
   for(let i=r;i<n-r;i++){ const a1=hh[i-r], b1=g[i+r]; out[i]=isMax?(a1>b1?a1:b1):(a1<b1?a1:b1); }
 }
 function rankMinMax(p,radius,isMax){
-  const {kR,dx}=IC.lineRadii(radius); const P=padded(p,kR); const W=p.w,H=p.h,PW=P.PW;
+  const {kR,dx}=IC.lineRadii(radius); const P=padded(p,kR);
+  { const d=P.d, fill=isMax?-Infinity:Infinity; for(let i=0;i<d.length;i++) if(d[i]!==d[i]) d[i]=fill; } /* NaN → 비교에서 빠지게 */ const W=p.w,H=p.h,PW=P.PW;
   const out=new Float32Array(W*H); const tmp=new Float32Array(PW); const acc=new Float32Array(W);
   for(let y=0;y<H;y++){
     acc.fill(isMax?-Infinity:Infinity);
@@ -45006,14 +45005,19 @@ function rankMinMax(p,radius,isMax){
   }
   return out;
 }
-function rankSums(p,radius){ // 평균·분산용 합 (double)
+function rankSums(p,radius){ // 평균·분산용 합 (double). 비유한값(NaN·±∞)은 개수만 세어 그 창의 결과를 ImageJ 처럼 NaN/±∞ 로
   const {kR,dx,n}=IC.lineRadii(radius); const P=padded(p,kR); const W=p.w,H=p.h,PW=P.PW,PH=P.PH;
+  let anyNF=false; for(let i=0;i<P.d.length;i++){ const v=P.d[i]; if(v!==v||v===Infinity||v===-Infinity){ anyNF=true; break; } }
+  let cN=null,cP=null,cM=null; if(anyNF){ const R1=PW+1; cN=new Int32Array(PH*R1); cP=new Int32Array(PH*R1); cM=new Int32Array(PH*R1);
+    for(let y=0;y<PH;y++){ let a=0,b=0,c=0; for(let x=0;x<PW;x++){ const v=P.d[y*PW+x]; if(v!==v) a++; else if(v===Infinity) b++; else if(v===-Infinity) c++; cN[y*R1+x+1]=a; cP[y*R1+x+1]=b; cM[y*R1+x+1]=c; if(v!==v||v===Infinity||v===-Infinity) P.d[y*PW+x]=0; } } }
   const c1=new Float64Array(PW*PH+PH), c2=new Float64Array(PW*PH+PH); // 행별 누적합 (길이 PW+1)
   const R=PW+1;
   for(let y=0;y<PH;y++){ let s=0,t=0; c1[y*R]=0; c2[y*R]=0; for(let x=0;x<PW;x++){ const v=P.d[y*PW+x]; s+=v; t+=v*v; c1[y*R+x+1]=s; c2[y*R+x+1]=t; } }
   const S1=new Float64Array(W*H), S2=new Float64Array(W*H);
   for(let y=0;y<H;y++) for(let x=0;x<W;x++){ let s=0,t=0; const cx=x+kR;
     for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*R; s+=c1[row+cx+r+1]-c1[row+cx-r]; t+=c2[row+cx+r+1]-c2[row+cx-r]; }
+    if(anyNF){ let a=0,b=0,c=0; for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*R; a+=cN[row+cx+r+1]-cN[row+cx-r]; b+=cP[row+cx+r+1]-cP[row+cx-r]; c+=cM[row+cx+r+1]-cM[row+cx-r]; }
+      if(a||(b&&c)){ s=NaN; t=NaN; } else if(b){ s=Infinity; t=NaN; } else if(c){ s=-Infinity; t=NaN; } }
     S1[y*W+x]=s; S2[y*W+x]=t; }
   return {S1,S2,n};
 }
@@ -45038,11 +45042,13 @@ function rankMedian(p,radius){
     }
     return out;
   }
-  const buf=new Float64Array(n);
+  const buf=new Float64Array(n), ab=new Float64Array(n), bl=new Float64Array(n);
   for(let y=0;y<H;y++){ for(let x=0;x<W;x++){ let c=0; for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; for(let xx=-r;xx<=r;xx++) buf[c++]=P.d[row+xx]; }
-      // NaN 은 제외(ImageJ getNaNAwareMedian)
-      let m=0; for(let i=0;i<c;i++) if(buf[i]===buf[i]) buf[m++]=buf[i];
-      out[y*W+x]=m?quickSelect(buf,m>>1,m):NaN; }
+      // ImageJ getNaNAwareMedian: 추정값 g = 가운데 화소(NaN 이면 결과 NaN). NaN 은 뺀 개수 m, half=⌊m/2⌋.
+      // g 보다 큰 값이 half 개보다 많으면 그중 (nAbove−half−1) 번째, 작은 값이 half 개보다 많으면 그중 half 번째, 아니면 g
+      const g=P.d[(y+kR)*PW+kR+x]; if(g!==g){ out[y*W+x]=NaN; continue; }
+      let m=0,na=0,nb=0; for(let i=0;i<c;i++){ const v=buf[i]; if(v!==v) continue; m++; if(v>g) ab[na++]=v; else if(v<g) bl[nb++]=v; }
+      const half=m>>1; out[y*W+x]=!m?NaN:na>half?quickSelect(ab,na-half-1,na):nb>half?quickSelect(bl,half,nb):g; }
     if((y&31)===0) IC.progress(y/H); }
   return out;
 }
@@ -45054,7 +45060,7 @@ IC.rank=function(p,type,o){
   if(type==="mean"||type==="variance"){
     const {S1,S2,n}=rankSums(p,r); out=new Float32Array(W*H);
     if(type==="mean") for(let i=0;i<W*H;i++) out[i]=S1[i]/n;
-    else { const mx=IC.maxOf(p.bit); for(let i=0;i<W*H;i++){ let v=f32((S2[i]-S1[i]*S1[i]/n)/n); if(v>mx) v=mx; if(v<0) v=0; out[i]=v; } }
+    else { const mx=IC.maxOf(p.bit); for(let i=0;i<W*H;i++){ let v=f32((S2[i]-S1[i]*S1[i]/n)/n); if(v>mx) v=mx; if(v<0) v=0; out[i]=v; } } // NaN 은 비교를 지나 그대로 NaN
   }else if(type==="median") out=rankMedian(p,r);
   else if(type==="min") out=rankMinMax(p,r,false);
   else if(type==="max") out=rankMinMax(p,r,true);
@@ -45175,6 +45181,7 @@ function filter3mean(px,w,h){
 IC.rollingBackground=function(p,o){
   const W=p.w,H=p.h, radius=+o.radius, invert=!!o.light, smooth=o.smooth!==false;
   const ball=rollingBall(radius);
+  if(ball.shrink>1&&(Math.ceil(W/ball.shrink)<2||Math.ceil(H/ball.shrink)<2)) throw new Error(`Subtract Background: 영상(${W}×${H})이 반지름 ${radius} 에 비해 너무 얇습니다 — 반지름을 줄이세요 (ImageJ 도 처리하지 않음)`);
   const bg=Float32Array.from(p.data);
   if(invert) for(let i=0;i<bg.length;i++) bg[i]=-bg[i];
   if(smooth) filter3mean(bg,W,H);
@@ -45387,12 +45394,13 @@ IC.autoThreshold=function(p,method,dark,mask){
   const t=IC.thresholdLevel(method,h8);
   let lower,upper; const tmax=255;
   if(dark){ lower=t+1; upper=tmax; } else { lower=0; upper=t; }
+  if(p.bit===8){ lower=Math.min(255,Math.max(0,lower)); upper=Math.min(255,Math.max(0,upper)); } // 빈 histogram 등에서 방법이 −2³¹ 을 돌려줘도 0..255 (ImageJ)
   if(p.bit!==8){
     if(lower>255) lower=255;
     if(mx>mn){
       if(lower===0){ lower=p.bit===32?Math.min(mn,-1e30):0; } else lower=mn+(lower/255)*(mx-mn);
       if(upper===255){ upper=p.bit===16?65535:Math.max(mx,1e30); } else upper=mn+(upper/255)*(mx-mn);
-    } else { lower=upper=mn; }
+    } else { return {lower:NaN,upper:NaN,level:t,hist:h8,min:mn,max:mx,none:true}; } // 일정한 16/32-bit 영상: ImageJ 는 문턱 없음(−1,−1)
     if(p.bit===16){ lower=Math.round(lower); upper=Math.round(upper); } // ShortProcessor.setThreshold: 정수로 반올림
   }
   return {lower,upper,level:t,hist:h8,min:mn,max:mx};
@@ -45681,7 +45689,7 @@ MF.prototype.sortedMax=function(px,types,exEdges,isEDM,gMin,gMax,threshold){
     if(isMax){ types[i]=MAXIMUM; list.push(i); }
   }
   const vF=f32(2e9/(gMax-gMin));
-  const arr=list.map(p=>{ const x=p%W, y=(p-x)/W; const fv=isEDM?this.trueEdmHeight(x,y,px):px[p]; return {v:Math.trunc(f32(f32(fv-gMin)*vF)),p}; });
+  const arr=list.map(p=>{ const x=p%W, y=(p-x)/W; const fv=isEDM?this.trueEdmHeight(x,y,px):px[p]; return {v:(Math.trunc(f32(f32(fv-gMin)*vF))||0),p}; }); // Java (int)NaN = 0
   arr.sort((a,b)=>a.v-b.v||a.p-b.p);
   return arr.map(a=>a.p);
 };
@@ -45823,23 +45831,27 @@ MF.prototype.cleanupExtraLines=function(pix){
   for(let y=0,i=0;y<H;y++) for(let x=0;x<W;x++,i++){ const v=pix[i]; if(v!==255&&v!==0){ const nr=this.nRadii(pix,x,y); if(nr===0) pix[i]=255; else if(nr===1) this.removeLineFrom(pix,x,y); } }
 };
 MF.prototype.deleteEdgeParticles=function(pix,types){
-  const W=this.W,H=this.H; const del=(x,y)=>{ const i=x+y*W; if((types[i]&MAX_AREA)&&pix[i]!==0){ const m=IC.componentFilled(pix,W,H,x,y,v=>v===255); for(let k=0;k<m.length;k++) if(m[k]) pix[k]=0; } };
+  const W=this.W,H=this.H; const del=(x,y)=>{ const i=x+y*W; if((types[i]&MAX_AREA)&&pix[i]!==0){ const b=IC.componentFilledBox(pix,W,H,x,y,v=>v===255); for(let yy=0;yy<b.h;yy++) for(let xx=0;xx<b.w;xx++) if(b.m[xx+yy*b.w]) pix[(b.y0+yy)*W+b.x0+xx]=0; } };
   for(let x=0;x<W;x++){ del(x,0); del(x,H-1); } for(let y=1;y<H-1;y++){ del(0,y); del(W-1,y); }
 };
 
-/* 8-연결 성분 + 그 안의 구멍(= ImageJ 가 traced polygon 을 채운 것과 같은 화소 집합) */
-IC.componentFilled=function(pix,W,H,x0,y0,inside){
-  const comp=new Uint8Array(W*H), st=[x0+y0*W]; comp[x0+y0*W]=1; let minx=x0,maxx=x0,miny=y0,maxy=y0;
-  while(st.length){ const i=st.pop(), x=i%W, y=(i-x)/W; if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y;
-    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const j=xx+yy*W; if(!comp[j]&&inside(pix[j])){ comp[j]=1; st.push(j); } } }
+/* 8-연결 성분 + 그 안의 구멍(= ImageJ 가 traced polygon 을 채운 것과 같은 화소 집합)
+   상자 크기 결과 {x0,y0,w,h,m}: 입자마다 영상 전체 크기 배열을 만들지 않음 (입자 많은 큰 영상에서 수십 배 빠름) */
+let CF_STAMP=null, CF_GEN=0;
+IC.componentFilledBox=function(pix,W,H,x0,y0,inside){
+  if(!CF_STAMP||CF_STAMP.length!==W*H){ CF_STAMP=new Int32Array(W*H); CF_GEN=0; } const gen=++CF_GEN; if(gen>2e9){ CF_STAMP.fill(0); CF_GEN=1; }
+  const G0=CF_GEN, st=[x0+y0*W], list=[]; CF_STAMP[x0+y0*W]=G0; let minx=x0,maxx=x0,miny=y0,maxy=y0;
+  while(st.length){ const i=st.pop(), x=i%W, y=(i-x)/W; list.push(i); if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const j=xx+yy*W; if(CF_STAMP[j]!==G0&&inside(pix[j])){ CF_STAMP[j]=G0; st.push(j); } } }
   // 바깥(경계 상자 테두리 한 칸 밖에서 4-연결로 닿는 비성분)을 지우고 나머지 = 채운 영역
-  const bw=maxx-minx+3, bh=maxy-miny+3, out=new Uint8Array(bw*bh); const q=[0]; out[0]=1;
-  while(q.length){ const i=q.pop(), x=i%bw, y=(i-x)/bw; const nb=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
-    for(const [xx,yy] of nb){ if(xx<0||yy<0||xx>=bw||yy>=bh) continue; const j=xx+yy*bw; if(out[j]) continue; const gx=xx+minx-1, gy=yy+miny-1;
-      const inC=gx>=0&&gy>=0&&gx<W&&gy<H&&comp[gx+gy*W]; if(!inC){ out[j]=1; q.push(j); } } }
-  const res=new Uint8Array(W*H); for(let y=miny;y<=maxy;y++) for(let x=minx;x<=maxx;x++){ if(!out[(x-minx+1)+(y-miny+1)*bw]) res[x+y*W]=1; }
-  return res;
+  const bw=maxx-minx+3, bh=maxy-miny+3, comp=new Uint8Array(bw*bh); for(const i of list){ const x=i%W, y=(i-x)/W; comp[(x-minx+1)+(y-miny+1)*bw]=1; }
+  const out=new Uint8Array(bw*bh); const q=[0]; out[0]=1;
+  while(q.length){ const i=q.pop(), x=i%bw, y=(i-x)/bw;
+    for(let d=0;d<4;d++){ const xx=x+(d===0?-1:d===1?1:0), yy=y+(d===2?-1:d===3?1:0); if(xx<0||yy<0||xx>=bw||yy>=bh) continue; const j=xx+yy*bw; if(out[j]||comp[j]) continue; out[j]=1; q.push(j); } }
+  const w=maxx-minx+1, h=maxy-miny+1, m=new Uint8Array(w*h); for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(!out[(x+1)+(y+1)*bw]) m[x+y*w]=1;
+  return {x0:minx,y0:miny,w,h,m};
 };
+IC.componentFilled=function(pix,W,H,x0,y0,inside){ const b=IC.componentFilledBox(pix,W,H,x0,y0,inside); const res=new Uint8Array(W*H); for(let y=0;y<b.h;y++) for(let x=0;x<b.w;x++) if(b.m[x+y*b.w]) res[(b.y0+y)*W+b.x0+x]=1; return res; };
 
 /* p: plane. prominence: 허용치. o: {output, strict(false), excludeEdges(false), light(false), isEDM(false), threshold(null), mask(Uint8Array)} */
 IC.findMaxima=function(p,prominence,o){
@@ -45963,6 +45975,7 @@ IC.ellipse=function(mask,rect){
 /* ROI 하나를 ImageJ 'Measure' 처럼 잰다.
    roi = {mask:Uint8Array(rect.w*rect.h)|null, rect:{x,y,w,h}, poly:{xs,ys}|null, kind:"traced"|"rect"|"oval"|"polygon"|"freehand"}
    cal = {pw, ph, unit}. 반환은 ImageJ 열 이름 */
+function isAxisInt(P){ const n=P.xs.length; if(n<3) return false; for(let i=0;i<n;i++){ const j=(i+1)%n; if(P.xs[i]!==Math.trunc(P.xs[i])||P.ys[i]!==Math.trunc(P.ys[i])) return false; if(!(P.xs[j]-P.xs[i]===0||P.ys[j]-P.ys[i]===0)) return false; } return true; }
 IC.measureRoi=function(p,roi,cal){
   cal=cal||{pw:1,ph:1}; const pw=cal.pw||1, ph=cal.ph||1; const W=p.w;
   const r=roi.rect; void W;
@@ -45977,6 +45990,7 @@ IC.measureRoi=function(p,roi,cal){
   else if(roi.kind==="rect") per=2*bb.w*pw+2*bb.h*ph;
   else if(roi.kind==="oval"){ const a=bb.w*pw/2, b=bb.h*ph/2; per=Math.PI*(3*(a+b)-Math.sqrt((3*a+b)*(a+3*b))); }
   else if(roi.kind==="freehand") per=IC.smoothedPerimeter(roi.poly.xs,roi.poly.ys,pw,ph);
+  else if(roi.kind==="poly"&&roi.poly&&isAxisInt(roi.poly)) per=IC.tracedPerimeter(roi.poly.xs,roi.poly.ys,pw,ph); // ImageJ PolygonRoi.isTraced: 변이 모두 가로·세로이고 꼭짓점이 정수면 traced 둘레
   else if(roi.poly) per=IC.polyLength(roi.poly.xs,roi.poly.ys,pw,ph,true);
   else per=2*bb.w*pw+2*bb.h*ph;
   out["Perim."]=per;
@@ -46013,7 +46027,7 @@ IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
     const rect={x:minx,y:miny,w:maxx-minx+1,h:maxy-miny+1};
     let mask=null;
     let maskPix=pix;
-    if(o.includeHoles){ const filled=IC.componentFilled(cur,W,H,x,y,v=>v===1); maskPix=[]; for(let yy=miny;yy<=maxy;yy++) for(let xx=minx;xx<=maxx;xx++) if(filled[yy*W+xx]) maskPix.push(yy*W+xx); }
+    if(o.includeHoles){ const b=IC.componentFilledBox(cur,W,H,x,y,v=>v===1); maskPix=[]; for(let yy=0;yy<b.h;yy++) for(let xx=0;xx<b.w;xx++) if(b.m[xx+yy*b.w]) maskPix.push((b.y0+yy)*W+b.x0+xx); }
     if(rect.w>1&&rect.h>1){ mask=new Uint8Array(rect.w*rect.h); for(const i of maskPix){ const xx=i%W, yy=(i-xx)/W; mask[(yy-miny)*rect.w+(xx-minx)]=1; } }
     for(const i of pix) cur[i]=0;
     for(const i of maskPix) done[i]=1;
@@ -46024,7 +46038,8 @@ IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
     if(np>=minS&&np<=maxS&&include){
       count++;
       const roi={mask,rect,poly:ol,kind:"traced"};
-      const meas=IC.measureRoi(intensity||{w:W,h:H,bit:8,data:Float32Array.from(bin,v=>v?255:0)},roi,cal);
+      if(!intensity) intensity={w:W,h:H,bit:8,data:Float32Array.from(bin,v=>v?255:0)}; // 한 번만 만듦
+      const meas=IC.measureRoi(intensity,roi,cal);
       for(const i of maskPix) labels[i]=count;
       parts.push({n:count,rect,poly:ol,mask,meas,start:[x,y]});
     }
@@ -46038,7 +46053,7 @@ IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
 IC.sizeSummary=function(vals){
   // 선형 통계 = 유한한 모든 값, 로그정규 = 양수만 (nPos 로 따로 알림). 백분위(D10…)는 개수 기준
   const v=vals.filter(x=>x!=null&&isFinite(x)).sort((a,b)=>a-b); const n=v.length; if(!n) return {n:0};
-  const mean=v.reduce((a,b)=>a+b,0)/n; const sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(n-1)):0;
+  const mean=v.reduce((a,b)=>a+b,0)/n; const sd=n>1?Math.sqrt(v.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(n-1)):NaN; /* n=1 이면 SD·SE·CV 정의 없음 */
   const q=pct=>{ const h=(n-1)*pct; const lo=Math.floor(h), hi=Math.ceil(h); return v[lo]+(v[hi]-v[lo])*(h-lo); };
   const pos=v.filter(x=>x>0); const np=pos.length; const ln=pos.map(Math.log); const mu=np?ln.reduce((a,b)=>a+b,0)/np:NaN; const sg=np>1?Math.sqrt(ln.reduce((a,b)=>a+(b-mu)*(b-mu),0)/(np-1)):NaN;
   return {n,nPos:np,mean,sd,se:sd/Math.sqrt(n),cv:mean?sd/mean:NaN,min:v[0],max:v[n-1],median:q(0.5),d10:q(0.1),d50:q(0.5),d90:q(0.9),
@@ -46054,6 +46069,7 @@ IC.binsFD=function(vals,nb){ const v=vals.filter(isFinite).sort((a,b)=>a-b); con
 /* 다각형(꼭짓점, 화소 모서리 좌표) → 마스크 — ij/process/PolygonFiller.fillByteProcessorMask 이식.
    정수 꼭짓점이면 int 경로, 아니면 float 경로(꼭짓점 y 반올림). 마스크 범위 = 경계 상자 [floor(min), ceil(max)) */
 IC.polygonMask=function(xs,ys,W,H){
+  xs=Array.from(xs,Math.fround); ys=Array.from(ys,Math.fround); // ImageJ FloatPolygon 은 float32 좌표
   const n=xs.length; let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
   for(let i=0;i<n;i++){ minx=Math.min(minx,xs[i]); maxx=Math.max(maxx,xs[i]); miny=Math.min(miny,ys[i]); maxy=Math.max(maxy,ys[i]); }
   const bx=Math.floor(minx), by=Math.floor(miny), bw=Math.ceil(maxx)-bx, bh=Math.ceil(maxy)-by;
@@ -46215,13 +46231,14 @@ IC.math=function(p,op,val){
       switch(op){ case "add": r=v+val; break; case "sub": r=v-val; break; case "mul": r=v*val; break; case "div": r=v/val; break;
         case "min": r=v<val?val:v; break; case "max": r=v>val?val:v; break; case "set": r=val; break;
         case "gamma": r=v<=0?0:Math.exp(val*Math.log(v)); break; case "log": r=Math.log(v); break; case "exp": r=Math.exp(v); break;
-        case "sqr": r=v*v; break; case "sqrt": r=v<=0?0:Math.sqrt(v); break; case "abs": r=Math.abs(v); break; case "reciprocal": r=1/v; break;
+        case "sqr": r=v*v; break; case "sqrt": r=v<=0?0:Math.sqrt(v); break; case "abs": r=Math.abs(v); break; case "reciprocal": r=v===0?NaN:1/v; break; // ImageJ: 1/0 = NaN
         case "nan": r=(v<val[0]||v>val[1])?NaN:v; break;
         default: throw new Error("Math 연산 (32-bit): "+op); }
       out[i]=r; }
     return {w:p.w,h:p.h,bit:32,data:out};
   }
   const jr=x=>Math.floor(x+0.5); // Java Math.round
+  if(op==="div"&&val===0) return {w:p.w,h:p.h,bit,data:Float32Array.from(d)}; // ImageJ: 8/16-bit 을 0 으로 나누기는 바꾸지 않음
   if(op==="div"){ op="mul"; val=1/val; }
   if(op==="sub"){ op="add"; val=-val; }
   const M=bit===8?255:65535; let mn=0,mx=M;
@@ -46251,7 +46268,7 @@ IC.calc=function(a,b,op,float){
   if(a.w!==b.w||a.h!==b.h) throw new Error("두 영상의 크기가 같아야 합니다");
   const n=a.data.length, out=new Float32Array(n), bit=float?32:a.bit;
   for(let i=0;i<n;i++){ const x=a.data[i], y=b.data[i]; let r;
-    switch(op){ case "add": r=x+y; break; case "sub": r=x-y; break; case "mul": r=x*y; break; case "div": r=float?x/y:(y===0?IC.maxOf(bit):Math.trunc(x/y)); break;
+    switch(op){ case "add": r=x+y; break; case "sub": r=x-y; break; case "mul": r=x*y; break; case "div": r=(float||bit===32)?x/y:(y===0?IC.maxOf(bit):Math.trunc(x/y)); break; // 32-bit 은 언제나 실수 나눗셈 (0/0 = NaN, x/0 = ±∞)
       case "and": r=(x&y)>>>0; break; case "or": r=(x|y)>>>0; break; case "xor": r=(x^y)>>>0; break; case "min": r=Math.min(x,y); break; case "max": r=Math.max(x,y); break;
       case "average": r=(x+y)/2; break; case "difference": r=Math.abs(x-y); break; case "copy": r=y; break; case "transparent-zero": r=y===0?x:y; break;
       default: throw new Error("Image Calculator 연산: "+op); }
@@ -46271,10 +46288,12 @@ IC.saturatedRange=function(p,saturated,mask){
   let i=-1,c=0; do{ i++; c+=h.h[i]; }while(!(c>thr)&&i<L-1); const hmin=i;
   i=L; c=0; do{ i--; c+=h.h[i]; }while(!(c>thr)&&i>0); const hmax=i;
   if(hmax>hmin) return [h.min+hmin*h.binSize,h.min+hmax*h.binSize];
-  return IC.minMax(p.data,mask);
+  return null; // ImageJ: hmax ≤ hmin 이면 바꾸지 않음
 };
 IC.enhanceContrast=function(p,o){
-  o=o||{}; const [mn,mx]=IC.saturatedRange(p,o.saturated!=null?+o.saturated:0.35,o.mask);
+  o=o||{}; const rr=IC.saturatedRange(p,o.saturated!=null?+o.saturated:0.35,o.mask);
+  if(!rr) return o.normalize?{plane:{w:p.w,h:p.h,bit:p.bit,data:Float32Array.from(p.data)},unchanged:true}:{range:null,unchanged:true}; // 일정한 영상·saturated 과다 → 그대로
+  const [mn,mx]=rr;
   if(!o.normalize) return {range:[mn,mx]};
   const d=p.data, out=new Float32Array(d.length);
   if(p.bit===32){ const sc=mx>mn?1/(mx-mn):1; for(let i=0;i<d.length;i++){ let v=d[i]-mn; if(v<0) v=0; v*=sc; if(v>1) v=1; out[i]=v; } return {plane:{w:p.w,h:p.h,bit:32,data:out}}; }
@@ -46302,8 +46321,9 @@ IC.rotate=function(p,deg,o){
   let W=W0,H=H0,ox=0,oy=0; if(o.enlarge){ W=Math.ceil(Math.abs(W0*ca)+Math.abs(H0*sa)); H=Math.ceil(Math.abs(W0*sa)+Math.abs(H0*ca)); ox=(W-W0)/2; oy=(H-H0)/2; }
   const cx=(W0-1)/2, cy=(H0-1)/2, bg=o.bg||0, out=new Float32Array(W*H), d=p.data;
   for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const dx=x-ox-cx, dy=y-oy-cy; const xs=dx*ca-dy*sa+cx, ys=dx*sa+dy*ca+cy;
-    let v=bg; if(xs>=-0.01&&xs<W0-0.99&&ys>=-0.01&&ys<H0-0.99){ const x0=Math.max(0,Math.floor(xs)), y0=Math.max(0,Math.floor(ys)), x1=Math.min(W0-1,x0+1), y1=Math.min(H0-1,y0+1), fx=xs-x0, fy=ys-y0;
-      v=o.nearest?d[Math.round(ys)*W0+Math.round(xs)]:(d[y0*W0+x0]*(1-fx)+d[y0*W0+x1]*fx)*(1-fy)+(d[y1*W0+x0]*(1-fx)+d[y1*W0+x1]*fx)*fy; }
+    let v=bg; if(xs>=-0.01&&xs<W0&&ys>=-0.01&&ys<H0){ const xc=Math.min(Math.max(xs,0),W0-1.001), yc=Math.min(Math.max(ys,0),H0-1.001); // ImageJ: [−0.01, w) 안이면 w−1.001 로 자름
+      const x0=Math.floor(xc), y0=Math.floor(yc), x1=Math.min(W0-1,x0+1), y1=Math.min(H0-1,y0+1), fx=xc-x0, fy=yc-y0;
+      v=o.nearest?d[Math.min(H0-1,Math.round(yc))*W0+Math.min(W0-1,Math.round(xc))]:(d[y0*W0+x0]*(1-fx)+d[y0*W0+x1]*fx)*(1-fy)+(d[y1*W0+x0]*(1-fx)+d[y1*W0+x1]*fx)*fy; }
     out[y*W+x]=v; }
   return {w:W,h:H,bit:p.bit,data:IC.roundTo(out,p.bit)};
 };
@@ -46326,17 +46346,19 @@ IC.translate=function(p,dx,dy){ const W=p.w,H=p.h,out=new Float32Array(W*H); for
 IC.zProject=function(planes,method){
   const n=planes.length, N=planes[0].data.length, out=new Float32Array(N);
   if(method==="median"){ const buf=new Float64Array(n); for(let i=0;i<N;i++){ for(let k=0;k<n;k++) buf[k]=planes[k].data[i]; buf.sort(); out[i]=n%2?buf[(n-1)>>1]:(buf[n/2-1]+buf[n/2])/2; } }
-  else if(method==="max"||method==="min"){ out.set(planes[0].data); for(let k=1;k<n;k++){ const d=planes[k].data; for(let i=0;i<N;i++){ if(method==="max"?d[i]>out[i]:d[i]<out[i]) out[i]=d[i]; } } }
-  else { const s=new Float64Array(N), s2=method==="sd"?new Float64Array(N):null; for(const p of planes){ const d=p.data; for(let i=0;i<N;i++){ s[i]+=d[i]; if(s2) s2[i]+=d[i]*d[i]; } }
-    for(let i=0;i<N;i++){ if(method==="sum") out[i]=s[i]; else if(method==="avg") out[i]=s[i]/n; else { const v=n>1?(n*s2[i]-s[i]*s[i])/n/(n-1):0; out[i]=v>0?Math.sqrt(v):0; } } }
+  else if(method==="max"||method==="min"){ out.fill(method==="max"?-3.4028234663852886e38:3.4028234663852886e38); for(let k=0;k<n;k++){ const d=planes[k].data; for(let i=0;i<N;i++){ if(method==="max"?d[i]>out[i]:d[i]<out[i]) out[i]=d[i]; } } } // NaN 은 비교에서 빠짐 (ImageJ)
+  else { const s=new Float64Array(N), s2=method==="sd"?new Float64Array(N):null, cnt=method==="avg"&&planes[0].bit===32?new Int32Array(N):null;
+    for(const p of planes){ const d=p.data; for(let i=0;i<N;i++){ const v=d[i]; if(cnt){ if(v!==v) continue; cnt[i]++; } s[i]+=v; if(s2) s2[i]+=v*v; } }
+    for(let i=0;i<N;i++){ if(method==="sum") out[i]=s[i]; else if(method==="avg") out[i]=s[i]/(cnt?cnt[i]:n); else { const v=n>1?(n*s2[i]-s[i]*s[i])/n/(n-1):0; out[i]=v>0?Math.sqrt(v):0; } } } // 32-bit 평균은 NaN 을 뺀 개수로 (ImageJ doAverageFloatProjection)
   // ImageJ 1.54u: avg·max·min 은 원래 형식으로 (int)(v+0.5), sum·sd 는 32-bit, median 은 아래 시험으로 확인
-  const keep=method==="avg"||method==="max"||method==="min"||method==="median"; const bit=keep?planes[0].bit:32;
+  const keep=method==="avg"||method==="max"||method==="min"||(method==="median"&&planes[0].bit===8); const bit=keep?planes[0].bit:32; // 16-bit median 은 32-bit (ImageJ)
   return {w:planes[0].w,h:planes[0].h,bit,data:keep&&bit!==32?IC.roundTo(out,bit):out};
 };
 
 /* ---------- 위상 상관 이동 추정 (translation) ----------
    Hann 창, 교차 전력 스펙트럼 정규화, 정수 극대 + 3 점 포물선 보간(부화소). 반환 {dx,dy,peak} = b 를 a 에 맞추는 이동 */
 IC.phaseCorr=function(a,b){
+  for(const q of [a,b]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("정렬: 영상에 NaN·무한대 화소가 있습니다 — Process ▸ Math ▸ NaN Background 등을 되돌리거나 값으로 바꾼 뒤 정렬하세요"); } }
   const W=a.w,H=a.h, S=IC.nextPow2(Math.max(W,H));
   let ma=0,mb=0; for(let i=0;i<W*H;i++){ ma+=a.data[i]; mb+=b.data[i]; } ma/=W*H; mb/=W*H;
   const hann=(t,n)=>t<=-0.5||t>=n-0.5?0:0.5-0.5*Math.cos(2*Math.PI*(t+0.5)/n);
@@ -46404,7 +46426,7 @@ IC.orientation=function(p,o){
   for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; let k=Math.floor(th[i]+90); if(k>=180) k=179; if(k<0) k=0; hist[k]+=coh[i]*en[i]; }
   // 주 방향: 선택한 화소의 텐서 합(구간 나눔 없이), order parameter = 이중각 평균 길이
   let A=0,B=0,Cc=0,sc=0,ss=0,sw=0; for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; A+=jxx[i]; B+=jyy[i]; Cc+=jxy[i]; const w=coh[i]*en[i], t=th[i]*Math.PI/180; sc+=w*Math.cos(2*t); ss+=w*Math.sin(2*t); sw+=w; }
-  let dom=-(0.5*Math.atan2(2*Cc,A-B)*180/Math.PI+90); if(dom>90) dom-=180; if(dom<=-90) dom+=180; const R=sw?Math.hypot(sc,ss)/sw:0;
+  let dom=-(0.5*Math.atan2(2*Cc,A-B)*180/Math.PI+90); if(dom>90) dom-=180; if(dom<=-90) dom+=180; if(!(A+B>0)||!(emax>0)) dom=NaN; /* 일정한 영상: 방향 없음 */ const R=sw?Math.hypot(sc,ss)/sw:0;
   let ct=0,cw=0; for(let i=0;i<N;i++){ if(en[i]<minE) continue; ct+=coh[i]*en[i]; cw+=en[i]; }
   return {theta:th,coherency:coh,energy:en,hist,dominant:dom,orderParam:R,meanCoherency:cw?ct/cw:0};
 };
@@ -46412,8 +46434,9 @@ IC.orientation=function(p,o){
 })();
 (function(){ const IC=((typeof self!=="undefined")?self:globalThis).IMG_CORE;
 /* Image ▸ Adjust ▸ Apply LUT: 표시 범위 [min,max] 를 0..M 로 펼쳐 화소에 씀 (8/16-bit) */
-IC.applyLut=function(p,min,max){ const M=p.bit===8?255:65535, d=p.data, out=new Float32Array(d.length), sc=max>min?M/(max-min):1;
-  for(let i=0;i<d.length;i++){ let v=Math.round((d[i]-min)*sc); if(v<0) v=0; if(v>M) v=M; out[i]=v; } return {w:p.w,h:p.h,bit:p.bit,data:out}; };
+/* ContrastAdjuster.apply: min·max 정수, i≤min → 0, i≥max → range−1, 사이 = (int)((i−min)/(max−min)·range) (range 256 / 65536) */
+IC.applyLut=function(p,min,max){ const range=p.bit===8?256:65536, d=p.data, out=new Float32Array(d.length); const a=Math.trunc(min), b=Math.trunc(max);
+  for(let i=0;i<d.length;i++){ const v=d[i]; out[i]=v<=a?0:v>=b?range-1:Math.trunc(((v-a)/(b-a))*range); } return {w:p.w,h:p.h,bit:p.bit,data:out}; };
 })();
 
 /* ============================================================
@@ -46983,6 +47006,8 @@ function checkPlane(p,name){ if(!p||!(p.w>=2)||!(p.h>=2)||!p.data||p.data.length
 IC.turboReg=function(refPlane,movPlane,mode){
   const tr=modeCode(mode); checkPlane(refPlane,"ref"); checkPlane(movPlane,"mov");
   if(refPlane.w!==movPlane.w||refPlane.h!==movPlane.h) throw new Error("StackReg: 두 영상 크기가 다름");
+  if(refPlane.w<16||refPlane.h<16) throw new Error("StackReg: 영상이 너무 작습니다 (가로·세로 16 px 이상)");
+  for(const q of [refPlane,movPlane]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("StackReg: 영상에 NaN·무한대 화소가 있습니다 — 값으로 바꾼 뒤 정렬하세요"); } }
   const r=registerRaw(cropData(refPlane),cropData(movPlane),refPlane.w-1,refPlane.h-1,tr);
   return {mat:shortToLong(r.short,tr),refPts:r.refPts,movPts:r.movPts};
 };
@@ -47824,9 +47849,12 @@ var G=(typeof window!=="undefined")?window:globalThis; G.IMG_ZSTD=exports; if(ty
 "use strict";
 const G=(typeof self!=="undefined")?self:globalThis;
 const IO={};
-const td=new TextDecoder("latin1"), tdu=new TextDecoder("utf-8");
+const td=new TextDecoder("latin1"), tdu=new TextDecoder("utf-8"), tdf=new TextDecoder("utf-8",{fatal:true});
+/* 문자열 태그: UTF-8 로 읽히면 UTF-8(µ 등), 아니면 latin1 */
+const txt=b=>{ try{ return tdf.decode(b); }catch(e){ return td.decode(b); } }; IO._txt=txt;
 
 /* ---------- 압축 풀기 ---------- */
+IO.MAXBYTES=1.6e9; // 32-bit 메모리 한도 (nd2·czi 와 같음)
 IO.inflate=async function(u8,raw){ // zlib(deflate) — 브라우저 DecompressionStream, node 시험은 IO.inflate 를 바꿔 끼운다
   if(typeof DecompressionStream==="undefined") throw new Error("이 브라우저는 deflate 압축을 풀 수 없습니다");
   const rs=new Blob([u8]).stream().pipeThrough(new DecompressionStream(raw?"deflate-raw":"deflate"));
@@ -47842,6 +47870,7 @@ function lzw(src,expected){ // TIFF LZW (MSB 우선, early change)
   const emit=c=>{ const L=len[c]; grow(L); let p=op+L-1, k=c; while(k>=0&&p>=op){ out[p--]=suf[k]; k=pre[k]; } op+=L; };
   for(;;){ const code=read(); if(code===257) break;
     if(code===256){ next=258; bits=9; old=-1; continue; }
+    if(code>next||(old===-1&&code>255)) throw new Error("LZW 자료가 손상되었습니다");
     if(old===-1){ emit(code); old=code; continue; }
     if(code<next){ emit(code); if(next<4096){ pre[next]=old; suf[next]=first[code]; len[next]=len[old]+1; first[next]=first[old]; next++; } }
     else { // code === next (KwKwK)
@@ -47870,7 +47899,7 @@ function tiffIFDs(u8){
         case 5: return dv.getUint32(q,le)/(dv.getUint32(q+4,le)||1); case 6: return dv.getInt8(q); case 8: return dv.getInt16(q,le); case 9: return dv.getInt32(q,le);
         case 10: return dv.getInt32(q,le)/(dv.getInt32(q+4,le)||1); case 11: return dv.getFloat32(q,le); case 12: return dv.getFloat64(q,le); case 16: case 18: return hiLo(q); case 17: return hiLo(q); default: return dv.getUint8(q); } };
       const t={type,cnt,off:vo,len:sz};
-      if(type===2) t.str=td.decode(u8.subarray(vo,vo+sz)).replace(/\0+$/,"");
+      if(type===2) t.str=txt(u8.subarray(vo,vo+sz)).replace(/\0+$/,"");
       else if(cnt<=1) t.v=rd(0);
       else if(cnt<=1e6&&type!==7&&type!==1) t.a=Array.from({length:cnt},(_,k)=>rd(k));
       t.raw=u8.subarray(vo,vo+sz);
@@ -47893,6 +47922,7 @@ async function tiffDecode(T,u8,pi,limitPx){
   if(comp===7||comp===6) throw new Error("JPEG 압축 TIFF 는 아직 읽지 않습니다 (무손실 TIFF 로 다시 저장하세요)");
   if(![1,5,8,32946,32773].includes(comp)) throw new Error("압축 방식 "+comp+" 은 지원하지 않습니다");
   if(limitPx&&W*H>limitPx) throw new Error(`영상이 너무 큽니다 (${W}×${H})`);
+  if(W*H*Math.min(spp,4)*4>IO.MAXBYTES) throw new Error(`영상이 너무 큽니다: ${W}×${H}×${spp} = ${(W*H*Math.min(spp,4)*4/1e9).toFixed(2)} GB (32-bit 메모리, 한도 ${(IO.MAXBYTES/1e9).toFixed(1)} GB)`);
   const tiled=!!tg[322]; const tw=tiled?tv(tg[322]):W, th=tiled?tv(tg[323]):Math.min(H,tv(tg[278],H)); // RowsPerStrip 기본값 2³²−1
   const offs=ta(tiled?tg[324]:tg[273]), cnts=ta(tiled?tg[325]:tg[279]);
   if(!offs) throw new Error("화소 자료 위치(StripOffsets) 태그가 없습니다");
@@ -47902,13 +47932,16 @@ async function tiffDecode(T,u8,pi,limitPx){
   const nPlanes=planar===2?spp:1;
   const out=[...Array(spp)].map(()=>new Float32Array(W*H));
   const across=Math.ceil(W/tw), down=Math.ceil(H/th), perPlane=across*down;
-  const dv0=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  const dv0=new DataView(u8.buffer,u8.byteOffset,u8.byteLength); let short=0;
   for(let pl=0;pl<nPlanes;pl++){
     for(let ci=0;ci<perPlane;ci++){
       const k=pl*perPlane+ci; if(k>=offs.length) break;
-      let src=u8.subarray(offs[k],offs[k]+(cnts?cnts[k]:chunkBytes));
+      const nb=cnts?cnts[k]:(comp===1?chunkBytes:((offs[k+1]||u8.length)-offs[k])); // StripByteCounts 가 없으면 다음 strip 까지
+      if(offs[k]>=u8.length||offs[k]+nb>u8.length) short++;
+      let src=u8.subarray(offs[k],offs[k]+nb);
       let buf;
       if(comp===1) buf=src; else if(comp===5) buf=lzw(src,chunkBytes); else if(comp===32773) buf=packbits(src,chunkBytes); else buf=await IO.inflate(src);
+      const y0c=Math.floor((ci%perPlane)/across)*th, need=rowBytes*Math.min(th,H-y0c); if(buf.length<(tiled?chunkBytes:need)) short++; // 마지막 strip 은 짧아도 됨
       if(buf.length<chunkBytes){ const b=new Uint8Array(chunkBytes); b.set(buf); buf=b; } else if(buf===src) buf=Uint8Array.from(src.subarray(0,chunkBytes));
       const dv=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
       // predictor
@@ -47927,27 +47960,29 @@ async function tiffDecode(T,u8,pi,limitPx){
             if(bits===8) v=fmt===2?(buf[o+si]<<24>>24):buf[o+si];
             else if(bits===16) v=fmt===2?dv.getInt16(o+2*si,le):fmt===3?f16(dv.getUint16(o+2*si,le)):dv.getUint16(o+2*si,le);
             else if(bits===32) v=fmt===3?dv.getFloat32(o+4*si,le):fmt===2?dv.getInt32(o+4*si,le):dv.getUint32(o+4*si,le);
-            else if(bits===64) v=fmt===3?dv.getFloat64(o+8*si,le):Number((le?dv.getBigUint64(o+8*si,true):dv.getBigUint64(o+8*si,false)));
+            else if(bits===64) v=fmt===3?dv.getFloat64(o+8*si,le):fmt===2?Number(dv.getBigInt64(o+8*si,le)):Number(dv.getBigUint64(o+8*si,le));
             else { const bitPos=si*bits; const byte=buf[o+(bitPos>>3)]; v=(byte>>(8-bits-(bitPos&7)))&((1<<bits)-1); }
             out[planar===2?pl:s][Y*W+X]=v; } } }
     }
   }
   void dv0;
+  if(short) throw new Error(`쪽 ${pi+1}: 화소 자료가 잘렸거나 손상되었습니다 (strip/tile ${short} 개가 짧음) — 파일이 끝까지 저장·복사되었는지 확인하세요`);
   // 형식
   let bit=bits<=8?8:bits===16&&fmt!==2&&fmt!==3?16:32;
   if(bits===16&&fmt===2){ bit=32; }
-  if(bits<8){ const mx=(1<<bits)-1; for(const p of out) for(let i=0;i<p.length;i++) p[i]=Math.round(p[i]*255/mx); }
+  if(bits<8&&photo!==3){ const mx=(1<<bits)-1; for(const p of out) for(let i=0;i<p.length;i++) p[i]=Math.round(p[i]*255/mx); } // 팔레트 색인은 그대로
   if(bits===8&&fmt===2){ bit=32; }
   const notes=[];
   if(photo===0&&spp===1){ notes.push("WhiteIsZero(0=흰색) TIFF — 화소 값은 그대로 두고 LUT 를 뒤집어 보입니다"); }
-  let rgb=false, palette=null;
+  let rgb=false, palette=null, photo0inv=false;
   if(photo===3&&tg[320]){ const cm=ta(tg[320]); const n=cm.length/3; let gray=true; for(let i=0;i<n;i++) if(cm[i]!==cm[n+i]||cm[i]!==cm[2*n+i]){ gray=false; break; }
-    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=s[i]|0; r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
-    palette="gray"; }
+    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=Math.min(n-1,s[i]|0); r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
+    palette="gray"; if(n>1&&cm[0]>cm[n-1]) { photo0inv=true; } }
   if(photo===2&&spp>=3&&bit===8){ rgb=true; }
   const planes=rgb?out.slice(0,3):out.slice(0,photo===2?Math.min(spp,3):spp);
   if(spp===4&&photo===2) notes.push("알파 채널은 버렸습니다");
-  return {W,H,bit,planes,rgb,inv:photo===0,notes,bits,fmt,comp,palette};
+  if(photo===5) notes.push("CMYK TIFF — 4 채널(C·M·Y·K)로 열었습니다 (RGB 로 바꾸지 않음)"); if(photo===6) notes.push("YCbCr TIFF — 3 채널(Y·Cb·Cr)로 열었습니다 (RGB 로 바꾸지 않음)");
+  return {W,H,bit,planes,rgb,inv:photo===0||photo0inv,notes,bits,fmt,comp,palette};
 }
 function f16(h){ const s=(h&0x8000)?-1:1, e=(h>>10)&31, m=h&1023; if(e===0) return s*Math.pow(2,-14)*(m/1024); if(e===31) return m?NaN:s*Infinity; return s*Math.pow(2,e-15)*(1+m/1024); }
 
@@ -47956,21 +47991,20 @@ const UNIT={ "m":1,"meter":1,"mm":1e-3,"millimeter":1e-3,"cm":1e-2,"um":1e-6,"µ
 IO.unitToM=u=>{ if(u==null) return null; const s=String(u).trim().replace(/^\\u00B5/,"µ"); if(UNIT[s]!=null) return UNIT[s]; if(UNIT[s.toLowerCase()]!=null) return UNIT[s.toLowerCase()]; if(/^\\?mu?m$/i.test(s)||/^micro/i.test(s)) return 1e-6; return null; };
 /* 미터 단위 화소 크기 → 사람이 읽기 좋은 단위 */
 IO.niceUnit=function(m){ if(!(m>0)) return {unit:"px",f:1}; if(m<1e-9) return {unit:"pm",f:1e12}; if(m<1e-6) return {unit:"nm",f:1e9}; if(m<1e-3) return {unit:"µm",f:1e6}; return {unit:"mm",f:1e3}; };
-IO.calFromMeters=function(pwm,phm,src){ const nu=IO.niceUnit(pwm); return {pw:pwm*nu.f,ph:(phm||pwm)*nu.f,unit:nu.unit,src}; };
+IO.calFromMeters=function(pwm,phm,src,unit){ const k=unit&&IO.unitToM(unit); const nu=k&&k!==0.0254&&k!==1e-2&&k!==1?{unit:k===1e-6?"µm":k===1e-9?"nm":k===1e-12?"pm":k===1e-10?"Å":k===1e-3?"mm":null,f:1/k}:null; const u=nu&&nu.unit?nu:IO.niceUnit(pwm); return {pw:pwm*u.f,ph:(phm||pwm)*u.f,unit:u.unit,src}; }; // unit: 파일이 밝힌 단위가 있으면 그 단위로 (micron → µm)
 function parseImageJDesc(s){ const o={}; s.split(/\r?\n/).forEach(l=>{ const i=l.indexOf("="); if(i>0) o[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); return o; }
-function parseOME(s){
-  const g=(re)=>{ const m=s.match(re); return m?m[1]:null; };
-  const px=s.match(/<(?:\w+:)?Pixels\b[^>]*>/); if(!px) return null; const t=px[0];
-  const a=k=>{ const m=t.match(new RegExp("\\b"+k+'="([^"]*)"')); return m?m[1]:null; };
-  void g;
-  return {sizeX:+a("SizeX"),sizeY:+a("SizeY"),sizeC:+a("SizeC")||1,sizeZ:+a("SizeZ")||1,sizeT:+a("SizeT")||1,order:a("DimensionOrder")||"XYCZT",type:a("Type"),
-    psx:a("PhysicalSizeX")?+a("PhysicalSizeX"):null,psy:a("PhysicalSizeY")?+a("PhysicalSizeY"):null,psxu:a("PhysicalSizeXUnit")||"µm",psyu:a("PhysicalSizeYUnit")||"µm",psz:a("PhysicalSizeZ")?+a("PhysicalSizeZ"):null};
-}
+function parseOME(s){ const L=parseOMEAll(s); return L.length?L[0]:null; }
+function parseOMEAll(s){ // <Image><Pixels .../> 마다 하나 (multi-series OME-TIFF)
+  const out=[]; const re=/<(?:\w+:)?Pixels\b[^>]*>/g; let m;
+  while((m=re.exec(s))){ const t=m[0]; const a=k=>{ const q=t.match(new RegExp("\\b"+k+'="([^"]*)"')); return q?q[1]:null; };
+    out.push({sizeX:+a("SizeX"),sizeY:+a("SizeY"),sizeC:+a("SizeC")||1,sizeZ:+a("SizeZ")||1,sizeT:+a("SizeT")||1,order:a("DimensionOrder")||"XYCZT",type:a("Type"),
+      psx:a("PhysicalSizeX")?+a("PhysicalSizeX"):null,psy:a("PhysicalSizeY")?+a("PhysicalSizeY"):null,psxu:a("PhysicalSizeXUnit")||"µm",psyu:a("PhysicalSizeYUnit")||"µm",psz:a("PhysicalSizeZ")?+a("PhysicalSizeZ"):null,pszu:a("PhysicalSizeZUnit")||"µm"}); }
+  return out; }
 function iniSections(s){ const o={}; let cur=""; s.split(/\r?\n/).forEach(l=>{ const m=l.match(/^\s*\[(.+)\]\s*$/); if(m){ cur=m[1]; o[cur]=o[cur]||{}; return; } const i=l.indexOf("="); if(i>0){ (o[cur]=o[cur]||{})[l.slice(0,i).trim()]=l.slice(i+1).trim(); } }); return o; }
 /* SEM·TEM 장비 태그에서 화소 크기 */
 function semCal(tg,info,warn){
   // FEI / Thermo Fisher (34680 FEI_SFEG, 34682 FEI_HELIOS, 34683)
-  for(const code of [34682,34680,34683]){ const t=tg[code]; if(!t) continue; const s=t.str!=null?t.str:td.decode(t.raw); const ini=iniSections(s);
+  for(const code of [34682,34680,34683]){ const t=tg[code]; if(!t) continue; const s=t.str!=null?t.str:txt(t.raw); const ini=iniSections(s);
     const pw=(ini.Scan&&+ini.Scan.PixelWidth)||(ini.EScan&&+ini.EScan.PixelWidth)||(ini.IScan&&+ini.IScan.PixelWidth);
     const ph=(ini.Scan&&+ini.Scan.PixelHeight)||(ini.EScan&&+ini.EScan.PixelHeight)||pw;
     info.push(["Instrument",(ini.System&&(ini.System.SystemType||ini.System.Type))||"FEI/Thermo"]);
@@ -47979,13 +48013,13 @@ function semCal(tg,info,warn){
     const ry=ini.Image&&+ini.Image.ResolutionY; const dbh=ini.PrivateFei&&+ini.PrivateFei.DatabarHeight;
     const r={raw:s}; if(pw>0) r.cal=IO.calFromMeters(pw,ph,"FEI/Thermo 태그 "+code+" [Scan] PixelWidth"); if(ry>0) r.imageRows=ry; if(dbh>0) r.databar=dbh; return r; }
   // Zeiss (34118 CZ_SEM)
-  if(tg[34118]){ const s=td.decode(tg[34118].raw); const m=s.match(/Image Pixel Size\s*=\s*([\d.eE+-]+)\s*(pm|nm|µm|um|mm)/)||s.match(/Pixel Size\s*=\s*([\d.eE+-]+)\s*(pm|nm|µm|um|mm)/);
+  if(tg[34118]){ const s=txt(tg[34118].raw); const m=s.match(/Image Pixel Size\s*=\s*([\d.eE+-]+)\s*(pm|nm|µm|um|mm)/)||s.match(/Pixel Size\s*=\s*([\d.eE+-]+)\s*(pm|nm|µm|um|mm)/);
     const hv=s.match(/EHT\s*=\s*([\d.]+\s*\w+)/); if(hv) info.push(["EHT",hv[1]]); const mag=s.match(/\bMag\s*=\s*([\d.,]+\s*\w+)/); if(mag) info.push(["Mag",mag[1]]);
     info.push(["Instrument","Zeiss SEM"]);
     if(m){ const u=m[2]==="um"?"µm":m[2]; const k=IO.unitToM(u); return {cal:IO.calFromMeters(+m[1]*k,+m[1]*k,"Zeiss 태그 34118 'Image Pixel Size'"),raw:s}; }
     warn.push("Zeiss 태그에서 Pixel Size 를 찾지 못했습니다"); return {raw:s}; }
   // TESCAN (50431)
-  if(tg[50431]){ const s=td.decode(tg[50431].raw); const m=s.match(/PixelSizeX\s*=\s*([\d.eE+-]+)/), n=s.match(/PixelSizeY\s*=\s*([\d.eE+-]+)/); info.push(["Instrument","TESCAN"]);
+  if(tg[50431]){ const s=txt(tg[50431].raw); const m=s.match(/PixelSizeX\s*=\s*([\d.eE+-]+)/), n=s.match(/PixelSizeY\s*=\s*([\d.eE+-]+)/); info.push(["Instrument","TESCAN"]);
     if(m) return {cal:IO.calFromMeters(+m[1],n?+n[1]:+m[1],"TESCAN 태그 50431 PixelSizeX"),raw:s}; }
   return null;
 }
@@ -48001,32 +48035,40 @@ function sidecarCal(name,ctx,info){
 }
 
 async function readTIFF(name,u8,ctx){
-  const T=tiffIFDs(u8); const p0=T.pages[0]; const warn=[], info=[];
+  const T=tiffIFDs(u8); if(!T.pages.length) throw new Error("TIFF: 읽을 수 있는 IFD 가 없습니다 (파일이 손상되었거나 잘림)"); const p0=T.pages[0]; const warn=[], info=[];
   const desc=p0[270]&&p0[270].str||"";
   const ij=desc.startsWith("ImageJ=")?parseImageJDesc(desc):null;
-  const ome=/<OME[\s>]/.test(desc)?parseOME(desc):null;
+  const omeAll=/<OME[\s>]/.test(desc)?parseOMEAll(desc):[]; const ome=omeAll[0]||null;
   const sem=semCal(p0,info,warn);
   // 쪽 묶기: 같은 크기·형식인 쪽들 = 한 스택 (썸네일 등 다른 크기 쪽은 따로)
   const decoded=[]; const nP=T.pages.length;
+  { let tot=0; for(let i=0;i<nP;i++){ const tg=T.pages[i]; if(i>0&&(tv(tg[254],0)&1)) continue; tot+=(tv(tg[256],0)*tv(tg[257],0))*Math.min(3,tv(tg[277],1))*4; } if(ij&&+ij.images>nP) tot=Math.max(tot,(tv(p0[256],0)*tv(p0[257],0))*Math.min(3,tv(p0[277],1))*4*(+ij.images));
+    if(tot>IO.MAXBYTES) throw new Error(`TIFF: 너무 큼 — ${(tot/1e9).toFixed(2)} GB (32-bit 메모리, 한도 ${(IO.MAXBYTES/1e9).toFixed(1)} GB). ImageJ 에서 일부(substack)만 저장해 여세요`); }
   let nImg=ij&&+ij.images>1?+ij.images:nP;
   for(let i=0;i<nP;i++){ const tg=T.pages[i]; const sub=tv(tg[254],0); if(i>0&&(sub&1)) continue; // reduced-resolution 쪽 건너뜀
     try{ decoded.push(await tiffDecode(T,u8,i,ctx&&ctx.limitPx)); }catch(e){ if(i===0) throw e; warn.push(`쪽 ${i+1}: ${e.message}`); }
     if(ctx&&ctx.onProgress) ctx.onProgress(i/nP); }
   // ImageJ 큰 스택: IFD 가 하나뿐이고 images=N 이면 이어진 비압축 자료
   if(ij&&+ij.images>decoded.length&&decoded.length===1&&tv(p0[259],1)===1){
-    const W=tv(p0[256]),H=tv(p0[257]), bits=ta(p0[258],[8])[0], fmt=tv(p0[339],1), off=ta(p0[273])[0]; const per=W*H*bits/8; const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+    const W=tv(p0[256]),H=tv(p0[257]), bits=ta(p0[258],[8])[0], fmt=tv(p0[339],1), spp=tv(p0[277],1), off=ta(p0[273])[0]; const per=W*H*spp*bits/8; const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength); const rgb0=decoded[0].rgb;
+    const rd=o=>bits===8?(fmt===2?(u8[o]<<24>>24):u8[o]):bits===16?(fmt===2?dv.getInt16(o,T.le):dv.getUint16(o,T.le)):fmt===3?dv.getFloat32(o,T.le):fmt===2?dv.getInt32(o,T.le):dv.getUint32(o,T.le);
     for(let k=1;k<+ij.images;k++){ const o=off+k*per; if(o+per>u8.byteLength){ warn.push(`ImageJ 스택 ${ij.images} 장 중 ${k} 장만 파일 안에 있습니다`); break; }
-      const d=new Float32Array(W*H); for(let i=0;i<W*H;i++){ d[i]=bits===8?u8[o+i]:bits===16?dv.getUint16(o+2*i,T.le):fmt===3?dv.getFloat32(o+4*i,T.le):dv.getUint32(o+4*i,T.le); }
-      decoded.push({W,H,bit:decoded[0].bit,planes:[d],rgb:false,notes:[]}); }
+      const ch=[...Array(rgb0?3:1)].map(()=>new Float32Array(W*H)); const bs=bits/8;
+      for(let i=0;i<W*H;i++) for(let c=0;c<ch.length;c++) ch[c][i]=rd(o+(i*spp+c)*bs);
+      decoded.push({W,H,bit:decoded[0].bit,planes:ch,rgb:rgb0,notes:[]}); }
     nImg=decoded.length; }
   void nImg;
-  const groups=[]; for(const d of decoded){ const g=groups.find(g=>g.W===d.W&&g.H===d.H&&g.bit===d.bit&&g.rgb===d.rgb&&g.planes[0]&&g.np===d.planes.length); if(g){ g.list.push(d); } else groups.push({W:d.W,H:d.H,bit:d.bit,rgb:d.rgb,np:d.planes.length,list:[d],planes:d.planes}); }
+  let groups=[];
+  if(omeAll.length>1&&omeAll.reduce((a,o)=>a+o.sizeC*o.sizeZ*o.sizeT,0)===decoded.reduce((a,d)=>a+(d.rgb?1:d.planes.length),0)){ // multi-series OME-TIFF: series 마다 따로
+    let k=0; omeAll.forEach((o,si)=>{ const n=o.sizeC*o.sizeZ*o.sizeT; const list=[]; let got=0; while(got<n&&k<decoded.length){ const d=decoded[k++]; list.push(d); got+=d.rgb?1:d.planes.length; } if(list.length) groups.push({W:list[0].W,H:list[0].H,bit:list[0].bit,rgb:list[0].rgb,np:list[0].planes.length,list,planes:list[0].planes,ome:o,series:si}); });
+  } else for(const d of decoded){ const g=groups.find(g=>g.W===d.W&&g.H===d.H&&g.bit===d.bit&&g.rgb===d.rgb&&g.planes[0]&&g.np===d.planes.length); if(g){ g.list.push(d); } else groups.push({W:d.W,H:d.H,bit:d.bit,rgb:d.rgb,np:d.planes.length,list:[d],planes:d.planes}); }
   const images=[];
   groups.forEach((g,gi)=>{
     const planes=[]; g.list.forEach(d=>d.planes.forEach(p=>planes.push(p)));
     let nc=g.rgb?3:g.np, nz=g.list.length, nt=1, order="czt";
     if(gi===0&&ij&&!g.rgb){ const C=+ij.channels||1, Z=+ij.slices||1, Tt=+ij.frames||1; if(C*Z*Tt===planes.length){ nc=C; nz=Z; nt=Tt; } }
-    else if(gi===0&&ome&&!g.rgb&&ome.sizeC*ome.sizeZ*ome.sizeT===planes.length){ nc=ome.sizeC; nz=ome.sizeZ; nt=ome.sizeT;
+    const om=g.ome||(gi===0?ome:null);
+    if(om&&!(gi===0&&ij&&!g.rgb)&&!g.rgb&&om.sizeC*om.sizeZ*om.sizeT===planes.length){ const ome=om; nc=ome.sizeC; nz=ome.sizeZ; nt=ome.sizeT;
       // OME DimensionOrder(XYZCT 등)의 파일 순서를 앱 순서 c + nc·(z + nz·t) 로 다시 놓는다
       const ord=ome.order.slice(2).toLowerCase(); const size={c:nc,z:nz,t:nt}; const re=new Array(planes.length);
       for(let k=0;k<planes.length;k++){ let r=k; const ix={}; for(const ch of ord){ ix[ch]=r%size[ch]; r=Math.floor(r/size[ch]); } re[ix.c+nc*(ix.z+nz*ix.t)]=planes[k]; }
@@ -48034,16 +48076,19 @@ async function readTIFF(name,u8,ctx){
     let cal=null; const cands=[];
     if(gi===0&&sem&&sem.cal) cal=sem.cal;
     if(!cal&&gi===0&&ij&&ij.unit&&p0[282]){ const xr=tv(p0[282]), yr=tv(p0[283],xr); const u=ij.unit.replace(/\\u00B5/g,"µ"); const k=IO.unitToM(u);
-      if(xr>0&&k){ cal=IO.calFromMeters(k/xr,k/yr,"ImageJ 메타데이터 (unit="+u+", XResolution)"); } else if(xr>0&&u!=="pixel"){ cal={pw:1/xr,ph:1/yr,unit:u,src:"ImageJ 메타데이터"}; } }
-    if(!cal&&gi===0&&ome&&ome.psx){ const k=IO.unitToM(ome.psxu)||1e-6; cal=IO.calFromMeters(ome.psx*k,(ome.psy||ome.psx)*(IO.unitToM(ome.psyu)||k),"OME-XML PhysicalSizeX"); }
+      if(xr>0&&k){ cal=IO.calFromMeters(k/xr,k/yr,"ImageJ 메타데이터 (unit="+u+", XResolution)",u); } else if(xr>0&&u!=="pixel"){ cal={pw:1/xr,ph:1/yr,unit:u,src:"ImageJ 메타데이터"}; } }
+    if(!cal&&om&&om.psx){ const k=IO.unitToM(om.psxu)||1e-6; cal=IO.calFromMeters(om.psx*k,(om.psy||om.psx)*(IO.unitToM(om.psyu)||k),"OME-XML PhysicalSizeX"+(omeAll.length>1?` (series ${(g.series||0)+1})`:""),om.psxu); }
     if(!cal&&gi===0){ const sc=sidecarCal(name,ctx,info); if(sc) cal=sc.cal; }
     if(!cal&&gi===0&&typeof G.tiffGatanScale==="function"&&p0[65027]){ try{ const gs=G.tiffGatanScale({65027:{raw:p0[65027].raw}}); if(gs&&gs.ok) cal=IO.calFromMeters(gs.nmPerPx*1e-9,gs.nmPerPx*1e-9,"Gatan 태그 65027 → "+gs.how); else if(gs&&gs.why) warn.push("Gatan TIFF: "+gs.why); }catch(e){} }
     if(!cal&&gi===0&&p0[282]&&!ij){ const xr=tv(p0[282]), ru=tv(p0[296],2); if(xr>0&&ru===3) cands.push({pw:1e4/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /cm`}); else if(xr>0&&ru===2&&![72,96,150,300,600,1200].includes(Math.round(xr))) cands.push({pw:25400/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /inch`}); }
-    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:warn.concat(...g.list.slice(0,1).map(d=>d.notes||[])),invertLut:!!(g.list[0]&&g.list[0].inv)};
+    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:(g.list[0]&&g.list[0].notes||[]).slice(),invertLut:!!(g.list[0]&&g.list[0].inv)}; // 파일 전체 알림은 r.warn 으로 한 번만
+    if(om&&om.psz>0&&nz>1){ const kz=IO.unitToM(om.pszu)||1e-6; im.zStep=om.psz*kz/1e-6; }
+    // ImageJ 'signed 16-bit': 값 = 저장값 − 32768 (Calibration function 0, c0=−32768, c1=1)
+    if(gi===0&&ij&&g.bit===16&&ij.cf==="0"&&+ij.c0===-32768&&+ij.c1===1){ for(const P of planes) for(let i=0;i<P.length;i++) P[i]-=32768; im.bit=32; im.info.push(["Signed 16-bit","ImageJ calibration c0=−32768 적용 → 32-bit 로 열었습니다"]); if(ij.min!=null) ij.min=+ij.min-32768; if(ij.max!=null) ij.max=+ij.max-32768; }
     if(gi===0&&sem&&sem.raw) im.metaText=sem.raw;
     if(gi===0&&desc) im.desc=desc.length>20000?desc.slice(0,20000)+"…":desc;
     if(gi===0&&sem&&sem.imageRows&&sem.imageRows<g.H) im.databar={rows:g.H-sem.imageRows,src:"FEI [Image] ResolutionY"};
-    if(gi===0&&ij){ if(ij.spacing){ const ku=IO.unitToM(String(ij.unit||"").replace(/\\u00B5/g,"µ")); if(ku) im.zStep=+ij.spacing*ku/1e-6; } /* spacing 은 ImageJ unit 단위 → µm */ if(ij.finterval) im.frameInterval=+ij.finterval; if(ij.min!=null&&ij.max!=null&&+ij.channels<=1) im.display=[{min:+ij.min,max:+ij.max}]; }
+    if(gi===0&&ij){ if(ij.spacing){ const ku=IO.unitToM(String(ij.unit||"").replace(/\\u00B5/g,"µ")); if(ku) im.zStep=+ij.spacing*ku/1e-6; } /* spacing 은 ImageJ unit 단위 → µm */ if(ij.finterval) im.frameInterval=+ij.finterval; if(ij.min!=null&&ij.max!=null&&!(+ij.channels>1)) im.display=[{min:+ij.min,max:+ij.max}]; }
     images.push(im);
   });
   return {images,warn};
@@ -48056,9 +48101,13 @@ async function readPNG(name,u8){
     if(type==="IHDR"){ W=dv.getUint32(p+8); H=dv.getUint32(p+12); bd=u8[p+16]; ct=u8[p+17]; il=u8[p+20]; }
     else if(type==="PLTE") plte=data; else if(type==="IDAT") idat.push(data); else if(type==="pHYs"){ const q=new DataView(data.buffer,data.byteOffset,data.byteLength); phys={x:q.getUint32(0),y:q.getUint32(4),unit:data[8]}; } else if(type==="IEND") break;
     p+=12+len; }
+  if(!(W>0&&H>0)) throw new Error("PNG: IHDR 가 없거나 크기가 0 입니다");
+  const nch={0:1,2:3,3:1,4:2,6:4}[ct]; if(!nch) throw new Error("PNG: 알 수 없는 color type "+ct); const bpp=Math.max(1,(nch*bd)>>3);
+  if(W*H*Math.min(nch,3)*4>IO.MAXBYTES) throw new Error(`PNG: 너무 큼 — ${W}×${H} (32-bit 메모리 ${(W*H*Math.min(nch,3)*4/1e9).toFixed(2)} GB, 한도 ${(IO.MAXBYTES/1e9).toFixed(1)} GB)`);
   let tot=0; for(const d of idat) tot+=d.length; const z=new Uint8Array(tot); let o=0; for(const d of idat){ z.set(d,o); o+=d.length; }
   const raw=await IO.inflate(z);
-  const nch={0:1,2:3,3:1,4:2,6:4}[ct]; const bpp=Math.max(1,(nch*bd)>>3);
+  { let need=0; const passes=il?[[0,0,8,8],[4,0,8,8],[0,4,4,8],[2,0,4,4],[0,2,2,4],[1,0,2,2],[0,1,1,2]]:[[0,0,1,1]]; for(const [x0,y0,dx,dy] of passes){ const pw=Math.ceil((W-x0)/dx), ph=Math.ceil((H-y0)/dy); if(pw>0&&ph>0) need+=ph*(1+Math.ceil(pw*nch*bd/8)); }
+    if(raw.length<need) throw new Error(`PNG: 화소 자료가 짧습니다 (${raw.length} < ${need} 바이트) — 파일이 잘렸거나 손상됨`); }
   const outC=[...Array(nch)].map(()=>new Float32Array(W*H));
   let rp=0;
   const pass=(x0,y0,dx,dy)=>{ const pw=Math.ceil((W-x0)/dx), ph=Math.ceil((H-y0)/dy); if(pw<=0||ph<=0) return; const rb=Math.ceil(pw*nch*bd/8); let prev=new Uint8Array(rb);
@@ -48134,24 +48183,26 @@ function readIBW(name,u8){
   const i32=o=>dv.getInt32(o,le), u16=o=>dv.getUint16(o,le), f64=o=>dv.getFloat64(o,le);
   const formulaSize=i32(8), noteSize=i32(12), dataEUnitsSize=i32(16), dimEU=[0,1,2,3].map(k=>i32(20+4*k)), dimLab=[0,1,2,3].map(k=>i32(36+4*k));
   const wh=64; const npnts=i32(wh+12), type=u16(wh+16); const nDim=[0,1,2,3].map(k=>i32(wh+68+4*k)); const sfA=[0,1,2,3].map(k=>f64(wh+84+8*k)); const sfB=[0,1,2,3].map(k=>f64(wh+116+8*k));
-  const dimUnits=[0,1,2,3].map(k=>td.decode(u8.subarray(wh+152+4*k,wh+156+4*k)).replace(/\0.*$/,"")); const bname=td.decode(u8.subarray(wh+30,wh+62)).replace(/\0.*$/,"");
+  const dimUnits=[0,1,2,3].map(k=>td.decode(u8.subarray(wh+152+4*k,wh+156+4*k)).replace(/\0.*$/,"")); const bname=td.decode(u8.subarray(wh+28,wh+60)).replace(/\0.*$/,""); // WaveHeader5.bname 은 28 바이트 뒤
   const dataOff=wh+320; const tsz={2:4,4:8,8:1,16:2,32:4}; const base=type&~0x41; const uns=!!(type&0x40); if(type&1) throw new Error("복소수 wave 는 읽지 않습니다");
   const bs=tsz[base]; if(!bs) throw new Error("wave 자료형 "+type+" 은 읽지 않습니다");
+  if(!(npnts>0)||dataOff+npnts*bs>u8.length) throw new Error(`IBW: 자료가 짧습니다 (${npnts} 점 × ${bs} 바이트) — 파일이 잘렸거나 손상됨`);
   const rd=i=>{ const o=dataOff+i*bs; switch(base){ case 2: return dv.getFloat32(o,le); case 4: return dv.getFloat64(o,le); case 8: return uns?dv.getUint8(o):dv.getInt8(o); case 16: return uns?dv.getUint16(o,le):dv.getInt16(o,le); case 32: return uns?dv.getUint32(o,le):dv.getInt32(o,le); } };
   let o=dataOff+npnts*bs+formulaSize; const note=tdu.decode(u8.subarray(o,o+noteSize)).replace(/\r/g,"\n"); o+=noteSize+dataEUnitsSize;
   const dimEUstr=[]; for(let k=0;k<4;k++){ dimEUstr.push(td.decode(u8.subarray(o,o+dimEU[k]))); o+=dimEU[k]; }
   const labels=[]; for(let k=0;k<4;k++){ const L=[]; for(let j=0;j*32<dimLab[k];j++) L.push(td.decode(u8.subarray(o+32*j,o+32*j+32)).replace(/\0.*$/,"")); labels.push(L); o+=dimLab[k]; }
   const nx=nDim[0]||npnts, ny=nDim[1]||1, nl=nDim[2]||1; if(ny<2) throw new Error("1D wave 는 영상이 아닙니다");
+  const iwarn=[]; if(nDim[3]>1) iwarn.push(`4D wave (${nDim.join("×")}) — 넷째 차원의 첫 묶음만 읽었습니다`);
   // Igor: 첫 차원(행)이 가로(x), 둘째 차원이 세로(y, 위로 증가) → 화면은 위가 큰 y
   const planes=[]; for(let l=0;l<nl;l++){ const p=new Float32Array(nx*ny); for(let y=0;y<ny;y++) for(let x=0;x<nx;x++) p[(ny-1-y)*nx+x]=rd(x+nx*y+nx*ny*l); planes.push(p); }
-  const u0=dimUnits[0]||dimEUstr[0]; const k=IO.unitToM(u0); let cal=null; if(k&&sfA[0]>0) cal=IO.calFromMeters(sfA[0]*k,(sfA[1]||sfA[0])*(IO.unitToM(dimUnits[1]||dimEUstr[1])||k),"Igor wave scaling (sfA, "+u0+")");
+  const u0=dimUnits[0]||dimEUstr[0]; const k=IO.unitToM(u0); let cal=null; if(k&&sfA[0]!==0&&isFinite(sfA[0])) cal=IO.calFromMeters(Math.abs(sfA[0])*k,Math.abs(sfA[1]||sfA[0])*(IO.unitToM(dimUnits[1]||dimEUstr[1])||k),"Igor wave scaling (sfA, "+u0+")",u0); // 음의 간격 = 축 방향만 반대
   const info=[["Wave",bname]]; const nv={}; note.split(/\n/).forEach(l=>{ const i=l.indexOf(":"); if(i>0) nv[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
   ["ImagingMode","ScanSize","ScanRate","SetPoint","DriveAmplitude","DriveFrequency","SpringConstant","InvOLS","Date","Time"].forEach(kk=>{ if(nv[kk]!=null) info.push([kk,nv[kk]]); });
   const chLab=labels[2]&&labels[2].length>1?labels[2].slice(1):null;
   const imgs=planes.map((p,l)=>({name:nl>1?`${name} · ${chLab&&chLab[l]?chLab[l]:"layer "+(l+1)}`:name,w:nx,h:ny,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info,warn:[],metaText:note,
     channelLabel:chLab?chLab[l]:null}));
   void sfB;
-  return {images:imgs,warn:[]};
+  return {images:imgs,warn:iwarn};
 }
 /* ============================================================ Nanonis SXM ============================================================ */
 function readSXM(name,u8){
@@ -48178,24 +48229,37 @@ function readNPY(name,u8){
   const major=u8[6]; const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength); const hl=major>=2?dv.getUint32(8,true):dv.getUint16(8,true); const ho=major>=2?12:10;
   const h=td.decode(u8.subarray(ho,ho+hl)); const descr=(h.match(/'descr':\s*'([^']+)'/)||[])[1], fo=/'fortran_order':\s*True/.test(h), shape=((h.match(/'shape':\s*\(([^)]*)\)/)||[])[1]||"").split(",").map(s=>s.trim()).filter(Boolean).map(Number);
   if(fo) throw new Error("Fortran 순서 NPY 는 읽지 않습니다 (np.ascontiguousarray 로 저장)");
+  if(!descr) throw new Error("NPY: 구조체(structured) dtype 은 영상으로 읽지 않습니다");
   const le=descr[0]!==">"; const t=descr.replace(/^[<>|=]/,""); const sz=+t.slice(1); const kind=t[0];
-  const rd=(o)=>kind==="f"?(sz===4?dv.getFloat32(o,le):sz===8?dv.getFloat64(o,le):f16(dv.getUint16(o,le))):kind==="u"?(sz===1?dv.getUint8(o):sz===2?dv.getUint16(o,le):dv.getUint32(o,le)):kind==="i"?(sz===1?dv.getInt8(o):sz===2?dv.getInt16(o,le):sz===4?dv.getInt32(o,le):Number(dv.getBigInt64(o,le))):kind==="b"?dv.getUint8(o):NaN;
-  let H,W,N=1,rgb=false; if(shape.length===2){ [H,W]=shape; } else if(shape.length===3&&(shape[2]===3||shape[2]===4)&&kind==="u"&&sz===1){ [H,W]=shape; rgb=true; } else if(shape.length===3){ [N,H,W]=shape; } else throw new Error("NPY 모양 "+JSON.stringify(shape)+" 은 영상으로 읽지 않습니다");
-  const off=ho+hl, per=W*H; const planes=[];
-  if(rgb){ const C=shape[2]; for(let c=0;c<3;c++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=u8[off+i*C+c]; planes.push(p); } }
+  if(!"fiub".includes(kind)||!(sz>0)||(kind==="f"&&![2,4,8].includes(sz))) throw new Error("NPY dtype '"+descr+"' 은 영상으로 읽지 않습니다 (실수·정수·bool 만)");
+  const rd=(o)=>kind==="f"?(sz===4?dv.getFloat32(o,le):sz===8?dv.getFloat64(o,le):f16(dv.getUint16(o,le))):kind==="u"?(sz===1?dv.getUint8(o):sz===2?dv.getUint16(o,le):sz===4?dv.getUint32(o,le):Number(dv.getBigUint64(o,le))):kind==="i"?(sz===1?dv.getInt8(o):sz===2?dv.getInt16(o,le):sz===4?dv.getInt32(o,le):Number(dv.getBigInt64(o,le))):kind==="b"?dv.getUint8(o):NaN;
+  let H,W,N=1,rgb=false,chLast=0; if(shape.length===2){ [H,W]=shape; }
+  else if(shape.length===3&&(shape[2]===3||shape[2]===4)&&shape[0]>4&&shape[1]>4){ [H,W]=shape; chLast=shape[2]; rgb=kind==="u"&&sz===1; } // (H, W, 3|4) = 색 채널
+  else if(shape.length===3){ [N,H,W]=shape; } else throw new Error("NPY 모양 "+JSON.stringify(shape)+" 은 영상으로 읽지 않습니다");
+  const off=ho+hl, per=W*H; const planes=[]; if(off+per*N*Math.max(1,chLast)*sz>u8.length) throw new Error("NPY: 자료가 짧습니다 — 파일이 잘렸거나 손상됨");
+  if(per*N*Math.min(3,Math.max(1,chLast))*4>IO.MAXBYTES) throw new Error("NPY: 너무 큼 (32-bit 메모리 한도 1.6 GB)");
+  if(chLast){ for(let c=0;c<3;c++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=rd(off+(i*chLast+c)*sz); planes.push(p); } }
   else for(let k=0;k<N;k++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=rd(off+(k*per+i)*sz); planes.push(p); }
-  const bit=kind==="u"&&sz===1?8:(kind==="u"&&sz===2)?16:32;
-  return {images:[{name,w:W,h:H,bit,rgb,nc:rgb?3:1,nz:rgb?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:[]}],warn:[]};
+  const bit=kind==="u"&&sz===1||kind==="b"?8:(kind==="u"&&sz===2)?16:32;
+  const w2=[]; if(chLast===4) w2.push("넷째 채널(알파)은 버렸습니다"); if(kind==="i"&&sz===8||kind==="u"&&sz===8) w2.push("64-bit 정수를 32-bit float 로 읽었습니다 (2²⁴ 넘는 값은 반올림)");
+  return {images:[{name,w:W,h:H,bit,rgb,nc:chLast?3:1,nz:chLast?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:w2,...(chLast&&!rgb?{chNames:["R","G","B"],chLut:["Red","Green","Blue"]}:{})}],warn:[]};
 }
 /* ============================================================ 텍스트 행렬 ============================================================ */
 function readText(name,u8){
-  const s=tdu.decode(u8); const lines=s.split(/\r?\n/).filter(l=>l.trim()&&!/^\s*[#%]/.test(l));
-  const rows=lines.map(l=>l.trim().split(/[\s,;]+/).map(Number)); const W=Math.max(...rows.map(r=>r.length)); const good=rows.filter(r=>r.length===W&&r.every(v=>isFinite(v)));
+  const s=tdu.decode(u8); const lines=s.split(/\r?\n/).filter(l=>l.trim()&&!/^\s*[#%]/.test(l)); if(!lines.length) throw new Error("빈 텍스트 파일입니다");
+  // 구분자: 탭 > ; (이때 , 는 소수점) > , > 공백
+  const smp=lines.slice(0,50).join("\n"); const delim=smp.includes("\t")?"\t":smp.includes(";")?";":smp.includes(",")?",":null; const commaDec=delim===";"&&/\d,\d/.test(smp);
+  const num=t=>{ t=t.trim(); if(t==="") return NaN; if(commaDec) t=t.replace(",","."); if(/^[+-]?(nan)$/i.test(t)) return NaN; if(/^\+?inf(inity)?$/i.test(t)) return Infinity; if(/^-inf(inity)?$/i.test(t)) return -Infinity; const v=Number(t); return t!==""&&!isNaN(v)?v:null; };
+  const rows=[]; let header=0, bad=0;
+  for(const l of lines){ let tk=delim?l.split(delim):l.trim().split(/\s+/); if(delim&&tk.length>1&&tk[tk.length-1].trim()==="") tk=tk.slice(0,-1); // 줄 끝 구분자
+    const v=tk.map(num); if(v.some(x=>x===null)){ if(!rows.length) header++; else bad++; continue; } rows.push(v); }
+  const W=Math.max(0,...rows.map(r=>r.length)); const good=rows.filter(r=>r.length===W); const short=rows.length-good.length;
   if(good.length<2||W<2) throw new Error("숫자 행렬(텍스트 영상)로 읽을 수 없습니다");
   const H=good.length, p=new Float32Array(W*H); good.forEach((r,y)=>r.forEach((v,x)=>p[y*W+x]=v));
-  let isInt=true,mn=Infinity,mx=-Infinity; for(const v of p){ if(v!==Math.floor(v)) isInt=false; if(v<mn) mn=v; if(v>mx) mx=v; }
+  let isInt=true,mn=Infinity,mx=-Infinity; for(const v of p){ if(!isFinite(v)){ isInt=false; continue; } if(v!==Math.floor(v)) isInt=false; if(v<mn) mn=v; if(v>mx) mx=v; }
   const bit=isInt&&mn>=0&&mx<=255?8:isInt&&mn>=0&&mx<=65535?16:32;
-  return {images:[{name,w:W,h:H,bit,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal:null,calCandidates:[],info:[["Text image",`${W}×${H}`]],warn:rows.length!==H?[`숫자가 아닌 줄 ${rows.length-H}개를 건너뛰었습니다`]:[]}],warn:[]};
+  const w=[]; if(header) w.push(`머리 줄 ${header}개를 건너뛰었습니다`); if(bad) w.push(`숫자가 아닌 칸이 있는 줄 ${bad}개를 건너뛰었습니다 — 행 위치가 어긋날 수 있습니다`); if(short) w.push(`칸 수가 다른 줄 ${short}개를 건너뛰었습니다`); if(commaDec) w.push("';' 구분, ',' 소수점으로 읽었습니다");
+  return {images:[{name,w:W,h:H,bit,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal:null,calCandidates:[],info:[["Text image",`${W}×${H}${delim?` (구분자 '${delim==="\t"?"tab":delim}')`:""}`]],warn:w}],warn:[]};
 }
 /* ============================================================ Raw (사용자 지정) ============================================================ */
 IO.readRaw=function(name,u8,o){
@@ -48278,7 +48342,7 @@ IO.writeTIFF=function(img,o){
   u8[0]=0x49; u8[1]=0x49; dv.setUint16(2,42,true); dv.setUint32(4,ifd0,true);
   u8.set(descB,dOff);
   const xr=cal&&cal.pw>0?1/cal.pw:1, yr=cal&&cal.ph>0?1/cal.ph:1; const rat=(o,v)=>{ // RATIONAL: 분자가 2³² 를 넘지 않게 분모를 고른다
-    const den=Math.max(1,Math.min(1e6,Math.floor(4294967295/Math.max(1,v)))); dv.setUint32(o,Math.min(4294967295,Math.round(v*den)),true); dv.setUint32(o+4,den,true); };
+    const den=Math.max(1,Math.floor(4294967295/Math.max(1,v))); dv.setUint32(o,Math.min(4294967295,Math.round(v*den)),true); dv.setUint32(o+4,den,true); }; // 분모를 가능한 크게 (상대 오차 < 1e-9)
   rat(resOff,xr); rat(resOff+8,yr); if(rgb){ dv.setUint16(bpsOff,8,true); dv.setUint16(bpsOff+2,8,true); dv.setUint16(bpsOff+4,8,true); }
   for(let k=0;k<nImg;k++){
     const io=ifd0+k*ifdSize; let p=io; dv.setUint16(p,nTags,true); p+=2;
@@ -48292,7 +48356,8 @@ IO.writeTIFF=function(img,o){
     dv.setUint32(p,k<nImg-1?io+ifdSize:0,true);
     const o0=data0+k*pixBytes;
     if(rgb){ const r=img.planes[3*k],g=img.planes[3*k+1],b=img.planes[3*k+2]; for(let i=0;i<W*H;i++){ u8[o0+3*i]=r[i]; u8[o0+3*i+1]=g[i]; u8[o0+3*i+2]=b[i]; } }
-    else { const d=img.planes[k]; if(bit===8) for(let i=0;i<W*H;i++) u8[o0+i]=d[i]; else if(bit===16) for(let i=0;i<W*H;i++) dv.setUint16(o0+2*i,d[i],true); else for(let i=0;i<W*H;i++) dv.setFloat32(o0+4*i,d[i],true); }
+    else { const d=img.planes[k]; const cl=(v,m)=>v!==v?0:v<0?0:v>m?m:Math.floor(v+0.5); // 8/16-bit 은 ImageJ 처럼 반올림·자르기
+      if(bit===8) for(let i=0;i<W*H;i++) u8[o0+i]=cl(d[i],255); else if(bit===16) for(let i=0;i<W*H;i++) dv.setUint16(o0+2*i,cl(d[i],65535),true); else for(let i=0;i<W*H;i++) dv.setFloat32(o0+4*i,d[i],true); }
   }
   // 해상도 태그는 뒤에 붙이지 않고 ImageJ 가 쓰는 282/283/296 을 IFD 에 넣지 못했으므로(12 개 고정) 첫 IFD 에만 덧붙인다
   return addResolution(u8,cal,resOff);
@@ -48506,7 +48571,7 @@ async function cziPixels(u8,e,ctx){
 // XML 경로(ImageDocument/Metadata/...)의 요소 내용 — libCZI 와 같이 정해진 자리만 본다 (다른 곳의 같은 이름 요소는 무시)
 function xmlPath(xml,pathArr,from,to){ from=from||0; to=to==null?xml.length:to; let depth=0, want=0, start=-1; const re=/<(\/?)([\w:.-]+)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>/g; re.lastIndex=from; let m;
   while((m=re.exec(xml))&&m.index<to){ if(!m[2]) continue; const close=m[1]==="/", self=m[4]==="/", tag=m[2];
-    if(close){ depth--; if(start>=0&&depth===want-1&&want===pathArr.length) return {inner:xml.slice(start,m.index),open:xml.slice(openAt,start)}; continue; }
+    if(close){ depth--; if(start>=0&&depth===want-1&&want===pathArr.length) return {inner:xml.slice(start,m.index),open:xml.slice(openAt,start)}; if(want>depth) want=depth; continue; } // 맞은 조상이 닫히면 경로를 되돌림
     if(depth===want&&tag===pathArr[want]){ if(want===pathArr.length-1){ if(self) return {inner:"",open:m[0]}; var openAt=m.index; start=m.index+m[0].length; want++; depth++; continue; } want++; }
     if(!self) depth++; }
   return null; }
@@ -48635,7 +48700,8 @@ const unitSq=im=>{ const u=calOf(im).unit; return u==="px"?"px²":u+"²"; };
 
 /* ---------------- 저장 (IndexedDB) ---------------- */
 const DBN="innoanalytics_image", ST="kv";
-function idb(){ return new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,1); q.onupgradeneeded=()=>q.result.createObjectStore(ST); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }catch(e){ rej(e); } }); }
+let _db=null; function idb(){ if(_db) return _db; _db=new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,1); q.onupgradeneeded=()=>q.result.createObjectStore(ST); q.onsuccess=()=>{ const db=q.result; db.onclose=()=>{ _db=null; }; db.onversionchange=()=>{ db.close(); _db=null; }; res(db); }; q.onerror=()=>{ _db=null; rej(q.error); }; }catch(e){ _db=null; rej(e); } }); return _db; } // 연결 하나를 다시 씀
+async function dbKeys(){ try{ const db=await idb(); return await new Promise(r=>{ const t=db.transaction(ST,"readonly").objectStore(ST).getAllKeys(); t.onsuccess=()=>r(t.result||[]); t.onerror=()=>r([]); }); }catch(e){ return []; } }
 async function dbGet(k){ try{ const db=await idb(); return await new Promise(r=>{ const t=db.transaction(ST,"readonly").objectStore(ST).get(k); t.onsuccess=()=>r(t.result); t.onerror=()=>r(null); }); }catch(e){ return null; } }
 async function dbPut(k,v){ try{ const db=await idb(); await new Promise((r,j)=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).put(v,k); t.oncomplete=r; t.onerror=()=>j(t.error); t.onabort=()=>j(t.error); }); return true; }catch(e){ return false; } }
 async function dbDel(k){ try{ const db=await idb(); await new Promise(r=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).delete(k); t.oncomplete=r; t.onerror=r; }); }catch(e){} }
@@ -48643,7 +48709,8 @@ let _svT=null; const DIRTY=new Set(); let _quotaWarned=false;
 function save(){ clearTimeout(_svT); _svT=setTimeout(flushSave,700); }
 async function flushSave(){ clearTimeout(_svT); _svT=null; const snap=JSON.parse(JSON.stringify(S));
   await dbPut("state",snap);
-  for(const id of [...DIRTY]){ DIRTY.delete(id); const P=PX.get(id); if(!P) { await dbDel("px:"+id); continue; } const ok=await dbPut("px:"+id,P);
+  for(const id of [...DIRTY]){ DIRTY.delete(id); const P=PX.get(id); if(!P) { await dbDel("px:"+id); continue; } const im=byId(id); const ok=await dbPut("px:"+id,{v:im?im.ver:0,P}); // 판 번호와 함께 → 불러올 때 맞는지 확인
+    if(!ok) DIRTY.add(id); // 다음 저장 때 다시
     if(!ok&&!_quotaWarned){ _quotaWarned=true; note("브라우저 저장 공간이 부족해 일부 영상 화소를 저장하지 못했습니다 — 새로 고치면 그 영상은 다시 열어야 합니다","warn"); } } }
 function markDirty(id){ DIRTY.add(id); save(); }
 try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size)) flushSave(); }); }catch(e){}
@@ -48651,7 +48718,10 @@ async function loadSaved(){
   const st=await dbGet("state"); if(!st||st.v!==1) return;
   const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{});
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
-  const keep=[]; for(const im of S.images){ const P=await dbGet("px:"+im.id); if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
+  const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
+    if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
+  if(stale) setTimeout(()=>note(`영상 ${stale}개는 마지막 작업의 화소가 저장되지 않아 열지 않았습니다 — 다시 여세요`,"warn"),60);
+  { const ids=new Set(keep.map(x=>"px:"+x.id)); for(const k of await dbKeys()) if(typeof k==="string"&&k.startsWith("px:")&&!ids.has(k)) dbDel(k); } // 닫힌 영상의 화소 지움
   const lost=S.images.length-keep.length; S.images=keep; if(S.sel&&!byId(S.sel)) S.sel=keep[0]?keep[0].id:null;
   if(lost) setTimeout(()=>note(`저장되지 않은 영상 ${lost}개는 다시 열어야 합니다`,"warn"),50);
 }
@@ -48683,20 +48753,22 @@ function getWorker(){ const url=workerURL(); if(!url) return null; let w=WK.find
 function killWorkers(){ WK.forEach(x=>{ try{ x.w.terminate(); }catch(e){} }); WK.length=0; }
 /* call(fn, args, onProg) → Promise. 일꾼이 없으면(시험 환경) 주 스레드 */
 function call(fn,args,onProg){
+  const gen=CANCEL_GEN;
   return new Promise((res,rej)=>{
-    const tryRun=()=>{ const w=getWorker();
+    const tryRun=()=>{ if(gen!==CANCEL_GEN){ rej(new Error("취소")); return; } const w=getWorker();
       if(!workerURL()){ try{ IC._prog=onProg||null; const o=IC[fn].apply(null,args); IC._prog=null; res(o); }catch(e){ rej(e); } return; }
       if(!w){ setTimeout(tryRun,15); return; }
       w.busy=true; const id=++JOBSEQ; const cancel=()=>{ try{ w.w.terminate(); }catch(e){} const i=WK.indexOf(w); if(i>=0) WK.splice(i,1); rej(new Error("취소")); };
       CANCELS.add(cancel);
-      w.w.onmessage=e=>{ const d=e.data; if(d.id!==id) return; if(d.prog!=null){ onProg&&onProg(d.prog); return; } CANCELS.delete(cancel); w.busy=false; if(d.ok) res(d.out); else rej(new Error(d.err)); };
-      w.w.onerror=e=>{ e.preventDefault&&e.preventDefault(); CANCELS.delete(cancel); w.busy=false; rej(new Error(e.message||"Worker 오류")); };
+      w.w.onmessage=e=>{ const d=e.data; if(d.id!==id) return; if(d.prog!=null){ onProg&&onProg(d.prog); return; } CANCELS.delete(cancel); w.w.onmessage=w.w.onerror=null; w.busy=false; if(d.ok) res(d.out); else rej(new Error(d.err)); }; // 끝난 일의 처리기를 떼어 큰 배열을 놓아 줌
+      w.w.onerror=e=>{ e.preventDefault&&e.preventDefault(); CANCELS.delete(cancel); w.w.onmessage=w.w.onerror=null; w.busy=false; rej(new Error(e.message||"Worker 오류")); };
       w.w.postMessage({id,fn,args}); };
     tryRun();
   });
 }
 const CANCELS=new Set();
-function cancelAll(){ for(const c of [...CANCELS]) c(); CANCELS.clear(); hideProg(); BUSY=null; }
+let CANCEL_GEN=0; // 중단할 때마다 늘림: 기다리던 일·batch 고리도 이 값을 보고 멈춤
+function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.clear(); hideProg(); } // BUSY 는 그 작업이 끝나며 직접 풂
 
 /* ---------------- 영상 추가·삭제·되돌리기 ---------------- */
 function addImage(d,o){
@@ -48712,24 +48784,28 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; S.images.splice(i,1); PX.delete(id); UNDO.delete(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; delete S.ui.views[id];
+function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; delete S.ui.views[id];
+  DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 영상마다 8 단계, 모든 영상 합쳐 1.2 GB
 function pushUndo(im,label){ const L=UNDO.get(im.id)||[]; const e={label,planes:planesOf(im),macroAt:null,calChanged:false,
-    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
+    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
   L.push(e); while(L.length>UNDO_MAX) L.shift(); UNDO.set(im.id,L);
   // 전체 메모리 상한: 가장 오래된 항목부터 버림 (지금 넣은 것은 남김)
-  const all=[]; for(const [id,LL] of UNDO) LL.forEach((x,k)=>all.push({id,k,x})); let tot=all.reduce((a,o)=>a+o.x.planes.reduce((q,p)=>q+p.byteLength,0),0);
-  if(tot>UNDO_BYTES){ for(const [id,LL] of UNDO){ while(LL.length&&tot>UNDO_BYTES&&LL[0]!==e){ const o=LL.shift(); tot-=o.planes.reduce((q,p)=>q+p.byteLength,0); } void id; } }
+  // 전체 크기: 같은 배열(한 장만 바뀐 스택의 나머지 장 등)과 지금 보이는 화소는 한 번만·세지 않음
+  const live=new Set(); for(const P of PX.values()) for(const p of P) live.add(p.buffer); const extra=x=>{ let b=0; for(const p of x.planes){ if(!live.has(p.buffer)&&!SEEN.has(p.buffer)){ SEEN.add(p.buffer); b+=p.byteLength; } } return b; };
+  let SEEN=new Set(); let tot=0; for(const [,LL] of UNDO) for(const x of LL) tot+=extra(x);
+  if(tot>UNDO_BYTES){ for(const [id,LL] of UNDO){ while(LL.length&&tot>UNDO_BYTES&&LL[0]!==e){ const o=LL.shift(); SEEN=new Set(); tot=0; for(const [,L2] of UNDO) for(const x of L2) tot+=extra(x); void o; } void id; } }
   return e; }
-function undo(){ const im=cur(); if(!im) return; const L=UNDO.get(im.id); if(!L||!L.length){ note("되돌릴 작업이 없습니다"); return; } const u=L.pop();
+function undo(){ const im=cur(); if(!im) return; if(BUSY){ note("계산 중에는 되돌릴 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const L=UNDO.get(im.id); if(!L||!L.length){ note("되돌릴 작업이 없습니다"); return; } const u=L.pop();
   const keepCal=im.cal; PX.set(im.id,u.planes); Object.assign(im,u.meta); if(!u.calChanged) im.cal=keepCal; im.ver++; markDirty(im.id);
   // 이 되돌리기에 해당하는 매크로 단계만 지운다
   if(u.macroAt!=null&&S.macro.steps[u.macroAt]&&S.macro.steps[u.macroAt]._u===u.uid) S.macro.steps.splice(u.macroAt,1);
   invalidate(im); save(); rerender(); note(`되돌림: ${u.label}`); }
 /* 화소 교체 (제자리 연산) */
 function setPlanes(im,planes,meta,label,step){
-  const u=pushUndo(im,label); u.uid=uid(); const cal0=im.cal, nc0=im.nc; PX.set(im.id,planes); if(meta) Object.assign(im,meta); if(im.nc!==nc0||im.rgb) im.chNames=null; // 채널 수가 바뀌면 이름은 더 맞지 않음 im.ver++; u.calChanged=im.cal!==cal0;
+  if(!byId(im.id)) throw new Error("영상이 닫혔습니다"); // 계산 중 닫힌 영상에 결과를 쓰지 않음
+  const u=pushUndo(im,label); u.uid=uid(); const cal0=im.cal, nc0=im.nc; PX.set(im.id,planes); if(meta) Object.assign(im,meta); if(im.nc!==nc0||im.rgb) im.chNames=null; /* 채널 수가 바뀌면 이름은 더 맞지 않음 */ im.ver++; u.calChanged=im.cal!==cal0;
   if(step){ im.ops.push(step); const n=S.macro.steps.length; record(Object.assign({},step,{_u:u.uid}),im); if(S.macro.steps.length>n) u.macroAt=n; }
   if(meta&&(meta.bit!=null||meta.nc!=null)){ im.disp=[...Array(im.rgb?1:im.nc)].map((_,c)=>({min:0,max:255,lut:(im.disp[c]&&im.disp[c].lut)||defaultLut(im,c)})); }
   if(!meta||!meta.keepDisplay) resetDisplay(im);
@@ -48785,11 +48861,11 @@ op("gaussian",{label:"Gaussian Blur",group:"smooth",params:[R("sigma","Sigma",2,
   help:"ImageJ 와 같은 커널(정확도 8-bit 0.002, 16/32-bit 0.0002)과 가장자리 처리(가장자리 화소 복제). σ > 8.5 px 는 축소-합성곱-확대 경로."});
 op("median",{label:"Median",group:"smooth",params:[R("radius","Radius",2,{min:0.5,step:0.5,unit:"px"}),stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"median",{radius:+P.radius}],`Median r=${P.radius}`),ij:P=>`run("Median...", "radius=${P.radius}${ijStack(P)}");`,help:"원형 커널 (ImageJ RankFilters 와 같은 모양)."});
 op("mean",{label:"Mean",group:"smooth",params:[R("radius","Radius",2,{min:0.5,step:0.5,unit:"px"}),stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"mean",{radius:+P.radius}],`Mean r=${P.radius}`),ij:P=>`run("Mean...", "radius=${P.radius}${ijStack(P)}");`});
-op("despeckle",{label:"Despeckle",group:"smooth",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"despeckle",{}],"Despeckle"),ij:P=>`run("Despeckle"${P.stack?', "stack"':""});`,help:"Median r=1."});
+op("despeckle",{label:"Despeckle",group:"smooth",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"despeckle",{}],"Despeckle"),ij:P=>`run("Despeckle"${P.stack?', "stack"':', " "'});`,help:"Median r=1."});
 op("outliers",{label:"Remove Outliers",group:"smooth",params:[R("radius","Radius",2,{min:0.5,step:0.5,unit:"px"}),R("threshold","Threshold",50,{step:1}),R("which","Which",["bright"],{type:"sel",opts:[["bright","Bright"],["dark","Dark"]],def:"bright"}),stackParam],
   run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"outliers",{radius:+P.radius,threshold:+P.threshold,which:P.which}],`Remove Outliers (${P.which})`),ij:P=>`run("Remove Outliers...", "radius=${P.radius} threshold=${P.threshold} which=${P.which==="dark"?"Dark":"Bright"}${ijStack(P)}");`,
   help:"중앙값과의 차이가 threshold 보다 큰 화소를 중앙값으로 바꿉니다."});
-op("smooth3",{label:"Smooth (3×3)",group:"smooth",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"smooth"],"Smooth"),ij:P=>`run("Smooth"${P.stack?', "stack"':""});`});
+op("smooth3",{label:"Smooth (3×3)",group:"smooth",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"smooth"],"Smooth"),ij:P=>`run("Smooth"${P.stack?', "stack"':', " "'});`});
 /* ---------- Rank & morphology ---------- */
 op("minimum",{label:"Minimum",group:"rank",params:[R("radius","Radius",2,{min:0.5,step:0.5,unit:"px"}),stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"min",{radius:+P.radius}],`Minimum r=${P.radius}`),ij:P=>`run("Minimum...", "radius=${P.radius}${ijStack(P)}");`,help:"회색조 erosion."});
 op("maximum",{label:"Maximum",group:"rank",params:[R("radius","Radius",2,{min:0.5,step:0.5,unit:"px"}),stackParam],run:(im,P)=>runPlaneOp(im,P,"rank",p=>[p,"max",{radius:+P.radius}],`Maximum r=${P.radius}`),ij:P=>`run("Maximum...", "radius=${P.radius}${ijStack(P)}");`,help:"회색조 dilation."});
@@ -48800,8 +48876,8 @@ op("subtractBg",{label:"Subtract Background",group:"bg",params:[R("radius","Roll
   run:(im,P)=>runPlaneOp(im,P,"subtractBackground",p=>[p,{radius:+P.radius,light:!!P.light,createBackground:!!P.create,smooth:!P.nosmooth}],`Subtract Background r=${P.radius}`),
   ij:P=>`run("Subtract Background...", "rolling=${P.radius}${P.light?" light":""}${P.create?" create":""}${P.nosmooth?" disable":""}${ijStack(P)}");`,help:"반지름은 배경에 속하지 않는 가장 큰 물체의 반지름보다 크게. 반지름 > 10 px 는 ImageJ 처럼 영상을 줄여 계산합니다."});
 /* ---------- Edges ---------- */
-op("edges",{label:"Find Edges (Sobel)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"edges"],"Find Edges"),ij:P=>`run("Find Edges"${P.stack?', "stack"':""});`});
-op("sharpen",{label:"Sharpen (3×3)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"sharpen"],"Sharpen"),ij:P=>`run("Sharpen"${P.stack?', "stack"':""});`});
+op("edges",{label:"Find Edges (Sobel)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"edges"],"Find Edges"),ij:P=>`run("Find Edges"${P.stack?', "stack"':', " "'});`});
+op("sharpen",{label:"Sharpen (3×3)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"sharpen"],"Sharpen"),ij:P=>`run("Sharpen"${P.stack?', "stack"':', " "'});`});
 op("unsharp",{label:"Unsharp Mask",group:"edge",params:[R("sigma","Radius (sigma)",2,{min:0.1,step:0.1,unit:"px"}),R("weight","Mask weight",0.6,{min:0.1,max:0.9,step:0.05}),stackParam],run:(im,P)=>runPlaneOp(im,P,"unsharp",p=>[p,{sigma:+P.sigma,weight:+P.weight}],`Unsharp Mask σ=${P.sigma}`),ij:P=>`run("Unsharp Mask...", "radius=${P.sigma} mask=${(+P.weight).toFixed(2)}${ijStack(P)}");`});
 op("convolve",{label:"Convolve",group:"edge",params:[R("kernel","Kernel (행마다 숫자)","-1 -1 -1\n-1 8 -1\n-1 -1 -1",{type:"text"}),R("normalize","Normalize",true,{type:"bool"}),stackParam],
   run:(im,P)=>{ const rows=String(P.kernel).trim().split(/\n+/).map(l=>l.trim().split(/[\s,]+/).map(Number)); const kh=rows.length, kw=rows[0].length; if(rows.some(r=>r.length!==kw||r.some(v=>!isFinite(v)))) throw new Error("커널의 각 행은 같은 개수의 숫자여야 합니다");
@@ -48810,10 +48886,10 @@ op("convolve",{label:"Convolve",group:"edge",params:[R("kernel","Kernel (행마�
 /* ---------- Frequency ---------- */
 op("bandpass",{label:"Bandpass Filter",group:"freq",params:[R("large","Filter large structures down to",40,{min:1,unit:"px"}),R("small","Filter small structures up to",3,{min:0,unit:"px"}),R("stripes","Suppress stripes","none",{type:"sel",opts:[["none","None"],["horizontal","Horizontal"],["vertical","Vertical"]]}),R("tolerance","Tolerance of direction",5,{unit:"%"}),R("autoscale","Autoscale after filtering",true,{type:"bool"}),R("saturate","Saturate image when autoscaling",true,{type:"bool"}),stackParam],
   run:(im,P)=>runPlaneOp(im,P,"bandpass",p=>[p,{large:+P.large,small:+P.small,stripes:P.stripes,tolerance:+P.tolerance,autoscale:!!P.autoscale,saturate:!!P.saturate}],`Bandpass ${P.small}–${P.large} px`),
-  ij:P=>`run("Bandpass Filter...", "filter_large=${P.large} filter_small=${P.small} suppress=${P.stripes==="none"?"None":P.stripes==="horizontal"?"Horizontal":"Vertical"} tolerance=${P.tolerance}${P.autoscale?" autoscale":""}${P.saturate?" saturate":""}${ijStack(P)}");`,
+  ij:P=>`run("Bandpass Filter...", "filter_large=${P.large} filter_small=${P.small} suppress=${P.stripes==="none"?"None":P.stripes==="horizontal"?"Horizontal":"Vertical"} tolerance=${P.tolerance}${P.autoscale?" autoscale":""}${P.saturate?" saturate":""}${P.stack?" process":""}");`,
   help:"거울상으로 2ⁿ 크기에 채운 뒤 주파수 영역 Gaussian 대역 통과 (ImageJ FFTFilter 정의). DC(평균)는 그대로."});
 op("fft",{label:"FFT power spectrum",group:"freq",kind:"new",params:[R("window","Window","none",{type:"sel",opts:[["none","None"],["hann","Hann"]]})],
-  run:async(im,P)=>{ const p=curPlaneOf(im); const r=await call("powerSpectrum",[p,{window:P.window}]); const n=addImage({name:"FFT of "+im.name,w:r.w,h:r.h,bit:8,planes:[r.data],cal:null},{parent:im.id,src:"derived",kind:"fft",fft:{of:im.id,S:r.w,pad:r.pad,pw:calOf(im).pw,unit:calOf(im).unit,c:im.c,z:im.z,t:im.t}});
+  run:async(im,P)=>{ const p=curPlaneOf(im); const r=await call("powerSpectrum",[p,{window:P.window}]); const cs=calOf(im); const n=addImage({name:"FFT of "+im.name,w:r.w,h:r.h,bit:8,planes:[r.data],cal:im.cal?{pw:1/(r.w*cs.pw),ph:1/(r.h*cs.ph),unit:"1/"+cs.unit,src:`FFT: 1/(${r.w}·화소 크기) — 역공간`}:null},{parent:im.id,src:"derived",kind:"fft",fft:{of:im.id,S:r.w,pad:r.pad,pw:calOf(im).pw,unit:calOf(im).unit,c:im.c,z:im.z,t:im.t}});
     n.info=[["설명","ln(1+|F|) 를 0–255 로. 가운데 = 0 주파수"],["주파수 간격",im.cal?`1/(${r.w}·${g4(calOf(im).pw)} ${calOf(im).unit})`:`1/${r.w} px⁻¹`]]; record({op:"fft",params:clean(P),label:"FFT"},im); return n; },
   ij:()=>`run("FFT");`,help:"표시용 power spectrum. 그 위에 ROI 를 그리고 Inverse FFT 로 주기 잡음 제거·격자 필터를 할 수 있습니다 (Process ▸ Frequency ▸ Inverse FFT)."});
 op("ifft",{label:"Inverse FFT (ROI mask)",group:"freq",kind:"new",params:[R("mode","ROI 안을","keep",{type:"sel",opts:[["keep","통과 (나머지 제거)"],["remove","제거 (나머지 통과)"]]}),R("sym","원점 대칭 자동 추가",true,{type:"bool"})],
@@ -48826,22 +48902,22 @@ op("ifft",{label:"Inverse FFT (ROI mask)",group:"freq",kind:"new",params:[R("mod
 /* ---------- Contrast ---------- */
 op("enhance",{label:"Enhance Contrast",group:"contrast",params:[R("saturated","Saturated pixels",0.35,{min:0,max:50,step:0.05,unit:"%"}),R("normalize","Normalize (화소 값을 바꿈)",false,{type:"bool"}),R("equalize","Equalize histogram",false,{type:"bool"}),R("classic","Classic equalization (ImageJ 기본은 √)",false,{type:"bool"}),stackParam],
   run:async(im,P)=>{ if(P.equalize){ if(im.bit===32&&!im.rgb) throw new Error("32-bit 은 Equalize 하지 않습니다 (ImageJ 와 같음)"); return runPlaneOp(im,P,"equalize",p=>[p,!!P.classic],"Equalize"); }
-    if(!P.normalize){ if(P.__pv) return null; const p=curPlaneOf(im); const r=await call("enhanceContrast",[p,{saturated:+P.saturated}]); const c=im.rgb?0:im.c; im.disp[c].min=r.range[0]; im.disp[c].max=r.range[1]; invalidate(im); rerender(); note(`표시 범위 ${g4(r.range[0])} – ${g4(r.range[1])} (화소 값은 그대로)`); return; }
+    if(!P.normalize){ if(P.__pv) return null; const p=curPlaneOf(im); const r=await call("enhanceContrast",[p,{saturated:+P.saturated}]); if(!r.range){ note("영상이 거의 일정해 표시 범위를 바꾸지 않았습니다 (ImageJ 와 같음)","warn"); return; } const c=im.rgb?0:im.c; im.disp[c].min=r.range[0]; im.disp[c].max=r.range[1]; invalidate(im); rerender(); note(`표시 범위 ${g4(r.range[0])} – ${g4(r.range[1])} (화소 값은 그대로)`); return; }
     return runPlaneOp(im,P,"enhanceContrast",p=>[p,{saturated:+P.saturated,normalize:true}],`Normalize ${P.saturated}%`); },
-  ij:P=>P.equalize?`${P.classic?'setKeyDown("alt"); ':""}run("Enhance Contrast...", "saturated=${P.saturated} equalize${ijStack(P)}");${P.classic?' setKeyDown("none");':""}`:`run("Enhance Contrast...", "saturated=${P.saturated}${P.normalize?" normalize":""}${ijStack(P)}");`,
+  ij:P=>P.equalize?`${P.classic?'setKeyDown("alt"); ':""}run("Enhance Contrast...", "saturated=${P.saturated} equalize${P.stack?" process_all":""}");${P.classic?' setKeyDown("none");':""}`:`run("Enhance Contrast...", "saturated=${P.saturated}${P.normalize?" normalize":""}${P.stack&&P.normalize?" process_all":""}");`,
   help:"Normalize 를 끄면 표시 범위만 바꿉니다(측정값 그대로). 세기 비교에는 Normalize·Equalize 를 쓰지 마세요."});
 op("applyLut",{label:"Apply LUT (표시 범위를 화소에)",group:"contrast",params:[stackParam],
-  run:(im,P)=>{ if(im.rgb||im.bit===32) throw new Error("8/16-bit 영상에서만 (ImageJ 와 같음)"); const d=im.disp[im.c]; const mn=d.min, mx=d.max, M=im.bit===8?255:65535;
-    void M; return runPlaneOp(im,P,"applyLut",p=>[p,mn,mx],"Apply LUT"); },
-  ij:()=>`run("Apply LUT");`,hidden:true});
+  run:(im,P)=>{ if(im.rgb||im.bit===32) throw new Error("8/16-bit 영상에서만 (ImageJ 와 같음)"); const d=im.disp[im.c]; if(P.min==null||P.max==null){ P.min=d.min; P.max=d.max; } // 기록 = 그때의 표시 범위 (재생도 같게)
+    const mn=+P.min, mx=+P.max; return runPlaneOp(im,P,"applyLut",p=>[p,mn,mx],`Apply LUT ${g4(mn)}–${g4(mx)}`); },
+  ij:P=>`${P.min!=null?`setMinAndMax(${P.min}, ${P.max});\n`:""}run("Apply LUT"${P.stack?', "stack"':', " "'});`,hidden:true});
 /* ---------- Math ---------- */
 const MATHS=[["add","Add",25],["sub","Subtract",25],["mul","Multiply",1.25],["div","Divide",1.25],["min","Min",0],["max","Max",255],["set","Set",0],["gamma","Gamma",0.5],["log","Log"],["exp","Exp"],["sqr","Square"],["sqrt","Square Root"],["abs","Abs"],["reciprocal","Reciprocal"]];
 op("math",{label:"Math",group:"math",params:[R("fn","Operation","add",{type:"sel",opts:MATHS.map(m=>[m[0],m[1]])}),R("value","Value",25,{step:"any",showIf:P=>(MATHS.find(m=>m[0]===P.fn)||[])[2]!==undefined}),stackParam],
   run:(im,P)=>runPlaneOp(im,P,"math",p=>[p,P.fn,+P.value],`${(MATHS.find(m=>m[0]===P.fn)||[0,P.fn])[1]}${MATHS.find(m=>m[0]===P.fn)[2]!==undefined?" "+P.value:""}`),
-  ij:P=>{ const m=MATHS.find(x=>x[0]===P.fn); const nm=m[1]; return m[2]!==undefined?`run("${nm}...", "value=${P.value}${ijStack(P)}");`:`run("${nm}"${P.stack?', "stack"':""});`; },
+  ij:P=>{ const m=MATHS.find(x=>x[0]===P.fn); const nm=m[1]; return m[2]!==undefined?`run("${nm}...", "value=${P.value}${ijStack(P)}");`:`run("${nm}"${P.stack?', "stack"':', " "'});`; },
   help:"8/16-bit 은 ImageJ 정수 규칙(반올림·범위 자르기). 소수 결과가 필요하면 먼저 32-bit 로."});
 op("nanbg",{label:"NaN Background (32-bit, threshold 밖 → NaN)",group:"math",params:[R("lower","Lower",0),R("upper","Upper",255)],run:(im,P)=>{ if(im.bit!==32) throw new Error("32-bit 영상에서만"); return runPlaneOp(im,P,"math",p=>[p,"nan",[+P.lower,+P.upper]],"NaN Background"); },ij:P=>`setThreshold(${P.lower}, ${P.upper}); run("NaN Background");`});
-op("invert",{label:"Invert",group:"math",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"invert",p=>[p],"Invert"),ij:P=>`run("Invert"${P.stack?', "stack"':""});`,help:"8-bit: 255−v. 16/32-bit: (min+max)−v (화소 범위)."});
+op("invert",{label:"Invert",group:"math",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"invert",p=>[p],"Invert"),ij:P=>`run("Invert"${P.stack?', "stack"':', " "'});`,help:"8-bit: 255−v. 16/32-bit: (min+max)−v (화소 범위)."});
 /* ---------- Geometry ---------- */
 op("crop",{label:"Crop (사각형 ROI)",group:"geom",kind:"image",params:[],
   run:(im,P)=>{ const r=P.rect||roiRect(im); if(!r) throw new Error("사각형 ROI 를 먼저 그리세요"); const rr={x:clamp(Math.round(r.x),0,im.w-1),y:clamp(Math.round(r.y),0,im.h-1)}; rr.w=clamp(Math.round(r.w),1,im.w-rr.x); rr.h=clamp(Math.round(r.h),1,im.h-rr.y);
@@ -48854,19 +48930,19 @@ op("rot90",{label:"Rotate 90°",group:"geom",kind:"image",params:[R("dir","Direc
   ij:P=>`run("Rotate 90 Degrees ${P.dir==="cw"?"Right":"Left"}");`});
 op("flip",{label:"Flip",group:"geom",kind:"image",params:[R("dir","Direction","h",{type:"sel",opts:[["h","Horizontally"],["v","Vertically"]]})],
   run:(im,P)=>{ const P2=planesOf(im).map(d=>IC.flip({w:im.w,h:im.h,bit:im.bit,data:d},P.dir).data); clearRois(im); setPlanes(im,P2,{keepDisplay:true},"Flip",{op:"flip",params:clean(P),label:"Flip "+(P.dir==="h"?"Horizontally":"Vertically")}); },
-  ij:P=>`run("Flip ${P.dir==="h"?"Horizontally":"Vertically"}"${""});`});
+  ij:P=>`run("Flip ${P.dir==="h"?"Horizontally":"Vertically"}", "stack");`}); // 앱은 모든 장을 뒤집음
 op("rotate",{label:"Rotate (임의 각도)",group:"geom",kind:"image",params:[R("angle","Angle (시계 +)",15,{unit:"°",step:0.1}),R("enlarge","Enlarge to fit",false,{type:"bool"}),R("interp","Interpolation","bilinear",{type:"sel",opts:[["bilinear","Bilinear"],["nearest","None"]]})],
   run:async(im,P)=>{ const outs=await Promise.all(planesOf(im).map(d=>call("rotate",[{w:im.w,h:im.h,bit:im.bit,data:d},+P.angle,{enlarge:!!P.enlarge,nearest:P.interp==="nearest"}]))); clearRois(im); setPlanes(im,outs.map(o=>o.data),{w:outs[0].w,h:outs[0].h},"Rotate",{op:"rotate",params:clean(P),label:`Rotate ${P.angle}°`}); resetView(im); },
-  ij:P=>`run("Rotate... ", "angle=${P.angle} grid=1 interpolation=${P.interp==="nearest"?"None":"Bilinear"}${P.enlarge?" enlarge":""}");`});
+  ij:P=>`run("Rotate... ", "angle=${P.angle} grid=1 interpolation=${P.interp==="nearest"?"None":"Bilinear"}${P.enlarge?" enlarge":""} stack");`});
 op("resize",{label:"Scale (크기 바꾸기)",group:"geom",kind:"image",params:[R("factor","배율",0.5,{min:0.01,step:0.05}),R("interp","Interpolation","bilinear",{type:"sel",opts:[["bilinear","Bilinear (줄일 때 면적 평균)"],["nearest","None"]]})],
   run:async(im,P)=>{ const f=+P.factor; const W=Math.max(1,Math.round(im.w*f)), H=Math.max(1,Math.round(im.h*f)); const outs=await Promise.all(planesOf(im).map(d=>call("resize",[{w:im.w,h:im.h,bit:im.bit,data:d},W,H,{method:P.interp}])));
     const c=im.cal; clearRois(im); setPlanes(im,outs.map(o=>o.data),{w:W,h:H,cal:c?{...c,pw:c.pw*im.w/W,ph:c.ph*im.h/H}:c},"Scale",{op:"resize",params:clean(P),label:`Scale ×${f}`}); resetView(im); },
-  ij:P=>`run("Scale...", "x=${P.factor} y=${P.factor} interpolation=${P.interp==="nearest"?"None":"Bilinear"} average create");`,help:"보정(화소 크기)은 배율만큼 함께 바뀝니다."});
+  ij:P=>`run("Scale...", "x=${P.factor} y=${P.factor} interpolation=${P.interp==="nearest"?"None":"Bilinear"} average process");`,help:"보정(화소 크기)은 배율만큼 함께 바뀝니다."});
 op("duplicate",{label:"Duplicate",group:"geom",kind:"new",params:[R("slice","현재 장만",false,{type:"bool"})],
   run:(im,P)=>{ let planes, nz=im.nz, nt=im.nt, nc=im.nc; if(P.slice&&isStack(im)){ planes=[]; for(let c=0;c<im.nc;c++) planes.push(Float32Array.from(planesOf(im)[pIndex(im,c,im.z,im.t)])); nz=1; nt=1; } else planes=planesOf(im).map(p=>Float32Array.from(p));
     const n=addImage({name:im.name+"-1",w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:nc,nz,nt,planes,cal:im.cal,chNames:im.chNames,zStep:nz>1?im.zStep:0},{parent:im.id,src:"derived",ops:im.ops.slice()}); n.disp=JSON.parse(JSON.stringify(im.disp));
     record({op:"duplicate",params:clean(P),label:"Duplicate"+(P.slice?" (slice)":"")},im); return n; },
-  ij:()=>`run("Duplicate...", " ");`});
+  ij:P=>P.slice?`run("Duplicate...", " ");`:`run("Duplicate...", "duplicate");`});
 /* ---------- Type ---------- */
 op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8",{type:"sel",opts:[["8","8-bit"],["16","16-bit"],["32","32-bit"],["rgb2gray","RGB → 8-bit gray"],["split","Split channels"]]}),R("weighted","Weighted RGB (0.299/0.587/0.114)",false,{type:"bool",showIf:P=>P.to==="rgb2gray"}),R("scale","Scale when converting (표시 범위 사용)",true,{type:"bool",showIf:P=>P.to==="8"||P.to==="16"})],
   run:(im,P)=>{
@@ -48885,7 +48961,7 @@ op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8
     const R0=[...Array(im.nc).keys()].map(rng);
     const out=planesOf(im).map((d,k)=>{ const c=k%im.nc; return IC.convertBit({w:im.w,h:im.h,bit:im.bit,data:d},to,R0[c][0],R0[c][1],P.scale!==false).data; });
     setPlanes(im,out,{bit:to},`${to}-bit`,{op:"type",params:clean(P),label:`${to}-bit`}); },
-  ij:P=>P.to==="split"?`run("Split Channels");`:P.to==="rgb2gray"?`run("Conversions...", "scale${P.weighted?" weighted":""}"); run("8-bit");`:`${Array.isArray(P.range)?`setMinAndMax(${P.range[0][0]}, ${P.range[0][1]}); `:"resetMinAndMax(); "}run("Conversions...", "${P.scale!==false?"scale":""}"); run("${P.to}-bit");`,
+  ij:P=>P.to==="split"?`run("Split Channels");`:P.to==="rgb2gray"?`run("Conversions...", "scale${P.weighted?" weighted":""}"); run("8-bit");`:`${Array.isArray(P.range)?`setMinAndMax(${P.range[0][0]}, ${P.range[0][1]}); `:"resetMinAndMax(); "}run("Conversions...", "${P.scale!==false?"scale":" "}"); run("${P.to}-bit");`,
   help:"16/32 → 8-bit 은 현재 표시 범위로 비례 변환합니다(ImageJ 와 같음). 측정 전에 정보 손실을 확인하세요."});
 /* ---------- Stack ---------- */
 op("zproject",{label:"Z Project",group:"stack",kind:"new",params:[R("method","Projection","avg",{type:"sel",opts:[["avg","Average Intensity"],["max","Max Intensity"],["min","Min Intensity"],["sum","Sum Slices"],["sd","Standard Deviation"],["median","Median"]]}),R("float","결과를 32-bit 로 (평균·최대·최소·중앙값)",false,{type:"bool"})],
@@ -48941,22 +49017,23 @@ op("register",{label:"Register (StackReg · drift correction)",group:"stack",kin
 op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image 2","",{type:"img"}),R("fn","Operation","sub",{type:"sel",opts:[["add","Add"],["sub","Subtract"],["mul","Multiply"],["div","Divide"],["and","AND"],["or","OR"],["xor","XOR"],["min","Min"],["max","Max"],["average","Average"],["difference","Difference"],["copy","Copy"],["transparent-zero","Transparent-zero"]]}),R("float","32-bit (float) result",true,{type:"bool"})],
   run:async(im,P)=>{ const b=byId(P.b)||S.images.find(x=>x.name===P.bName); if(!b) throw new Error("두 번째 영상을 고르세요"); if(b.w!==im.w||b.h!==im.h) throw new Error("두 영상의 크기가 같아야 합니다");
     const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
-  ij:P=>`imageCalculator("${{add:"Add",sub:"Subtract",mul:"Multiply",div:"Divide",and:"AND",or:"OR",xor:"XOR",min:"Min",max:"Max",average:"Average",difference:"Difference",copy:"Copy","transparent-zero":"Transparent-zero"}[P.fn]} create${P.float?" 32-bit":""}", getTitle(), "${P.bName||"image2"}");`});
+  ij:P=>`imageCalculator("${{add:"Add",sub:"Subtract",mul:"Multiply",div:"Divide",and:"AND",or:"OR",xor:"XOR",min:"Min",max:"Max",average:"Average",difference:"Difference",copy:"Copy","transparent-zero":"Transparent-zero"}[P.fn]} create${P.float?" 32-bit":""}", getTitle(), "${ijq(P.bName||"image2")}");`});
 
 /* ---------- Threshold · Binary (패널이 따로 있음) ---------- */
 op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,params:[],
   run:async(im,P)=>{ // P: {method, dark, manual, lower, upper, stack, newImage, local:{method,radius,p1,p2}}
-    const planes=planesOf(im); const idx=[]; if(P.stack||!isStack(im)){ for(let k=0;k<planes.length;k++) if(k%im.nc===(im.rgb?0:im.c)||im.nc===1) idx.push(k); } else idx.push(pIndex(im,im.rgb?0:im.c,im.z,im.t));
+    const planes=planesOf(im); const idx=[]; for(let k=0;k<planes.length;k++) if(k%im.nc===(im.rgb?0:im.c)||im.nc===1) idx.push(k); // 스택은 언제나 모든 장 (ImageJ 처럼 스택 유지)
+    let fixed=null; if(isStack(im)&&!P.stack&&!P.manual&&!P.local){ const t=await call("autoThreshold",[{w:im.w,h:im.h,bit:im.bit,data:planes[pIndex(im,im.rgb?0:im.c,im.z,im.t)]},P.method,!!P.dark]); fixed=[t.lower,t.upper]; } // '모든 장' 끔 = 지금 장에서 구한 문턱을 모든 장에
     if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ RGB → 8-bit gray");
     const out=[]; let msg="";
     for(const k of idx){ const p={w:im.w,h:im.h,bit:im.bit,data:planes[k]}; let m;
       if(P.local){ m=await call("localThreshold",[p,P.local.method,{radius:+P.local.radius,p1:P.local.p1===""?null:+P.local.p1,p2:P.local.p2===""?null:+P.local.p2,dark:P.dark}]); msg=`Local ${P.local.method} r=${P.local.radius}`; }
-      else { let lo=+P.lower, hi=+P.upper; if(!P.manual){ const t=await call("autoThreshold",[p,P.method,!!P.dark]); lo=t.lower; hi=t.upper; } m=IC.applyThreshold(p,lo,hi); msg=P.manual?`Threshold ${g4(lo)}–${g4(hi)}`:`${P.method}${P.dark?" dark":""} → [${g4(lo)}, ${g4(hi)}]`; }
+      else { let lo=+P.lower, hi=+P.upper; if(fixed){ [lo,hi]=fixed; } else if(!P.manual){ const t=await call("autoThreshold",[p,P.method,!!P.dark]); lo=t.lower; hi=t.upper; } m=IC.applyThreshold(p,lo,hi); msg=P.manual?`Threshold ${g4(lo)}–${g4(hi)}`:`${P.method}${P.dark?" dark":""} → [${g4(lo)}, ${g4(hi)}]`; }
       out.push(m.data); }
     const step={op:"threshold",params:clean(P),label:"Convert to Mask ("+msg+")"};
     if(P.newImage){ const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record(step,im); note(msg,"ok"); return n; }
     setPlanes(im,out,{bit:8,nc:1,c:0,composite:false,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1},"Convert to Mask",step); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; note(msg,"ok"); },
-  ij:P=>P.local?`run("Auto Local Threshold", "method=${P.local.method} radius=${P.local.radius} parameter_1=${P.local.p1||0} parameter_2=${P.local.p2||0}${P.dark?" white":""}");`:(P.manual?`setThreshold(${P.lower}, ${P.upper}); setOption("BlackBackground", true); run("Convert to Mask");`:`setAutoThreshold("${P.method}${P.dark?" dark":""}"); setOption("BlackBackground", true); run("Convert to Mask"${P.stack?', "method='+P.method+' background='+(P.dark?"Dark":"Light")+' calculate black"':""});`)});
+  ij:P=>P.local?`run("Auto Local Threshold", "method=${P.local.method} radius=${P.local.radius} parameter_1=${P.local.p1||0} parameter_2=${P.local.p2||0}${P.dark?" white":""}");`:(P.manual?`setThreshold(${P.lower}, ${P.upper}); setOption("BlackBackground", true); run("Convert to Mask", "method=Default background=${P.dark?"Dark":"Light"} black");`:`setAutoThreshold("${P.method}${P.dark?" dark":""}"); setOption("BlackBackground", true); run("Convert to Mask", "method=${P.method} background=${P.dark?"Dark":"Light"}${P.stack?" calculate":""} black");`)}); // 스택: calculate = 장마다 문턱, 아니면 지금 장의 문턱을 모든 장에
 const BIN=[["erode","Erode"],["dilate","Dilate"],["open","Open"],["close","Close-"],["fill","Fill Holes"],["outline","Outline"],["skeleton","Skeletonize"],["watershed","Watershed"],["edm","Distance Map"],["uep","Ultimate Points"],["voronoiX","—"]].slice(0,10);
 op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","erode",{type:"sel",opts:BIN}),R("iterations","Iterations",1,{type:"int",min:1}),R("count","Count",1,{type:"int",min:1,max:8}),R("edm32","Distance Map 를 32-bit 새 영상으로",false,{type:"bool"}),stackParam],
   run:async(im,P)=>{ const f=P.fn; const all=!!P.stack||!isStack(im); const ix=all?planesOf(im).map((_,k)=>k):[pIndex(im,0,im.z,im.t)];
@@ -48969,7 +49046,7 @@ op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","
       P2[k]=r.data; }
     setPlanes(im,P2,{keepDisplay:f!=="edm"&&f!=="uep"},lab,{op:"binary",params:clean(P),label:lab+((f==="erode"||f==="dilate"||f==="open"||f==="close")?` (×${P.iterations}, count ${P.count})`:"")});
     if(f==="edm"||f==="uep"){ im.kind=""; } },
-  ij:P=>{ const nm=(BIN.find(b=>b[0]===P.fn)||[0,P.fn])[1]; if(["erode","dilate","open","close"].includes(P.fn)) return `run("Options...", "iterations=${P.iterations} count=${P.count} black do=Nothing"); run("${nm==="Close-"?"Close-":nm}"${P.stack?', "stack"':""});`; if(P.fn==="edm"&&P.edm32) return `run("Options...", "iterations=1 count=1 black edm=32-bit"); run("Distance Map");`; return `run("${nm}"${P.stack?', "stack"':""});`; }});
+  ij:P=>{ const nm=(BIN.find(b=>b[0]===P.fn)||[0,P.fn])[1]; if(["erode","dilate","open","close"].includes(P.fn)) return `run("Options...", "iterations=${P.iterations} count=${P.count} black do=Nothing"); run("${nm==="Close-"?"Close-":nm}"${P.stack?', "stack"':', " "'});`; if(P.fn==="edm"&&P.edm32) return `run("Duplicate...", "title=edm_src"); run("Options...", "iterations=1 count=1 black edm=32-bit"); run("Distance Map"); run("Options...", "iterations=1 count=1 black edm=Overwrite");`; /* 앱: 지금 장에서 32-bit 새 영상 */ return `run("${nm}"${P.stack?', "stack"':', " "'});`; }});
 
 /* 현재 장 plane (RGB 면 밝기) */
 function curPlaneOf(im){ if(im.rgb){ return IC.rgbToGray(planeAt(im,0),planeAt(im,1),planeAt(im,2),false); } return planeAt(im); }
@@ -49002,28 +49079,55 @@ function lutCss(name){ const t=lutTable(name); const st=[]; for(let i=0;i<=8;i++
 /* ---------- 표시 버퍼 ---------- */
 const DISP={key:null,cv:null,scale:1};
 const MAXDISP=24e6;
-function invalidate(im){ if(im) im.ver=(im.ver||0)+1; DISP.key=null; OVL.key=null; }
+function invalidate(im){ if(im) im.ver=(im.ver||0)+1; DISP.key=null; DISPZ.key=null; OVL.key=null; }
 function dispKey(im){ return [im.id,im.ver,im.c,im.z,im.t,im.composite,JSON.stringify(im.disp),PREVIEW.key||""].join("|"); }
-function buildDisplay(im){
-  const key=dispKey(im); if(DISP.key===key&&DISP.cv) return DISP;
-  const sc=im.w*im.h>MAXDISP?Math.ceil(Math.sqrt(im.w*im.h/MAXDISP)):1; const W=Math.ceil(im.w/sc), H=Math.ceil(im.h/sc);
-  let cv=DISP.cv; if(!cv||cv.width!==W||cv.height!==H){ cv=document.createElement("canvas"); cv.width=W; cv.height=H; }
+/* 값 → 0..255 (ImageJ create8BitImage 와 같은 규칙)
+   8-bit : LUT[i] = i<min ? 0 : i>max ? 255 : (int)(256·(i−min)/(max−min))   (ByteProcessor.setMinAndMax, min·max 반올림)
+   16-bit: (int)(max(0,v−min)·256/(max−min+1)+0.5) ≤ 255              (ShortProcessor, min·max 정수)
+   32-bit: (int)(max(0,v−min)·255/(max−min)+0.5) ≤ 255, NaN → 0          (FloatProcessor; max=min 이면 v>min → 255) */
+function qMap(bit,mn,mx){
+  if(bit===8||bit===16){ const N=bit===8?256:65536, t=new Uint8Array(N);
+    if(bit===8){ const a=Math.round(mn), b=Math.round(mx); for(let i=0;i<256;i++){ t[i]=i<a?0:i>b?255:(b>a?Math.min(255,Math.max(0,Math.floor(256*(i-a)/(b-a)))):0); } }
+    else { const a=Math.trunc(mn), b=Math.trunc(mx), sc=256/(b-a+1); for(let i=0;i<N;i++){ let v=i-a; if(v<0) v=0; v=Math.floor(v*sc+0.5); t[i]=v>255?255:v; } }
+    return v=>v!==v?0:t[v<0?0:v>=N?N-1:v|0]; }
+  const sc=255/(mx-mn); return v=>{ if(v!==v) return 0; let x=v-mn; if(x<0) x=0; const q=Math.floor(x*sc+0.5); return q>255||q!==q?(x>0?255:0):q; };
+}
+/* 영상 영역 R={x,y,w,h,sc} 를 표시 색으로 (sc>1 이면 sc 칸마다 한 화소) — 화면·썸네일·PNG 내보내기 공용 */
+function renderRegion(im,R,cvIn){
+  const W=Math.max(1,Math.ceil(R.w/R.sc)), H=Math.max(1,Math.ceil(R.h/R.sc)); let cv=cvIn; if(!cv||cv.width!==W||cv.height!==H){ cv=document.createElement("canvas"); cv.width=W; cv.height=H; }
   const cx=cv.getContext("2d"), id=cx.createImageData(W,H), o=id.data;
   const chans=im.rgb?[0,1,2]:(im.composite&&im.nc>1?[...Array(im.nc).keys()]:[im.c]);
   const add=chans.length>1&&!im.rgb;
   for(let i=0;i<o.length;i+=4) o[i+3]=255;
+  const bitOf=im.rgb?8:im.bit;
   chans.forEach(c=>{
     const prev=PREVIEW.plane&&PREVIEW.imId===im.id&&PREVIEW.planes?PREVIEW.planes[c]||null:null;
     const d=prev||planesOf(im)[pIndex(im,c,im.z,im.t)]; const ds=im.rgb?im.disp[0]:im.disp[c];
-    const mn=im.rgb?0:ds.min, mx=im.rgb?255:ds.max, k=mx>mn?255/(mx-mn):0;
-    const L=im.rgb?null:lutTable(add?ds.lut:(ds.lut||"Grays")); const hilo=!im.rgb&&ds.lut==="HiLo";
-    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const v=d[(y*sc)*im.w+x*sc]; let q=v!==v?0:Math.round((v-mn)*k); q=q<0?0:q>255?255:q; const j=(y*W+x)*4;
-      if(im.rgb){ o[j+c]=q; continue; }
-      if(hilo){ if(v<=mn){ o[j]=0;o[j+1]=0;o[j+2]=255; continue; } if(v>=mx){ o[j]=255;o[j+1]=0;o[j+2]=0; continue; } }
-      if(add){ o[j]=Math.min(255,o[j]+L[q]); o[j+1]=Math.min(255,o[j+1]+L[256+q]); o[j+2]=Math.min(255,o[j+2]+L[512+q]); }
-      else { o[j]=L[q]; o[j+1]=L[256+q]; o[j+2]=L[512+q]; } }
+    const q8=im.rgb?(v=>v<0?0:v>255?255:v|0):qMap(bitOf,ds.min,ds.max);
+    const L=im.rgb?null:lutTable(add?ds.lut:(ds.lut||"Grays")); const hilo=!im.rgb&&ds.lut==="HiLo"; const mn=ds.min, mx=ds.max;
+    for(let y=0;y<H;y++){ const sy=R.y+y*R.sc; if(sy>=im.h) break; const ro=sy*im.w;
+      for(let x=0;x<W;x++){ const sx=R.x+x*R.sc; if(sx>=im.w) break; const v=d[ro+sx]; const q=q8(v); const j=(y*W+x)*4;
+        if(im.rgb){ o[j+c]=q; continue; }
+        if(hilo&&v===v&&(v<=mn||v>=mx)){ const r=v>=mx?255:0, b=v<=mn?255:0; if(add){ o[j]=Math.min(255,o[j]+r); o[j+2]=Math.min(255,o[j+2]+b); } else { o[j]=r; o[j+1]=0; o[j+2]=b; } continue; }
+        if(add){ o[j]=Math.min(255,o[j]+L[q]); o[j+1]=Math.min(255,o[j+1]+L[256+q]); o[j+2]=Math.min(255,o[j+2]+L[512+q]); }
+        else { o[j]=L[q]; o[j+1]=L[256+q]; o[j+2]=L[512+q]; } } }
   });
-  cx.putImageData(id,0,0); DISP.key=key; DISP.cv=cv; DISP.scale=sc; return DISP;
+  cx.putImageData(id,0,0); return cv;
+}
+function fullScale(im){ return im.w*im.h>MAXDISP?Math.ceil(Math.sqrt(im.w*im.h/MAXDISP)):1; }
+function buildDisplay(im){
+  const key=dispKey(im); if(DISP.key===key&&DISP.cv) return DISP;
+  const sc=fullScale(im); DISP.cv=renderRegion(im,{x:0,y:0,w:im.w,h:im.h,sc},DISP.cv); DISP.key=key; DISP.scale=sc; return DISP;
+}
+/* 아주 큰 영상(> 2.4×10⁷ 화소)을 확대했을 때: 보이는 영역만 원래 해상도로 (여유 25 %, 영역 안에서 움직이면 다시 그리지 않음) */
+const DISPZ={key:null,cv:null,R:null};
+function zoomRegion(im,v,W,H){
+  const sc=fullScale(im); if(sc===1||v.zoom*sc<=1.0001) return null;
+  const [ax,ay]=toImg(v,0,0), [bx,by]=toImg(v,W,H); const vx0=Math.max(0,Math.floor(ax)), vy0=Math.max(0,Math.floor(ay)), vx1=Math.min(im.w,Math.ceil(bx)), vy1=Math.min(im.h,Math.ceil(by)); if(vx1<=vx0||vy1<=vy0) return null;
+  const key=dispKey(im); const R0=DISPZ.R;
+  if(DISPZ.key===key&&R0&&vx0>=R0.x&&vy0>=R0.y&&vx1<=R0.x+R0.w&&vy1<=R0.y+R0.h) return DISPZ;
+  const mx=Math.ceil((vx1-vx0)*0.25), my=Math.ceil((vy1-vy0)*0.25); let x=Math.max(0,vx0-mx), y=Math.max(0,vy0-my), w=Math.min(im.w,vx1+mx)-x, h=Math.min(im.h,vy1+my)-y;
+  if(w*h>MAXDISP) return null; const R={x,y,w,h,sc:1}; DISPZ.cv=renderRegion(im,R,DISPZ.cv); DISPZ.R=R; DISPZ.key=key; return DISPZ;
 }
 /* 미리 보기(필터 매개변수를 바꾸는 동안 결과를 화면에만) */
 const PREVIEW={key:"",imId:null,planes:null,plane:false,c:0};
@@ -49042,6 +49146,7 @@ const toImg=(v,sx,sy)=>[v.x+sx/v.zoom,v.y+sy/v.zoom];
 const toScr=(v,ix,iy)=>[(ix-v.x)*v.zoom,(iy-v.y)*v.zoom];
 
 /* ---------- 그리기 ---------- */
+let DRAW_RAF=0; function drawSoon(){ if(DRAW_RAF) return; DRAW_RAF=requestAnimationFrame(()=>{ DRAW_RAF=0; draw(); }); } // 막대를 끄는 동안 한 프레임에 한 번만
 const OVL={key:null,thr:null};
 function draw(){
   const im=cur(); const cv=ROOT&&$q(ROOT,"#imCanvas"), ov=ROOT&&$q(ROOT,"#imOverlay"); if(!cv||!ov) return;
@@ -49051,9 +49156,9 @@ function draw(){
   const ox=ov.getContext("2d"); ox.setTransform(dpr,0,0,dpr,0,0); ox.clearRect(0,0,W,H);
   if(!im){ return; }
   const v=viewOf(im); if(!v.zoom) fitView(im);
-  const D=buildDisplay(im);
-  cx.imageSmoothingEnabled=v.zoom<1; cx.imageSmoothingQuality="high";
-  const [x0,y0]=toScr(v,0,0); cx.drawImage(D.cv,x0,y0,im.w*v.zoom,im.h*v.zoom);
+  const Z=zoomRegion(im,v,W,H);
+  if(Z){ cx.imageSmoothingEnabled=false; const [x0,y0]=toScr(v,Z.R.x,Z.R.y); cx.drawImage(Z.cv,x0,y0,Z.R.w*v.zoom,Z.R.h*v.zoom); }
+  else { const D=buildDisplay(im); cx.imageSmoothingEnabled=v.zoom<1; cx.imageSmoothingQuality="high"; const [x0,y0]=toScr(v,0,0); cx.drawImage(D.cv,x0,y0,im.w*v.zoom,im.h*v.zoom); }
   // 화소 격자 (아주 크게 확대했을 때)
   if(v.zoom>=24){ ox.strokeStyle="rgba(255,255,255,.08)"; ox.lineWidth=1; ox.beginPath(); const [ax,ay]=toImg(v,0,0), [bx,by]=toImg(v,W,H);
     for(let x=Math.max(0,Math.floor(ax));x<=Math.min(im.w,Math.ceil(bx));x++){ const s=toScr(v,x,0)[0]; ox.moveTo(s,0); ox.lineTo(s,H); }
@@ -49083,12 +49188,21 @@ function drawParticles(im,ox,v){
 }
 /* 축척 막대 (Analyze ▸ Tools ▸ Scale Bar): 화면 폭의 약 1/5 에 맞는 1·2·5 × 10ⁿ 길이 */
 function niceLen(x){ const p=Math.pow(10,Math.floor(Math.log10(x))); const m=x/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; }
-function scaleBarSpec(im,viewW){ const c=calOf(im); if(!im.cal) return null; const fov=viewW*c.pw; const L=S.ui.scalebar.len>0?+S.ui.scalebar.len:niceLen(fov/5); return {L,px:L/c.pw,unit:c.unit}; }
-function sbLabel(L,u){ const up={pm:"Å",nm:"µm","µm":"mm"}; const f={pm:100,nm:1000,"µm":1000}; if(u==="pm"&&L>=100) return `${g4(L/100)} Å`; if(up[u]&&u!=="pm"&&L>=f[u]) return `${g4(L/f[u])} ${up[u]}`; return `${g4(L)} ${u}`; }
+function scaleBarSpec(im,viewW){ const c=calOf(im); if(!im.cal) return null; const fov=viewW*c.pw; const auto=niceLen(fov/5); let L=S.ui.scalebar.len>0?+S.ui.scalebar.len:auto;
+  if(L/c.pw>0.9*viewW) L=auto; // 지정 길이가 보이는 영상보다 길면 자동 길이로
+  return {L,px:L/c.pw,unit:c.unit,user:S.ui.scalebar.len>0&&L===+S.ui.scalebar.len}; }
+/* 눈금 막대 글자: 값이 1–1000 이 되는 단위로 (0.02 µm → 20 nm, 2000 nm → 2 µm, Å → nm) */
+function sbLabel(L,u){ const M={pm:1e-12,"Å":1e-10,nm:1e-9,"µm":1e-6,um:1e-6,mm:1e-3,cm:1e-2,m:1}; if(!(u in M)) return `${g4(L)} ${u}`; const m=L*M[u];
+  for(const [nu,k] of [["m",1],["mm",1e-3],["µm",1e-6],["nm",1e-9],["pm",1e-12]]) if(m>=k*0.9999||nu==="pm") return `${g4(m/k)} ${nu}`; return `${g4(L)} ${u}`; }
+/* 화면·내보내기 공용: 보이는 영상 영역 안에 두고, 글자·막대 굵기는 그 영역 크기에 비례 */
 function drawScaleBar(im,ox,v,W,H){
-  if(!S.ui.scalebar.on||!im.cal) return; const sb=scaleBarSpec(im,W/v.zoom); if(!sb) return; const len=sb.px*v.zoom; if(len<8) return;
-  const pos=S.ui.scalebar.pos, pad=14, x=pos.includes("l")?pad:W-pad-len, y=pos.includes("t")?pad+18:H-pad;
-  ox.save(); ox.fillStyle="rgba(0,0,0,.45)"; ox.fillRect(x-6,y-24,len+12,32); ox.fillStyle="#fff"; ox.fillRect(x,y-5,len,5); ox.font="600 12px DM Sans, system-ui, sans-serif"; ox.textAlign="center"; ox.fillText(sbLabel(sb.L,sb.unit),x+len/2,y-10); ox.restore();
+  if(!S.ui.scalebar.on||!im.cal) return;
+  const [sx0,sy0]=toScr(v,0,0), [sx1,sy1]=toScr(v,im.w,im.h); const ax=Math.max(0,sx0), ay=Math.max(0,sy0), bx=Math.min(W,sx1), by=Math.min(H,sy1); const vw=bx-ax, vh=by-ay; if(vw<40||vh<30) return;
+  const sb=scaleBarSpec(im,vw/v.zoom); if(!sb) return; const len=sb.px*v.zoom; if(len<8) return;
+  const fs=Math.round(Math.max(12,Math.min(96,Math.min(vw,vh)/40))), th=Math.max(4,Math.round(fs/2.6)), pad=Math.round(fs*1.1);
+  const pos=S.ui.scalebar.pos, x=pos.includes("l")?ax+pad:bx-pad-len, y=pos.includes("t")?ay+pad+fs+th+4:by-pad;
+  ox.save(); ox.fillStyle="rgba(0,0,0,.45)"; ox.fillRect(x-fs/2,y-th-fs-8,len+fs,th+fs+8+fs/2); ox.fillStyle="#fff"; ox.fillRect(x,y-th,len,th);
+  ox.font=`600 ${fs}px DM Sans, system-ui, sans-serif`; ox.textAlign="center"; ox.fillText(sbLabel(sb.L,sb.unit),x+len/2,y-th-6); ox.restore();
 }
 
 /* ---------- ROI ---------- */
@@ -49137,16 +49251,17 @@ function insideRoi(im,r,ix,iy){ if(r.type==="rect"||r.type==="oval"){ const b=ro
   if(r.type==="poly"||r.type==="free"||r.type==="traced"){ let c=false; const P=r.pts; for(let i=0,j=P.length-1;i<P.length;j=i++){ if((P[i][1]>iy)!==(P[j][1]>iy)&&ix<(P[j][0]-P[i][0])*(iy-P[i][1])/(P[j][1]-P[i][1])+P[i][0]) c=!c; } return c; }
   if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<5; }
   return false; }
-const snapI=v=>Math.round(v);
+const snapI=v=>Math.floor(v); // ImageJ: 화면 → 영상 좌표는 (int) 내림
 function onDown(e){
   const im=cur(); if(!im) return; const [sx,sy]=evPos(e); const v=viewOf(im); const [ix,iy]=toImg(v,sx,sy); const tool=S.ui.tool;
+  if(e.button===2) return; // 오른쪽 단추는 그리지 않음
   $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId);
   if(e.button===1||SPACE||tool==="hand"){ DRAG={mode:"pan",sx,sy,vx:v.x,vy:v.y}; return; }
   if(tool==="zoom"){ zoomStep(im,e.altKey?-1:1,sx,sy); return; }
   const a=activeRoi(im);
   if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
     if(insideRoi(im,a,ix,iy)&&!(e.shiftKey)){ DRAG={mode:"move",orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; } }
-  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<7){ finishPoly(im); return; } t.pts.push([snapI(ix),snapI(iy)]); draw(); return; }
+  if(tool==="poly"){ if(DRAG&&DRAG.mode==="poly"){ const t=DRAG.temp; const [fx,fy]=toScr(v,t.pts[0][0],t.pts[0][1]); if(t.pts.length>=3&&Math.hypot(fx-sx,fy-sy)<7){ finishPoly(im); return; } const P=[snapI(ix),snapI(iy)]; t.pts[t.pts.length-1]=P; t.pts.push(P.slice()); draw(); return; } // 터치는 hover 가 없어 고무줄 점을 누른 자리로 먼저 옮김
     DRAG={mode:"poly",temp:{id:uid(),type:"poly",pts:[[snapI(ix),snapI(iy)],[snapI(ix),snapI(iy)]]}}; return; }
   if(tool==="angle"){ if(DRAG&&DRAG.mode==="angle"){ DRAG.temp.pts.push([ix,iy]); if(DRAG.temp.pts.length>=4){ DRAG.temp.pts.length=3; setActive(im,DRAG.temp); DRAG=null; } draw(); return; } DRAG={mode:"angle",temp:{id:uid(),type:"angle",pts:[[ix,iy],[ix,iy]]}}; return; }
   if(tool==="point"){ let r=a&&a.type==="point"?a:null; if(!r||!e.shiftKey&&!S.ui.pointAdd&&false){ r={id:uid(),type:"point",pts:[],cls:[]}; } if(!r) r={id:uid(),type:"point",pts:[],cls:[]};
@@ -49267,8 +49382,12 @@ function histSVG(h,o){ o=o||{}; const W=o.w||380, H=o.h||110, n=h.h.length; let 
 function planeHist(im,c){ const p=planeAt(im,c); if(p.bit===8&&!im.rgb) return IC.histogram(p,null); return IC.histogram(p,null,256); }
 
 /* ===== Adjust ===== */
+// 히스토그램·통계는 (영상, 판, 채널, z, t) 마다 한 번만 — 패널을 다시 그릴 때마다 큰 영상 전체를 다시 세지 않게
+const ADJ={key:"",v:null};
+function adjStats(im,c){ const k=[im.id,im.ver,c,im.z,im.t].join("|"); if(ADJ.key===k) return ADJ.v; const p=im.rgb?curPlaneOf(im):planeAt(im,c);
+  const v={h:im.rgb?IC.histogram(p,null):planeHist(im,c),st:IC.stats(p,null,null,null,false,{noMedian:true})}; ADJ.key=k; ADJ.v=v; return v; }
 function panelAdjust(el,im){
-  const c=im.rgb?0:im.c, ds=im.disp[c]; const h=im.rgb?IC.histogram(curPlaneOf(im),null):planeHist(im,c); const st=IC.stats(im.rgb?curPlaneOf(im):planeAt(im,c));
+  const c=im.rgb?0:im.c, ds=im.disp[c]; const {h,st}=adjStats(im,c);
   const lutOpts=LUTS.map(n=>`<button class="lut ${ds.lut===n?"on":""}" data-l="${n}" title="${n}" style="background:${lutCss(n)}"></button>`).join("");
   const cal=im.cal; const cs=calOf(im);
   el.innerHTML=`
@@ -49291,10 +49410,11 @@ function panelAdjust(el,im){
   <div class="im-row"><label class="im-chk"><input type="checkbox" id="imSb" ${S.ui.scalebar.on?"checked":""}> Scale bar</label><select class="im-sel" id="imSbPos">${[["br","오른쪽 아래"],["bl","왼쪽 아래"],["tr","오른쪽 위"],["tl","왼쪽 위"]].map(([a,b])=>`<option value="${a}" ${S.ui.scalebar.pos===a?"selected":""}>${b}</option>`).join("")}</select><label class="im-f"><span>길이</span><input type="number" id="imSbLen" step="any" value="${S.ui.scalebar.len||""}" placeholder="자동"></label></div>
   ${im.databar?`<div class="note warn sm">영상 아래 ${im.databar.rows} 줄은 장비의 데이터 막대입니다 (${esc(im.databar.src)}). 분석 전에 잘라내세요. <button class="btn xs" id="imBar">잘라내기</button></div>`:""}`;
   const q=s=>$q(el,s);
-  if(!im.rgb){ const setD=(k,v)=>{ ds[k]=+v; if(ds.min>=ds.max&&k==="min") ds.max=ds.min+1e-9; invalidate(); draw(); save(); };
+  if(!im.rgb){ const setD=(k,v,now)=>{ ds[k]=+v; if(ds.min>ds.max){ if(k==="min") ds.max=ds.min; else ds.min=ds.max; } invalidate(); if(now) draw(); else drawSoon(); save(); }; // min=max 는 ImageJ 처럼 이진 표시
     q("#imDmin").oninput=e=>{ setD("min",e.target.value); q("#imDminN").value=+(+e.target.value).toPrecision(6); };
     q("#imDmax").oninput=e=>{ setD("max",e.target.value); q("#imDmaxN").value=+(+e.target.value).toPrecision(6); };
-    q("#imDminN").onchange=e=>{ setD("min",e.target.value); renderPanel(); }; q("#imDmaxN").onchange=e=>{ setD("max",e.target.value); renderPanel(); };
+    q("#imDminN").onchange=e=>{ setD("min",e.target.value,true); renderPanel(); drawSide(); }; q("#imDmaxN").onchange=e=>{ setD("max",e.target.value,true); renderPanel(); drawSide(); };
+    q("#imDmin").onchange=q("#imDmax").onchange=()=>{ renderPanel(); drawSide(); };
     q("#imAuto").onclick=()=>{ autoDisplay(im); invalidate(); draw(); renderPanel(); save(); }; q("#imReset").onclick=()=>{ resetDisplay(im); invalidate(); draw(); renderPanel(); save(); };
     if(q("#imApplyLut")) q("#imApplyLut").onclick=()=>runOp("applyLut",{stack:isStack(im)});
     $a(el,".lut").forEach(b=>b.onclick=()=>{ ds.lut=b.dataset.l; invalidate(); draw(); renderPanel(); save(); }); }
@@ -49343,7 +49463,7 @@ const PVMODE=false; // (이전 전역 미리 보기 표시 — 이제 매개변�
 
 /* ===== Threshold ===== */
 const THR_LOCAL={key:"",mask:null};
-async function updateAutoThr(im){ const T=S.ui.thr; if(T.manual||im.rgb) return; const t=await call("autoThreshold",[planeAt(im),T.method,!!T.dark]); T.lower=t.lower; T.upper=t.upper; T.level=t.level; OVL.key=null; }
+async function updateAutoThr(im){ const T=S.ui.thr; if(T.manual||im.rgb) return; const t=await call("autoThreshold",[planeAt(im),T.method,!!T.dark]); T.lower=t.lower; T.upper=t.upper; T.level=t.level; OVL.key=null; if(t.none) note("영상이 일정해 문턱을 구할 수 없습니다 (ImageJ 와 같음)","warn"); }
 function panelThreshold(el,im){
   const T=S.ui.thr; if(im.rgb){ el.innerHTML=`<div class="note warn sm">RGB 영상은 먼저 <b>Adjust ▸ Type ▸ RGB → 8-bit</b> 또는 Split channels. (ImageJ 의 Color Threshold 는 아직 없습니다)</div>`; return; }
   const p=planeAt(im); const h=IC.histogram(p,null,256); const [mn,mx]=[h.min,h.max];
@@ -49368,7 +49488,7 @@ function panelThreshold(el,im){
   const q=s=>$q(el,s);
   q("#imTm").onchange=e=>{ T.method=e.target.value; save(); renderPanel(); }; q("#imTd").onchange=e=>{ T.dark=e.target.checked; save(); renderPanel(); };
   q("#imTman").onchange=e=>{ T.manual=e.target.checked; save(); renderPanel(); };
-  const setT=(k,v,fromN)=>{ T[k]=+v; OVL.key=null; draw(); if(fromN) renderPanel(); save(); };
+  const setT=(k,v,fromN)=>{ T[k]=+v; OVL.key=null; if(fromN){ draw(); renderPanel(); } else drawSoon(); save(); };
   q("#imTl").oninput=e=>{ setT("lower",e.target.value); q("#imTlN").value=+(+e.target.value).toPrecision(7); }; q("#imTu").oninput=e=>{ setT("upper",e.target.value); q("#imTuN").value=+(+e.target.value).toPrecision(7); };
   q("#imTl").onchange=()=>renderPanel(); q("#imTu").onchange=()=>renderPanel();
   q("#imTlN").onchange=e=>setT("lower",e.target.value,true); q("#imTuN").onchange=e=>setT("upper",e.target.value,true);
@@ -49422,7 +49542,7 @@ function panelInfo(el,im){ const c=calOf(im); const tot=planesOf(im).reduce((a,p
   <div class="im-row"><button class="btn sm" id="imRen">이름 바꾸기</button><button class="btn sm" id="imToMacro" ${im.ops.length?"":"disabled"} title="이 영상에 적용한 작업을 매크로로">작업 → 매크로</button></div>
   ${im.metaText||im.desc?`<details><summary class="sm">파일 메타데이터 원문</summary><pre class="im-pre">${esc((im.metaText||im.desc).slice(0,20000))}</pre></details>`:""}`;
   $q(el,"#imRen").onclick=()=>{ const n=prompt("새 이름",im.name); if(n){ im.name=n; save(); rerender(); } };
-  $q(el,"#imToMacro").onclick=()=>{ S.macro.steps=im.ops.map(o=>Object.assign({},o)); S.ui.panel="macro"; save(); rerender(); note(`${im.ops.length} 단계를 매크로로 가져왔습니다`,"ok"); };
+  $q(el,"#imToMacro").onclick=()=>{ if(S.macro.steps.length&&!confirm2("tomac",`지금 매크로 ${S.macro.steps.length} 단계를 이 영상의 작업으로 바꿀까요? 한 번 더`)) return; S.macro.steps=im.ops.map(o=>Object.assign({},o)); S.ui.panel="macro"; save(); rerender(); note(`${im.ops.length} 단계를 매크로로 가져왔습니다`,"ok"); };
 }
 
 /* ============================================================
@@ -49446,14 +49566,21 @@ function measureRoiRow(im,r,label){
 }
 function addResults(rows){ rows=[].concat(rows); rows.forEach(r=>S.results.push(r)); S.ui.bottom="results"; S.ui.bottomOpen=true; save(); drawBottom(); }
 op("measure",{label:"Measure",group:"meas",hidden:true,kind:"measure",params:[R("all","ROI Manager 전체",false,{type:"bool"})],
-  run:(im,P)=>{ const L=P.all?roiList(im):[activeRoi(im)].filter(Boolean); const rows=[];
+  run:(im,P)=>{ const rec=P.roi&&REPLAY?Object.assign({id:"rec"},P.roi):null; const L=P.all?roiList(im):[rec||activeRoi(im)].filter(Boolean); const rows=[]; // 재생: 기록한 ROI 로 잼
     if(!L.length) rows.push(measureRoiRow(im,null,im.name)); else L.forEach((r,i)=>{ const x=measureRoiRow(im,r,`${im.name}:${r.name||(P.all?i+1:r.type)}`); [].concat(x).forEach(q=>rows.push(q)); });
-    addResults(rows); record({op:"measure",params:clean(P),label:P.all?"Measure (all ROIs)":"Measure"},im); },
-  ij:P=>P.all?`roiManager("Measure");`:`run("Measure");`});
+    const a=activeRoi(im); addResults(rows); record({op:"measure",params:Object.assign(clean(P),!P.all&&a?{roi:{type:a.type,pts:a.pts}}:{}),label:P.all?"Measure (all ROIs)":`Measure${a?` (${a.type} ROI)`:""}`},im); },
+  ij:P=>P.all?`roiManager("Measure");`:`${roiIJM(P.roi)}run("Measure");`});
+function roiIJM(r){ if(!r) return "run(\"Select None\");\n"; const f=v=>+(+v).toFixed(4); const xs=r.pts.map(p=>f(p[0])), ys=r.pts.map(p=>f(p[1]));
+  if(r.type==="rect"){ const x=Math.min(...xs), y=Math.min(...ys); return `makeRectangle(${x}, ${y}, ${Math.max(...xs)-x}, ${Math.max(...ys)-y});\n`; }
+  if(r.type==="oval"){ const x=Math.min(...xs), y=Math.min(...ys); return `makeOval(${x}, ${y}, ${Math.max(...xs)-x}, ${Math.max(...ys)-y});\n`; }
+  if(r.type==="line") return `makeLine(${xs[0]}, ${ys[0]}, ${xs[1]}, ${ys[1]});\n`;
+  if(r.type==="point") return `makeSelection("point", newArray(${xs.join(",")}), newArray(${ys.join(",")}));\n`;
+  const kind=r.type==="free"?"freehand":r.type==="traced"?"traced":r.type==="angle"?"angle":"polygon"; return `makeSelection("${kind}", newArray(${xs.join(",")}), newArray(${ys.join(",")}));\n`; }
 
 /* ---------- Analyze Particles ---------- */
 async function binaryFor(im,P){ // 이진이면 255, 아니면 Threshold 설정(방법 또는 수동 범위)
   const p=curPlaneOf(im); const isB=IC.isBinary(p); let lo=255, hi=255, how="binary";
+  if(!isB&&REPLAY&&"thr" in P&&!P.thr) throw new Error("기록할 때는 이진(mask) 영상이었는데 이 영상은 이진이 아닙니다 — 매크로에 Convert to Mask 단계를 넣으세요");
   if(!isB){ const T=P.thr||S.ui.thr; if(T.manual){ lo=+T.lower; hi=+T.upper; how=`threshold ${g4(lo)}–${g4(hi)}`; } else { const t=await call("autoThreshold",[p,T.method,!!T.dark]); lo=t.lower; hi=t.upper; how=`${T.method}${T.dark?" dark":""} [${g4(lo)}, ${g4(hi)}]`; } }
   const bin=new Uint8Array(p.data.length); for(let i=0;i<bin.length;i++){ const v=p.data[i]; bin[i]=(v>=lo&&v<=hi)?1:0; }
   return {bin,how,thr:isB?null:{lo,hi}};
@@ -49474,7 +49601,7 @@ op("analyze",{label:"Analyze Particles",group:"meas",hidden:true,kind:"measure",
     const polys=r.particles.map(q=>[q.poly.xs,q.poly.ys]); const cent=r.particles.map(q=>[q.meas.X/c.pw,q.meas.Y/c.ph]);
     const totPx=bin.reduce((a,v)=>a+v,0)||1; const areas=rows.map(x=>x.Area); const tot=areas.reduce((a,b)=>a+b,0);
     const fieldA=im.w*im.h*a1;
-    const sum={Image:im.name,Slice:isStack(im)?`${im.z+1}`:"",Count:rows.length,"Total Area":tot,"Average Size":rows.length?tot/rows.length:NaN,"%Area":100*tot/fieldA,
+    const sum={Image:im.name,Slice:isStack(im)?(im.nt>1?`z${im.z+1} t${im.t+1}`:`${im.z+1}`):"",Count:rows.length,"Total Area":tot,"Average Size":rows.length?tot/rows.length:NaN,"%Area":100*tot/fieldA,
       "ECD mean":mean(rows.map(x=>x.ECD)),"ECD SD":sd(rows.map(x=>x.ECD)),"Feret mean":mean(rows.map(x=>x.Feret)),"Circ. mean":mean(rows.map(x=>x["Circ."])),"Density (/area)":rows.length/fieldA,Unit:c.unit,Threshold:how};
     S.particles[im.id]={params:clean(P),rows,polys,cent,meanArea:rows.length?mean(rows.map(x=>x.Area))/a1:25,summary:sum,sel:[],thr,redirect:red.name,unit:c.unit};
     S.summary.push(sum);
@@ -49484,10 +49611,12 @@ op("analyze",{label:"Analyze Particles",group:"meas",hidden:true,kind:"measure",
     record({op:"analyze",params:Object.assign(clean(P),{redirect:rdRec,thr:P.thr||(IC.isBinary(curPlaneOf(im))?null:Object.assign({},S.ui.thr)),redirectName:red!==im&&!rdRec.startsWith("__")?red.name:""}),label:`Analyze Particles (${rows.length})`},im);
     S.ui.bottom="particles"; S.ui.bottomOpen=true; save();
     note(`입자 ${rows.length}개 — ${how}${red!==im?`, 세기는 '${red.name}' 에서`:""}${totPx&&rows.length===0?" (조건에 맞는 입자 없음)":""}`,"ok"); },
-  ij:P=>{ const s=`size=${P.minSize||0}-${P.maxSize===""||P.maxSize==null?"Infinity":P.maxSize}${P.unitPx?" pixel":""} circularity=${(+P.minCirc||0).toFixed(2)}-${(P.maxCirc===""||P.maxCirc==null?1:+P.maxCirc).toFixed(2)} show=${P.show==="masks"?"Masks":"Outlines"} display${P.exclude?" exclude":""}${P.holes?" include":""}${P.addRoi?" add":""} summarize`;
+  ij:P=>{ const s=`size=${P.minSize||0}-${P.maxSize===""||P.maxSize==null?"Infinity":P.maxSize}${P.unitPx?" pixel":""} circularity=${(+P.minCirc||0).toFixed(2)}-${(P.maxCirc===""||P.maxCirc==null?1:+P.maxCirc).toFixed(2)} show=${P.show==="masks"?"Masks":P.show==="none"?"Nothing":"Overlay"} display${P.exclude?" exclude":""}${P.holes?" include":""}${P.addRoi?" add":""} summarize`;
     const T=P.thr; const thr=!T?"":T.manual?`setThreshold(${T.lower}, ${T.upper});\n`:`setAutoThreshold("${T.method}${T.dark?" dark":""}");\n`;
-    const rd=P.redirect==="__parent"||P.redirect==="__root"?"None // 원본 영상 이름으로 바꾸세요 (redirect)":(P.redirectName||"None");
-    return `${thr}run("Set Measurements...", "area mean standard modal min centroid center perimeter bounding fit shape feret's integrated median skewness kurtosis redirect=${rd} decimal=4");\nrun("Analyze Particles...", "${s}");`; }});
+    const rel=P.redirect==="__parent"||P.redirect==="__root"; const rd=rel?"None":(P.redirectName?`[${ijq(P.redirectName)}]`:"None");
+    return `${rel?"// redirect: 원본(세기) 영상 이름을 아래 redirect=[...] 에 넣으세요 (앱에서는 이 영상의 원본)\n":""}${thr}run("Set Measurements...", "area mean standard modal min centroid center perimeter bounding fit shape feret's integrated median skewness kurtosis redirect=${rd} decimal=4");\nrun("Analyze Particles...", "${s}");`; }});
+const ijq=s=>String(s).replace(/\\/g,"\\\\").replace(/"/g,'\\"'); // ImageJ 매크로 문자열 안전하게
+
 const mean=a=>{ const v=a.filter(x=>x!=null&&isFinite(x)); return v.length?v.reduce((s,x)=>s+x,0)/v.length:NaN; };
 const sd=a=>{ const v=a.filter(x=>x!=null&&isFinite(x)); if(v.length<2) return NaN; const m=mean(v); return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/(v.length-1)); };
 
@@ -49496,7 +49625,7 @@ op("findMaxima",{label:"Find Maxima",group:"meas",hidden:true,kind:"measure",par
   R("output","Output","points",{type:"sel",opts:[["points","Point Selection + Count"],["single","Single Points (영상)"],["within","Maxima Within Tolerance (영상)"],["segmented","Segmented Particles (영상)"]]})],
   run:async(im,P)=>{ const p=curPlaneOf(im); const o={output:P.output,light:!!P.light,excludeEdges:!!P.exclude,strict:!!P.strict};
     if(P.output==="points"){ const r=await call("findMaxima",[p,+P.prominence,o]); const pts=r.points.map(([x,y])=>[x+0.5,y+0.5]); setActive(im,{id:uid(),type:"point",pts,cls:pts.map(()=>0),name:"maxima"});
-      S.summary.push({Image:im.name,Slice:isStack(im)?`${im.z+1}`:"",Count:pts.length,"Total Area":"","Average Size":"","%Area":"",Threshold:`Find Maxima prominence>${P.prominence}${P.light?" light":""}`,Unit:calOf(im).unit,"Density (/area)":pts.length/(im.w*im.h*calOf(im).pw*calOf(im).ph)});
+      S.summary.push({Image:im.name,Slice:isStack(im)?(im.nt>1?`z${im.z+1} t${im.t+1}`:`${im.z+1}`):"",Count:pts.length,"Total Area":"","Average Size":"","%Area":"",Threshold:`Find Maxima prominence>${P.prominence}${P.light?" light":""}`,Unit:calOf(im).unit,"Density (/area)":pts.length/(im.w*im.h*calOf(im).pw*calOf(im).ph)});
       record({op:"findMaxima",params:clean(P),label:`Find Maxima (${pts.length})`},im); note(`극대 ${pts.length}개 (prominence > ${P.prominence})`,"ok"); S.ui.bottom="summary"; S.ui.bottomOpen=true; return; }
     const r=await call("findMaximaImage",[p,+P.prominence,o]); const nm={single:"Maxima",within:"Maxima",segmented:"Segmented"}[P.output];
     const n=addImage({name:`${im.name} ${nm}`,w:im.w,h:im.h,bit:8,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record({op:"findMaxima",params:clean(P),label:`Find Maxima → ${nm}`},im); return n; },
@@ -49513,11 +49642,11 @@ op("radial",{label:"Radial Profile",group:"meas",hidden:true,kind:"measure",para
   ij:()=>`// Radial Profile (plugin): Analyze ▸ Radial Profile`,help:"방위 평균 세기. 회절(SAED/FFT) 고리의 반지름, 둥근 입자 단면 등. 중심 = 점 ROI · 타원/사각형 ROI 중심 · 없으면 영상 중심."});
 op("orientation",{label:"Orientation (구조 텐서)",group:"meas",hidden:true,kind:"measure",params:[R("sigma","Local window σ",2,{min:0.5,step:0.5,unit:"px"}),R("minC","최소 coherency",0.1,{min:0,max:1,step:0.05}),R("map","방향 색 지도 영상 만들기",true,{type:"bool"})],
   run:async(im,P)=>{ const r=await call("orientation",[curPlaneOf(im),{sigma:+P.sigma,minCoherency:+P.minC}]);
-    S.plots.push({id:uid(),kind:"xy",title:`Orientation — ${im.name}: 주 방향 ${r.dominant.toFixed(1)}°, order ${r.orderParam.toFixed(3)}, coherency ${r.meanCoherency.toFixed(3)}`,xl:"angle (°, 가로축 기준 반시계 +)",yl:"weighted count",series:[{name:"histogram",x:[...Array(180).keys()].map(k=>k-89.5),y:[...r.hist]}]});
+    S.plots.push({id:uid(),kind:"xy",title:`Orientation — ${im.name}: 주 방향 ${r.dominant===r.dominant?r.dominant.toFixed(1)+"°":"없음"}, order ${r.orderParam.toFixed(3)}, coherency ${r.meanCoherency.toFixed(3)}`,xl:"angle (°, 가로축 기준 반시계 +)",yl:"weighted count",series:[{name:"histogram",x:[...Array(180).keys()].map(k=>k-89.5),y:[...r.hist]}]});
     if(P.map){ const N=im.w*im.h, R1=new Float32Array(N),G1=new Float32Array(N),B1=new Float32Array(N); let emax=0; for(let i=0;i<N;i++) if(r.energy[i]>emax) emax=r.energy[i];
       for(let i=0;i<N;i++){ const h=((r.theta[i]+90)/180)%1; const [rr,gg,bb]=hsb(h); const s=r.coherency[i], b=Math.min(1,Math.sqrt(r.energy[i]/(emax||1))*1.5); R1[i]=Math.round(255*(1-s+s*rr/255)*b); G1[i]=Math.round(255*(1-s+s*gg/255)*b); B1[i]=Math.round(255*(1-s+s*bb/255)*b); }
-      addImage({name:"Orientation of "+im.name,w:im.w,h:im.h,bit:8,rgb:true,planes:[R1,G1,B1],cal:im.cal},{parent:im.id,src:"derived"}); }
-    record({op:"orientation",params:clean(P),label:"Orientation"},im); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); note(`주 방향 ${r.dominant.toFixed(1)}° · order parameter ${r.orderParam.toFixed(3)} (0 무질서 – 1 완전 정렬)`,"ok"); },
+      var map=addImage({name:"Orientation of "+im.name,w:im.w,h:im.h,bit:8,rgb:true,planes:[R1,G1,B1],cal:im.cal},{parent:im.id,src:"derived"}); }
+    record({op:"orientation",params:clean(P),label:"Orientation"},im); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); note(r.dominant===r.dominant?`주 방향 ${r.dominant.toFixed(1)}° · order parameter ${r.orderParam.toFixed(3)} (0 무질서 – 1 완전 정렬)`:"방향이 없습니다 (일정한 영상)","ok"); return P.map?map:undefined; }, // 색 지도가 다음 단계의 대상 (재생도 같게)
   ij:()=>`// OrientationJ (plugin) Analysis/Distribution 과 같은 정의`,help:"OrientationJ 와 같은 구조 텐서 정의. 색 지도: 색상 = 방향, 채도 = coherency, 밝기 = energy. 나노선·섬유·결 방향 분석."});
 op("zprofile",{label:"Plot Z-axis Profile",group:"meas",hidden:true,kind:"measure",params:[],
   run:(im)=>{ if(!isStack(im)) throw new Error("스택이 아닙니다"); const a=activeRoi(im); const g=a&&AREA_T.has(a.type)?roiGeom(im,a):null; const ys=[];
@@ -49603,17 +49732,20 @@ function drawBottom(){
 }
 function tableHTML(rows,cols,o){ o=o||{}; if(!rows.length) return `<div class="xs muted im-empty">${o.empty||"표가 비었습니다"}</div>`;
   return `<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }
-function csvOf(rows,cols){ const q=v=>{ const s=v==null?"":String(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }; return cols.map(c=>q(c.label||c.k)+(c.u?` (${c.u})`:"")).join(",")+"\n"+rows.map(r=>cols.map(c=>q(r[c.k])).join(",")).join("\n"); }
+const csvQ=v=>{ const s=v==null?"":String(v); return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+function csvOf(rows,cols){ return cols.map(c=>csvQ((c.label||c.k)+(c.u?` (${c.u})`:""))).join(",")+"\n"+rows.map(r=>cols.map(c=>csvQ(r[c.k])).join(",")).join("\n"); }
+// 복사(Excel·Origin 붙여 넣기): 탭 구분, 값 안의 탭·줄바꿈은 공백 (쉼표는 그대로)
+function tsvOf(rows,cols){ const t=v=>(v==null?"":String(v)).replace(/[\t\r\n]+/g," "); return cols.map(c=>t((c.label||c.k)+(c.u?` (${c.u})`:""))).join("\t")+"\n"+rows.map(r=>cols.map(c=>t(r[c.k])).join("\t")).join("\n"); }
 function bResults(B){ const extra=["Length","Class"].filter(k=>S.results.some(r=>r[k]!=null));
   const units=[...new Set(S.results.map(r=>r.Unit).filter(Boolean))]; const one=units.length===1?units[0]:null; // 단위가 섞이면 Unit 열로
   const cols=[{k:"Label"},...(S.results.some(r=>r.Slice)?[{k:"Slice"}]:[]),...S.measure.cols.filter(k=>S.results.some(r=>r[k]!=null)).map(k=>({k,u:one?colUnit(k,one):""})),...extra.map(k=>({k,u:one?colUnit(k,one):""})),...(one?[]:[{k:"Unit"}])];
   B.innerHTML=`<div class="im-row"><button class="btn xs" id="rsCsv" ${S.results.length?"":"disabled"}>CSV</button><button class="btn xs" id="rsCopy" ${S.results.length?"":"disabled"}>복사 (표 붙여넣기)</button><button class="btn xs" id="rsClr" ${S.results.length?"":"disabled"}>Clear</button><span class="xs muted">열은 Measure ▸ Set Measurements 에서</span></div>${tableHTML(S.results,cols,{empty:"Measure (Ctrl+M) 결과가 여기에 쌓입니다."})}`;
-  $q(B,"#rsCsv").onclick=()=>downloadText("Results.csv",csvOf(S.results,cols)); $q(B,"#rsCopy").onclick=()=>copyText(csvOf(S.results,cols).replace(/,/g,"\t"));
+  $q(B,"#rsCsv").onclick=()=>downloadText("Results.csv",csvOf(S.results,cols)); $q(B,"#rsCopy").onclick=()=>copyText(tsvOf(S.results,cols));
   $q(B,"#rsClr").onclick=()=>{ if(confirm2("rsclr","Results 를 비울까요? 한 번 더 누르면 비웁니다")){ S.results=[]; save(); drawBottom(); } }; }
 function bParticles(B){ const im=cur(); const pa=im&&S.particles[im.id]; if(!pa){ B.innerHTML=`<div class="xs muted im-empty">Analyze ▸ Analyze Particles 를 실행하면 입자별 측정값이 여기에 나옵니다.</div>`; return; }
   const cols=[{k:"#"},...S.measure.cols.filter(k=>pa.rows.length&&pa.rows[0][k]!==undefined).map(k=>({k,u:colUnit(k,pa.unit)}))]; const sel=new Set(pa.sel||[]);
   B.innerHTML=`<div class="im-row"><b>${esc(im.name)}</b><span class="xs muted">${pa.rows.length} particles · ${esc(pa.summary.Threshold)}${pa.redirect&&pa.redirect!==im.name?` · 세기: ${esc(pa.redirect)}`:""}</span><span class="sp"></span><button class="btn xs" id="ptCsv">CSV</button><button class="btn xs" id="ptCopy">복사</button></div>${tableHTML(pa.rows,cols,{sel})}`;
-  $q(B,"#ptCsv").onclick=()=>downloadText(`${im.name}_particles.csv`,csvOf(pa.rows,cols)); $q(B,"#ptCopy").onclick=()=>copyText(csvOf(pa.rows,cols).replace(/,/g,"\t"));
+  $q(B,"#ptCsv").onclick=()=>downloadText(`${im.name}_particles.csv`,csvOf(pa.rows,cols)); $q(B,"#ptCopy").onclick=()=>copyText(tsvOf(pa.rows,cols));
   $a(B,"tbody tr").forEach(tr=>tr.onclick=e=>{ const i=+tr.dataset.i; if(e.shiftKey||e.ctrlKey||e.metaKey){ const s=new Set(pa.sel); s.has(i)?s.delete(i):s.add(i); pa.sel=[...s]; } else pa.sel=[i];
     const c=pa.cent[i]; const v=viewOf(im); const {W,H}=canvasSize(); if(c){ v.x=c[0]-W/v.zoom/2; v.y=c[1]-H/v.zoom/2; } draw(); $a(B,"tbody tr").forEach(t=>t.classList.toggle("sel",pa.sel.includes(+t.dataset.i))); }); }
 function bSummary(B){ const cols=["Image","Slice","Count","Total Area","Average Size","%Area","ECD mean","ECD SD","Feret mean","Circ. mean","Density (/area)","Unit","Threshold"].filter(k=>S.summary.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k}));
@@ -49666,7 +49798,7 @@ function bPlots(B){ if(!S.plots.length){ B.innerHTML=`<div class="xs muted im-em
   B.innerHTML=S.plots.slice().reverse().map(p=>{ let extra=""; if(p.recip){ const s=p.series[0]; const pk=peaksOf(s.x,s.y).slice(0,12); if(pk.length) extra=`<div class="xs">피크: ${pk.map(i=>`r = ${g4(s.x[i])} → d = <b>${g4(1/s.x[i])}</b>`).join(" · ")}</div>`; }
     return `<div class="im-plot" data-id="${p.id}"><div class="im-row"><b class="sm">${esc(p.title)}</b><span class="sp"></span><button class="btn xs" data-csv="${p.id}">CSV</button><button class="btn xs" data-svg="${p.id}">SVG</button><button class="btn xs" data-x="${p.id}">×</button></div>${svgXY(p.series,{xl:p.xl,yl:p.yl})}${extra}</div>`; }).join("");
   $a(B,"[data-x]").forEach(b=>b.onclick=()=>{ S.plots=S.plots.filter(p=>p.id!==b.dataset.x); save(); drawBottom(); });
-  $a(B,"[data-csv]").forEach(b=>b.onclick=()=>{ const p=S.plots.find(q=>q.id===b.dataset.csv); const s=p.series; downloadText(p.title.replace(/[^\w.-]+/g,"_")+".csv",[p.xl,...s.map(x=>x.name)].join(",")+"\n"+s[0].x.map((x,i)=>[x,...s.map(q=>q.y[i])].join(",")).join("\n")); });
+  $a(B,"[data-csv]").forEach(b=>b.onclick=()=>{ const p=S.plots.find(q=>q.id===b.dataset.csv); const s=p.series; downloadText(p.title.replace(/[^\w.-]+/g,"_")+".csv",[p.xl,...s.map(x=>x.name)].map(csvQ).join(",")+"\n"+s[0].x.map((x,i)=>[x,...s.map(q=>q.y[i])].join(",")).join("\n")); });
   $a(B,"[data-svg]").forEach(b=>b.onclick=()=>{ const s=$q(B,`.im-plot[data-id="${b.dataset.svg}"] svg`); downloadText("plot.svg",s.outerHTML,"image/svg+xml"); }); }
 
 /* ---------- 내려받기·복사 ---------- */
@@ -49680,10 +49812,10 @@ function copyText(t){ try{ navigator.clipboard.writeText(t).then(()=>note("복�
 let REPLAY=false;
 function record(step,im){ if(!S.macro.rec||REPLAY||PVMODE) return; S.macro.steps.push(Object.assign({},step,{img:im?im.id:null,t:Date.now()})); save(); if(S.ui.panel==="macro") renderPanel(); }
 async function runSteps(steps,im,onStep){
-  let target=im; REPLAY=true;
-  try{ for(let i=0;i<steps.length;i++){ const s=steps[i]; const o=OPS[s.op]; if(!o) throw new Error("알 수 없는 단계: "+s.op); onStep&&onStep(i,s);
+  let target=im; REPLAY=true; const gen=CANCEL_GEN;
+  try{ for(let i=0;i<steps.length;i++){ if(gen!==CANCEL_GEN) throw new Error("취소"); const s=steps[i]; const o=OPS[s.op]; if(!o) throw new Error("알 수 없는 단계: "+s.op); onStep&&onStep(i,s);
       const P=Object.assign({},s.params,{__op:s.op}); if(s.op==="calc"&&P.bName){ const b=S.images.find(x=>x.name===P.bName); if(b) P.b=b.id; }
-      if(s.op==="analyze"&&P.redirectName&&P.redirect&&P.redirect!=="__parent"){ const b=S.images.find(x=>x.name===P.redirectName); P.redirect=b?b.id:"__parent"; }
+      if(s.op==="analyze"&&P.redirectName&&P.redirect&&P.redirect!=="__parent"&&P.redirect!=="__root"){ const b=S.images.find(x=>x.name===P.redirectName); if(!b) throw new Error(`Redirect 영상 '${P.redirectName}' 이 열려 있지 않습니다`); P.redirect=b.id; }
       S.sel=target.id; const r=await o.run(target,P); if(r&&r.id) target=r; }
   } finally { REPLAY=false; }
   return target;
@@ -49719,18 +49851,24 @@ function panelMacro(el,im){
   q("#mcFiles").onchange=e=>{ const fl=[...e.target.files]; e.target.value=""; batchFiles(fl); };
 }
 const BATCH={sel:new Set(),keep:false,zip:false};
-async function batchImages(list){ if(!list.length){ note("영상을 고르세요","warn"); return; } if(BUSY) return; BUSY="batch"; const outs=[]; let ok=0;
-  try{ for(let k=0;k<list.length;k++){ const im=list[k]; setProg(`Batch ${k+1}/${list.length}: ${im.name}`,k/list.length); try{ const t=await runSteps(S.macro.steps,im); outs.push(t); ok++; }catch(e){ note(`${im.name}: ${e.message}`,"warn"); } } }
+async function batchImages(list){ if(!list.length){ note("영상을 고르세요","warn"); return; } if(BUSY) return; BUSY="batch"; const outs=[]; let ok=0; const gen=CANCEL_GEN;
+  try{ for(let k=0;k<list.length;k++){ if(gen!==CANCEL_GEN){ note(`Batch 중단 — ${k}/${list.length} 에서`,"warn"); break; } const im=list[k]; setProg(`Batch ${k+1}/${list.length}: ${im.name}`,k/list.length); try{ const t=await runSteps(S.macro.steps,im); outs.push(t); ok++; }catch(e){ note(`${im.name}: ${e.message}`,"warn"); } } }
   finally{ hideProg(); BUSY=null; }
   if(BATCH.zip) zipImages(outs); note(`Batch 완료 — ${ok}/${list.length} 영상`,"ok"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
-async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; let ok=0; const zipList=[];
-  try{ for(let k=0;k<files.length;k++){ const f=files[k]; setProg(`Batch ${k+1}/${files.length}: ${f.name}`,k/files.length);
-      try{ const before=new Set(S.images.map(x=>x.id)); const u8=new Uint8Array(await f.arrayBuffer()); const r=await IO.readFile(f.name,u8,{});
-        for(const d of r.images){ const im=addImage(d,{file:f.name}); const t=await runSteps(S.macro.steps,im); if(BATCH.zip) zipList.push(tiffOf(t)); ok++; }
-        if(!BATCH.keep){ S.images.filter(x=>!before.has(x.id)).map(x=>x.id).forEach(closeImage); } }
-      catch(e){ note(`${f.name}: ${e.message}`,"warn"); } await sleep(0); } }
+async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; let ok=0, nImg=0; const zipList=[]; const gen=CANCEL_GEN;
+  // 옆 파일(.txt: Hitachi·JEOL 보정)은 영상으로 열지 않고 같은 이름 영상에 넘김 (열기와 같은 규칙)
+  const base=n=>n.replace(/\.[^.]+$/,"").toLowerCase(); const imgNames=new Set(files.filter(f=>!/\.txt$/i.test(f.name)).map(f=>base(f.name)));
+  const side=files.filter(f=>/\.txt$/i.test(f.name)&&imgNames.has(base(f.name))); const sidecars={}; for(const f of side) sidecars[f.name.toLowerCase()]=IO._txt(new Uint8Array(await f.arrayBuffer()));
+  const list=files.filter(f=>!side.includes(f));
+  try{ for(let k=0;k<list.length;k++){ if(gen!==CANCEL_GEN){ note(`Batch 중단 — ${k}/${list.length} 파일에서`,"warn"); break; } const f=list[k]; setProg(`Batch ${k+1}/${list.length}: ${f.name}`,k/list.length);
+      const before=new Set(S.images.map(x=>x.id));
+      try{ const u8=new Uint8Array(await f.arrayBuffer()); const r=await IO.readFile(f.name,u8,{sidecars});
+        for(const d of r.images){ if(gen!==CANCEL_GEN) break; nImg++; try{ const im=addImage(d,{file:f.name}); const t=await runSteps(S.macro.steps,im); if(BATCH.zip) zipList.push(tiffOf(t)); ok++; }catch(e){ if(String(e.message)==="취소") break; note(`${d.name}: ${e.message}`,"warn"); } } }
+      catch(e){ note(`${f.name}: ${e.message}`,"warn"); }
+      finally{ if(!BATCH.keep){ S.images.filter(x=>!before.has(x.id)).map(x=>x.id).forEach(id=>closeImage(id,true)); } } // 실패해도 이 파일에서 생긴 영상은 닫음
+      await sleep(0); } }
   finally{ hideProg(); BUSY=null; }
-  if(BATCH.zip&&zipList.length) downloadBlob("batch_results.zip",makeZip(zipList)); note(`Batch 완료 — ${ok} 영상 (${files.length} 파일). 결과는 Summary 표`,"ok"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
+  if(BATCH.zip&&zipList.length) downloadBlob("batch_results.zip",makeZip(zipList)); note(`Batch 완료 — ${ok}/${nImg} 영상 (${list.length} 파일${side.length?`, 옆 .txt ${side.length}`:""}). 결과는 Summary 표`,ok===nImg?"ok":"warn"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
 function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
 function zipImages(list){ if(!list.length) return; downloadBlob("batch_results.zip",makeZip(list.map(tiffOf))); }
 /* ZIP (무압축 store) */
@@ -49748,7 +49886,7 @@ function makeZip(files){ const enc=new TextEncoder(); const parts=[], cent=[]; l
 function toIJM(steps){
   const body=steps.map(s=>{ const o=OPS[s.op]; let line=""; try{ line=o&&o.ij?o.ij(Object.assign({},s.params)):""; }catch(e){ line=""; } return `// ${stepText(s)}\n${line||"// (ImageJ 에 같은 명령 없음)"}`; }).join("\n");
   return `// INNO Analytics → ImageJ macro (${new Date().toISOString().slice(0,10)})\n// ImageJ 1.54 기준 명령. 한 영상에: 영상을 연 뒤 아래 '처리' 부분만 실행.\n// 폴더 전체: 이 파일 그대로 실행 → 폴더 고르기.\nsetOption("BlackBackground", true);\n`+
-`dir = getDirectory("영상 폴더");\nlist = getFileList(dir);\nsetBatchMode(true);\nfor (i=0; i<list.length; i++) {\n  if (File.isDirectory(dir+list[i])) continue;\n  open(dir+list[i]);\n  // ---- 처리 ----\n${body.split("\n").map(l=>"  "+l).join("\n")}\n  // -------------\n  run("Close All");\n}\nsetBatchMode(false);\n`;
+`dir = getDirectory("영상 폴더");\nlist = getFileList(dir);\nsetBatchMode(true);\nfor (i=0; i<list.length; i++) {\n  if (File.isDirectory(dir+list[i])) continue;\n  if (!matches(toLowerCase(list[i]), ".*\\\\.(tif|tiff|png|jpg|jpeg|bmp|gif|dm3|dm4|nd2|czi|lif|oib|oir|ome\\\\.tif)$")) continue; // 영상 파일만\n  open(dir+list[i]);\n  // ---- 처리 ----\n${body.split("\n").map(l=>"  "+l).join("\n")}\n  // -------------\n  run("Close All");\n}\nsetBatchMode(false);\n`;
 }
 
 /* ============================================================
@@ -49789,7 +49927,7 @@ function build(root){
   q("#imFmts").onclick=showFormats;
   q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveP").onclick=exportPNG;
   q("#imClose").onclick=()=>{ const im=cur(); if(im){ closeImage(im.id); rerender(); } };
-  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(!confirm2("imclr","열린 영상·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); DIRTY.add(id); }); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
+  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 영상·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); DIRTY.add(id); }); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
   q("#imStop").onclick=()=>{ cancelAll(); note("계산을 중단했습니다"); };
   ["dragenter","dragover"].forEach(ev=>x.addEventListener(ev,e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes("Files")){ e.preventDefault(); e.stopPropagation(); x.classList.add("over"); } }));
   x.addEventListener("dragleave",e=>{ if(e.target===x) x.classList.remove("over"); });
@@ -49804,8 +49942,8 @@ function rerender(){ if(!ROOT||!$q(ROOT,".imx")) return; drawSide(); drawTools()
 /* ---------- 왼쪽: 영상 목록 ---------- */
 const THUMB=new Map();
 function thumbOf(im){ const k=im.id+"|"+im.ver+"|"+JSON.stringify(im.disp)+"|"+im.composite; const t=THUMB.get(im.id); if(t&&t.k===k) return t.url;
-  try{ const save=[DISP.key,DISP.cv,DISP.scale]; DISP.key=null; DISP.cv=null; const D=buildDisplay(im); const s=56/Math.max(im.w,im.h); const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(im.w*s)); c.height=Math.max(1,Math.round(im.h*s));
-    const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(D.cv,0,0,c.width,c.height); const url=c.toDataURL(); [DISP.key,DISP.cv,DISP.scale]=save; THUMB.set(im.id,{k,url}); return url; }catch(e){ return ""; } }
+  try{ const sc=Math.max(1,Math.floor(Math.max(im.w,im.h)/112)); const src=renderRegion(im,{x:0,y:0,w:im.w,h:im.h,sc}); const s=56/Math.max(im.w,im.h); const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(im.w*s)); c.height=Math.max(1,Math.round(im.h*s)); // 작은 표본에서 바로 (전체 표시를 다시 만들지 않음)
+    const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(src,0,0,c.width,c.height); const url=c.toDataURL(); THUMB.set(im.id,{k,url}); return url; }catch(e){ return ""; } }
 function drawSide(){ const el=ROOT&&$q(ROOT,"#imList"); if(!el) return;
   if(!S.images.length){ el.innerHTML=`<div class="im-dropbox" id="imDrop">여기에 영상 파일을 놓거나<br><b>눌러서 열기</b><br><span class="xs">TIFF · ND2 · CZI · PNG · DM3 · MRC · EMD · IBW · SXM …</span></div>
     <ol class="im-steps0"><li><b>열기</b> — SEM·TEM·AFM·광학 영상. 화소 크기는 메타데이터에서 자동으로</li><li><b>보정 확인</b> — 없으면 Set Scale 도구로 축척 막대에 선</li><li><b>Threshold</b> → <b>Analyze Particles</b> — 크기 분포·면적 분율</li><li><b>Macro</b> — 같은 처리를 다른 영상·파일에 batch</li></ol>`; $q(el,"#imDrop").onclick=()=>$q(ROOT,"#imFin").click(); return; }
@@ -49833,7 +49971,7 @@ function drawStack(){ const el=ROOT&&$q(ROOT,"#imStack"); if(!el) return; const 
   $a(el,"input[type=range]").forEach(r=>r.oninput=()=>{ im[r.dataset.d]=+r.value-1; $q(r.parentNode,".v").textContent=`${r.value}/${r.max}${r.dataset.d==="c"&&im.chNames&&im.chNames[+r.value-1]?" "+im.chNames[+r.value-1]:""}`; clearPreview(); invalidate(); draw(); });
   $a(el,"input[type=range]").forEach(r=>r.onchange=()=>{ save(); renderPanel(); });
   const pb=$q(el,"#imPlay"); if(pb) pb.onclick=()=>{ if(PLAY){ clearInterval(PLAY); PLAY=null; drawStack(); return; } const k=im.nz>1?"z":"t", n=im.nz>1?im.nz:im.nt; PLAY=setInterval(()=>{ if(cur()!==im){ clearInterval(PLAY); PLAY=null; return; } im[k]=(im[k]+1)%n; invalidate(); draw(); const r=$q(el,`input[data-d="${k}"]`); if(r){ r.value=im[k]+1; $q(r.parentNode,".v").textContent=`${im[k]+1}/${n}`; } },1000/(S.ui.fps||7)); drawStack(); };
-  const fp=$q(el,"#imFps"); if(fp) fp.onchange=e=>{ S.ui.fps=clamp(+e.target.value||7,1,60); save(); };
+  const fp=$q(el,"#imFps"); if(fp) fp.onchange=e=>{ S.ui.fps=clamp(+e.target.value||7,1,60); save(); if(PLAY){ clearInterval(PLAY); PLAY=null; pb.click(); } }; // 재생 중 fps 바꾸면 바로 반영
 }
 
 /* ---------- 파일 열기 ---------- */
@@ -49842,7 +49980,7 @@ async function loadFiles(list){
   const base=n=>n.replace(/\.[^.]+$/,"").toLowerCase();
   const imgNames=new Set(arr.filter(f=>!/\.txt$/i.test(f.name)).map(f=>base(f.name)));
   const side=arr.filter(f=>/\.txt$/i.test(f.name)&&imgNames.has(base(f.name)));
-  const sidecars={}; for(const f of side) sidecars[f.name.toLowerCase()]=await f.text();
+  const sidecars={}; for(const f of side) sidecars[f.name.toLowerCase()]=IO._txt(new Uint8Array(await f.arrayBuffer())); // UTF-8 아니면 latin1 (µ)
   const files=arr.filter(f=>!side.includes(f));
   let n=0; const errs=[];
   for(let k=0;k<files.length;k++){ const f=files[k]; setProg(`읽는 중 ${k+1}/${files.length}: ${f.name}`,k/files.length);
@@ -49895,13 +50033,16 @@ function askRaw(name,size){ return new Promise(res=>{ const m=modal(`<div class=
 
 /* ---------- 저장·내보내기 ---------- */
 function saveTIFF(){ const im=cur(); if(!im) return; const t=tiffOf(im); downloadBlob(t.name,new Blob([t.data],{type:"image/tiff"})); note(`${t.name} — ImageJ/Fiji 에서 보정·스택 정보와 함께 열립니다`,"ok"); }
-function exportPNG(){ const im=cur(); if(!im) return; const D=buildDisplay(im); const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false; g.drawImage(D.cv,0,0,im.w,im.h);
+function exportPNG(){ const im=cur(); if(!im) return; const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
+  if(fullScale(im)===1){ const D=buildDisplay(im); g.drawImage(D.cv,0,0); } else { const hs=Math.max(1,Math.floor(8e6/im.w)); for(let y=0;y<im.h;y+=hs){ const st=renderRegion(im,{x:0,y,w:im.w,h:Math.min(hs,im.h-y),sc:1}); g.drawImage(st,0,y); } } // 큰 영상도 원래 해상도 (띠로 나눠)
   const v={zoom:1,x:0,y:0}; drawThreshold(im,g,v); drawParticles(im,g,v); if(S.ui.showAll!==false) roiList(im).forEach(r=>drawRoi(g,v,r,false,im)); const a=activeRoi(im); if(a) drawRoi(g,v,a,false,im); drawScaleBar(im,g,v,im.w,im.h);
   c.toBlob(b=>downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_view.png",b),"image/png"); }
 
 /* ---------- 단축키 ---------- */
 function onKey(e){
-  if(!ROOT||!document.body.contains(ROOT)||!$q(ROOT,".imx")) return; const t=e.target; if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)) return;
+  if(!ROOT||!document.body.contains(ROOT)||!$q(ROOT,".imx")) return;
+  { const m=$q(ROOT,"#imModal"); if(e.key==="Escape"&&m&&!m.hidden){ e.preventDefault(); const b=$q(m,"[data-close]"); if(b) b.click(); else { m.hidden=true; m.innerHTML=""; } return; } } // Esc = 창 닫기(취소)
+  const t=e.target; if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)) return;
   const im=cur(); const k=e.key; const mod=e.ctrlKey||e.metaKey;
   if(k===" "&&!SPACE){ SPACE=true; e.preventDefault(); return; }
   if(mod&&!e.shiftKey&&k.toLowerCase()==="z"){ e.preventDefault(); undo(); return; } // 다시 하기(redo)는 없음
@@ -49916,7 +50057,7 @@ function onKey(e){
 }
 try{ document.addEventListener("keydown",onKey); document.addEventListener("keyup",e=>{ if(e.key===" ") SPACE=false; }); window.addEventListener("blur",()=>{ SPACE=false; }); }catch(e){}
 
-window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps)};
+window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll};
 
 })();
 </script>
