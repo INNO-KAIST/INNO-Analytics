@@ -1,0 +1,35 @@
+/* Diffraction 탭 */
+.df-head{padding-bottom:12px}
+.df-head .seg{margin-top:2px}
+.df-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:start}
+.df-left,.df-right{min-width:0}
+.df-viewer{padding:12px}
+.df-vbar{gap:8px;margin-bottom:8px}
+.df-vbar select{padding:5px 8px}
+.df-stage{position:relative;width:100%;aspect-ratio:1/1;max-height:78vh;background:#0b0f0e;border-radius:8px;overflow:hidden}
+#dfCv{width:100%;height:100%;display:block;cursor:crosshair}
+.df-busy{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.72);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;text-align:center;max-width:80%}
+.df-hint{margin-top:6px}
+.df-ck{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap}
+.df-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:12.5px;align-items:baseline}
+.df-kv>span{color:var(--muted)}
+.df-kv>b{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.df-trunc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.df-wrap{flex-wrap:wrap}
+.df-calbody{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.df-layers{margin-top:8px;gap:12px}
+.df-cand tbody tr{cursor:pointer}
+.df-cand td{vertical-align:top}
+.df-cand td .muted{font-size:11px;white-space:normal}
+.df-sel td{background:var(--primary-soft,rgba(60,140,120,.15))!important}
+.df-dim td{opacity:.55}
+.df-tag{display:inline-block;font-size:10px;padding:0 5px;border-radius:5px;background:var(--chip);border:1px solid var(--line);margin-left:2px}
+.df-detail{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.df-detail h4{font-size:13.5px;margin-bottom:6px}
+.ov{text-decoration:overline}
+@media (max-width:1100px){ .df-grid{grid-template-columns:minmax(0,1fr)} .df-stage{max-height:none} }
+@media (max-width:720px){ .df-viewer{padding:8px} .df-stage{border-radius:6px} .df-kv{grid-template-columns:auto minmax(0,1fr)} }
+@media (pointer:coarse){ .df-vbar .btn,.df-vbar select,.df-head .seg button,#dfTool button,#dfPat button,#dfCal button,#dfLat button,.df-right .btn{min-height:40px}
+  .df-ck input{width:20px;height:20px} .df-cand td{padding-top:10px;padding-bottom:10px} }
+.df-kok{color:var(--ok,#2a8);font-weight:700}
+.df-kbad{color:var(--warn,#c80)}

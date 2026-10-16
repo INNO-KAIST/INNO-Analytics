@@ -3,7 +3,7 @@
 The user decided: **the UI skeleton is English; explanatory prose stays Korean.**
 
 ## English (translate)
-- Tab names (main nav): `XPS · EM Image · Image Analysis · EDS Maps · EDS Spectrum · Lattice FFT · EDS Interference · EM Metadata · Energy Diagram · DRE Kinetics`
+- Tab names (main nav): `XPS · EM Image · Image Analysis · EDS Maps · EDS Spectrum · Diffraction · EDS Interference · EM Metadata · Energy Diagram · DRE Kinetics`
   - EM Image = the image view of the opened electron-microscopy file (Velox EMD, DM3/DM4, Bruker BCF, MRC, TIFF): S/TEM, SEM.
   - Image Analysis = the ImageJ-style general analysis (optical microscopy, AFM, SEM, TEM — any image).
 - View / panel / card titles, section headings, sub-tab names.

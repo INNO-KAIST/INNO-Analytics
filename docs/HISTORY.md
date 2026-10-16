@@ -5,6 +5,13 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-17 Diffraction 탭 v1.0 — SAED 자동 해석(REDI 기능 + 보강) · Phase DB(연구실 공유)**(modules/diffraction/SPEC.md):
+  Lattice FFT 탭을 Diffraction 으로 넓힘(키 lattice 유지, 휴대폰 Diffr.) — FFT (HRTEM) · SAED · Phase DB. 파일에 따라 모드 자동(역공간 교정·DIFFRACTION 태그·이름·밝기 분포).
+  결정학 코어(공간군 530 설정·IT C 4.3.2.2 전자 산란 인자·CIF·정대축 2D 격자) = gemmi·pymatgen 과 일치. 패턴 읽기: 덧그림·빔스토퍼·포화 덩어리·국소 잡음 스폿·Friedel 중심(반 격자점 배제)·여러 격자·방사 왜곡·링 타원.
+  상 찾기: 길이비·각 FOM + 세기 순위 상관·운동학 금지 자리·빠진 반사로 전체 패턴 검증, 공칭 보정은 순위에 안 쓰고 κ 로만 — REDI 의 '3 % 교정 오차로 순위 뒤집힘' 해결. 아핀(찌그러짐) 표준 보정 저장.
+  실측 반증: Au 링(DM 태그 9 % 작음 검출), Si [001](파일 교정 nm 오기 경고 · 투사 렌즈 찌그러짐 7.4 % · 같은 장비 375/300 mm 교차 −1.4 %), Fe-Cr ODS 8-bit RGB tif(스케일바 177 px · 포화 직접빔 · bcc [135] κ 1.012).
+  Phase DB: IndexedDB(내장·이 기기) + Firestore `inno-analytics-base`(구성원·관리자·이력·숨김·검증, 게시된 규칙 그대로), 판정마다 DB 항목 id·판 기록. 기본 TIFF 리더에 RGB 8-bit 추가.
+  시험: core 58 · pattern 29 · index 30 · real 19 · 내장 묶음 277 · db 139 · Chromium ui_diff 47 · ui_db 83 · 독립 검토 13 건 중 12 건 수정 · 기존(ui_img·검수·XPS·DRE·셸 18·touch 70) 그대로.
 - **10-17 휴대폰 터치 조작 — 공용 제스처 window.INNO_TOUCH**(modules/touch/src, inject_all.py 의 INNO-TOUCH 블록 · head):
   한 구현을 모든 캔버스가 같이 쓴다 — EM Image, EDS Maps, EDS Spectrum, Lattice FFT(실공간·FFT·역FFT), Image Analysis, XPS. 나중의 Diffraction 모듈도 `INNO_TOUCH.attach(el,{getView,setView,oneFinger,onTap,onDoubleTap,onLongPress,onPassCancel…})` 로 붙인다.
   두 손가락 = 핀치 중심 고정 확대·이동(어느 도구든), 한 손가락 = 이동 또는 그리기 도구면 그리기(둘째 손가락이 오면 그리던 것 취소), 두 번 탭 = 맞춤, 탭·길게 누르기 = hover 로만 보이던 값(화소 값·XPS 풍선).

@@ -6,10 +6,10 @@
 - 본 앱 코드 변경은 정규식 치환 + 개수 확인. 원본(주입 전)과 이미 주입된 판본 모두에서 같은 결과가 나온다."""
 import sys, re, os
 HERE=os.path.dirname(os.path.abspath(__file__))
-ED=os.path.join(HERE,'energy_diagram','src'); TO=os.path.join(HERE,'touch','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
+ED=os.path.join(HERE,'energy_diagram','src'); DF=os.path.join(HERE,'diffraction','src'); TO=os.path.join(HERE,'touch','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
 inp,outp=sys.argv[1],sys.argv[2]
 s=open(inp,encoding='utf-8').read()
-s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
+s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH|DIFF):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
 def R(desc,pat,rep,flags=0):
     global s
     n=len(re.findall(pat,s,flags))
@@ -18,20 +18,25 @@ def R(desc,pat,rep,flags=0):
 # XPS 는 맨 왼쪽(사용자 요청 10-15), Energy Diagram·DRE 는 메타데이터 뒤
 # 탭 이름은 영어(docs/UI-English-style.md). 옛 한글 이름·옛 영어 이름·이미 주입된 판본 모두 같은 결과가 나오도록 라벨은 [^"]* 로 받는다.
 # 키(xps,image,imgx,maps,spectrum,lattice,interf,meta,energy,dre)는 바꾸지 않는다.
-TAB_LIST='const VIEWS=[["xps","XPS"],["image","EM Image"],["imgx","Image Analysis"],["maps","EDS Maps"],["spectrum","EDS Spectrum"],["lattice","Lattice FFT"],["interf","EDS Interference"],["meta","EM Metadata"],["energy","Energy Diagram"],["dre","DRE Kinetics"]];'
+TAB_LIST='const VIEWS=[["xps","XPS"],["image","EM Image"],["imgx","Image Analysis"],["maps","EDS Maps"],["spectrum","EDS Spectrum"],["lattice","Diffraction"],["interf","EDS Interference"],["meta","EM Metadata"],["energy","Energy Diagram"],["dre","DRE Kinetics"]];'
 _L=r'"[^"]*"'
 R('탭 목록',r'const VIEWS=\[(?:\["xps",'+_L+r'\],)?\["image",'+_L+r'\],(?:\["imgx",'+_L+r'\],)?\["maps",'+_L+r'\],\["spectrum",'+_L+r'\],\["lattice",'+_L+r'\],\["interf",'+_L+r'\],\["meta",'+_L+r'\](?:,\["energy",'+_L+r'\])?(?:,\["dre",'+_L+r'\])?(?:,\["xps",'+_L+r'\])?\];',
   lambda m:TAB_LIST)
 # 휴대폰 하단 탭(열 10개, 폭 ≈39px): 짧은 이름. 라벨 글자는 DOM 에 남기고(접근성·테스트) CSS 가 data-short 를 보여 준다.
-NAV_SHORT_JS='const NAV_SHORT={xps:"XPS",image:"EM Img",imgx:"Analysis",maps:"Maps",spectrum:"Spectra",lattice:"FFT",interf:"Interf.",meta:"Meta",energy:"Energy",dre:"DRE"};'
+NAV_SHORT_JS='const NAV_SHORT={xps:"XPS",image:"EM Img",imgx:"Analysis",maps:"Maps",spectrum:"Spectra",lattice:"Diffr.",interf:"Interf.",meta:"Meta",energy:"Energy",dre:"DRE"};'
 if 'const NAV_SHORT=' not in s:
     s=s.replace(TAB_LIST, TAB_LIST+'\n/* 휴대폰 하단 탭용 짧은 이름 — 키가 없으면 전체 이름 */\n'+NAV_SHORT_JS,1)
 else:
     s,_n=re.subn(r'const NAV_SHORT=\{[^}]*\};',lambda m:NAV_SHORT_JS,s); assert _n==1, 'NAV_SHORT 일치 %d개'%_n
 R('탭 버튼 라벨(짧은 이름)',r'return `<button data-v="\$\{k\}" class="\$\{state\.view===k\?"active":""\}"(?: aria-label="\$\{esc\(t\)\}")? \$\{dis\}>(?:<span class="nl" data-short="\$\{esc\(NAV_SHORT\[k\]\|\|t\)\}">\$\{t\}</span>|\$\{t\})\$\{cnt\}</button>`;',
   lambda m:'return `<button data-v="${k}" class="${state.view===k?"active":""}" aria-label="${esc(t)}" ${dis}><span class="nl" data-short="${esc(NAV_SHORT[k]||t)}">${t}</span>${cnt}</button>`;')
-R('파일 없이 열리는 탭',r'if\(!rec && state\.view!=="interf"(?: && state\.view!=="energy")?(?: && state\.view!=="dre")?(?: && state\.view!=="xps")?(?: && state\.view!=="imgx")?\)\{ renderWelcome\(root\); return; \}',
-  'if(!rec && state.view!=="interf" && state.view!=="energy" && state.view!=="dre" && state.view!=="xps" && state.view!=="imgx"){ renderWelcome(root); return; }')
+R('파일 없이 열리는 탭',r'if\(!rec && state\.view!=="interf"(?: && state\.view!=="energy")?(?: && state\.view!=="dre")?(?: && state\.view!=="xps")?(?: && state\.view!=="imgx")?(?: && state\.view!=="lattice")?\)\{ renderWelcome\(root\); return; \}',
+  'if(!rec && state.view!=="interf" && state.view!=="energy" && state.view!=="dre" && state.view!=="xps" && state.view!=="imgx" && state.view!=="lattice"){ renderWelcome(root); return; }')
+# Diffraction 탭(키 lattice): 파일 없이도 열림(Phase DB·SAED 파일 열기), 분기 = DIFF_UI (FFT 모드 안에서 기존 renderLattice)
+s,_n=re.subn(r'    if\(k==="lattice"&&!\(rec&&rec\.images&&rec\.images\.length\)\) dis="disabled";\n','',s); assert _n in (0,1)
+assert 'k==="lattice"&&!(rec' not in s, '격자 탭 비활성 줄이 남음'
+R('Diffraction 분기',r'    else if\(state\.view==="lattice"\) (?:renderLattice\(root\)|\(window\.DIFF_UI\?window\.DIFF_UI\.render\(root\):renderLattice\(root\)\));\n',
+  '    else if(state.view==="lattice") (window.DIFF_UI?window.DIFF_UI.render(root):renderLattice(root));\n')
 R('탭 분기',r'    else if\(state\.view==="interf"\) renderInterf\(root\);\n(?:    else if\(state\.view==="energy"\) window\.ED_UI\.render\(root\);\n)?(?:    else if\(state\.view==="dre"\) window\.DRE_UI\.render\(root\);\n)?(?:    else if\(state\.view==="xps"\) window\.XPS_UI\.render\(root\);\n)?(?:    else if\(state\.view==="imgx"\) window\.IMG_UI\.render\(root\);\n)?',
   '    else if(state.view==="interf") renderInterf(root);\n    else if(state.view==="energy") window.ED_UI.render(root);\n    else if(state.view==="dre") window.DRE_UI.render(root);\n    else if(state.view==="xps") window.XPS_UI.render(root);\n    else if(state.view==="imgx") window.IMG_UI.render(root);\n')
 R('출처 줄·파일 열',r'  renderSidebar\(\);\n(?:  const _noFile=state\.view==="energy"\|\|state\.view==="dre"(?:\|\|state\.view==="xps")?(?:\|\|state\.view==="imgx")?;\n)?  renderProv\((?:rec|state\.view==="energy"\?null:rec|_noFile\?null:rec)\);\n(?:  \{ const a=document\.getElementById\("app"\); if\(a\) a\.classList\.toggle\("ed-on",(?:state\.view==="energy"|_noFile)\); \}\n)?',
@@ -42,7 +47,7 @@ R('휴대폰 하단 탭',r'grid-template-columns:repeat\((?:6|7|8|9|10),1fr\);ga
 R('전역 끌어놓기 → XPS·Image 탭이면 그 탭으로',r'if\(ev==="drop"\) ?(?:loadFiles\(e\.dataTransfer\.files\);|\{ if\(state\.view==="xps"&&window\.XPS_UI\) XPS_UI\._load\(e\.dataTransfer\.files\);(?: else if\(state\.view==="imgx"&&window\.IMG_UI\) IMG_UI\._load\(e\.dataTransfer\.files\);)? else loadFiles\(e\.dataTransfer\.files\); \})',
   'if(ev==="drop"){ if(state.view==="xps"&&window.XPS_UI) XPS_UI._load(e.dataTransfer.files); else if(state.view==="imgx"&&window.IMG_UI) IMG_UI._load(e.dataTransfer.files); else loadFiles(e.dataTransfer.files); }')
 rd=lambda p:open(p,encoding='utf-8').read()
-css=rd(f'{ED}/ed.css')+'\n'+rd(f'{DR}/dre.css')+'\n'+rd(f'{XP}/xps.css')+'\n'+rd(f'{IM}/img.css')+'''
+css=rd(f'{ED}/ed.css')+'\n'+rd(f'{DR}/dre.css')+'\n'+rd(f'{XP}/xps.css')+'\n'+rd(f'{IM}/img.css')+'\n'+rd(f'{DF}/diff.css')+('\n'+rd(f'{DF}/diff_db.css') if os.path.exists(f'{DF}/diff_db.css') else '')+'''
 /* 파일 열을 쓰지 않는 탭(Energy Diagram·DRE·XPS — XPS 는 자체 파일 목록)에서는 숨기고 폭을 넘긴다 */
 #app.ed-on .side,#app.ed-on .sidetog{display:none!important}
 #app.ed-on .main{padding-left:0}
@@ -69,7 +74,9 @@ assert os.path.exists(f'{XP}/xps_lib.js'), 'xps_lib.js 없음: python3 -I module
 xlib=rd(f'{XP}/xps_lib.js'); xio=rd(f'{XP}/xps_io.js'); xcore=rd(f'{XP}/xps_core.js'); xui=rd(f'{XP}/xps_ui.js')
 icore=''.join(rd(os.path.join(IM,'core',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'core'))) if f.endswith('.js'))
 iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js')+'\n'+rd(f'{IM}/img_lif.js')+'\n'+rd(f'{IM}/img_oir.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
-for name,src in (('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
+DFS=[('diff-src-sg','diff_sg.js'),('diff-src-scat','diff_scat.js'),('diff-src-core','diff_core.js'),('diff-src-pattern','diff_pattern.js'),('diff-src-index','diff_index.js'),('diff-pack','diff_pack.js'),('diff-db','diff_db.js'),('diff-db-ui','diff_db_ui.js'),('diff-work','diff_work.js'),('diff-ui','diff_ui.js')]
+dfjs=[(i,rd(f'{DF}/{fn}')) for i,fn in DFS if os.path.exists(f'{DF}/{fn}')]
+for name,src in tuple(dfjs)+(('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_ui',xui)):
     assert '</script' not in src.lower(), name+': script 종료 태그'
     # 문법 확인 (node 가 있으면): 주석이 코드를 삼키는 등의 편집 실수를 주입 전에 막음
     import shutil as _sh, subprocess as _sp, tempfile as _tf
@@ -81,7 +88,8 @@ body=('<!-- INNO-ED:BEGIN js -->\n<script id="ed-js">\n'+edjs+'</script>\n<!-- I
       '<!-- INNO-DRE:BEGIN js -->\n<script id="dre-core-src">\n'+core+'</script>\n<script id="dre-ui">\n'+ui+'</script>\n<!-- INNO-DRE:END -->\n'
       '<!-- INNO-IF:BEGIN js -->\n<script id="interf-suggest">\n'+ifjs+'</script>\n<!-- INNO-IF:END -->\n'
       '<!-- INNO-XPS:BEGIN js -->\n<script id="xps-lib">\n'+xlib+'</script>\n<script id="xps-io">\n'+xio+'</script>\n<script id="xps-core-src">\n'+xcore+'</script>\n<script id="xps-ui">\n'+xui+'</script>\n<!-- INNO-XPS:END -->\n'
-      '<!-- INNO-IMG:BEGIN js -->\n<script id="img-core-src">\n'+icore+'</script>\n<script id="img-io">\n'+iio+'</script>\n<script id="img-ui">\n'+iui+'</script>\n<!-- INNO-IMG:END -->\n')
+      '<!-- INNO-IMG:BEGIN js -->\n<script id="img-core-src">\n'+icore+'</script>\n<script id="img-io">\n'+iio+'</script>\n<script id="img-ui">\n'+iui+'</script>\n<!-- INNO-IMG:END -->\n'
+      '<!-- INNO-DIFF:BEGIN js -->\n'+''.join('<script id="'+i+'">\n'+t+'</script>\n' for i,t in dfjs)+'<!-- INNO-DIFF:END -->\n')
 k=s.index('<script>window.INNO_UX') if '<script>window.INNO_UX' in s else s.rindex('</body>')
 s=s[:k]+body+s[k:]
 open(outp,'w',encoding='utf-8').write(s)

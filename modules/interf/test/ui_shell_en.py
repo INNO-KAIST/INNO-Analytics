@@ -29,7 +29,7 @@ with sync_playwright() as p:
     pg.goto('file://'+os.path.abspath(html)); pg.wait_for_timeout(1500)
     labels=pg.eval_on_selector_all('#nav button','els=>els.map(e=>[e.dataset.v,e.textContent.trim(),e.getAttribute("aria-label"),e.querySelector(".nl")&&e.querySelector(".nl").dataset.short])')
     print(labels)
-    exp=['XPS','EM Image','Image Analysis','EDS Maps','EDS Spectrum','Lattice FFT','EDS Interference','EM Metadata','Energy Diagram','DRE Kinetics']
+    exp=['XPS','EM Image','Image Analysis','EDS Maps','EDS Spectrum','Diffraction','EDS Interference','EM Metadata','Energy Diagram','DRE Kinetics']
     chk([l[1].rstrip('0123456789') for l in labels]==exp,'nav shows 10 English names',[l[1] for l in labels])
     chk([l[0] for l in labels]==['xps','image','imgx','maps','spectrum','lattice','interf','meta','energy','dre'],'view keys unchanged')
     pg.screenshot(path=f'{out}/d_welcome.png')

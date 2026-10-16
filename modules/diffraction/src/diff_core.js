@@ -168,6 +168,57 @@ DC.parseCIF=function(text){ const bl=DC.cifBlocks(text).filter(b=>b.items["_cell
 DC.phaseFromParams=function(p){ const e=p.sgSymbol?DC.sgBySymbol(p.sgSymbol):null; const s=e||DC.sgByNumber(+p.sgNumber); const cell=DC.cell(+p.a,+(p.b||p.a),+(p.c||p.a),+(p.al||90),+(p.be||90),+(p.ga||90));
   return {name:p.name||"",formula:p.formula||"",cell,ops:DC.sgOps(s),atoms:p.atoms||[],sg:{number:s.number,symbol:s.short,system:DC.crystalSystem(s.number),hall:s.hall},source:p.source||{}}; };
 
+/* ---------------- 저장 형식 (PhaseRec v1) ----------------
+   { id, name, formula, cell:{a,b,c,al,be,ga} (nm·도), sg:{number, symbol, hall?}, symops?:["x,y,z",…], atoms?:[{label,el,x,y,z,occ,B}],
+     source:{kind:"COD"|"DOI"|"paper"|"measured"|"manual", codId?, doi?, citation?, note?}, verified?, note?, (공유 DB 필드: createdBy… version, hidden) }
+   symops 가 있으면 그것(CIF 설정 그대로), 없으면 sg.hall → sg.symbol → sg.number 순으로 표의 설정 */
+const fmtOp=op=>{ const ax=["x","y","z"]; return [0,1,2].map(i=>{ let s=""; for(let j=0;j<3;j++){ const r=op.R[i*3+j]; if(!r) continue; s+=(r>0?(s?"+":""):"-")+ax[j]; } const t=op.t[i]; if(t){ const n=Math.round(t*24), g=gcd(n,24); s+=(s?"+":"")+(n/g)+"/"+(24/g); } return s||"0"; }).join(","); };
+DC.formatSymop=fmtOp;
+DC.phaseFromRecord=function(r){ if(!r||!r.cell) throw new Error("결정상 기록에 격자상수가 없습니다");
+  const c=r.cell; const cell=DC.cell(+c.a,+(c.b||c.a),+(c.c||c.a),+(c.al||90),+(c.be||90),+(c.ga||90)); let ops=null, e=null;
+  if(Array.isArray(r.symops)&&r.symops.length) ops=r.symops.map(DC.parseSymop);
+  else { const sg=r.sg||{}; if(sg.hall){ e=sgList().find(x=>x.hallSymbol===sg.hall)||null; } if(!e&&sg.symbol){ try{ e=DC.sgBySymbol(sg.symbol); }catch(_){ e=null; } } if(!e&&sg.number) e=DC.sgByNumber(+sg.number); if(!e) throw new Error(`'${r.name||r.id}': 공간군이 없습니다`);
+    // 설정을 명시하지 않았으면 격자 모양으로 고른다: 능면체 R 군 — 능면체 축(a=b=c, α=β=γ≠90) 이면 :R, 단사정 — 90° 가 아닌 각의 축(α→a, β→b, γ→c) 이 고유축
+    if(!sg.hall&&!/:/.test(String(sg.symbol||""))) e=DC.settingForCell(e,c)||e; ops=DC.sgOps(e); }
+  const number=(r.sg&&+r.sg.number)||(e&&e.number)||null;
+  return {id:r.id,name:r.name||r.formula||r.id,formula:r.formula||"",cell,ops,atoms:(r.atoms||[]).map(a=>({label:a.label||a.el,el:a.el,x:+a.x,y:+a.y,z:+a.z,occ:a.occ==null?1:+a.occ,B:a.B==null?0:+a.B})),
+    sg:{number,symbol:(r.sg&&r.sg.symbol)||(e&&e.short)||"",system:number?DC.crystalSystem(number):""},source:r.source||{},rec:r}; };
+DC.settingForCell=function(e,c){ const n=e.number; const al=+(c.al||90), be=+(c.be||90), ga=+(c.ga||90); const a=+c.a, b=+(c.b||c.a), cc=+(c.c||c.a); const n90=x=>Math.abs(x-90)>1e-3; const L=sgList().filter(x=>x.number===n); if(L.length<2) return e;
+  if([146,148,155,160,161,166,167].includes(n)){ const rh=Math.abs(a-b)<=1e-4*a&&Math.abs(b-cc)<=1e-4*a&&Math.abs(al-be)<1e-3&&Math.abs(be-ga)<1e-3&&n90(al); return L.find(x=>x.choice===(rh?"R":"H"))||e; }
+  if(n>=3&&n<=15){ const ax=n90(ga)&&!n90(al)&&!n90(be)?"c":n90(al)&&!n90(be)&&!n90(ga)?"a":"b"; if(String(e.choice||"").replace("-","")[0]===ax) return e; return L.find(x=>String(x.choice||"")===ax+"1")||L.find(x=>String(x.choice||"").startsWith(ax))||e; }
+  return e; };
+DC.recordFromPhase=function(p,extra){ const c=p.cell; const r={name:p.name||"",formula:p.formula||"",cell:{a:c.a,b:c.b,c:c.c,al:c.al,be:c.be,ga:c.ga},sg:{number:p.sg&&p.sg.number||null,symbol:p.sg&&p.sg.symbol||""},
+    symops:p.ops?p.ops.map(fmtOp):undefined,atoms:(p.atoms||[]).map(a=>({label:a.label,el:a.el,x:a.x,y:a.y,z:a.z,occ:a.occ,B:a.B})),source:Object.assign({},p.source||{})};
+  if(r.source&&r.source.codId&&!r.source.kind) r.source.kind="COD"; return Object.assign(r,extra||{}); };
+/* 입력 검사: errors(저장 불가) · warnings(확인 필요) */
+DC.validateRecord=function(r){ const E=[], W=[]; const c=r&&r.cell||{}; const a=+c.a, b=+(c.b||c.a), cc=+(c.c||c.a), al=+(c.al||90), be=+(c.be||90), ga=+(c.ga||90);
+  if(!r||!String(r.name||r.formula||"").trim()) E.push("이름 또는 화학식이 필요합니다");
+  if(!(a>0&&b>0&&cc>0)) E.push("격자상수 a·b·c 는 양수여야 합니다");
+  for(const [k,v] of [["a",a],["b",b],["c",cc]]) if(v>0&&(v<0.15||v>2.5)) W.push(`${k} = ${v} nm — 흔한 범위(0.15–2.5 nm) 밖입니다. Å 로 넣지 않았는지 확인하세요 (nm 단위)`);
+  for(const [k,v] of [["α",al],["β",be],["γ",ga]]) if(!(v>0&&v<180)) E.push(`${k} 는 0–180° 사이여야 합니다`);
+  let n=r&&r.sg&&+r.sg.number; if(!n&&r&&r.sg&&r.sg.symbol){ try{ n=DC.sgBySymbol(r.sg.symbol).number; }catch(_){ E.push(`공간군 기호 '${r.sg.symbol}' 를 모릅니다`); } }
+  if(!n&&!(r&&r.symops&&r.symops.length)) E.push("공간군(번호 또는 기호)이 필요합니다");
+  if(n&&(n<1||n>230)) E.push("공간군 번호는 1–230 입니다");
+  if(n&&n>=1&&n<=230&&a>0&&b>0&&cc>0){ const sys=DC.crystalSystem(n), eq=(x,y)=>Math.abs(x-y)<=1e-4*Math.max(x,y), r90=x=>Math.abs(x-90)<1e-3, r120=x=>Math.abs(x-120)<1e-3;
+    const rhombAxes=r.sg&&/:r$/i.test(String(r.sg.symbol||"")); let bad="";
+    if(sys==="Cubic"&&!(eq(a,b)&&eq(b,cc)&&r90(al)&&r90(be)&&r90(ga))) bad="입방정: a = b = c, α = β = γ = 90°";
+    else if(sys==="Tetragonal"&&!(eq(a,b)&&r90(al)&&r90(be)&&r90(ga))) bad="정방정: a = b, α = β = γ = 90°";
+    else if(sys==="Orthorhombic"&&!(r90(al)&&r90(be)&&r90(ga))) bad="사방정: α = β = γ = 90°";
+    else if(sys==="Hexagonal"&&!(eq(a,b)&&r90(al)&&r90(be)&&r120(ga))) bad="육방정: a = b, α = β = 90°, γ = 120°";
+    else if(sys==="Trigonal"&&!rhombAxes&&!(eq(a,b)&&r90(al)&&r90(be)&&r120(ga))&&!(eq(a,b)&&eq(b,cc)&&eq(al,be)&&eq(be,ga))) bad="삼방정: 육방 축(a = b, γ = 120°) 또는 능면체 축(a = b = c, α = β = γ)";
+    else if(sys==="Monoclinic"&&[r90(al),r90(be),r90(ga)].filter(Boolean).length<2) bad="단사정: 세 각 중 둘이 90°";
+    if(bad) E.push(`공간군 #${n} (${sys}) 과 격자상수가 맞지 않습니다 — ${bad}`); }
+  for(const at of (r&&r.atoms)||[]){ if(!DC.elementOf(at.el||at.label)) E.push(`원자 '${at.label||at.el}': 원소를 모릅니다`); if(at.occ!=null&&!(+at.occ>0&&+at.occ<=1.0001)) E.push(`원자 '${at.label||at.el}': 점유율은 0–1 입니다`); for(const k of ["x","y","z"]) if(!isFinite(+at[k])) E.push(`원자 '${at.label||at.el}': ${k} 좌표가 숫자가 아닙니다`); }
+  if(r&&(!r.atoms||!r.atoms.length)) W.push("원자 좌표가 없습니다 — 소멸칙은 공간군으로만, 세기(구조인자)는 계산하지 않습니다");
+  if(r&&(!r.source||!(r.source.codId||r.source.doi||r.source.citation||r.source.note))) W.push("출처(COD id·DOI·논문)가 없습니다");
+  if(!E.length&&r){ try{ DC.phaseFromRecord(r); }catch(e){ E.push(String(e.message||e)); } }
+  return {errors:E,warnings:W,ok:!E.length}; };
+/* 중복 후보: 같은 COD id, 또는 같은 화학식 원소 + 같은 공간군 번호 + 격자상수 ±0.5 % */
+DC.sameRecord=function(p,q){ if(p.source&&q.source&&p.source.codId&&p.source.codId===q.source.codId) return true;
+  const fp=DC.parseFormula(p.formula), fq=DC.parseFormula(q.formula); const ka=Object.keys(fp).sort().join(), kb=Object.keys(fq).sort().join(); if(!ka||ka!==kb) return false;
+  if(!(p.sg&&q.sg&&+p.sg.number&&+p.sg.number===+q.sg.number)) return false; const rel=(x,y)=>Math.abs(x-y)/Math.max(x,y)<=0.005;
+  const cp=p.cell, cq=q.cell; return rel(+cp.a,+cq.a)&&rel(+(cp.b||cp.a),+(cq.b||cq.a))&&rel(+(cp.c||cp.a),+(cq.c||cq.a)); };
+
 /* ---------------- 화학식 ---------------- */
 DC.parseFormula=function(f){ const out={}; const s=String(f||"").replace(/\s+/g,""); const re=/([A-Z][a-z]?)(\d*\.?\d*)/g; let m; while((m=re.exec(s))){ if(!m[1]) continue; out[m[1]]=(out[m[1]]||0)+(m[2]?+m[2]:1); } return out; };
 
