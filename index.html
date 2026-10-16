@@ -823,6 +823,8 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .aug-card .r .k{width:62px;flex:none;color:var(--muted);font-weight:600}
 .xps .aug-card .r select{max-width:100%;min-width:0}
 .xps .wagwrap{max-width:440px}
+.xps svg.sens-strip{display:block}
+.xps table.sens td{vertical-align:middle}
 
 /* 파일 열을 쓰지 않는 탭(Energy Diagram·DRE·XPS — XPS 는 자체 파일 목록)에서는 숨기고 폭을 넘긴다 */
 #app.ed-on .side,#app.ed-on .sidetog{display:none!important}
@@ -43079,6 +43081,73 @@ function refineByResidual(prob,o){
 function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
 
 /* ============================================================
+   12) 모형 민감도 (SPEC §11): 같은 성분 구성을 '합리적인 분석 선택'의 조합으로 다시 맞춰
+   관심 값(BE·넓이 %·FWHM)이 선택에 따라 얼마나 흔들리는지 — 분석자의 주관을 숫자로(모형 불확도).
+   요인: 배경 종류 · 끝점 평균 점 수(정적 배경만) · 낮은/높은 BE 창 끝 ±dw.
+   ============================================================ */
+const SENS_BG_LABEL={smart:"Smart",shirley:"Shirley",active:"Shirley 피팅 안(+기울기)",tougaard:"Tougaard",linear:"Linear"};
+function sensBg(base,type,n){
+  // 지금 배경과 같은 종류면 사용자의 제약(예: 기울기 고정)을 그대로 — 0 번 변형이 사용자가 실제로 맞춘 모형이어야 한다.
+  // 다른 종류로 바꿀 때만 그 종류의 기본값(피팅 안 Shirley 는 기울기 자유)
+  const same=(base||{}).type===type; const b=clone(base||{}); b.type=type; b.n=n!=null?n:(b.n||5);
+  if(type==="active"){ b.c0=null; b.k=null; if(!same){ b.s=0; b.cons={s:{mode:"free"}}; } }
+  if(type==="tougaard"&&(base||{}).type!=="tougaard"){ b.C=1643; b.D=0; b.u3=false; }
+  return b;
+}
+/* 변형 목록. model = {lo, hi, bg}; spec = {be}; o = {bgs:[type…], ns:[…], dw, mode:"oat"|"full"}.
+   0 번 = 지금 설정(기준). 반환 [{lo,hi,bg,f:{bg,n,lo,hi}}] — f 는 요인 수준 이름(주효과 계산용). */
+function sensVariants(model,spec,o){
+  o=o||{}; const be=spec.be, E0=be[0], E1=be[be.length-1];
+  const dw=o.dw!=null?o.dw:0.5; const cur=model.bg||{type:"smart",n:5}; const curN=cur.n||5;
+  const bgTypes=[cur.type].concat((o.bgs||["smart","shirley","active"]).filter(t=>t!==cur.type));
+  const nsStatic=[...new Set([curN].concat(o.ns||[3,10]))];
+  const bgLv=[]; bgTypes.forEach(t=>{ if(t==="active"||t==="none") bgLv.push({t,n:null}); else (t===cur.type?nsStatic:[curN]).forEach(n=>bgLv.push({t,n})); });
+  // 끝점 점 수는 지금 배경 종류에서만 바꾼다(다른 배경은 지금 점 수) — 요인이 섞이지 않게
+  const loLv=[0,-dw,dw], hiLv=[0,-dw,dw];
+  // 창이 스펙트럼 밖으로 나가면 스펙트럼 끝으로 자르고, 자른 결과가 이미 있는 변형과 같으면 넣지 않는다(기준이 두 번 세어지지 않게)
+  const r3=x=>Math.round(x*1000)/1000;
+  const mk=(b,dl,dh)=>{ const lo=Math.max(E0,model.lo+dl), hi=Math.min(E1,model.hi+dh); return {lo,hi,bg:sensBg(cur,b.t,b.n),f:{bg:b.t,n:b.n,lo:r3(lo-model.lo),hi:r3(hi-model.hi),nRef:curN}}; };
+  const out=[]; const key=v=>[v.f.bg,v.f.n,r3(v.lo),r3(v.hi)].join("|"); const seen=new Set(); const push=v=>{ const k=key(v); if(seen.has(k)) return; seen.add(k); out.push(v); };
+  push(mk(bgLv[0],0,0));
+  if(o.mode==="full"){ bgLv.forEach(b=>loLv.forEach(dl=>hiLv.forEach(dh=>push(mk(b,dl,dh))))); }
+  else { bgLv.forEach(b=>push(mk(b,0,0))); loLv.forEach(dl=>push(mk(bgLv[0],dl,0))); hiLv.forEach(dh=>push(mk(bgLv[0],0,dh))); }
+  return out;
+}
+/* 변형들을 실제로 맞춘다(Worker 안에서). spec={be,y,c}, model={lo,hi,bg,comps,cons}.
+   각 변형은 지금 성분 값에서 출발(넓이는 NNLS 로 다시). 성분 중심이 창 밖이면 건너뜀. */
+function sensJob(spec,model,variants){
+  return variants.map((v,j)=>{ const i=v.idx!=null?v.idx:j;   // 여러 Worker 로 나눌 때 원래 번호
+    try{
+      // 지금 창 안에 있던 성분 중심이 변형 창에서 잘려 나가면 건너뜀(창 밖에 있던 성분 — 꼬리·가장자리 — 은 사용자 모형 그대로 둔다)
+      if(model.comps.some(c=>c.be>=model.lo&&c.be<=model.hi&&(c.be<v.lo||c.be>v.hi))) return {i,ok:false,err:"성분 중심이 창 밖으로 잘림"};
+      const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons});
+      const r=fitOnce(P,{}); const st=fitStats(P,r); const tot=P.comps.reduce((s,c)=>s+c.area,0);
+      return {i,ok:true,conv:r.conv,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
+    }catch(e){ return {i,ok:false,err:String(e&&e.message||e)}; }
+  });
+}
+/* 요약: 성분마다 각 값의 기준·범위·평균·sd(변형들 같은 무게), 요인별 주효과(수준별 평균의 범위). 기준 = 0 번 변형. */
+function sensSummary(variants,res){
+  const ok=res.filter(r=>r&&r.ok); if(!ok.length) return null; const base=res.find(r=>r&&r.i===0&&r.ok)||null;
+  const ids=(base||ok[0]).comps.map(c=>c.id); const Q=["be","areaPct","area","fwhm"];
+  const st=a=>{ const n=a.length; const m=a.reduce((s,x)=>s+x,0)/n; const sd=n>1?Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0)/(n-1)):0; return {n,mean:m,sd,min:Math.min(...a),max:Math.max(...a)}; };
+  const comps=ids.map(id=>{ const o={id};
+    Q.forEach(q=>{ const vals=ok.map(r=>{ const c=r.comps.find(x=>x.id===id); return c&&c[q]!=null&&isFinite(c[q])?c[q]:null; }).filter(v=>v!=null);
+      if(!vals.length) return; const s=st(vals); const bc=base&&base.comps.find(x=>x.id===id); s.base=bc?bc[q]:null;
+      // 주효과: 요인마다 수준별 평균 → 그 범위
+      // 요인 fk 의 효과는 '다른 요인이 기준 수준인 변형들'끼리만 비교(배경 종류가 바뀌면 끝점 점 수도 함께 바뀌는 혼동을 피함:
+      // 배경 효과는 끝점 점 수를 따지지 않고, 끝점 효과는 같은 배경 종류 안에서만)
+      const b0=(variants[0]||{}).f||{};
+      // 배경 효과: 끝점 점 수가 '다른 배경에 준 값(nRef)' 이거나 없는(피팅 안 배경) 변형만 — 지금 배경의 n=3·10 변형이 섞이지 않게
+      const same=(f,fk)=>["bg","n","lo","hi"].every(k=>k===fk||(fk==="bg"&&k==="n"&&(f.n==null||f.n===f.nRef))||f[k]===b0[k]);
+      const eff={}; ["bg","n","lo","hi"].forEach(fk=>{ const g={}; ok.forEach(r=>{ const v=variants[r.i]; const c=r.comps.find(x=>x.id===id); if(!v||!c||c[q]==null||!same(v.f,fk)) return; const lv=String(v.f[fk]); (g[lv]=g[lv]||[]).push(c[q]); });
+        const ms=Object.values(g).map(a=>a.reduce((s,x)=>s+x,0)/a.length); eff[fk]=ms.length>1?Math.max(...ms)-Math.min(...ms):0; });
+      s.eff=eff; o[q]=s; });
+    return o; });
+  return {n:variants.length,nOk:ok.length,nFail:variants.length-ok.length,base:!!base,comps,chi2nu:st(ok.map(r=>r.chi2nu))};
+}
+
+/* ============================================================
    보조: 문제 만들기 (스펙트럼 + 영역 + 배경 + 성분)
    ============================================================ */
 function sliceRegion(be,y,lo,hi){ const i0=be.findIndex(e=>e>=lo); let i1=-1; for(let i=be.length-1;i>=0;i--) if(be[i]<=hi){ i1=i; break; } if(i0<0||i1<i0) return null; return {E:be.slice(i0,i1+1),y:y.slice(i0,i1+1),i0,i1}; }
@@ -43148,7 +43217,7 @@ const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
+  tfValue,tpp2m,imfpValue,quantify,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -43504,6 +43573,7 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   else if(d.cmd==="final") out=C.finalJob(d.prob,d.opt);
   else if(d.cmd==="mc") out=C.mcJob(d.prob,d.res,d.M,d.seed,d.opt);
   else if(d.cmd==="auto") out=C.autoJob(d.prob,d.opt);
+  else if(d.cmd==="sens") out=C.sensJob(d.spec,d.model,d.variants);
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
   const url=URL.createObjectURL(new Blob([body],{type:"text/javascript"})); WORK={url}; return url;
@@ -43513,7 +43583,7 @@ function pool(jobs,onDone){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -43972,12 +44042,13 @@ function panelResult(el,sp){
      <div>AICc<b>${f(st.AICc,2)}</b></div><div>BIC<b>${f(st.BIC,2)}</b></div><div>반복 · 시간<b>${r.iter} · ${r.ms} ms</b></div>${r.multi?`<div>다중 시작<b>${r.multi.near}/${r.multi.N}</b></div>`:""}
    </div>
    <div class="muted xs">가중: ${sp.c?`Poisson, 1 CPS = ${g(sp.c,4)} count (${esc(sp.cSrc)})`:"준-Poisson, 척도 φ 는 잔차에서 추정"}. ${sp.c?`φ≈1 이면 잡음이 Poisson 과 일치. 지금 φ=${f(st.chi2nu,2)}.`:""}</div>
+   ${sensHTML(sp,p)}
    ${corrHTML(r,p)}
    ${modelsHTML(p)}
    <div class="xps-h">내보내기</div>
    <div class="xps-row"><button class="btn sm" id="xpsCsv">곡선 CSV</button><button class="btn sm" id="xpsPkCsv">봉우리 표 CSV</button><button class="btn sm" id="xpsSvgE">그림 SVG</button><button class="btn sm" id="xpsPngE">그림 PNG</button></div>`;
   $q(el,"#xpsCsv").onclick=()=>exportCurves(sp); $q(el,"#xpsPkCsv").onclick=()=>exportPeaks(sp); $q(el,"#xpsSvgE").onclick=()=>exportFig("svg"); $q(el,"#xpsPngE").onclick=()=>exportFig("png");
-  bindModels(el,sp,p);
+  bindSens(el,sp,p); bindModels(el,sp,p);
 }
 function mcHTML(r,sp){ const sh=shOf(sp); const mc=r.mc.summ; return `<details class="xps-d" open><summary>Monte Carlo 95 % 구간 (${r.mc.n}회, AR(1) ρ=${f(r.mc.rho,2)}, φ=${f(r.mc.phi,2)})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>이름</th><th class="num">BE 2.5–97.5 %</th><th class="num">FWHM</th><th class="num">넓이 %</th></tr></thead><tbody>${r.comps.map((c,i)=>{ const m=mc[i]; if(!m) return ""; return `<tr><td>${esc(c.name||"#"+(i+1))}</td><td class="num">${f(m.be.lo+sh,2)} – ${f(m.be.hi+sh,2)}</td><td class="num">${m.fwhm?f(m.fwhm.lo,2)+" – "+f(m.fwhm.hi,2):"—"}</td><td class="num">${f(m.areaPct.lo,1)} – ${f(m.areaPct.hi,1)}</td></tr>`; }).join("")}</tbody></table>${r.mc.fails?`<div class="muted xs">재피팅 실패 ${r.mc.fails}회는 빼고 계산</div>`:""}</div></details>`; }
 function corrHTML(r,p){
@@ -43990,6 +44061,87 @@ function corrHTML(r,p){
   s+=`</svg>`;
   return `<details class="xps-d" ${hi.length?"open":""}><summary>매개변수 상관 행렬 ${hi.length?`<span class="badge wr">|ρ|>0.9 ${hi.length}쌍</span>`:""}</summary><div class="b"><div class="tw">${s}</div><div class="muted xs" style="margin-top:4px">파랑 = 양의 상관, 주황 = 음의 상관. |ρ|>0.9 인 쌍은 데이터만으로 따로 정해지지 않는다는 뜻 — 연결·고정으로 줄이세요.</div>${hi.slice(0,8).map(h=>`<div class="sm">${esc(lab(h.a))} ↔ ${esc(lab(h.b))}: <b>${f(h.v,3)}</b></div>`).join("")}</div></details>`;
 }
+/* ---------------- 모형 민감도 (결과 탭) ----------------
+   지금 성분 구성을 그대로 두고 분석 선택(배경 종류·끝점 점 수·창 끝)을 바꿔 다시 맞춘다 → 각 값의 흔들림.
+   보고 구간 = [변형들의 최소 − 2σ통계, 최대 + 2σ통계] (합성 시험에서 기준 배경이 틀렸을 때도 참값을 거의 늘 포함 — SPEC §11). */
+const SENS_FAC={bg:"배경 종류",n:"끝점 점 수",lo:"낮은 BE 창 끝",hi:"높은 BE 창 끝"};
+function sensOpts(){ const o=S.ui.sens||(S.ui.sens={mode:"oat",dw:0.5,bgs:{smart:true,shirley:true,active:true,tougaard:false},ns:true}); return o; }
+function sensVarList(sp,p){ const o=sensOpts(); const wide=p.hi-p.lo>=30;
+  const bgs=Object.keys(o.bgs).filter(k=>o.bgs[k]&&(k!=="tougaard"||wide));
+  return C.sensVariants({lo:p.lo,hi:p.hi,bg:p.bg},{be:sp.be},{mode:o.mode,dw:+o.dw||0.5,bgs,ns:o.ns?[3,10]:[]}); }
+async function runSens(sp,p){
+  if(RUN){ note("이미 계산 중입니다","warn"); return; }
+  const r=p.result; if(!r||r.stale){ note("먼저 피팅하세요 (수정 뒤에는 다시 피팅)","warn"); return; }
+  const variants=sensVarList(sp,p); const model={lo:p.lo,hi:p.hi,bg:C.clone(p.bg),comps:C.clone(r.comps),cons:C.clone(p.cons)};
+  const spec={be:sp.be,y:sp.y,c:sp.c||null};
+  const K=Math.min(nWorkers(),variants.length); const chunks=[...Array(K)].map(()=>[]); variants.forEach((v,i)=>chunks[i%K].push(Object.assign({},v,{idx:i})));
+  let dn=0; setProg(`모형 민감도 0/${K} 묶음 (변형 ${variants.length}개)`,0.02); const t0=performance.now(); const ver=p.ver;
+  try{
+    const outs=await pool(chunks.map(ch=>({cmd:"sens",spec,model,variants:ch})),()=>{ dn++; setProg(`모형 민감도 ${dn}/${K} 묶음`,dn/K); });
+    const got=[].concat(...outs.filter(Boolean)); const res=variants.map((v,i)=>got.find(x=>x.i===i)||{i,ok:false,err:"계산 묶음 실패"}); const sum=C.sensSummary(variants,res); hideProg();
+    if(p.ver!==ver){ note("계산 중에 모형이 바뀌어 결과를 버렸습니다 — 다시 실행하세요","warn"); return; }
+    if(!sum){ note("모든 변형이 실패했습니다 — 창·배경 설정을 확인하세요","warn"); return; }
+    p.sens={ver,when:new Date().toISOString(),ms:Math.round(performance.now()-t0),opts:C.clone(sensOpts()),variants:variants.map(v=>({lo:v.lo,hi:v.hi,f:v.f})),res,sum};
+    save(); renderPanel(); note(`모형 민감도: 변형 ${sum.nOk}/${sum.n}개를 다시 맞췄습니다`,"ok");
+  }catch(e){ hideProg(); RUN=null; note("모형 민감도 중단: "+(e.message||e),"warn"); }
+}
+/* 통계 σ(넓이 %): 공분산 σ × AR(1) 팽창(잔차 이웃상관), Monte Carlo 가 있으면 그 sd 와 큰 쪽 */
+function sigStat(r,ci){ const q=r.summ&&r.summ[ci]; const sc=q&&q.sig&&q.sig.areaPct!=null?q.sig.areaPct*((r.stats&&r.stats.ar1Inflate)||1):0;
+  const m=r.mc&&r.mc.summ&&r.mc.summ[ci]&&r.mc.summ[ci].areaPct; return Math.max(sc,m&&m.sd!=null?m.sd:0); }
+function sensStrip(vals,base,lo,hi){ const W=150,H=16; if(!(hi>lo)){ lo-=0.5; hi+=0.5; } const X=v=>4+(v-lo)/(hi-lo)*(W-8);
+  return `<svg class="sens-strip" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><line x1="4" x2="${W-4}" y1="${H/2}" y2="${H/2}" class="ax"/>${vals.map(v=>`<circle cx="${X(v).toFixed(1)}" cy="${H/2}" r="2.6" fill="var(--s1)" opacity=".55"/>`).join("")}${base!=null?`<line x1="${X(base).toFixed(1)}" x2="${X(base).toFixed(1)}" y1="2" y2="${H-2}" stroke="var(--ink)" stroke-width="2"/>`:""}</svg>`; }
+function sensHTML(sp,p){
+  const o=sensOpts(), r=p.result, sh=shOf(sp); const wide=p.hi-p.lo>=30;
+  let nVar=0; try{ nVar=sensVarList(sp,p).length; }catch(e){}
+  const set=`<div class="xps-row"><span class="xps-f">방식 <select class="xps-sel" id="xsnM"><option value="oat" ${o.mode==="oat"?"selected":""}>빠르게 — 한 번에 하나씩</option><option value="full" ${o.mode==="full"?"selected":""}>꼼꼼히 — 모든 조합</option></select></span>
+     <span class="xps-f" title="낮은·높은 BE 창 끝을 이만큼 안팎으로">창 끝 ± <input type="number" class="w56" step="0.1" min="0.1" id="xsnW" value="${o.dw}"> eV</span>
+     <span class="xps-f">배경 ${["smart","shirley","active","tougaard"].map(k=>`<label class="xps-f" ${k===p.bg.type?`title="지금 배경 — 항상 포함(기준)"`:k==="tougaard"&&!wide?`title="Tougaard 는 창이 30 eV 이상일 때만"`:""}><input type="checkbox" data-snb="${k}" ${o.bgs[k]||k===p.bg.type?"checked":""} ${k===p.bg.type||(k==="tougaard"&&!wide)?"disabled":""}> ${esc(C.SENS_BG_LABEL[k])}</label>`).join(" ")}</span>
+     <label class="xps-f" title="정적 배경의 끝점 평균 점 수를 3·10 으로도"><input type="checkbox" id="xsnN" ${o.ns?"checked":""}> 끝점 점 수</label>
+     <button class="btn sm primary" id="xsnRun" ${r&&!r.stale?"":"disabled"}>분석 선택 흔들어 보기 (${nVar}회 피팅)</button></div>`;
+  const S_=p.sens; let body="";
+  if(S_&&S_.ver!==p.ver) body=`<div class="note warn">모형(성분·영역·배경)을 바꾼 뒤의 결과가 아닙니다 — 다시 실행하세요.</div>`;
+  else if(S_){ const sum=S_.sum; const rc=r.comps; const base=S_.res.find(x=>x.i===0&&x.ok);
+    const rows=sum.comps.map(cs=>{ const c=rc.find(x=>x.id===cs.id); const ci=rc.indexOf(c); const q=r.summ&&r.summ[ci]; const a=cs.areaPct; if(!a) return "";
+      const sS=sigStat(r,ci); const lo=Math.max(0,a.min-2*sS), hi=Math.min(100,a.max+2*sS);
+      const half=(a.max-a.min)/2; const dom=half>2*sS; const top=Object.entries(a.eff||{}).sort((x,y)=>y[1]-x[1])[0];
+      const vals=S_.res.filter(x=>x.ok).map(x=>{ const cc=x.comps.find(z=>z.id===cs.id); return cc?cc.areaPct:null; }).filter(v=>v!=null);
+      const be=cs.be, fw=cs.fwhm;
+      return `<tr><td><i class="sw" style="background:${c?colorOf(c):"var(--faint)"}"></i><b>${esc(c?c.name||"성분":cs.id)}</b></td>
+        <td class="num">${f(q&&q.areaPct!=null?q.areaPct:a.base,1)}<div class="muted xs" title="공분산 σ × 잔차 이웃상관 보정, Monte Carlo 가 있으면 그 sd 와 큰 쪽">± ${f(sS,1)} 통계</div></td>
+        <td class="num">${f(a.min,1)} – ${f(a.max,1)}<div class="muted xs">sd ${f(a.sd,1)}</div></td>
+        <td class="num"><b>${f(lo,1)} – ${f(hi,1)}</b><div class="xs"><span class="badge ${dom?"wr":"inf"}" title="${dom?"분석 선택에 따른 흔들림의 반이 통계 2σ 보다 큼 — 배경·창 선택을 보고에 꼭 밝힐 것":"통계 2σ 가 분석 선택에 따른 흔들림보다 큼"}">${dom?"분석 선택이 지배":"통계가 지배"}</span></div></td>
+        <td>${sensStrip(vals,a.base,Math.min(a.min,a.base!=null?a.base:a.min)-2*sS,Math.max(a.max,a.base!=null?a.base:a.max)+2*sS)}<div class="muted xs">${top&&top[1]>0?`가장 큰 영향: ${esc(SENS_FAC[top[0]])} (${f(top[1],1)} %p)`:""}</div></td>
+        <td class="num">${be?`${f(be.min+sh,2)} – ${f(be.max+sh,2)}`:"—"}<div class="muted xs">FWHM ${fw?`${f(fw.min,2)}–${f(fw.max,2)}`:"—"}</div></td></tr>`; }).join("");
+    const fails=S_.res.filter(x=>!x.ok); const why=[...new Set(fails.map(x=>x.err))];
+    const ex=sum.comps.map(cs=>{ const c=rc.find(x=>x.id===cs.id), a=cs.areaPct; if(!a||!c) return ""; const ci=rc.indexOf(c); const sS=sigStat(r,ci);
+      const bv=r.summ[ci]&&r.summ[ci].areaPct!=null?r.summ[ci].areaPct:a.base;
+      return `${c.name||"성분"} ${f(bv,1)} % (통계 σ ${f(sS,1)}; 분석 선택 ${f(a.min,1)}–${f(a.max,1)} %; 가능 범위 ${f(Math.max(0,a.min-2*sS),1)}–${f(Math.min(100,a.max+2*sS),1)} %)`; }).filter(Boolean).join(" · ");
+    body=(sum.base?"":`<div class="note warn">기준(0 번, 지금 설정) 변형이 실패했습니다 — 범위를 믿기 어렵습니다. 변형 목록에서 이유를 확인하세요.</div>`)+`<div class="tw"><table class="xps-tbl sens"><thead><tr><th>성분</th><th class="num">넓이 % 기준</th><th class="num" title="변형들에서 나온 값의 최소–최대">분석 선택 범위</th><th class="num" title="[최소 − 2σ통계, 최대 + 2σ통계] — 보고에 쓸 구간">가능 범위</th><th>변형별 값 (│ = 기준)</th><th class="num">BE · FWHM 범위</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="muted xs" style="margin-top:4px">변형 ${sum.nOk}/${sum.n}개 성공${fails.length?` (건너뜀 ${fails.length}: ${esc(why.join(", "))})`:""} · χ²ν ${f(sum.chi2nu.min,2)}–${f(sum.chi2nu.max,2)} · ${(S_.ms/1000).toFixed(1)} s. 변형들은 같은 무게(창·배경이 달라 χ²·BIC 로 서로 비교할 수 없음).</div>
+      <div class="note" style="margin-top:6px;font-size:12px"><b>보고 예</b>: ${esc(ex)}</div>
+      <details class="xps-d"><summary>변형 ${sum.n}개 자세히</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>#</th><th>배경</th><th>창 (보정 BE)</th><th class="num">χ²ν</th>${rc.map(c=>`<th class="num">${esc(c.name||"성분")} %</th>`).join("")}</tr></thead><tbody>
+      ${S_.variants.map((v,i)=>{ const x=S_.res.find(z=>z.i===i); return `<tr${i===0?` class="tot"`:""}><td>${i===0?"기준":i}</td><td>${esc(C.SENS_BG_LABEL[v.f.bg]||v.f.bg)}${v.f.n!=null?` · ${v.f.n}점`:""}</td><td>${f(v.lo+sh,2)} – ${f(v.hi+sh,2)}</td><td class="num">${x&&x.ok?f(x.chi2nu,2):`<span class="badge wr" title="${esc(x?x.err:"")}">건너뜀</span>`}</td>${rc.map(c=>{ const cc=x&&x.ok&&x.comps.find(z=>z.id===c.id); return `<td class="num">${cc?f(cc.areaPct,1):"—"}</td>`; }).join("")}</tr>`; }).join("")}
+      </tbody></table><div class="xps-row"><button class="btn xs" id="xsnCsv">변형 CSV</button></div></div></details>`;
+  }
+  return `<div class="xps-h">모형 민감도 <span class="muted xs">분석 선택에 따라 값이 얼마나 흔들리나</span></div>
+   <div class="muted xs" style="line-height:1.55">성분 구성은 그대로 두고 배경 종류·끝점·창 끝을 바꿔 다시 맞춥니다. 위 표의 ± 는 잡음(통계)만이고, 여기 <b>가능 범위</b> = [분석 선택 범위 − 2σ, + 2σ] 가 분석자의 선택까지 넣은 보고용 구간입니다. 합성 시험(40 회, 참 배경이 후보 중에 있을 때): 지금 배경이 틀렸으면 통계 ±2σ 는 참값을 12 % 만, 가능 범위는 93 % 포함 — 참 배경이 후보 밖이면 보장되지 않음.</div>
+   ${set}${body}`;
+}
+function bindSens(el,sp,p){
+  const o=sensOpts(); const m=$q(el,"#xsnM"); if(!m) return;
+  m.onchange=()=>{ o.mode=m.value; save(); renderPanel(); };
+  $q(el,"#xsnW").onchange=e=>{ const v=+e.target.value; o.dw=isFinite(v)&&e.target.value!==""?Math.max(0.1,Math.min(v,5)):0.5; save(); renderPanel(); };
+  $a(el,"[data-snb]").forEach(c=>c.onchange=()=>{ o.bgs[c.dataset.snb]=c.checked; save(); renderPanel(); });
+  $q(el,"#xsnN").onchange=e=>{ o.ns=e.target.checked; save(); renderPanel(); };
+  $q(el,"#xsnRun").onclick=()=>runSens(sp,p);
+  const cv=$q(el,"#xsnCsv"); if(cv) cv.onclick=()=>exportSens(sp,p);
+}
+function exportSens(sp,p){ const S_=p.sens; if(!S_) return; const sh=shOf(sp); const rc=p.result.comps;
+  const lines=[`# INNO Analytics XPS model sensitivity · ${SK(sp)} · ${sp.region} · charge shift ${sh} eV · ${S_.when}`,["variant","background","endpoint_n","lo_corr_eV","hi_corr_eV","ok","chi2nu",...rc.map(c=>(c.name||c.id)+"_areaPct"),...rc.map(c=>(c.name||c.id)+"_BEcorr"),...rc.map(c=>(c.name||c.id)+"_FWHM")].map(csvE).join(",")];
+  S_.variants.forEach((v,i)=>{ const x=S_.res.find(z=>z.i===i); const get=(c,k)=>{ const cc=x&&x.ok&&x.comps.find(z=>z.id===c.id); return cc&&cc[k]!=null&&isFinite(cc[k])?(k==="be"?(cc.be+sh).toFixed(3):(+cc[k]).toFixed(4)):""; };
+    lines.push([i,v.f.bg,v.f.n==null?"":v.f.n,(v.lo+sh).toFixed(3),(v.hi+sh).toFixed(3),x&&x.ok?1:0,x&&x.ok?x.chi2nu.toFixed(4):"",...rc.map(c=>get(c,"areaPct")),...rc.map(c=>get(c,"be")),...rc.map(c=>get(c,"fwhm"))].map(csvE).join(",")); });
+  download(safe(SK(sp)+"_"+sp.region)+"_sensitivity.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
+
 function modelsHTML(p){ const L=p.models||[]; if(!L.length) return ""; const same=L.filter(m=>Math.abs(m.lo-p.lo)<1e-6&&Math.abs(m.hi-p.hi)<1e-6); const amin=Math.min(...L.map(m=>m.stats.AICc)), bmin=Math.min(...L.map(m=>m.stats.BIC));
   return `<details class="xps-d" open><summary>모형 비교 (${L.length})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>모형</th><th class="num">p</th><th class="num">χ²ν</th><th class="num">ΔAICc</th><th class="num">ΔBIC</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr><td>${esc(m.name)}${Math.abs(m.lo-p.lo)>1e-6||Math.abs(m.hi-p.hi)>1e-6?` <span class="badge wr">영역 다름</span>`:""}</td><td class="num">${m.stats.p}</td><td class="num">${f(m.stats.chi2nu,3)}</td><td class="num">${f(m.stats.AICc-amin,1)}</td><td class="num">${f(m.stats.BIC-bmin,1)}</td><td><button class="btn xs" data-mload="${i}">불러오기</button> <button class="btn xs" data-mdel="${i}">×</button></td></tr>`).join("")}</tbody></table><div class="muted xs" style="margin-top:4px">같은 영역·같은 데이터에서만 비교 의미가 있습니다. ΔAICc &lt; 2 는 사실상 구별 불가, &gt; 10 은 강한 근거. 성분을 늘려 χ² 가 조금 줄어도 AICc 가 커지면 과적합입니다.${same.length<L.length?" (영역이 다른 모형 포함)":""}</div></div></details>`; }
 function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ const m=p.models[+b.dataset.mload]; pushHist(p,"모형 불러오기"); p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=C.clone(m.bg); p.lo=m.lo; p.hi=m.hi; touch(p); S.ui.tab="fit"; rerender(); note("불러왔습니다 — 다시 피팅하면 결과가 갱신됩니다"); }); $a(el,"[data-mdel]").forEach(b=>b.onclick=()=>{ p.models.splice(+b.dataset.mdel,1); save(); renderPanel(); }); }
