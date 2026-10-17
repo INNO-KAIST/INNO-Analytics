@@ -162,7 +162,7 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
 - **Wand**: Worker 에서(형식 배열 스택). 4096² 한 덩어리 0.75 s, 그동안 화면 멈추지 않음. 연속 클릭은 앞 것이 끝날 때까지 알림. 결과 = 이전 주 스레드 구현(무작위 3000 경우 같음), ImageJ doWand(8-connected) 꼭짓점과 같음(Chromium 시험).
 
 ## 3h. Drop Shape — 접촉각 · 펜던트 드랍 (v1.6)
-ImageJ 플러그인 DropSnake·LB-ADSA(Stalder 2006·2010)·Pendent_Drop 이 하던 일을 한 패널(**Drop**)에. 계산 `src/core/88_drop.js`(Worker), 화면 `src/ui/35_drop.js`.
+ImageJ 플러그인 DropSnake·LB-ADSA(Stalder 2006·2010)·Pendent_Drop 이 하던 일을 **Analyze** 패널 맨 아래 칸 **Drop Shape** 에(영상 처리의 연장 — 따로 탭을 두지 않음, 패널 머리의 "Drop Shape ↓" 로 바로 감). 계산 `src/core/88_drop.js`(Worker), 화면 `src/ui/35_drop.js`.
 - **윤곽**: 가우스(σ 1) → Otsu 문턱 → 방울 성분(영역 테두리 중앙값보다 어두운/밝은 쪽 자동, 구멍 메움 — 방울 안 반사점) → marching squares 부화소 등고선 → 법선 ±3 px 에서 경사 최대 자리로 다듬음(Canny 와 같은 정의, 비네팅으로 바탕 밝기가 고르지 않을 때 문턱 등고선이 밀리는 것을 없앰). 영역 테두리를 따라 생긴 가짜 윤곽은 맞춤에서 뺀다.
 - **Young–Laplace**(무차원, apex 곡률 반지름 b 로 나눔, Rotenberg·Boyce·Neumann 1983 ADSA): dx/ds = cos φ, dz/ds = sin φ, dφ/ds = 2 ± Bo·z − sin φ/x (세실 +, 펜던트 −), Bo = Δρ g b²/γ. RK4(ds 0.002–0.003). 맞춤 = 윤곽 점과 이론 곡선의 최단 거리 제곱합, Levenberg–Marquardt.
 - **펜던트**: 영역 위 테두리에 닿은 성분 → 위쪽 폭이 일정한 구간 = 바늘(두 가장자리 직선 맞춤 → 지름·기울기) → 그 아래 윤곽에 [apex x·y, b, Bo, 기울기 ω] 맞춤. 바늘이 붙는 높이 = 적도 위에서 이론 곡선 반지름 = 바늘 반지름인 곳. γ = Δρ g b²/Bo, 부피·겉넓이 = 회전체 적분(바늘 끝까지), Worthington Wo = Δρ g V/(π γ D_바늘)(Berry et al. 2015). 눈금 = 바늘 바깥 지름(mm) ÷ 바늘 화소 폭, 없으면 영상 보정.
@@ -172,7 +172,7 @@ ImageJ 플러그인 DropSnake·LB-ADSA(Stalder 2006·2010)·Pendent_Drop 이 하
 - **경고**: 방법 사이 > 5°, 접선 왼·오른 차 > 5°, θ > 150° 접선, 잔차 rms > 1 px, Wo < 0.5, 기울기 > 5°, 눈금 없음.
 - 불확도: 표의 'fit SD' 는 맞춤 공분산(잔차 분산 × (JᵀJ)⁻¹, b·Bo 상관 포함 gᵀCg)에서 온 **맞춤 통계만**이다. 펜던트는 바늘 가장자리 ±0.3 px 가 눈금에 주는 몫을 'needle-scale SD' 로 따로 보인다(보통 맞춤 SD 보다 10–20 배 큼). 바늘 지름·밀도·g·가장자리 정의의 계통 오차는 들어 있지 않다 — 같은 방울 여러 장(스택 Frames: All)의 흩어짐이 더 정직한 값.
 - 결과: 아래 **Drop** 표(방법마다 한 줄, CSV·Copy), 스택은 시계열 그래프(Plots), 매크로 기록(op `drop` — 영역·기준선 좌표째).
-- 검증(`node test/test_drop.js` 21, `python3 test/ui_drop.py` 35):
+- 검증(`node test/test_drop.js` 21, `python3 test/ui_drop.py` 38):
   ① 합성(정답 = `ref/gen_drop.py`, scipy DOP853 — 이 구현과 다른 적분기): 펜던트 16 장(Bo 0.1–0.45, γ 25–75 mN/m, 기울임 ±1.5°) γ 중앙 오차 0.06 %·최대 0.37 %, 부피 ≤ 0.53 %, 기울기 ≤ 0.024°. 세실 20 장(θ 20–160°, Bo 0.0005–0.6, 기울임 ±3°) YL ≤ 0.85°, 접선 θ ≤ 150° 에서 ≤ 1.40°·160° 에서 3.45°, 원(Bo ≈ 0) ≤ 0.15°. 바늘 꽂힌 세실 3 장 YL ≤ 0.08°.
   ② 실측(OpenDrop 예제, `sh ref/fetch_drop.sh` — GPL-3 이라 저장소·배포 제외): water_in_air001 은 OpenDrop 결과 화면과 γ −1.17 %, V −0.87 %, A −0.56 %, Wo +0.34 %, Bo +0.50 %. 같은 물 방울 5 장 평균 γ 73.07 mN/m(물 20–25 °C 의 IAPWS R1-76 값 72.0–72.8 mN/m 근처; 온도 미상). drop_on_surface 접선 118.8° / 123.8° ↔ OpenDrop 120.0° / 124.2°.
   Worthington 수가 작은 장(004: 0.22, 005: 0.10)은 γ 가 ±2 % 흔들린다 — Berry 2015 가 말한 대로이며 화면 경고로 알린다.

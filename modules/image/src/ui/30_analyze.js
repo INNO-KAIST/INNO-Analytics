@@ -158,7 +158,7 @@ op("skeleton",{label:"Analyze Skeleton (2D/3D)",group:"analyze",kind:"analyze",h
 function panelAnalyze(el,im){
   const A=S.ui.pa; const bin=!im.rgb&&IC.isBinary(curPlaneOf(im)); const c=calOf(im); const us=A.unitPx?"px²":unitSq(im); const fm=formVals(OPS.findMaxima);
   const reds=S.images.filter(x=>x.id!==im.id&&x.w===im.w&&x.h===im.h);
-  el.innerHTML=`<div class="im-h">Analyze Particles</div>
+  el.innerHTML=`<div class="im-h">Analyze Particles<span class="sp"></span><button class="btn xs" id="anToDrop" title="Contact angle · pendant drop">Drop Shape ↓</button></div>
   <div class="xs muted">${bin?"이진 영상: 255 인 화소를 입자로 셉니다.":`문턱: <b>${S.ui.thr.manual?`수동 ${g4(S.ui.thr.lower)}–${g4(S.ui.thr.upper)}`:`${S.ui.thr.method}${S.ui.thr.dark?" dark":""}`}</b> (Threshold 탭 설정) 범위의 화소를 입자로 셉니다.`}</div>
   <div class="im-row"><label class="im-f"><span>Size</span><input type="number" id="paMin" value="${esc(A.minSize)}" step="any" min="0"><span>–</span><input type="number" id="paMax" value="${esc(A.maxSize)}" step="any" placeholder="∞"><span class="u">${esc(us)}</span></label><label class="im-chk"><input type="checkbox" id="paPx" ${A.unitPx?"checked":""}> Pixel units</label></div>
   <div class="im-row"><label class="im-f"><span>Circularity</span><input type="number" id="paC0" value="${A.minCirc}" min="0" max="1" step="0.05"><span>–</span><input type="number" id="paC1" value="${A.maxCirc}" min="0" max="1" step="0.05"></label></div>
@@ -174,7 +174,8 @@ function panelAnalyze(el,im){
   <div class="im-tool"><b>Radial Profile</b><span class="xs muted">중심 = 점·타원 ROI</span><div id="rpForm">${formHTML(OPS.radial,im)}</div><button class="btn sm" id="rpRun">Plot</button></div>
   <div class="im-tool"><b>Orientation</b><span class="xs muted">구조 텐서 (OrientationJ 정의)</span><div id="orForm">${formHTML(OPS.orientation,im)}</div><button class="btn sm" id="orRun">Analyze</button></div>
   <div class="im-tool"><b>Analyze Skeleton (2D/3D)</b><span class="xs muted">가지·접점·길이 (Fiji 와 같은 결과)${im.nz>1?" · 스택 = 3D":""}</span><div id="skForm">${formHTML(OPS.skeleton,im)}</div><button class="btn sm" id="skRun">Analyze</button></div>
-  ${isStack(im)?`<div class="im-tool"><b>Z-axis Profile</b><span class="xs muted">ROI 평균의 장별 변화</span><button class="btn sm" id="zpRun">Plot</button></div>`:""}`;
+  ${isStack(im)?`<div class="im-tool"><b>Z-axis Profile</b><span class="xs muted">ROI 평균의 장별 변화</span><button class="btn sm" id="zpRun">Plot</button></div>`:""}
+  <div id="anDrop"></div>`;
   const q=s=>$q(el,s); const up=()=>save();
   q("#paMin").onchange=e=>{ A.minSize=e.target.value===""?0:+e.target.value; up(); }; q("#paMax").onchange=e=>{ A.maxSize=e.target.value; up(); }; q("#paPx").onchange=e=>{ A.unitPx=e.target.checked; up(); renderPanel(); };
   q("#paC0").onchange=e=>{ A.minCirc=+e.target.value; up(); }; q("#paC1").onchange=e=>{ A.maxCirc=+e.target.value; up(); };
@@ -185,6 +186,8 @@ function panelAnalyze(el,im){
   q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
   q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
+  q("#anToDrop").onclick=()=>{ const d=q("#anDrop"); if(d) d.scrollIntoView({behavior:"smooth",block:"start"}); };
+  panelDrop(q("#anDrop"),im); // 접촉각·펜던트 드랍 (35_drop.js)
 }
 function particleCard(im){ const pa=S.particles[im.id]; const s=pa.summary; const ss=IC.sizeSummary(pa.rows.map(r=>r.ECD)); const u=pa.unit;
   return `<div class="im-card"><div class="im-row"><b>${s.Count} particles</b><span class="xs muted">${esc(s.Threshold)}</span><span class="sp"></span><button class="btn xs" data-dist="1">Size distribution</button></div>

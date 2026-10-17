@@ -6,11 +6,11 @@
 
 ## 최근 작업
 - **10-17 Image Analysis v1.6 — Drop Shape: 접촉각 · 펜던트 드랍 표면장력**(modules/image/SPEC.md §3h·§6g):
-  ImageJ DropSnake·LB-ADSA·Pendent Drop 대응 패널 Drop. 윤곽 = Otsu + marching squares + 경사 최대 다듬기, Young–Laplace(RK4) Levenberg–Marquardt 맞춤.
+  ImageJ DropSnake·LB-ADSA·Pendent Drop 대응. 처음엔 따로 Drop 탭이었으나 요청으로 **Analyze 패널 맨 아래 칸 Drop Shape** 로 옮김(머리의 "Drop Shape ↓" 단추, 예전 저장 상태 panel=drop → Analyze). 윤곽 = Otsu + marching squares + 경사 최대 다듬기, Young–Laplace(RK4) Levenberg–Marquardt 맞춤.
   접촉각: Young–Laplace · 접선(호 길이 2 차식, θ > 90° 에서도) · 타원(Fitzgibbon) · 원, 자동 기준선(RANSAC) 또는 선 ROI, 바늘 꽂힌 방울 자동 제외. 펜던트: 바늘 지름 눈금, γ·Bo·Wo·V·A·기울기, Wo < 0.5 경고.
   검증: 합성(scipy 정답) γ 중앙 0.06 %·최대 0.37 %, θ YL ≤ 0.85°·접선 ≤ 1.4°(≤ 150°). OpenDrop 공개 예제: 물 γ 72.45 ↔ 73.31 mN/m(−1.2 %, V·A·Wo·Bo ±0.9 % 안), 5 장 평균 73.1 ↔ IAPWS 72.0–72.8; 접선 118.8/123.8° ↔ 120.0/124.2°. OpenDrop 그림(GPL-3)은 ref/fetch_drop.sh 로만 — 배포 제외(manifest drop_real).
   ± 는 'fit SD'(맞춤 통계)와 'needle-scale SD'(바늘 ±0.3 px) 를 따로. 스택 시계열·매크로·CSV.
-  시험: test_drop 21 · Chromium ui_drop 35 · 독립 검토 16 건 중 14 건 수정 · 기존 test_img 103·afm 101·oir 54·lif 12·ui_touch 72·ui_shell 18 그대로.
+  시험: test_drop 21 · Chromium ui_drop 38 · 독립 검토 16 건 중 14 건 수정 · 기존 test_img 103·afm 101·oir 54·lif 12·ui_touch 72·ui_shell 18 그대로.
 - **10-17 Diffraction v1.2 — REDI 대응 마무리: GMS 이름표 OCR · 조성비 필터 · R3·각도 오차 · 결과 보고 PNG · 화학식 검사**(modules/diffraction/SPEC.md §3c·§4c):
   GMS 기본 이름표(검은 세리프 글자 + 흰 그림자 + 속 빈 막대)를 반대 극성·중앙값 잡음 제거·글자∪그림자 모드로 읽음 — 첫 읽기 확신 ≥ 0.5 면 그대로, 뒤집은 결과는 ≥ 0.6 만 받음. 세리프·고정폭 틀(TPL_B64_X)은 뒤집기에서만 써서 산세리프 오독 없음. 시험 gms 58.3 %(capH ≥ 20: 26/33), 고확신 오답 0, 실측 REDI_B3·T13 확신 0.998·0.997.
   Phase DB 조성비 검색: "Fe3O4", "Fe:3 O:4", "Zn 60 Mg 40" 등 → 원자 분율 비교(기본 ±5 at.%p, 화면에서 조정), 수화물·괄호·혼합 자리 해석, 화학식이 비면 원자 자리 조성으로 대신. 화학식과 대칭 전개 조성이 2 at.%p 넘게 다르면 경고.

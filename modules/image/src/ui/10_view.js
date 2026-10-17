@@ -156,7 +156,7 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="drop"&&typeof panelDrop==="function") renderPanel(); } // Drop 패널은 영역·기준선 ROI 를 보여 줌
+function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
 function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }

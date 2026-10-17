@@ -1,7 +1,7 @@
 /* ============================================================
    오른쪽 패널: Adjust · Process · Threshold · Binary · Analyze · Measure · Macro · Info
    ============================================================ */
-const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["drop","Drop"],["measure","Measure"],["macro","Macro"],["info","Info"]];
+const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["measure","Measure"],["macro","Macro"],["info","Info"]];
 
 /* ---------- 매개변수 입력 칸 (등록부에서 만든다) ---------- */
 const FORM={}; // op id → 마지막 값
@@ -27,9 +27,9 @@ async function runOp(id,params,im){
 /* ---------- 패널 그리기 ---------- */
 function drawTabs(){ const el=$q(ROOT,"#imTabs"); if(!el) return; el.innerHTML=PANELS.map(([k,l])=>`<button data-p="${k}" class="${S.ui.panel===k?"active":""}">${l}</button>`).join("");
   $a(el,"button").forEach(b=>b.onclick=()=>{ S.ui.panel=b.dataset.p; clearPreview(); save(); drawTabs(); renderPanel(); draw(); }); }
-function renderPanel(){ const el=$q(ROOT,"#imPanel"); if(!el) return; const im=cur(); if(S.ui.panel!=="process"&&PREVIEW.plane){ PREVIEW.plane=false; PREVIEW.planes=null; PREVIEW.key=""; DISP.key=null; }
+function renderPanel(){ const el=$q(ROOT,"#imPanel"); if(!el) return; if(S.ui.panel==="drop") S.ui.panel="analyze"; /* 예전 Drop 탭 → Analyze 안 */ const im=cur(); if(S.ui.panel!=="process"&&PREVIEW.plane){ PREVIEW.plane=false; PREVIEW.planes=null; PREVIEW.key=""; DISP.key=null; }
   if(!im&&S.ui.panel!=="macro"){ el.innerHTML=`<div class="im-empty sm">영상을 열면 여기에서 조정·처리·분석합니다.</div>`; return; }
-  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,drop:panelDrop,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
+  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
 
 /* ---------- 히스토그램 SVG ---------- */
 function histSVG(h,o){ o=o||{}; const W=o.w||380, H=o.h||110, n=h.h.length; let mx=0; for(let i=0;i<n;i++) mx=Math.max(mx,o.log?Math.log1p(h.h[i]):h.h[i]); if(!mx) mx=1;
