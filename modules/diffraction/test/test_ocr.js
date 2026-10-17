@@ -28,7 +28,7 @@ const truth=fs.existsSync(path.join(DIR,"truth.json"))?JSON.parse(fs.readFileSyn
 const dump=[];
 if(!truth) console.log("합성 시험 그림 없음 (python3 ref/gen_ocr_test.py) — 건너뜀");
 else { console.log("== 1. 합성 이름표 "+truth.length+" 장 ("+DIR+")");
-  const by={}; let nOK=0, nOKT=0, nHi=0, nHiWrong=0, nBarMiss=0; const bins=[[0,0.5],[0.5,0.7],[0.7,0.9],[0.9,1.01]].map(r=>({r,n:0,ok:0}));
+  const gmsRight=new Set(); const by={}; let nOK=0, nOKT=0, nHi=0, nHiWrong=0, nBarMiss=0; const bins=[[0,0.5],[0.5,0.7],[0.7,0.9],[0.9,1.01]].map(r=>({r,n:0,ok:0}));
   const t0=Date.now();
   for(const t of truth){ const {img,w,h}=readPNG(path.join(DIR,t.file));
     const isRight=r=>!!r&&Math.abs(r.value-t.value)<1e-9&&r.unit===t.unit&&(t.valueInvNm==null?r.valueInvNm==null:Math.abs(r.valueInvNm-t.valueInvNm)<1e-9);
@@ -37,6 +37,7 @@ else { console.log("== 1. 합성 이름표 "+truth.length+" 장 ("+DIR+")");
     const rT=OCR.readScaleLabel(img,w,h,t.bar); // 정답 막대를 줬을 때 (OCR 만)
     const right=isRight(r), rightT=isRight(rT);
     const c=by[t.cond]||(by[t.cond]={n:0,ok:0,okT:0,nul:0,hiWrong:0,bar:0}); c.n++; if(right) c.ok++; if(rightT) c.okT++; if(!r) c.nul++; if(r&&!barOK) c.bar++;
+    if(right&&t.cond==="gms") gmsRight.add(t.file);
     if(right) nOK++; if(rightT) nOKT++; const conf=r?r.conf:0; if(conf>=0.9){ nHi++; if(!right){ nHiWrong++; c.hiWrong++; } }
     for(const bn of bins) if(conf>=bn.r[0]&&conf<bn.r[1]){ bn.n++; if(right) bn.ok++; }
     if(process.env.OCR_DUMP) dump.push({file:t.file,cond:t.cond,truth:t.text,got:r?r.text:null,right,conf,barOK,dbg:r&&r.debug});
@@ -50,6 +51,11 @@ else { console.log("== 1. 합성 이름표 "+truth.length+" 장 ("+DIR+")");
   const clean=by.clean; if(clean) ok(clean.ok/clean.n>=0.98,`깨끗한 조건 정확(자동 막대) ${(100*clean.ok/clean.n).toFixed(1)} % (≥ 98 %)`);
   ok(nOK/truth.length>=0.95,`전체 정확(자동 막대) ${(100*nOK/truth.length).toFixed(1)} % (≥ 95 %)`);
   ok(nHi>0&&nHiWrong/nHi<=0.01,`conf ≥ 0.9: ${nHi} 장 중 틀림 ${nHiWrong} (${(100*nHiWrong/Math.max(1,nHi)).toFixed(2)} % ≤ 1 %)`);
+  // GMS 기본 이름표 꼴(검은 명조 + 흰 그림자, REDI 예제 B3·T13 모양): 큰 글자(대문자 ≥ 20 px)는 대부분 읽고, 못 읽으면 conf 를 낮춰 확인을 묻는다(높은 conf 오답 0)
+  const g=by.gms; if(g){ const big=truth.filter(t=>t.cond==="gms"&&t.capH>=20); const okBig=big.filter(t=>gmsRight.has(t.file)).length;
+    ok(g.ok/g.n>=0.55,`GMS 꼴 전체 ${(100*g.ok/g.n).toFixed(1)} % (≥ 55 %; 대문자 10–19 px 가 어렵다)`);
+    ok(big.length>0&&okBig/big.length>=0.75,`GMS 꼴 대문자 ≥ 20 px: ${okBig}/${big.length} (${(100*okBig/Math.max(1,big.length)).toFixed(1)} % ≥ 75 %)`);
+    ok(g.hiWrong===0,`GMS 꼴 conf ≥ 0.9 오답 ${g.hiWrong} (= 0)`); }
   if(process.env.OCR_DUMP) fs.writeFileSync(process.env.OCR_DUMP,JSON.stringify(dump)); }
 
 /* ---------- 2. 실측 ---------- */

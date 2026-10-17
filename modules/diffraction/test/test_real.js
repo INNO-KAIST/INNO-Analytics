@@ -55,4 +55,10 @@ if(PACK&&M[FE]&&M[AU]){ console.log("== 내장 묶음 (COD "+PACK.phases.length+
     const S=DP.findSpots(img,m.w,m.h,{mask}); const c=DP.findCenter(S.spots,m.w,m.h,{beamStop:bs.mask}); const L=DP.fitLattice(S.spots.slice(0,16),c,{size:m.w});
     const Rk=DI.rankSpots(L,only(["Fe","Cr","Y","Ti","O"]),{scale:5/bar.lenPx,scaleErr:0.05,distortion:0.02,maxIdx:7,gmax:15,w:m.w,h:m.h,mask}); const t=Rk.cands[0];
     ok(t&&t.phase.id==="pack:aFe"&&t.zone.map(Math.abs).sort().join()==="1,3,5",`Fe-Cr (원소 Fe Cr Y Ti O): 1 위 ${t&&t.phaseName} [${t&&t.zone}] κ ${t&&t.kappa.toFixed(4)}`); } }
+// REDI(포항산업과학연구원) 설치본 동봉 예제 B3·T13 — GMS 기본 이름표(검은 명조 + 흰 그림자, 속 빈 막대). 그림은 내부 시험용(공개 저장소 제외)
+{ require("../src/diff_ocr.js"); const OC=globalThis.DIFF_OCR; const H=globalThis.DIFF_WORK.handler(globalThis);
+  for(const [f,dd,ang] of [["REDI_B3.tif",0.459,120],["REDI_T13.tif",0.206,90]]){ if(!M[f]) continue; console.log("== REDI 예제 "+f); const m=M[f]; const img=load(f);
+    const r=H("analyze",{img:Float32Array.from(img),w:m.w,h:m.h,opt:{pattern:"auto"}}); const lb=r.scaleLabel;
+    ok(lb&&lb.text==="10 1/nm"&&lb.conf>=0.9,`이름표 "${lb&&lb.text}" conf ${lb&&lb.conf.toFixed(3)} (GMS 꼴)`); ok(r.scaleBar&&Math.abs(r.scaleBar.lenPx-798)<=2,`속 빈 막대 ${r.scaleBar&&r.scaleBar.lenPx} px`);
+    const L=r.spots&&r.spots.lattices[0]; const d=L&&1/(L.len[0]*10/r.scaleBar.lenPx); ok(r.type==="spots"&&L&&Math.abs(d-dd)/dd<0.01&&Math.abs(L.ang12-ang)<1,`격자 d ${d&&d.toFixed(4)} nm, ∠R1·R2 ${L&&L.ang12.toFixed(2)}°`); } }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail){ console.log(fails.join("\n")); process.exit(1); }

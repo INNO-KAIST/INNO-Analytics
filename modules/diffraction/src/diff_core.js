@@ -211,7 +211,15 @@ DC.validateRecord=function(r){ const E=[], W=[]; const c=r&&r.cell||{}; const a=
   for(const at of (r&&r.atoms)||[]){ if(!DC.elementOf(at.el||at.label)) E.push(`원자 '${at.label||at.el}': 원소를 모릅니다`); if(at.occ!=null&&!(+at.occ>0&&+at.occ<=1.0001)) E.push(`원자 '${at.label||at.el}': 점유율은 0–1 입니다`); for(const k of ["x","y","z"]) if(!isFinite(+at[k])) E.push(`원자 '${at.label||at.el}': ${k} 좌표가 숫자가 아닙니다`); }
   if(r&&(!r.atoms||!r.atoms.length)) W.push("원자 좌표가 없습니다 — 소멸칙은 공간군으로만, 세기(구조인자)는 계산하지 않습니다");
   if(r&&(!r.source||!(r.source.codId||r.source.doi||r.source.citation||r.source.note))) W.push("출처(COD id·DOI·논문)가 없습니다");
-  if(!E.length&&r){ try{ DC.phaseFromRecord(r); }catch(e){ E.push(String(e.message||e)); } }
+  if(!E.length&&r){ try{ const ph=DC.phaseFromRecord(r);
+      // 화학식 ↔ 원자 자리 조성(대칭으로 펼친 단위 세포, 점유율 합) — 원소별 몫이 2 %p 넘게 다르면 경고 (CIF 의 화학식 칸이 틀린 일이 있다)
+      const f=DC.parseFormula(r.formula||""); const fk=Object.keys(f).filter(e=>DC.elementOf(e)===e);
+      // 혼합 자리(쉼표)·중수소 D 가 있으면 화학식이 점유율을 나타내지 않으므로 건너뜀
+      if(fk.length&&r.atoms&&r.atoms.length&&!/,/.test(r.formula||"")&&!/D(?![a-z])/.test(String(r.formula||"").replace(/Dy|Db|Ds/g,""))){ const uc={}; for(const a of DC.expandAtoms(ph)){ const el=DC.elementOf(a.el); if(el) uc[el]=(uc[el]||0)+(a.occ==null?1:+a.occ); }
+        const keys=[...new Set(fk.concat(Object.keys(uc)))]; const sf=fk.reduce((x,k)=>x+f[k],0), su=Object.values(uc).reduce((x,v)=>x+v,0);
+        if(sf>0&&su>0){ const d=Math.max(...keys.map(k=>Math.abs((f[k]||0)/sf-(uc[k]||0)/su))); if(d>0.02){ const fmt=o=>Object.keys(o).sort().map(k=>k+(+o[k].toFixed(3))).join(" ");
+          W.push(`화학식(${fmt(Object.fromEntries(fk.map(k=>[k,f[k]])))})과 원자 자리로 센 단위 세포 조성(${fmt(uc)})이 다릅니다(최대 ${(d*100).toFixed(1)} %p) — 화학식 칸이나 원자 자리·점유율을 확인하세요`); } } }
+    }catch(e){ E.push(String(e.message||e)); } }
   return {errors:E,warnings:W,ok:!E.length}; };
 /* 중복 후보: 같은 COD id, 또는 같은 화학식 원소 + 같은 공간군 번호 + 격자상수 ±0.5 % */
 DC.sameRecord=function(p,q){ if(p.source&&q.source&&p.source.codId&&p.source.codId===q.source.codId) return true;
@@ -220,7 +228,23 @@ DC.sameRecord=function(p,q){ if(p.source&&q.source&&p.source.codId&&p.source.cod
   const cp=p.cell, cq=q.cell; return rel(+cp.a,+cq.a)&&rel(+(cp.b||cp.a),+(cq.b||cq.a))&&rel(+(cp.c||cp.a),+(cq.c||cq.a)); };
 
 /* ---------------- 화학식 ---------------- */
-DC.parseFormula=function(f){ const out={}; const s=String(f||"").replace(/\s+/g,""); const re=/([A-Z][a-z]?)(\d*\.?\d*)/g; let m; while((m=re.exec(s))){ if(!m[1]) continue; out[m[1]]=(out[m[1]]||0)+(m[2]?+m[2]:1); } return out; };
+/* 원소 → 개수. 괄호·대괄호 묶음과 배수 'Ca3(PO4)2', 괄호 안 쉼표 혼합 자리 '(Fe,Mn)2SiO4'(배수를 똑같이 나눔 → Fe 1 · Mn 1),
+   수화물 가운뎃점 'CuSO4·5H2O' (· • * 뒤 앞자리 수 = 그 묶음의 배수) 를 푼다. 괄호·점이 없는 식은 예전 규칙 그대로(원소 + 수).
+   짝이 안 맞는 괄호는 무시하고 읽을 수 있는 만큼, 괄호 깊이 64 넘으면 그 안은 무시 */
+DC.parseFormula=function(f){ const s0=String(f||"").replace(/\s+/g,"");
+  if(!/[()\[\],·•*]/.test(s0)){ const out={}; const re=/([A-Z][a-z]?)(\d*(?:\.\d*)?)/g; let m; while((m=re.exec(s0))){ if(!m[1]) continue; out[m[1]]=(out[m[1]]||0)+(m[2]&&m[2]!=="."?+m[2]:1); } return out; }
+  const add=(o,k,v)=>{ o[k]=(o[k]||0)+v; }; const total={};
+  for(let part of s0.split(/[·•*]/)){ if(!part) continue; let mult=1; const lm=/^(\d+(?:\.\d+)?)(?=[A-Z(\[])/.exec(part); if(lm){ mult=+lm[1]; part=part.slice(lm[1].length); }
+    let i=0; const s=part; const num=()=>{ const m=/^\d*(?:\.\d*)?/.exec(s.slice(i))[0]; i+=m.length; return m&&m!=="."?+m:1; };
+    const group=(close,depth)=>{ const alts=[{}]; while(i<s.length){ const c=s[i];
+        if(c===")"||c==="]"){ i++; if(close) break; continue; }
+        if(c==="("||c==="["){ i++; if(depth>64){ let d=1; while(i<s.length&&d){ if(s[i]==="("||s[i]==="[") d++; else if(s[i]===")"||s[i]==="]") d--; i++; } num(); continue; } const g=group(true,depth+1); const k=num(); for(const e in g) add(alts[alts.length-1],e,g[e]*k); continue; }
+        if(c===","){ i++; if(close) alts.push({}); continue; }   // 쉼표 = 괄호 안 혼합 자리만 (맨 바깥 쉼표는 무시)
+        const m=/^([A-Z][a-z]?)/.exec(s.slice(i)); if(m){ i+=m[1].length; const k=num(); add(alts[alts.length-1],m[1],k); continue; }
+        i++; }
+      if(alts.length===1) return alts[0]; const out={}; for(const a of alts) for(const e in a) add(out,e,a[e]/alts.length); return out; };
+    const g=group(false,0); for(const e in g) add(total,e,g[e]*mult); }
+  return total; };
 
 /* ---------------- 정대축의 2D 역격자 ---------------- */
 /* [uvw] 에 수직인 정수 hkl 평면 격자의 원시 기저 p, q (cross(p,q) = ±[uvw]/gcd) */

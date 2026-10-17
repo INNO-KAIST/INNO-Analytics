@@ -95,7 +95,7 @@ function drawBar(){ const el=$q(ROOT,"#ddbBar"); if(!el) return; const D=DB(); c
       <button class="btn sm" id="ddbExpC" title="목록 요약 CSV">Export CSV</button></div>`;
   $a(el,".ddb-layers button").forEach(b=>b.onclick=()=>{ const L=b.dataset.l; U.layers=U.layers.includes(L)?U.layers.filter(x=>x!==L):U.layers.concat([L]); savePref(); drawBar(); drawList(); });
   const q=$q(el,"#ddbQ"); let tq=null; q.oninput=()=>{ clearTimeout(tq); tq=setTimeout(()=>{ U.q=q.value; drawList(); },150); };
-  const ei=$q(el,"#ddbEl"); const addEls=()=>{ const v=D.parseElements(ei.value); const bad=String(ei.value).split(/[\s,;]+/).filter(Boolean).filter(t=>!v.some(x=>x.toLowerCase()===t.toLowerCase()));
+  const ei=$q(el,"#ddbEl"); const addEls=()=>{ const v=D.parseElements(ei.value); const bad=D.parseComposition?D.parseComposition(ei.value).bad:String(ei.value).split(/[\s,;]+/).filter(Boolean).filter(t=>!v.some(x=>x.toLowerCase()===t.toLowerCase()));
       if(bad.length) say("모르는 원소 기호: "+bad.join(" "),"warn"); if(v.length){ U.els=[...new Set(U.els.concat(v))]; savePref(); drawBar(); drawList(); const n=$q(ROOT,"#ddbEl"); if(n) n.focus(); } else ei.value=""; };
   ei.onkeydown=e=>{ if(e.key==="Enter"||e.key===","){ e.preventDefault(); addEls(); } else if(e.key==="Backspace"&&!ei.value&&U.els.length){ U.els.pop(); savePref(); drawBar(); drawList(); $q(ROOT,"#ddbEl").focus(); } };
   ei.onblur=()=>{ if(ei.value.trim()) addEls(); };

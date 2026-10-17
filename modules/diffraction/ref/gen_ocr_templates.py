@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """스케일바 이름표 OCR 글자 틀(template) 만들기 → src/diff_ocr.js 의 /*TPL-BEGIN*/ … /*TPL-END*/ 자리에 넣는다.
 
-글꼴(틀용): Liberation Sans(Arial 치수 호환) · DejaVu Sans · FreeSans(Helvetica 계열), 보통·굵게.
+글꼴(틀용): Liberation Sans(Arial 치수 호환) · DejaVu Sans · FreeSans(Helvetica 계열), 보통·굵게
++ 명조 Liberation Serif(보통·굵게)·DejaVu Serif·FreeSerif + 고정폭 Liberation Mono·DejaVu Sans Mono·FreeMono (GMS 기본 이름표 = Times 꼴, 2026-10-17).
 크기(px): 12 15 19 24 30 40 52, 계단(앤티에일리어싱 없음)·부드러움 둘 다.
 시험(gen_ocr_test.py)은 다른 크기와 다른 글꼴(Carlito·Inter·Noto Sans CJK 라틴·TeX Gyre Heros)을 쓴다.
 
@@ -24,6 +25,16 @@ FONTS = [
     ("DejaVuSansB", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
     ("FreeSans", "/usr/share/fonts/truetype/freefont/FreeSans.ttf"),
     ("FreeSansB", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
+    # 명조(serif) — GMS 기본 이름표는 Times 꼴 명조(검은 글자 + 흰 그림자). Liberation Serif = Times New Roman 치수 호환
+    # ↓ 여기부터 '추가 틀'(TPL_B64_X): 막대 극성 첫 읽기는 위 고딕 틀만 쓰고(검증된 동작 그대로), 반대 극성(GMS 꼴) 읽기에서만 함께 쓴다
+    ("LiberationSerif", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+    ("LiberationSerifB", "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"),
+    ("DejaVuSerif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
+    ("FreeSerif", "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"),
+    # 고정폭 — 장비 소프트웨어 덧글씨(Courier·Consolas 꼴)
+    ("LiberationMono", "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"),
+    ("DejaVuSansMono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+    ("FreeMono", "/usr/share/fonts/truetype/freefont/FreeMono.ttf"),
 ]
 SIZES = [12, 15, 19, 24, 30, 40, 52]
 # 대상 글자 + 거절용 글자(다른 덧글씨를 이름표로 착각하지 않게)
@@ -113,9 +124,12 @@ def has_glyph(font_path, ch):
         return True
 
 
+N_SANS = 6   # FONTS 앞 6 개 = 기본 틀
+
+
 def main():
     recs = []
-    for fname, fp in FONTS:
+    for fi, (fname, fp) in enumerate(FONTS):
         for size in SIZES:
             for aa in (True, False):
                 hs = []
@@ -133,13 +147,14 @@ def main():
                     if f is None:
                         continue
                     f["cls"] = "µ" if ch == "μ" else ch
+                    f["x"] = fi >= N_SANS
                     recs.append(f)
                 # 글꼴 자체 위첨자 ¹ (있으면)
                 if has_glyph(fp, "¹"):
                     S = size * 4; im = Image.new("L", (S, S), 0); dd = ImageDraw.Draw(im); dd.fontmode = "L" if aa else "1"
                     base = int(size * 2.6); dd.text((size, base), "¹", font=ImageFont.truetype(fp, size), fill=255, anchor="ls")
                     f = glyph_feat(np.asarray(im, np.float64) / 255.0, base, H)
-                    if f: f["cls"] = "¹"; recs.append(f)
+                    if f: f["cls"] = "¹"; f["x"] = fi >= N_SANS; recs.append(f)
     # 같은 클래스 안 거의 같은 틀 빼기
     cls_list = [c for c in CLASSES if c != "μ"]
     kept = {c: [] for c in cls_list}
@@ -151,29 +166,33 @@ def main():
                 dup = True; break
         if not dup:
             kept[r["cls"]].append(r)
-    out = bytearray()
-    n = 0
-    for ci, c in enumerate(cls_list):
-        for r in kept[c]:
-            out.append(ci)
-            out += np.packbits(r["bits"]).tobytes()  # 216 비트 = 27 B
-            out.append(int(np.clip(round((r["la"] + 4) * 40), 0, 255)))
-            out.append(int(np.clip(round(r["rh"] * 100), 0, 255)))
-            out.append(int(np.clip(round((r["rb"] + 1) * 100), 0, 255)))
-            out.append(int(min(r["ho"], 3)))
-            n += 1
-    b64 = base64.b64encode(bytes(out)).decode()
-    lines = "\n".join('"' + b64[i:i + 160] + '"+' for i in range(0, len(b64), 160)) + '""'
-    block = ("/*TPL-BEGIN*/\n// ref/gen_ocr_templates.py 가 만든 글자 틀 %d 개 (글꼴 %s, 크기 %s px, 부드러움 켜고/끄고)\n"
-             "const TPL_CLASSES=%s;\nconst TPL_B64=\n%s;\n/*TPL-END*/") % (
-        n, " · ".join(f for f, _ in FONTS), " ".join(map(str, SIZES)), _js_str("".join(cls_list)), lines)
+    def pack(extra):
+        out = bytearray(); n = 0
+        for ci, c in enumerate(cls_list):
+            for r in kept[c]:
+                if r["x"] != extra:
+                    continue
+                out.append(ci)
+                out += np.packbits(r["bits"]).tobytes()  # 216 비트 = 27 B
+                out.append(int(np.clip(round((r["la"] + 4) * 40), 0, 255)))
+                out.append(int(np.clip(round(r["rh"] * 100), 0, 255)))
+                out.append(int(np.clip(round((r["rb"] + 1) * 100), 0, 255)))
+                out.append(int(min(r["ho"], 3)))
+                n += 1
+        b64 = base64.b64encode(bytes(out)).decode()
+        return n, b64, "\n".join('"' + b64[i:i + 160] + '"+' for i in range(0, len(b64), 160)) + '""'
+    n, b64, lines = pack(False)
+    nx, b64x, linesx = pack(True)
+    block = ("/*TPL-BEGIN*/\n// ref/gen_ocr_templates.py 가 만든 글자 틀 — 기본 %d 개 (고딕: %s) + 추가 %d 개 (명조·고정폭: %s), 크기 %s px, 부드러움 켜고/끄고\n"
+             "const TPL_CLASSES=%s;\nconst TPL_B64=\n%s;\nconst TPL_B64_X=\n%s;\n/*TPL-END*/") % (
+        n, " · ".join(f for f, _ in FONTS[:N_SANS]), nx, " · ".join(f for f, _ in FONTS[N_SANS:]), " ".join(map(str, SIZES)), _js_str("".join(cls_list)), lines, linesx)
     src = open(JS, encoding="utf8").read()
     src2, k = re.subn(r"/\*TPL-BEGIN\*/.*?/\*TPL-END\*/", lambda m: block, src, flags=re.S)
     if k != 1:
         sys.exit("diff_ocr.js 에 TPL 표시가 없다")
     open(JS, "w", encoding="utf8").write(src2)
     per = {c: len(kept[c]) for c in cls_list}
-    print("틀", n, "개, ", len(b64), "글자 base64;", per)
+    print("틀 기본", n, "개 + 추가", nx, "개, ", len(b64), "+", len(b64x), "글자 base64;", per)
 
 
 def _js_str(s):

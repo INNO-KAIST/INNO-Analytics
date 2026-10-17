@@ -69,6 +69,23 @@ console.log("== 원소 거르기·검색");
   ok(DB.list({query:"TiO2"}).length===1,"검색: 화학식 비 (TiO2 = 'Ti2 O4')"); ok(DB.list({query:"Na2Y2F12"}).length===1,"검색: 비가 같은 식 (Na2Y2F12 = 'Na1 Y1 F6')"); ok(DB.list({query:"periclase"}).length===0&&DB.list({query:"ti2"}).length===1,"검색: 소문자 부분 문자열");
   const cod=imported["Au_Fm-3m.cif"].source.codId; if(cod){ ok(DB.list({query:cod}).length>=1,"검색: COD id "+cod); } else ok(true,"(Au CIF 에 COD id 없음)"); }
 
+console.log("== 조성비 (REDI 의 성분 + 조성비)");
+{ const C=DB.parseComposition; const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  ok(eq(C("Fe3 O4").ratio,{Fe:3,O:4})&&eq(C("Fe3O4").ratio,{Fe:3,O:4})&&eq(C("Fe:3 O:4").ratio,{Fe:3,O:4})&&eq(C("Fe 3 O 4").ratio,{Fe:3,O:4}),"입력 꼴 4 가지 → 같은 비");
+  ok(eq(C("Fe=42.1, O=57.9").ratio,{Fe:42.1,O:57.9})&&eq(C("fe 42.1% o 57.9%").ratio,{Fe:42.1,O:57.9}),"EDS at.% (소문자·% 허용)");
+  ok(C("Na Y F").ratio===null&&eq(C("Na Y F").els,["Na","Y","F"]),"수 없으면 원소만");
+  ok(C("Fe3 O").partial&&C("Fe3 O").ratio===null,"일부만 수 → partial, 비 안 씀");
+  ok(eq(C("Xx Fe").bad,["Xx"])&&eq(C("Xx Fe").els,["Fe"]),"읽지 못한 조각 표시");
+  const mr=(f,q,t)=>DB.matchRatio({formula:f},C(q).ratio,t);
+  ok(mr("Fe3O4","Fe=42 O=58")&&mr("Fe2O3","Fe=42 O=58")&&!mr("FeO","Fe=42 O=58"),"±5 at.%p: Fe3O4·Fe2O3 통과, FeO(50 %) 탈락");
+  ok(!mr("Fe2O3","Fe3O4",0.02)&&mr("Fe2O3","Fe3O4",0.03),"허용 2 % 면 Fe2O3(40 %) 탈락, 3 % 면 통과 (차 2.86 %p)");
+  ok(mr("Na1.5 Y1.5 F6","NaYF4",0.01),"같은 비 다른 쓰기 (β-NaYF4 = Na1.5Y1.5F6)");
+  ok(mr("(Fe,Mn)2SiO4","Fe Mn Si O4".replace("Fe Mn","Fe1 Mn1").replace("Si","Si1"),0.01),"괄호·혼합 자리 화학식 (Fe,Mn)2SiO4 = Fe1 Mn1 Si1 O4");
+  const L=o=>DB.list(Object.assign({layers:["local"]},o)).map(r=>r.formula.replace(/\s+/g,""));
+  const a=L({elements:"Y O",elementMode:"all"}), b=L({elements:"Y2 O3",elementMode:"all",ratioTol:0.02}), c=L({elements:"Y1 O1",elementMode:"all",ratioTol:0.02});
+  ok(a.length>=1&&b.length===1&&/^Y\d+O\d+$/.test(b[0])&&c.length===0,"목록: Y·O 포함 → 조성비 Y2 O3 는 Y2O3, Y1 O1(50 %) 은 없음",{a,b,c});
+  ok(L({elements:"Y1 O1",elementMode:"all",useRatio:false}).length===a.length,"useRatio:false 면 비를 무시하고 원소만"); }
+
 console.log("== 내보내기·가져오기 왕복");
 { const before=DB.list({layers:["local"]}); const js=DB.exportJSON(); const csv=DB.exportCSV(null,{layers:["local"]});
   ok(csv.split("\r\n").filter(Boolean).length===before.length+1&&/^id,layer,name,formula/.test(csv),"CSV 요약: 머리 + 행 수");

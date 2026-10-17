@@ -14,6 +14,13 @@ PACK='''(cifs)=>{ if(window.DIFF_PACK&&DIFF_PACK.phases&&DIFF_PACK.phases.length
   window.DIFF_PACK={version:"test",phases:L}; return L.length; }'''
 def wait_res(pg,ms=60000):
     pg.wait_for_function('()=>{ const S=DIFF_UI._S(); return S&&S.res&&!S.busy&&!S.idBusy; }',timeout=ms); pg.wait_for_timeout(400)
+import re
+def DC_ratio_ok(formula,tol=0.05):
+    """화학식에서 Fe·O 몫이 Fe3O4(0.4286/0.5714)와 ±tol 안인지 (괄호 없는 식만)"""
+    f={}
+    for el,n in re.findall(r'([A-Z][a-z]?)(\d*\.?\d*)',formula.replace(' ','')): f[el]=f.get(el,0)+(float(n) if n else 1.0)
+    if not (f.get('Fe') and f.get('O')): return False
+    s=f['Fe']+f['O']; return abs(f['Fe']/s-3/7)<=tol+1e-9
 def hscroll(pg): return pg.evaluate('document.documentElement.scrollWidth>document.documentElement.clientWidth+1')
 def run(pg,tag):
     pg.goto('file://'+os.path.abspath(html)); pg.wait_for_timeout(1200)
@@ -88,6 +95,24 @@ def run(pg,tag):
             L=pg.evaluate('(()=>{ const L=DIFF_UI._S().res.spots.lattices[0]; return L&&[L.len[0]*5/177,L.len[1]*5/177,L.ang12]; })()'); print(L)
             chk(L and abs(L[0]-8.38)<0.1 and abs(L[1]-8.45)<0.1,'FeCr: strongest-16 lattice = bcc 211-type (8.4 1/nm)',L)
             pg.screenshot(path=f'{out}/{tag}_fecr.png',full_page=True); chk(not hscroll(pg),f'{tag} FeCr: no page horizontal scroll')
+            # REDI 대응: 후보 표에 R3 와 각도 오차, 결과 보고 그림, 조성비 필터
+            pg.fill('#dfEls','Fe Cr'); pg.dispatch_event('#dfEls','change'); wait_res(pg)
+            row=pg.evaluate('(()=>{ const tr=document.querySelector(".df-cand tbody tr"); if(!tr) return null; const td=[...tr.children].map(x=>x.innerHTML); return {hkl:td[3].split("<br>").length, d:td[4].split("<br>").length, ang:(tr.querySelector(".df-ang")||{innerHTML:""}).innerHTML.split("<br>").length}; })()')
+            chk(row and row['hkl']==3 and row['d']==3 and row['ang']==3,f'{tag} FeCr: candidate row shows R1/R2/R3 hkl, d and three angles with Δ',row)
+            A=pg.evaluate('(()=>{ const S=DIFF_UI._S(); const c=S.cands[0]; const a=DIFF_UI._angles(c); return {a, s:a[1]+a[2]-a[0]}; })()')
+            chk(A and abs(A['s'])<1e-6,f'{tag} FeCr: ∠13 + ∠23 = ∠12 (R3 = R1 + R2 between them)',A)
+            rep=pg.evaluate('DIFF_UI._report().filter(r=>!r.h).map(r=>r.k)')
+            chk(all(k in rep for k in ['Zone axis','System / SG','∠R1·R3','∠R2·R3']) and any(k.startswith('R3 (') for k in rep),f'{tag} FeCr: report rows (zone, system, R3, angles)',rep)
+            with pg.expect_download() as dl: pg.click('#dfRep')
+            fn=dl.value.suggested_filename; pth=os.path.join(out,f'{tag}_{fn}'); dl.value.save_as(pth)
+            chk(fn.endswith('_diffraction_report.png') and os.path.getsize(pth)>20000,f'{tag} FeCr: report PNG downloaded',(fn,os.path.getsize(pth)))
+            pg.fill('#dfEls','Fe3 O4'); pg.dispatch_event('#dfEls','change'); wait_res(pg)
+            cs=pg.evaluate('(()=>{ const S=DIFF_UI._S(); return {names:(S.cands||[]).map(c=>c.formula), note:(document.querySelector("#dfCompNote")||{}).textContent||""}; })()')
+            ok=cs['names'] and all(DC_ratio_ok(n) for n in cs['names'])
+            chk(ok and '42.9' in cs['note'] and pg.query_selector('#dfRatioTol') is not None,f'{tag} FeCr: Elements "Fe3 O4" → ratio filter (Fe 42.9 · O 57.1 at.%, ±5)',cs)
+            pg.fill('#dfEls','Fe 3 O'); pg.dispatch_event('#dfEls','change'); wait_res(pg)
+            chk('일부' in (pg.evaluate('(document.querySelector("#dfCompNote")||{}).textContent') or ''),f'{tag} FeCr: partial numbers → warning, ratio not used')
+            pg.fill('#dfEls',''); pg.dispatch_event('#dfEls','change'); wait_res(pg)
     # Phase DB 모드
     pg.click('#dfMode button[data-m="db"]'); pg.wait_for_timeout(600); pg.screenshot(path=f'{out}/{tag}_db.png',full_page=True)
     chk(pg.evaluate('document.querySelector("#dfMode .active").dataset.m')=='db',f'{tag}: Phase DB mode renders')

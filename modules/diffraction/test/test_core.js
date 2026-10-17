@@ -31,4 +31,12 @@ console.log("== CIF 읽기 경계");
 { const t=`data_x\n_cell_length_a 4.0782(3)\n_cell_length_b 4.0782\n_cell_length_c 4.0782\n_cell_angle_alpha 90\n_cell_angle_beta 90\n_cell_angle_gamma 90\n_symmetry_Int_Tables_number 225\nloop_\n_atom_site_label\n_atom_site_fract_x\n_atom_site_fract_y\n_atom_site_fract_z\n_atom_site_U_iso_or_equiv\nAu1 0 0 0 0.0081\n`;
   const p=DC.parseCIF(t)[0]; ok(p.ops.length===192&&p.atoms[0].el==="Au"&&Math.abs(p.atoms[0].B-8*Math.PI**2*0.0081)<1e-9&&DC.expandAtoms(p).length===4,"연산 없는 CIF → 공간군 번호, 표준 불확도 괄호, Uiso→B, 단위세포 4 원자");
   const s=DC.parseSymop("-x+1/2, y+0.5 ,-z"); ok(s.R.join()==="-1,0,0,0,1,0,0,0,-1"&&s.t.join()==="0.5,0.5,0","대칭 연산 문자열"); }
+// 화학식 ↔ 원자 자리 조성 검사 (CIF 의 화학식 칸이 틀린 경우) · 괄호 화학식
+{ console.log("== 화학식 검사");
+  const au={name:"Au",formula:"Au",cell:{a:0.40782,b:0.40782,c:0.40782,al:90,be:90,ga:90},sg:{number:225},atoms:[{label:"Au",el:"Au",x:0,y:0,z:0,occ:1}],source:{note:"t"}};
+  const w0=DC.validateRecord(au).warnings.filter(x=>/화학식\(/.test(x)); const w1=DC.validateRecord(Object.assign({},au,{formula:"Au2O"})).warnings.filter(x=>/화학식\(/.test(x));
+  ok(w0.length===0&&w1.length===1,"화학식 Au2O ↔ 원자 Au4 → 경고, Au ↔ Au4 → 없음",w1[0]);
+  const sp={name:"MgAl2O4",formula:"Mg8 Al16 O32",cell:{a:0.8083,b:0.8083,c:0.8083,al:90,be:90,ga:90},sg:{number:227,symbol:"F d -3 m :2"},atoms:[{label:"Mg",el:"Mg",x:0.125,y:0.125,z:0.125},{label:"Al",el:"Al",x:0.5,y:0.5,z:0.5},{label:"O",el:"O",x:0.2624,y:0.2624,z:0.2624}],source:{note:"t"}};
+  ok(DC.validateRecord(sp).warnings.filter(x=>/화학식\(/.test(x)).length===0,"스피넬 Mg8Al16O32 = 원자 자리(8a·16d·32e)");
+  ok(JSON.stringify(DC.parseFormula("(Fe,Mn)2SiO4"))==='{"Fe":1,"Mn":1,"Si":1,"O":4}'&&JSON.stringify(DC.parseFormula("Ca3(PO4)2"))==='{"Ca":3,"P":2,"O":8}'&&JSON.stringify(DC.parseFormula("Na1.5 Y1.5 F6"))==='{"Na":1.5,"Y":1.5,"F":6}',"괄호·혼합 자리·소수 화학식"); }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail){ console.log(fails.join("\n")); process.exit(1); }

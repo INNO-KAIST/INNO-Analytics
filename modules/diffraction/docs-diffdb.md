@@ -19,6 +19,8 @@ IndexedDB `inno-diffraction` v1 (stores `local`, `lab`, `cal`, `meta`)은 diff_d
 - `init()` → Promise. IndexedDB 열기 + 캐시·메타 읽기 + pack. 다른 함수(비동기)는 스스로 `init()` 을 기다린다. `ready()` 같은 것.
 - `list({layers?=["pack","lab","local"], includeHidden?=false, query?, elements?, elementMode?="subset"|"all"("contains" 도 같음)})` → 기록[] (이름순).
   - `elements`: `"Na Y F"` 또는 `["Na","Y","F"]`. `subset` = 상의 원소 ⊆ 고른 원소 (REDI 의 EDS 원소), `all` = 고른 원소를 모두 포함.
+  - **조성비**(2026-10-17, REDI 의 '성분 + 조성비'): `elements` 에 수까지 — `"Fe3 O4"`·`"Fe3O4"`·`"Fe:3 O:4"`·`"Fe 3 O 4"`·`"Fe=42.1 O=57.9"`(EDS at.%). 모든 원소에 수가 있으면 넣은 원소끼리의 몫(합 1)과 상 화학식의 같은 원소 몫이 원소마다 `ratioTol`(기본 0.05 = 5 at.%p) 안이어야 통과. `useRatio:false` 면 비를 무시. 수가 일부만 있으면 비를 쓰지 않는다(`partial`).
+  - `parseComposition(str|arr)` → `{els, ratio|null, partial, bad[]}`, `matchRatio(rec, ratio, tol)`. 화학식은 `DC.parseFormula` — 괄호·대괄호·배수(`Ca3(PO4)2`)와 쉼표 혼합 자리(`(Fe,Mn)2SiO4` → Fe 1·Mn 1)를 푼다.
   - `query`: 이름·id·COD id·DOI·공간군 기호·번호 부분 일치, 화학식은 공백 무시 부분 일치 + **원소 비 일치**(`TiO2` = `Ti2 O4`).
 - `get(id)`, `layerOf(id)`, `counts()` → `{pack, lab, labHidden, local, cal}`, `packInfo()` → `{version, count}`, `elementsOf(rec)`, `parseElements(str|arr)`.
 - `phase(id)` → `DC.phaseFromRecord` 결과 (판이 바뀔 때만 다시 만듦). 숨긴 Lab 항목도 된다(재현용).

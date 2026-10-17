@@ -15,7 +15,7 @@ const hklS=h=>h?h.map(v=>v<0?"<span class=\"ov\">"+(-v)+"</span>":String(v)).joi
 const hklT=h=>h?"("+h.join(" ")+")":"";
 const uvwS=z=>"["+z.map(v=>v<0?"<span class=\"ov\">"+(-v)+"</span>":String(v)).join("")+"]";
 const LS_KEY="inno.diff.v1";
-const P=(()=>{ let p={}; try{ p=JSON.parse(localStorage.getItem(LS_KEY)||"{}")||{}; }catch(e){ p={}; } return Object.assign({pattern:"auto",calSrc:"auto",kappaPct:100,tolPct:3,elements:"",elMode:"subset",layers:{pack:true,lab:true,local:true},maxIdx:5,radial:"auto",topN:0,showMask:true,showPred:true,distPct:1,rankCal:"auto",manual:{h1:"1 1 1",h2:"2 0 0"}},p); })();
+const P=(()=>{ let p={}; try{ p=JSON.parse(localStorage.getItem(LS_KEY)||"{}")||{}; }catch(e){ p={}; } return Object.assign({pattern:"auto",calSrc:"auto",kappaPct:100,tolPct:3,elements:"",ratioTol:5,elMode:"subset",layers:{pack:true,lab:true,local:true},maxIdx:5,radial:"auto",topN:0,showMask:true,showPred:true,distPct:1,rankCal:"auto",manual:{h1:"1 1 1",h2:"2 0 0"}},p); })();
 const save=()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(P)); }catch(e){} };
 /* 화면 상태 (파일마다 새로) */
 let S=null;
@@ -59,9 +59,11 @@ const ringScale=cal=>cal.scale&&S.res&&S.res.rings?cal.scale*Math.sqrt(S.res.rin
 /* 스폿 벡터(px) → |g| (1/nm): 저장한 보정의 찌그러짐까지 */
 function gOf(v,cal){ if(!cal.scale) return null; if(cal.ellip>1.0001){ const T=DI().affineFromParams(1,cal.ellip,cal.phi).T; return Math.hypot(T[0][0]*v[0]+T[0][1]*v[1],T[1][0]*v[0]+T[1][1]*v[1])*cal.scale; } return Math.hypot(v[0],v[1])*cal.scale; }
 /* ---------- 상 목록 ---------- */
-async function records(){ const els=P.elements.trim()?P.elements.trim().split(/[\s,;]+/).filter(Boolean):null; let list=[];
-  if(window.DIFF_DB&&DIFF_DB.list){ try{ if(DIFF_DB.init&&!DIFF_DB._inited){ await DIFF_DB.init(); DIFF_DB._inited=true; } list=await Promise.resolve(DIFF_DB.list({elements:els,elementMode:P.elMode,layers:Object.keys(P.layers).filter(k=>P.layers[k])})); }catch(e){ say("Phase DB 를 읽지 못했습니다: "+(e.message||e),"warn"); list=[]; } }
-  else if(window.DIFF_PACK){ list=DIFF_PACK.phases.map(r=>Object.assign({layer:"pack"},r)); if(els){ const set=new Set(els); list=list.filter(r=>{ const k=Object.keys(DC().parseFormula(r.formula)); return P.elMode==="contains"?els.every(e=>k.includes(e)):k.every(e=>set.has(e)); }); } }
+async function records(){ const raw=P.elements.trim(); const els=raw?raw.split(/[\s,;]+/).filter(Boolean):null; let list=[];
+  if(window.DIFF_DB&&DIFF_DB.list){ try{ if(DIFF_DB.init&&!DIFF_DB._inited){ await DIFF_DB.init(); DIFF_DB._inited=true; } list=await Promise.resolve(DIFF_DB.list({elements:raw||null,ratioTol:(+P.ratioTol>0?+P.ratioTol:5)/100,elementMode:P.elMode,layers:Object.keys(P.layers).filter(k=>P.layers[k])})); }catch(e){ say("Phase DB 를 읽지 못했습니다: "+(e.message||e),"warn"); list=[]; } }
+  else if(window.DIFF_PACK){ list=DIFF_PACK.phases.map(r=>Object.assign({layer:"pack"},r)); if(raw){ // DIFF_DB 가 없을 때: 토큰마다 화학식으로 읽어 원소만 (조성비는 Phase DB 가 있을 때)
+      const set=new Set(); for(const t of els){ const t2=t.replace(/[:=].*$/,""); const f=DC().parseFormula(t2[0].toUpperCase()+t2.slice(1)); for(const k of Object.keys(f)) if(DC().elementOf(k)===k) set.add(k); } const E2=[...set];
+      list=list.filter(r=>{ const k=Object.keys(DC().parseFormula(r.formula)); return P.elMode==="contains"?E2.every(e=>k.includes(e)):k.every(e=>set.has(e)); }); } }
   return (list||[]).filter(r=>!r.hidden); }
 const refOf=id=>{ try{ return window.DIFF_DB&&DIFF_DB.refOf?DIFF_DB.refOf(id):{id}; }catch(e){ return {id}; } };
 
@@ -108,7 +110,7 @@ async function analyze(){ if(!S.img||S.busy) return; const my=S; S.busy=true; S.
   try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:P.pattern,radial:P.radial,topN:P.topN,maxLattices:3,center:S.center}},[copy.buffer]);
     if(S!==my) return; // 분석 중 다른 파일로 바뀜 — 버림
     S.res=r; S.type=P.pattern==="auto"?r.type:P.pattern; S.spotsEdit=null; S.lat=0; S.maskCv=null; if(S.barLen==null&&r.scaleBar) S.barLen=r.scaleBar.lenPx;
-    const lb=r.scaleLabel; if(S.barVal==null&&lb&&lb.recip&&lb.valueInvNm>0){ S.barVal=+lb.valueInvNm.toPrecision(6); S.barFromOCR=true; } // 그림 속 이름표에서 읽은 값 (확인 가능)
+    const lb=r.scaleLabel; if(S.barVal==null&&lb&&lb.recip&&lb.valueInvNm>0&&lb.conf>=0.3){ /* conf < 0.3 은 그럴듯하지 않아 채우지 않는다(잡음·다른 덧글씨) */ S.barVal=+lb.valueInvNm.toPrecision(6); S.barFromOCR=true; } // 그림 속 이름표에서 읽은 값 (확인 가능)
     if(DW().mode==="main") say("Worker 를 쓸 수 없어 주 화면에서 계산했습니다","warn"); }
   catch(e){ if(S!==my) return; S.err=String(e.message||e); }
   if(S.res&&!S.err) S.idBusy=true; S.busy=false; S.progress=""; paint(); if(S.res&&!S.err) identify(); }
@@ -217,19 +219,29 @@ function ringCard(){ const R=S.res.rings; const cal=calib(); const s=ringScale(c
   return `<div class="card"><h3>Rings <span class="hint">center ${f(R.center.x,1)}, ${f(R.center.y,1)} · a/b ${f(R.ratio,4)} · ${R.ringFits.length} rings fitted</span></h3>
     <div class="tblwrap" style="max-height:40vh"><table class="tbl"><thead><tr><th>#</th><th>r (px)</th><th>g (1/nm)</th><th>d (nm)</th><th>FWHM (px)</th><th>S/N</th><th class="l">Note</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="margin-top:6px">반지름은 타원을 원으로 편 단축 기준입니다. 빔스토퍼 가장자리·넓은 봉우리는 상 찾기에서 뺍니다.</div></div>`; }
+/* Elements 칸 해석 표시: 원소만 / 조성비(입력 원소만으로 몫, 허용 ±at.%p) / 읽지 못한 조각 */
+function compHint(){ const raw=(P.elements||"").trim(); if(!raw||!window.DIFF_DB||!DIFF_DB.parseComposition) return ""; const c=DIFF_DB.parseComposition(raw); const out=[];
+  if(c.ratio){ const sum=Object.values(c.ratio).reduce((a,b)=>a+b,0); out.push(`<label class="f" title="조성비 허용 오차 — 입력한 원소끼리의 몫(at.%)이 상의 화학식과 이만큼 안이면 후보">Ratio ±<input type="number" id="dfRatioTol" value="${E(P.ratioTol)}" min="0.5" max="50" step="0.5" style="width:64px"> at.%</label>`);
+    out.push(`<span class="muted" id="dfCompNote">조성비 ${c.els.map(e=>E(e)+" "+f(100*c.ratio[e]/sum,1)).join(" · ")} at.%</span>`); }
+  else if(c.partial) out.push(`<span class="note warn" id="dfCompNote">수가 일부 원소에만 있어 조성비는 쓰지 않습니다 — 모든 원소에 수를 넣거나(Fe3 O4) 모두 빼세요</span>`);
+  if(c.bad.length) out.push(`<span class="note warn" id="dfCompBad">읽지 못함: ${c.bad.map(E).join(" ")}</span>`);
+  return out.join(""); }
 function idCard(){ const cal=calib(); const els=P.elements;
   const head=`<div class="card"><h3>Phase ID <span class="hint">${cal.scale?"보정값 + 길이비·각도·세기":"보정 없이 — 길이비·각도·세기"}</span></h3>
-    <div class="row"><label class="f" style="flex:1;min-width:160px" title="EDS 로 확인한 원소 (예: Na Y F)">Elements<input type="text" id="dfEls" value="${E(els)}" placeholder="e.g. Na Y F  (empty = all)"></label>
+    <div class="row"><label class="f" style="flex:1;min-width:160px" title="EDS 로 확인한 원소, 조성비를 알면 수까지 (REDI 의 성분·조성비) — 예: Na Y F · Fe3 O4 · Fe3O4 · Fe=42 O=58 (EDS at.%)">Elements<input type="text" id="dfEls" value="${E(els)}" placeholder="e.g. Na Y F · Fe3 O4 · Fe=42 O=58"></label>
+      ${compHint()}
       <label class="f">Match<select id="dfElMode"><option value="subset" ${P.elMode==="subset"?"selected":""}>Only these</option><option value="contains" ${P.elMode==="contains"?"selected":""}>Contains all</option></select></label>
       ${S.type==="spots"?`<label class="f" title="동역학 = Bloch-wave (이중 회절·Gjønnes–Moodie 소멸 반영, 상위 12 후보)">Intensities<select id="dfIntM"><option value="dyn" ${P.intModel!=="kin"?"selected":""}>Dynamical</option><option value="kin" ${P.intModel==="kin"?"selected":""}>Kinematic</option></select></label><label class="f">Max zone index<select id="dfMaxIdx">${[3,4,5,6,7].map(k=>`<option ${+P.maxIdx===k?"selected":""}>${k}</option>`).join("")}</select></label>`:""}</div>
     <div class="row df-layers">${[["pack","Built-in"],["lab","Lab"],["local","Local"]].map(([k,t])=>`<label class="df-ck"><input type="checkbox" data-layer="${k}" ${P.layers[k]?"checked":""}> ${t}</label>`).join("")}<button class="btn sm" id="dfId" ${S.idBusy?"disabled":""}>Search</button></div>`;
   if(S.idBusy) return head+`<div class="muted" style="margin-top:8px">후보를 계산하는 중…</div></div>`;
   if(S.type==="spots"){ const C=S.cands; if(!C) return head+"</div>"; if(!C.length) return head+`<div class="note" style="margin-top:8px">후보가 없습니다 — 원소·Phase DB 범위를 넓혀 보세요.</div></div>`;
-    const tb=C.map((c,i)=>{ const dErr=cal.scale?c.d.map((d,j)=>{ const L=correctedFit(curLat(),cal); const dm=1/(L.len[j]*cal.scale); return (dm-d)/d*100; }):null;
+    const Lm=correctedFit(curLat(),cal);
+    const tb=C.map((c,i)=>{ const dErr=cal.scale?c.d.map((d,j)=>{ const dm=1/(Lm.len[j]*cal.scale); return (dm-d)/d*100; }):null; const A=candAngles(c), Am=[Lm.ang12,Lm.ang13,Lm.ang23];
+      const angS=A?A.map((a,j)=>`${f(a,1)}°<span class="muted"> (${(a-Am[j]>=0?"+":"")+f(a-Am[j],1)})</span>`).join("<br>"):`${f(c.ang12,1)}°`;
       return `<tr data-i="${i}" class="${i===S.sel?"df-sel":""}"><td>${i+1}</td><td class="l"><b>${E(c.phaseName)}</b><div class="muted">${E(c.formula||"")} · ${E(c.sg&&c.sg.symbol||"")} ${c.layer?`<span class="df-tag">${E(c.layer)}</span>`:""}</div></td><td>${uvwS(c.zone)}</td>
-        <td class="mono">${hklS(c.h1)}<br>${hklS(c.h2)}</td><td class="num">${f(c.d[0],4)}<br>${f(c.d[1],4)}</td>${dErr?`<td class="num">${f(dErr[0],1)}<br>${f(dErr[1],1)}</td>`:""}<td class="num">${f(c.ang12,1)}°</td>
+        <td class="mono">${hklS(c.h1)}<br>${hklS(c.h2)}<br>${c.h3?hklS(c.h3):"–"}</td><td class="num">${f(c.d[0],4)}<br>${f(c.d[1],4)}<br>${f(c.d[2],4)}</td>${dErr?`<td class="num">${f(dErr[0],1)}<br>${f(dErr[1],1)}<br>${f(dErr[2],1)}</td>`:""}<td class="num df-ang">${angS}</td>
         <td class="num">${f(c.fom,2)}</td><td class="num">${c.hasF?f(c.rho,2):"–"}</td><td class="num">${c.hasF?f(c.forb*100,0)+"%":"–"}</td><td class="num">${c.hasF?f(c.missFrac*100,0)+"%":"–"}</td>${kCell(cal.scale?c.scaleImplied/cal.scale:null,c.scaleImplied,cal)}<td class="num"><b>${f(c.score,2)}</b></td></tr>`; }).join("");
-    return head+`<div class="tblwrap" style="margin-top:10px;max-height:52vh"><table class="tbl df-cand"><thead><tr><th>#</th><th class="l">Phase</th><th>Zone</th><th>R1 / R2 (hkl)</th><th>d calc (nm)</th>${cal.scale?"<th>Δd (%)</th>":""}<th>∠</th>
+    return head+`<div class="tblwrap" style="margin-top:10px;max-height:52vh"><table class="tbl df-cand"><thead><tr><th>#</th><th class="l">Phase</th><th>Zone</th><th>R1 / R2 / R3 (hkl)</th><th>d calc (nm)</th>${cal.scale?"<th title=\"(측정 − 계산) ÷ 계산\">Δd (%)</th>":""}<th title="계산 각 ∠R1·R2 / ∠R1·R3 / ∠R2·R3, 괄호 = 계산 − 측정 (REDI 의 각도 오차)">∠ calc (Δ)</th>
       <th title="길이비·각도(+보정) χ²/자유도">FOM</th><th title="관측 세기 ↔ 예측 세기(동역학 또는 운동학) 순위 상관 — 포화 스폿 제외">ρ</th><th title="운동학적으로 0 인 자리의 관측 세기 비율 (이중 회절 가능)">Forb.</th><th title="예측 강한 반사 중 안 보이는 비율">Miss</th><th title="${cal.scale?"후보가 맞다면 필요한 보정 배율 = 예측 g ÷ 측정 g":"후보가 맞다면 필요한 1/nm/px"}">${cal.scale?"κ":"Scale"}</th><th>Score</th></tr></thead><tbody>${tb}</tbody></table></div>
       <div class="muted" style="margin-top:6px">Score = FOM + 5·Forb + (1 − ρ) + 3·Miss (작을수록 좋음). ${rankNote(cal)}</div>${tieNote(C,"low")}
       ${candDetail()}</div>`; }
@@ -241,6 +253,9 @@ function idCard(){ const cal=calib(); const els=P.elements;
 /* 1·2 위가 거의 같으면(점수 차 < 5 %) 알림 — 같은 구조형(예: fcc 금속끼리)은 보정이 1 % 안으로 맞거나 원소가 없으면 가를 수 없다 */
 function tieNote(list,better){ if(!list||list.length<2) return ""; const a=list[0].score, b=list[1].score; const close=better==="low"?(b-a)<=0.05*Math.max(Math.abs(a),0.05):(a-b)<=0.05*Math.abs(a);
   return close?`<div class="note warn" style="margin-top:8px">1 위(${E(list[0].phaseName)})와 2 위(${E(list[1].phaseName)})의 점수가 거의 같습니다 — 이 패턴만으로는 가를 수 없습니다. Elements 에 EDS 원소를 넣거나 표준 시료로 만든 보정을 쓰세요.</div>`:""; }
+/* 후보의 계산 각: g3 = g1 + g2 이므로 세 길이로 (∠R1·R2, ∠R1·R3, ∠R2·R3) — 측정 각과 같은 규약 */
+function candAngles(c){ if(!c||!c.g||c.g.length<3||!(c.g[0]>0&&c.g[1]>0&&c.g[2]>0)) return null; const [a,b,g3]=c.g; const ac=x=>Math.acos(Math.max(-1,Math.min(1,x)))*180/Math.PI;
+  return [c.ang12!=null?c.ang12:ac((g3*g3-a*a-b*b)/(2*a*b)), ac((a*a+g3*g3-b*b)/(2*a*g3)), ac((b*b+g3*g3-a*a)/(2*b*g3))]; }
 function kCell(k,sc,cal){ if(k==null) return `<td class="num">${sc!=null?f(sc,5):"–"}</td>`; const ok=Math.abs(k-1)<=cal.err; return `<td class="num ${ok?"df-kok":"df-kbad"}" title="${ok?"보정 허용 안":"보정 허용 밖"}">${f(k,3)}</td>`; }
 function rankNote(cal){ if(!cal.scale) return "보정 없이 — 모양(길이비·각도)과 세기가 같은 상은 가를 수 없습니다. 원소나 보정으로 좁히세요.";
   return cal.rank?`보정(${E(cal.label)}, 허용 ±${f(cal.err*100,1)} %)을 순위에 씁니다.`:`순위는 보정 없이 매기고 κ 만 보여 줍니다 — ${E(cal.label)} 는 공칭값이라 수 % 틀릴 수 있습니다. 초록 κ = 허용 ±${f(cal.err*100,1)} % 안. 보정을 믿으면 Calibration 의 'Rank' 를 켜세요.`; }
@@ -254,11 +269,11 @@ function candDetail(){ const c=S.cands&&S.cands[S.sel]; if(!c) return ""; const 
     ${missL.length?`<div class="muted">빠진 ${dy?"(동역학) ":""}강한 반사: ${missL.slice(0,8).map(m=>`<span class="mono">${hklS(m.h)}</span> (${f(m.I*100,0)}%)`).join(", ")}</div>`:""}
     ${dy?`<div class="muted">세기 모형: 동역학 Bloch-wave (ZOLZ ${c.dyn.nBeams} 빔, ${c.dyn.kV} kV, 두께 ${c.dyn.tRange[0]}–${c.dyn.tRange[1]} nm 평균). 운동학이었다면 ρ ${c.kin&&c.kin.rho!=null?f(c.kin.rho,2):"–"} · Forb ${c.kin&&c.kin.forb!=null?f(c.kin.forb*100,0)+"%":"–"} · Score ${c.kin?f(c.kin.score,2):"–"}.</div>`:""}
     <div class="tblwrap" style="max-height:30vh;margin-top:6px"><table class="tbl"><thead><tr><th>hkl</th><th>d (nm)</th><th>|F|² rel. (%)</th>${dy?"<th>Dyn. I (%)</th>":""}<th class="l">Note</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="row" style="margin-top:8px"><button class="btn sm" id="dfCalib">Use as calibration</button><button class="btn sm" id="dfCsv">Export CSV</button><button class="btn sm" id="dfPng">Export PNG</button><button class="btn sm" id="dfJson">Export JSON</button></div></div>`; }
+    <div class="row" style="margin-top:8px"><button class="btn sm" id="dfCalib">Use as calibration</button><button class="btn sm" id="dfCsv">Export CSV</button><button class="btn sm" id="dfPng">Export PNG</button><button class="btn sm" id="dfRep" title="패턴 그림 + 결과 패널(상·정대축·hkl·d·각도와 오차·보정) 한 장 — REDI 의 이미지 저장 + 결정정보 저장">Export report</button><button class="btn sm" id="dfJson">Export JSON</button></div></div>`; }
 function ringDetail(){ const c=S.rcands&&S.rcands[S.rsel]; if(!c) return ""; const rows=c.pairs.map(p=>`<tr><td class="num">${f(p.r,2)}</td><td class="num">${f(p.d,4)}</td><td class="mono">${hklS(p.hkl.map(Math.abs).sort((a,b)=>b-a))}</td><td class="num">${p.m}</td><td class="num">${f(1/p.gPred,4)}</td><td class="num">${f(p.e*100,2)}</td></tr>`).join("");
   return `<div class="df-detail"><h4>${E(c.phaseName)} <span class="muted">scale ${f(c.scale,6)} ± ${c.scaleErr.toExponential(1)} 1/nm/px</span></h4>
     <div class="tblwrap" style="max-height:30vh"><table class="tbl"><thead><tr><th>r (px)</th><th>d meas (nm)</th><th>hkl</th><th>m</th><th>d calc (nm)</th><th>Δ (%)</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="row" style="margin-top:8px"><button class="btn sm" id="dfCalib">Use as calibration</button><button class="btn sm" id="dfCsv">Export CSV</button><button class="btn sm" id="dfPng">Export PNG</button><button class="btn sm" id="dfJson">Export JSON</button></div></div>`; }
+    <div class="row" style="margin-top:8px"><button class="btn sm" id="dfCalib">Use as calibration</button><button class="btn sm" id="dfCsv">Export CSV</button><button class="btn sm" id="dfPng">Export PNG</button><button class="btn sm" id="dfRep" title="패턴 그림 + 결과 패널(상·정대축·hkl·d·각도와 오차·보정) 한 장 — REDI 의 이미지 저장 + 결정정보 저장">Export report</button><button class="btn sm" id="dfJson">Export JSON</button></div></div>`; }
 function manualCard(){ if(S.type!=="spots") return ""; const L=curLat(); if(!L) return ""; const m=S.mres;
   return `<div class="card"><h3>Manual check <span class="hint">REDI 수동 해석처럼 — 상과 R1·R2 의 hkl 을 넣어 비교</span></h3>
     <div class="row"><label class="f" style="flex:1;min-width:150px">Phase<select id="dfMPh">${(S.recList||[]).map(r=>`<option value="${E(r.id)}" ${S.mPh===r.id?"selected":""}>${E(r.name)} · ${E(r.formula||"")} · ${E(r.sg&&r.sg.symbol||"")}</option>`).join("")}</select></label>
@@ -298,7 +313,8 @@ function wire(body){ const cv=$q("#dfCv",body);
   const tn=$q("#dfTopN",body); if(tn) tn.onchange=()=>{ P.topN=+tn.value; save(); refit(); };
   const rd=$q("#dfRad",body); if(rd) rd.onchange=()=>{ P.radial=rd.value==="on"?true:rd.value==="off"?false:"auto"; save(); refit(); };
   $all("#dfLat button",body).forEach(b=>b.onclick=()=>{ S.lat=+b.dataset.l; S.cands=null; rerender(); identify(); });
-  const els=$q("#dfEls",body); if(els) els.onchange=()=>{ P.elements=els.value; save(); identify(); };
+  const els=$q("#dfEls",body); if(els) els.onchange=()=>{ P.elements=els.value; save(); rerender(); identify(); };
+  const rt=$q("#dfRatioTol",body); if(rt) rt.onchange=()=>{ const v=+rt.value; P.ratioTol=v>0?Math.min(50,v):5; save(); identify(); };
   const em=$q("#dfElMode",body); if(em) em.onchange=()=>{ P.elMode=em.value; save(); identify(); };
   const mi=$q("#dfMaxIdx",body); if(mi) mi.onchange=()=>{ P.maxIdx=+mi.value; save(); identify(); };
   const im=$q("#dfIntM",body); if(im) im.onchange=()=>{ P.intModel=im.value; save(); identify(); };
@@ -306,7 +322,7 @@ function wire(body){ const cv=$q("#dfCv",body);
   const idb=$q("#dfId",body); if(idb) idb.onclick=identify;
   $all(".df-cand tbody tr",body).forEach(tr=>tr.onclick=()=>{ if(S.type==="spots") S.sel=+tr.dataset.i; else S.rsel=+tr.dataset.i; rerender(); });
   const cb=$q("#dfCalib",body); if(cb) cb.onclick=useAsCalibration;
-  const cs=$q("#dfCsv",body); if(cs) cs.onclick=exportCSV; const pn=$q("#dfPng",body); if(pn) pn.onclick=exportPNG; const js=$q("#dfJson",body); if(js) js.onclick=exportJSON;
+  const cs=$q("#dfCsv",body); if(cs) cs.onclick=exportCSV; const pn=$q("#dfPng",body); if(pn) pn.onclick=exportPNG; const rp=$q("#dfRep",body); if(rp) rp.onclick=exportReport; const js=$q("#dfJson",body); if(js) js.onclick=exportJSON;
   const mg=$q("#dfMGo",body); if(mg){ ensureRecList(body); mg.onclick=()=>manualCompare(body); $q("#dfMSug",body).onclick=()=>manualSuggest(body); }
   // 보기: 마우스
   let drag=null; cv.addEventListener("wheel",e=>{ e.preventDefault(); const v=S.view; const rc=cv.getBoundingClientRect(); const mx=e.clientX-rc.left, my=e.clientY-rc.top; const ix=v.x+mx/v.zoom, iy=v.y+my/v.zoom; const k=Math.exp(-e.deltaY*0.0015); v.zoom=Math.max(0.05,Math.min(40,v.zoom*k)); v.x=ix-mx/v.zoom; v.y=iy-my/v.zoom; draw(); },{passive:false});
@@ -370,15 +386,51 @@ const base=()=>(S.name||"pattern").replace(/\.[^.]+$/,"").replace(/[^\w.-]+/g,"_
 function exportCSV(){ const cal=calib(); let s=""; if(S.type==="spots"){ const L=curLat(); const C=S.cands&&S.cands[S.sel]; s+="# INNO Analytics Diffraction — spots\n# file,"+S.name+"\n# calibration,"+(cal.scale||"")+",1/nm/px,"+cal.label+"\n";
     if(L) s+="# R1_px,"+L.len[0]+"\n# R2_px,"+L.len[1]+"\n# R3_px,"+L.len[2]+"\n# angle12_deg,"+L.ang12+"\n# center,"+L.center.x+","+L.center.y+"\n";
     if(C) s+="# phase,"+C.phaseName+",zone,"+C.zone.join(" ")+",ref,"+JSON.stringify(refOf(C.phaseId)).replace(/,/g,";")+"\n";
+    if(C&&L){ const Lm=correctedFit(L,cal), A=candAngles(C)||[C.ang12,NaN,NaN], Am=[Lm.ang12,Lm.ang13,Lm.ang23]; s+="# vector,hkl,d_calc_nm,d_meas_nm,d_err_pct\n";
+      ["R1","R2","R3"].forEach((n,j)=>{ const h=[C.h1,C.h2,C.h3][j]; const dm=cal.scale?1/(Lm.len[j]*cal.scale):null; s+="# "+n+","+(h?h.join(" "):"")+","+C.d[j]+","+(dm!=null?dm:"")+","+(dm!=null?((dm-C.d[j])/C.d[j]*100):"")+"\n"; });
+      const nz=v=>isFinite(v)?v:""; s+="# angle,calc_deg,meas_deg,diff_deg\n"; ["R1-R2","R1-R3","R2-R3"].forEach((n,j)=>{ s+="# "+n+","+nz(A[j])+","+nz(Am[j])+","+nz(A[j]-Am[j])+"\n"; }); }
     s+="x_px,y_px,intensity,snr,n1,n2,indexed,h,k,l,d_nm\n"; for(const p of (L?L.spots:S.res.spots.list)){ const h=C&&p.indexed?[0,1,2].map(i=>p.n[0]*C.h1[i]+p.n[1]*C.h2[i]):null; const g=L?Math.hypot(p.x-L.center.x,p.y-L.center.y):null; s+=[p.x.toFixed(3),p.y.toFixed(3),p.I.toFixed(1),isFinite(p.snr)?p.snr.toFixed(1):"sat",p.n?p.n[0]:"",p.n?p.n[1]:"",p.indexed?1:0,h?h[0]:"",h?h[1]:"",h?h[2]:"",L&&cal.scale?(1/gOf([p.x-L.center.x,p.y-L.center.y],cal)).toFixed(5):""].join(",")+"\n"; } }
   else { const C=S.rcands&&S.rcands[S.rsel]; s+="# INNO Analytics Diffraction — rings\n# file,"+S.name+"\n# center,"+S.res.rings.center.x+","+S.res.rings.center.y+",a/b,"+S.res.rings.ratio+"\n"; if(C) s+="# phase,"+C.phaseName+",scale_1/nm/px,"+C.scale+"\n";
     s+="r_px,g_1/nm,d_nm,fwhm_px,snr,flag,hkl,d_calc_nm\n"; const sc=C?C.scale:ringScale(cal); for(const p of S.res.rings.peaks){ const q=C&&C.pairs.find(x=>Math.abs(x.r-p.r)<1e-6); s+=[p.r.toFixed(3),sc?(p.r*sc).toFixed(5):"",sc?(1/(p.r*sc)).toFixed(5):"",p.fwhm.toFixed(2),p.snr.toFixed(1),p.nearStop?"beamstop":p.broad?"broad":"",q?q.hkl.map(Math.abs).sort((a,b)=>b-a).join(""):"",q?(1/q.gPred).toFixed(5):""].join(",")+"\n"; } }
   dl(base()+"_diffraction.csv",new Blob([s],{type:"text/csv"})); }
+/* 결과 보고 그림: 왼쪽 = 지금 보이는 패턴(겹쳐 그린 지수·라벨 그대로), 오른쪽 = 결과 패널 (REDI 의 '이미지 저장' + '결정정보 저장' 을 한 장에) */
+const SYS=n=>!(n>0)?"":n<=2?"Triclinic":n<=15?"Monoclinic":n<=74?"Orthorhombic":n<=142?"Tetragonal":n<=167?"Trigonal":n<=194?"Hexagonal":"Cubic";
+function reportRows(){ const cal=calib(); const rows=[]; const H=(t)=>rows.push({h:t}); const R=(k,v,warn)=>rows.push({k,v:String(v),warn:!!warn});
+  H("File"); R("Name",S.name||"–"); R("Size",S.w+" × "+S.h+" px");
+  H("Calibration"); R("Source",cal.label||"none"); R("Scale",cal.scale?cal.scale.toPrecision(6)+" 1/nm/px":"없음 — 길이비·각도로만"); if(cal.ellip>1.0001) R("Distortion",f((cal.ellip-1)*100,2)+" %");
+  const elRow=()=>{ if(P.elements&&P.elements.trim()) R("Elements filter",P.elements.trim()); };
+  if(S.type==="spots"){ const L=curLat(); const C=S.cands&&S.cands[S.sel]; if(!L){ elRow(); return rows; } const Lm=correctedFit(L,cal);
+    H("Measured lattice"); ["R1","R2","R3"].forEach((n,j)=>R(n,f(L.len[j],2)+" px"+(cal.scale?" · d "+f(1/(Lm.len[j]*cal.scale),4)+" nm":"")));
+    R("∠R1·R2 / ∠R1·R3 / ∠R2·R3",f(Lm.ang12,1)+"° / "+f(Lm.ang13,1)+"° / "+f(Lm.ang23,1)+"°"); R("Indexed spots",L.nIndexed);
+    if(C){ const A=candAngles(C)||[C.ang12,NaN,NaN], Am=[Lm.ang12,Lm.ang13,Lm.ang23];
+      H("Phase (#"+(S.sel+1)+" of "+S.cands.length+")"); R("Phase",C.phaseName); R("Formula",C.formula||"–"); R("System / SG",SYS(C.sg&&+C.sg.number)+" · "+((C.sg&&C.sg.symbol)||"–")+(C.sg&&C.sg.number?" (#"+C.sg.number+")":""));
+      R("Zone axis","["+C.zone.join(" ")+"]");
+      ["R1","R2","R3"].forEach((n,j)=>{ const h=[C.h1,C.h2,C.h3][j]; const dm=cal.scale?1/(Lm.len[j]*cal.scale):null; const e=dm!=null?(dm-C.d[j])/C.d[j]*100:null;
+        R(n+" ("+(h?h.join(" "):"–")+")","d calc "+f(C.d[j],4)+" nm"+(e!=null?" · Δ "+(e>=0?"+":"")+f(e,1)+" %":""),e!=null&&Math.abs(e)>5); });
+      ["∠R1·R2","∠R1·R3","∠R2·R3"].forEach((n,j)=>{ const dd=A[j]-Am[j]; R(n,f(A[j],1)+"° calc · "+f(Am[j],1)+"° meas · Δ "+(dd>=0?"+":"")+f(dd,1)+"°",Math.abs(dd)>2); });
+      const kap=cal.scale&&C.scaleImplied?C.scaleImplied/cal.scale:null; R("κ (scale needed)",kap!=null?f(kap,4)+(Math.abs(kap-1)<=cal.err?" (within cal.)":" (outside cal.)"):(C.scaleImplied?f(C.scaleImplied,6)+" 1/nm/px":"–"),kap!=null&&Math.abs(kap-1)>cal.err);
+      R("FOM · ρ · Forb · Miss",f(C.fom,2)+" · "+(C.hasF?f(C.rho,2):"–")+" · "+(C.hasF?f(C.forb*100,0)+"%":"–")+" · "+(C.hasF?f(C.missFrac*100,0)+"%":"–")); R("Score",f(C.score,3));
+      const ref=refOf(C.phaseId); if(ref) R("DB entry",(ref.id||"")+(ref.layer&&!String(ref.id||"").startsWith(ref.layer+":")?" ("+ref.layer+")":"")+(ref.version!=null?" v"+ref.version:"")); } }
+  else if(S.type==="rings"&&S.res&&S.res.rings){ const C=S.rcands&&S.rcands[S.rsel]; H("Rings"); R("Center",f(S.res.rings.center.x,1)+", "+f(S.res.rings.center.y,1)); R("Ellipse a/b",f(S.res.rings.ratio,4)); R("Peaks",S.res.rings.peaks.length);
+    if(C){ H("Phase (#"+(S.rsel+1)+")"); R("Phase",C.phaseName); R("System / SG",SYS(C.sg&&+C.sg.number)+" · "+((C.sg&&C.sg.symbol)||"–")); R("Scale",f(C.scale,6)+" 1/nm/px"); R("Rings matched",C.pairs.length); R("Mean dev.",f(C.dev*100,2)+" %"); R("Score",f(C.score,3));
+      for(const q of C.pairs.slice(0,10)) R("("+q.hkl.map(Math.abs).sort((a,b)=>b-a).join("")+")","d calc "+f(1/q.gPred,4)+" nm"); } }
+  elRow(); return rows; }
+function exportReport(){ const cv=$q("#dfCv"); if(!cv) return; const rows=reportRows(); const k=Math.max(1,cv.width/Math.max(1,cv.clientWidth||cv.width)); // 캔버스 화소 ÷ CSS 화소 (DPR) — 패널 글자도 같은 배율로
+  const pw=560*k, lh=22*k, pad=18*k; const ph=pad*2+rows.length*lh+30*k;
+  const H=Math.max(cv.height,ph), W=cv.width+pw; const o=document.createElement("canvas"); o.width=W; o.height=H; const ctx=o.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,W,H); ctx.drawImage(cv,0,0); const x0=cv.width+pad; let y=pad+14;
+  const F=(px,b,m)=>`${b?"bold ":""}${Math.round(px*k)}px ${m?"ui-monospace,Consolas,monospace":"system-ui,Segoe UI,sans-serif"}`;
+  ctx.fillStyle="#111"; ctx.font=F(16,true); ctx.fillText("INNO Analytics · Diffraction report",x0,y); y+=lh+4*k;
+  for(const r of rows){ if(r.h){ ctx.fillStyle="#3355aa"; ctx.font=F(13,true); ctx.fillText(r.h,x0,y+4*k); y+=lh; continue; }
+    ctx.fillStyle="#555"; ctx.font=F(13); ctx.fillText(r.k,x0,y); ctx.fillStyle=r.warn?"#b45309":"#111"; ctx.font=F(13,false,true);
+    let v=r.v; const maxW=pw-190*k; if(ctx.measureText(v).width>maxW){ while(v.length>2&&ctx.measureText(v+"…").width>maxW) v=v.slice(0,-1); v+="…"; } ctx.fillText(v,x0+170*k,y); y+=lh; }
+  ctx.fillStyle="#888"; ctx.font=F(11); const d=new Date(), p2=n=>String(n).padStart(2,"0"); ctx.fillText(`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`,x0,H-10);
+  o.toBlob(b=>{ if(b) dl(base()+"_diffraction_report.png",b); }); }
 function exportPNG(){ const cv=$q("#dfCv"); if(!cv) return; cv.toBlob(b=>{ if(b) dl(base()+"_diffraction.png",b); }); }
 function exportJSON(){ const cal=calib(); const out={app:"INNO Analytics Diffraction",version:1,file:S.name,size:[S.w,S.h],meta:S.meta,calibration:cal,type:S.type};
   if(S.type==="spots"){ out.lattice=curLat(); const C=S.cands&&S.cands[S.sel]; if(C) out.selected=Object.assign({},C,{ref:refOf(C.phaseId)}); out.candidates=(S.cands||[]).slice(0,10).map(c=>({phase:c.phaseName,ref:refOf(c.phaseId),zone:c.zone,h1:c.h1,h2:c.h2,fom:c.fom,rho:c.rho,forb:c.forb,miss:c.missFrac,score:c.score,kappa:c.kappa,scale:c.scaleImplied})); }
   else { out.rings={center:S.res.rings.center,ellipse:S.res.rings.ellipse,peaks:S.res.rings.peaks}; const C=S.rcands&&S.rcands[S.rsel]; if(C) out.selected={phase:C.phaseName,ref:refOf(C.phaseId),scale:C.scale,pairs:C.pairs}; }
   dl(base()+"_diffraction.json",new Blob([JSON.stringify(out,null,1)],{type:"application/json"})); }
 
-window.DIFF_UI={render,_S:()=>S,_P:P,_identify:identify,_analyze:analyze};
+window.DIFF_UI={render,_S:()=>S,_P:P,_identify:identify,_analyze:analyze,_report:reportRows,_angles:candAngles};
 })();

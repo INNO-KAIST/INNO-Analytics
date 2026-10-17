@@ -104,19 +104,49 @@ DB.layerOf=id=>findRaw(id)[1];
 /* 원소: 화학식에서, 없으면 원자 자리에서 */
 function elementsOf(r){ const f=DC.parseFormula(r.formula||""); let el=Object.keys(f).filter(e=>DC.elementOf(e)===e); if(!el.length&&r.atoms) el=[...new Set(r.atoms.map(a=>DC.elementOf(a.el||a.label)).filter(Boolean))]; return el; }
 DB.elementsOf=elementsOf;
-function parseEls(e){ if(!e) return null; const arr=Array.isArray(e)?e:String(e).split(/[\s,;]+/); const out=[]; for(let s of arr){ s=String(s).trim(); if(!s) continue; s=s[0].toUpperCase()+s.slice(1).toLowerCase(); if(DC.elementOf(s)===s&&!out.includes(s)) out.push(s); } return out; }
+/* 원소·조성 입력 해석 (REDI 의 '성분 + 조성비'): "Fe O" · "fe o" · "Fe3 O4" · "Fe3O4" · "Fe:3 O:4" · "Fe=42.1, O=57.9"(EDS at.%) · "NaYF4"
+   → {els:[원소…], ratio:{원소:수}|null, partial:bool, bad:[읽지 못한 조각]} — 모든 원소에 수가 있을 때만 ratio. 수가 일부만 있으면 partial(비는 쓰지 않음) */
+function parseComposition(e){ const res={els:[],ratio:null,partial:false,bad:[]}; if(!e) return res;
+  // 맨 바깥에서만 공백·쉼표·세미콜론으로 자른다 (괄호 안 쉼표 = 혼합 자리 '(Fe,Mn)2SiO4' 는 한 조각)
+  const toks=[]; if(Array.isArray(e)) for(const t of e) toks.push(String(t)); else { let cur="", dep=0; for(const ch of String(e)){ if(ch==="("||ch==="[") dep++; else if((ch===")"||ch==="]")&&dep>0) dep--; if(dep===0&&/[\s,;]/.test(ch)){ if(cur) toks.push(cur); cur=""; } else cur+=ch; } if(cur) toks.push(cur); }
+  const num={}; let nNum=0;
+  const put=(el,v)=>{ if(!res.els.includes(el)) res.els.push(el); if(v!=null&&v>0){ num[el]=(num[el]||0)+v; nNum++; } };
+  const norm=t=>t[0].toUpperCase()+t.slice(1).toLowerCase();
+  let last=null;   // "Fe 3 O 4": 원소 뒤 따로 쓴 수
+  for(let t of toks){ t=t.trim(); if(!t) continue;
+    if(/^\d*(?:\.\d+)?%?$/.test(t)&&/\d/.test(t)){ if(last&&num[last]==null){ const v=parseFloat(t); if(v>0){ num[last]=v; nNum++; } last=null; } else res.bad.push(t); continue; }
+    last=null;
+    let m=/^([A-Za-z]{1,2})\s*[:=]\s*(\d*(?:\.\d+)?)%?$/.exec(t);        // Fe:3, Fe=42.1
+    if(m&&m[2]){ const el=norm(m[1]); if(DC.elementOf(el)===el){ put(el,+m[2]); continue; } }
+    m=/^([A-Za-z]{1,2})$/.exec(t); if(m){ const el=norm(m[1]); if(DC.elementOf(el)===el){ put(el,null); last=el; continue; } }   // fe, O
+    if(/^[A-Z(\[][A-Za-z0-9.()\[\],·•]*$/.test(t)){ const f=DC.parseFormula(t); const ks=Object.keys(f).filter(k=>DC.elementOf(k)===k);   // Fe3, Fe3O4, (Fe,Mn)2SiO4
+      if(ks.length&&ks.every(k=>t.includes(k))){ const explicit=/\d/.test(t)||/[()\[\]]/.test(t);   // 수·괄호가 있을 때만 조성비 ('NaYF' 처럼 붙여 쓴 원소는 원소만)
+        for(const k of ks) put(k,explicit?f[k]:null); continue; } }
+    res.bad.push(t); }
+  if(nNum&&Object.keys(num).length===res.els.length) res.ratio=num; else if(nNum) res.partial=true;
+  return res; }
+DB.parseComposition=parseComposition;
+function parseEls(e){ if(!e) return null; return parseComposition(e).els; }
 DB.parseElements=parseEls;
-function matchEls(r,o){ const want=parseEls(o.elements); if(!want||!want.length) return true; const have=elementsOf(r); if(!have.length) return false;
-  if(o.elementMode==="all"||o.elementMode==="contains") return want.every(e=>have.includes(e));
-  return have.every(e=>want.includes(e)); }                   // 기본: 상의 원소 ⊆ 고른 원소 (REDI 의 EDS 원소)
+/* 조성비 비교: 입력한 원소들만 놓고 몫(합 = 1)으로 맞춰 각 원소 차이 ≤ tol (기본 0.05 = 5 at.%p) */
+function compOf(r){ const f=DC.parseFormula(r.formula||""); if(Object.keys(f).some(k=>DC.elementOf(k)===k)) return f;
+  // 화학식이 비면 원자 자리(대칭으로 펼친 단위 세포, 점유율 합)로
+  if(r.atoms&&r.atoms.length){ try{ const ph=DC.phaseFromRecord(r); const uc={}; for(const a of DC.expandAtoms(ph)){ const el=DC.elementOf(a.el); if(el) uc[el]=(uc[el]||0)+(a.occ==null?1:+a.occ); } return uc; }catch(e){} } return {}; }
+function matchRatio(r,ratio,tol){ if(!ratio) return true; const f=compOf(r); const ks=Object.keys(ratio); if(!ks.every(k=>f[k]>0)) return false;
+  const sa=ks.reduce((a,k)=>a+ratio[k],0), sb=ks.reduce((a,k)=>a+f[k],0); if(!(sa>0&&sb>0)) return false; const t=tol>0?tol:0.05;
+  return ks.every(k=>Math.abs(ratio[k]/sa-f[k]/sb)<=t+1e-9); }
+DB.matchRatio=matchRatio;
+function matchEls(r,o){ const c=o._comp||(o._comp=parseComposition(o.elements)); const want=c.els; if(!want||!want.length) return true; const have=elementsOf(r); if(!have.length) return false;
+  const okEl=(o.elementMode==="all"||o.elementMode==="contains")?want.every(e=>have.includes(e)):have.every(e=>want.includes(e));   // 기본: 상의 원소 ⊆ 고른 원소 (REDI 의 EDS 원소)
+  return okEl&&(o.useRatio===false||matchRatio(r,c.ratio,o.ratioTol)); }
 /* 화학식 비교: 원소별 비(가장 작은 수로 나눔)가 같으면 같은 식 — 'TiO2' = 'O2 Ti', 'NaYF4' = 'Na1.5 Y1.5 F6' */
 function ratioKey(f){ const k=Object.keys(f).filter(e=>DC.elementOf(e)===e).sort(); if(!k.length) return ""; const m=Math.min(...k.map(e=>f[e])); return k.map(e=>e+(+(f[e]/m).toFixed(3))).join(""); }
 function matchQ(r,q){ if(!q) return true; const raw=String(q).trim(); q=raw.toLowerCase(); if(!q) return true; const qs=q.replace(/\s+/g,"");
   const s=r.source||{}; const hay=[r.name,r.id,s.codId,s.doi,r.sg&&r.sg.symbol].map(x=>String(x||"").toLowerCase());
   if(hay.some(h=>h.includes(q))||String(r.formula||"").replace(/\s+/g,"").toLowerCase().includes(qs)||(r.sg&&String(r.sg.number)===q)) return true;
-  if(/^(\s*[A-Z][a-z]?\d*\.?\d*)+\s*$/.test(raw)){ const a=ratioKey(DC.parseFormula(raw)); return !!a&&a===ratioKey(DC.parseFormula(r.formula||"")); }
+  if(/^(\s*[A-Z][a-z]?\d*(?:\.\d*)?)+\s*$/.test(raw)){ const a=ratioKey(DC.parseFormula(raw)); return !!a&&a===ratioKey(DC.parseFormula(r.formula||"")); }
   return false; }
-DB.list=function(o){ o=o||{}; const layers=o.layers||["pack","lab","local"]; const out=[];
+DB.list=function(o){ o=Object.assign({},o||{}); o._comp=parseComposition(o.elements); const layers=o.layers||["pack","lab","local"]; const out=[];
   for(const L of layers){ const m=layerMap(L); if(!m) continue; for(const r of m.values()){ if(r.hidden&&!o.includeHidden) continue; if(!matchEls(r,o)||!matchQ(r,o.query)) continue; out.push(tag(r,L)); } }
   const ord={pack:0,lab:1,local:2}; out.sort((a,b)=>String(a.name||a.formula).localeCompare(String(b.name||b.formula),"en",{sensitivity:"base"})||ord[a.layer]-ord[b.layer]);
   return out; };

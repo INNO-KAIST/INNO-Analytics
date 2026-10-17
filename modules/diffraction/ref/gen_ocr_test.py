@@ -26,7 +26,13 @@ VALUES = ["0.5", "1", "2", "5", "10", "20", "50", "100", "200", "500"]
 ODD = ["0.25", "0.2", "1.5", "3", "4", "25", "40", "250", "300", "7.5"]   # 1·2·5 가 아닌 값 (값 사전이 맞는 읽기를 덮지 않는지)
 UNITS = [("1/nm", "1/nm"), ("nm", "nm"), ("nm-1", "1/nm"), ("1/Å", "1/Å"), ("µm", "µm"), ("Å", "Å")]
 SIZES = [14, 17, 21, 27, 34, 44, 58, 70, 83]   # 대문자 높이 ≈ 0.72 × 크기 → 10–60 px
-CONDS = ["odd", "clean", "below", "side", "box_dark", "box_white", "inverted", "degraded", "heldout", "small", "large", "hollow", "distract"]
+CONDS = ["odd", "clean", "below", "side", "box_dark", "box_white", "inverted", "degraded", "heldout", "small", "large", "hollow", "distract", "gms"]
+# gms: GMS 기본 이름표 꼴 — Times 꼴 명조 검은 글자 + 흰 그림자(오른쪽 아래로 밀림), 흰 속 빈 막대(속은 검정), 어두운 잡음 바탕 (REDI 예제 B3·T13 실측 모양).
+#      글꼴은 Liberation Serif(Times 치수 = 틀과 같은 가족, 크기만 다름) 절반 + 틀에 없는 명조(아래) 절반
+GMS_TEST = [("LiberationSerif", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", 0), ("Caladea", "/usr/share/fonts/truetype/crosextra/Caladea-Regular.ttf", 0),
+            ("DejaVuSerifCondensed", "/usr/share/fonts/truetype/dejavu/DejaVuSerifCondensed.ttf", 0)]
+GMS_DEV = [("LiberationSerif", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", 0), ("GFSBaskerville", "/usr/share/fonts/truetype/baskerville/GFSBaskerville.otf", 0),
+           ("FreeSerifBold", "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf", 0)]
 DISTRACT = ["SAD 1", "200 kV", "DF-2", "x 40k", "Spot 3", "img_0042.dm3", "CL 250 mm", "HAADF"]
 
 
@@ -86,7 +92,7 @@ def make(rng, cond, val, unit, fname, fp, fidx, size, out_png):
     if cond == "large":
         L = int(rng.uniform(max(200, tw * 0.8), max(260, tw * 1.6)))
     thick = max(2, int(round(capH * rng.uniform(0.18, 0.45))))
-    hollow = cond == "hollow"
+    hollow = cond in ("hollow", "gms")
     if hollow:
         thick = max(6, int(round(capH * rng.uniform(0.35, 0.6))))
     place = "above"
@@ -121,6 +127,8 @@ def make(rng, cond, val, unit, fname, fp, fidx, size, out_png):
     ox, oy = m, m + extra_top
     level = rng.uniform(10, 45)
     noise = rng.uniform(0.7, 2.2)
+    if cond == "gms":   # 실측 B3·T13: 바탕 중앙값 11–13, MAD 4 안팎
+        level, noise = rng.uniform(8, 20), rng.uniform(3, 6)
     img = background(rng, W, H, level, noise, int(rng.uniform(3, 12) * W * H / 1e5) + 2)
     box = None
     if cond in ("box_dark", "box_white"):
@@ -134,9 +142,21 @@ def make(rng, cond, val, unit, fname, fp, fidx, size, out_png):
     if hollow:
         fr = int(rng.choice([2, 3]))
         barm[Y0 + fr:Y0 + thick - fr, X0 + fr:X0 + L - fr] = 0
-    lay = np.maximum(ink, barm)
-    inkv = 0.0 if cond == "box_white" else 255.0
-    img = img * (1 - lay) + inkv * lay
+    if cond == "gms":
+        # 흰 그림자(글자를 (sx, sy) 밀어 흰색) → 그 위에 검은 글자. 막대: 흰 테두리 + 검은 속
+        sx = sy = max(1, int(round(capH * rng.uniform(0.03, 0.06))))
+        sh = text_layer(W, H, ox + tx + sx, oy + base + sy, parts, aa)
+        bo = np.zeros((H, W)); bo[Y0:Y0 + thick, X0:X0 + L] = 1
+        fr = max(2, int(round(thick * 0.12)))
+        inner = np.zeros((H, W)); inner[Y0 + fr:Y0 + thick - fr, X0 + fr:X0 + L - fr] = 1
+        img = img * (1 - sh) + 255.0 * sh
+        img = img * (1 - ink) + 0.0 * ink
+        img = img * (1 - bo) + 255.0 * bo
+        img = img * (1 - inner)
+    else:
+        lay = np.maximum(ink, barm)
+        inkv = 0.0 if cond == "box_white" else 255.0
+        img = img * (1 - lay) + inkv * lay
     if cond == "distract":
         dtext = DISTRACT[int(rng.integers(len(DISTRACT)))]
         dl = text_layer(W, H, int(rng.uniform(4, max(5, W - 200))), int(rng.uniform(asc + 2, max(asc + 3, extra_top - capH))), [(dtext, font(fp, size, fidx), 0)], aa)
@@ -175,6 +195,9 @@ def main():
                     fname, fp, fidx = "LiberationSans", LIB, 0
                     if cond == "heldout":
                         fname, fp, fidx = held[int(rng.integers(len(held)))]
+                    if cond == "gms":
+                        gl = GMS_DEV if a.dev else GMS_TEST
+                        fname, fp, fidx = gl[int(rng.integers(len(gl)))]
                     size = int(rng.choice(SIZES))
                     if cond == "small": size = int(rng.choice([13, 14, 16, 17]))
                     if cond == "large": size = int(rng.choice([62, 70, 76, 83]))
