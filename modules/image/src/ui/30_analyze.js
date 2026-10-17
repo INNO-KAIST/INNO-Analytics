@@ -224,12 +224,12 @@ function roiAdd(im){ const a=activeRoi(im); if(!a){ note("ROI 가 없습니다")
 
 /* ============================================================ 아래쪽 표 ============================================================ */
 function drawBottom(){
-  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["skeleton",`Skeleton (${S.skelTrees.length})`],["plots",`Plots (${S.plots.length})`]];
+  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["skeleton",`Skeleton (${S.skelTrees.length})`],["plots",`Plots (${S.plots.length})`],["drop",`Drop (${(S.drops||[]).length})`]];
   el.innerHTML=`<div class="im-btabs">${tabs.map(([k,l])=>`<button data-b="${k}" class="${S.ui.bottom===k?"active":""}">${l}</button>`).join("")}<span class="sp"></span><button class="btn xs" id="imBtog">${S.ui.bottomOpen?"Collapse":"Expand"}</button></div><div class="im-bbody" ${S.ui.bottomOpen?"":"hidden"} id="imBbody"></div>`;
   $a(el,"[data-b]").forEach(b=>b.onclick=()=>{ S.ui.bottom=b.dataset.b; S.ui.bottomOpen=true; save(); drawBottom(); });
   $q(el,"#imBtog").onclick=()=>{ S.ui.bottomOpen=!S.ui.bottomOpen; save(); drawBottom(); };
   if(!S.ui.bottomOpen) return; const B=$q(el,"#imBbody");
-  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,skeleton:bSkeleton,plots:bPlots}[S.ui.bottom]||bResults)(B);
+  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,skeleton:bSkeleton,plots:bPlots,drop:bDrop}[S.ui.bottom]||bResults)(B);
 }
 function tableHTML(rows,cols,o){ o=o||{}; if(!rows.length) return `<div class="xs muted im-empty">${o.empty||"표가 비었습니다"}</div>`;
   return `<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }

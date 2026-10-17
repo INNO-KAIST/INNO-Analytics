@@ -170,3 +170,11 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 /* Color Threshold */
 .imx .ct-ch{padding:4px 0 6px;border-bottom:1px solid var(--line,rgba(127,127,127,.18))}
 .imx .im-huebar{height:6px;margin:-2px 0 4px;border-radius:2px;background:linear-gradient(to right,hsl(0,100%,50%),hsl(60,100%,50%),hsl(120,100%,50%),hsl(180,100%,50%),hsl(240,100%,50%),hsl(300,100%,50%),hsl(360,100%,50%))}
+
+/* Drop 패널 */
+.imx .im-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 1px;vertical-align:-1px}
+.imx .im-mini{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;margin-top:4px}
+.imx .im-mini th{font-size:11px;color:var(--muted);font-weight:600;text-align:right;padding:2px 4px}
+.imx .im-mini td{text-align:right;padding:2px 4px;border-top:1px solid var(--line)}
+.imx .im-mini td:first-child,.imx .im-mini th:first-child{text-align:left}
+.imx .im-det{margin:6px 0}.imx .im-det summary{cursor:pointer;color:var(--muted)}

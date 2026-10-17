@@ -110,7 +110,7 @@ function draw(){
   if(v.zoom>=24){ ox.strokeStyle="rgba(255,255,255,.08)"; ox.lineWidth=1; ox.beginPath(); const [ax,ay]=toImg(v,0,0), [bx,by]=toImg(v,W,H);
     for(let x=Math.max(0,Math.floor(ax));x<=Math.min(im.w,Math.ceil(bx));x++){ const s=toScr(v,x,0)[0]; ox.moveTo(s,0); ox.lineTo(s,H); }
     for(let y=Math.max(0,Math.floor(ay));y<=Math.min(im.h,Math.ceil(by));y++){ const s=toScr(v,0,y)[1]; ox.moveTo(0,s); ox.lineTo(W,s); } ox.stroke(); }
-  drawThreshold(im,ox,v); drawParticles(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
+  drawThreshold(im,ox,v); drawParticles(im,ox,v); drawDrop(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
   drawStatus(); drawProfileMini(); drawPolyBar();
 }
 function thrRange(im){ const T=S.ui.thr; return {lo:+T.lower,hi:+T.upper}; }
@@ -156,8 +156,8 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); }
-function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; }
+function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="drop"&&typeof panelDrop==="function") renderPanel(); } // Drop 패널은 영역·기준선 ROI 를 보여 줌
+function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
 function roiGeom(im,r){ // {mask, rect, poly, kind} — IC.measureRoi 형식

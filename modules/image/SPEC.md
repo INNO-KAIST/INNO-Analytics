@@ -1,4 +1,4 @@
-# Image Analysis 탭 — SPEC v1.5 (2026-10-17)
+# Image Analysis 탭 — SPEC v1.6 (2026-10-17)
 
 ImageJ 를 본뜬 영상 분석 탭. 계산 결과가 ImageJ 와 같도록 ImageJ 1.54u 의 알고리즘을 옮겼다.
 ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LICENSE.txt`). 옮긴 원본 파일은 각 함수 머리말에 적었다.
@@ -161,6 +161,22 @@ ImageJ 1.x 는 미국 NIH 직원이 직무로 작성해 public domain 이다(`LI
   빠른 경로 = 직접 경로 무작위 400 경우(NaN·±∞·같은 값) 차이 0.
 - **Wand**: Worker 에서(형식 배열 스택). 4096² 한 덩어리 0.75 s, 그동안 화면 멈추지 않음. 연속 클릭은 앞 것이 끝날 때까지 알림. 결과 = 이전 주 스레드 구현(무작위 3000 경우 같음), ImageJ doWand(8-connected) 꼭짓점과 같음(Chromium 시험).
 
+## 3h. Drop Shape — 접촉각 · 펜던트 드랍 (v1.6)
+ImageJ 플러그인 DropSnake·LB-ADSA(Stalder 2006·2010)·Pendent_Drop 이 하던 일을 한 패널(**Drop**)에. 계산 `src/core/88_drop.js`(Worker), 화면 `src/ui/35_drop.js`.
+- **윤곽**: 가우스(σ 1) → Otsu 문턱 → 방울 성분(영역 테두리 중앙값보다 어두운/밝은 쪽 자동, 구멍 메움 — 방울 안 반사점) → marching squares 부화소 등고선 → 법선 ±3 px 에서 경사 최대 자리로 다듬음(Canny 와 같은 정의, 비네팅으로 바탕 밝기가 고르지 않을 때 문턱 등고선이 밀리는 것을 없앰). 영역 테두리를 따라 생긴 가짜 윤곽은 맞춤에서 뺀다.
+- **Young–Laplace**(무차원, apex 곡률 반지름 b 로 나눔, Rotenberg·Boyce·Neumann 1983 ADSA): dx/ds = cos φ, dz/ds = sin φ, dφ/ds = 2 ± Bo·z − sin φ/x (세실 +, 펜던트 −), Bo = Δρ g b²/γ. RK4(ds 0.002–0.003). 맞춤 = 윤곽 점과 이론 곡선의 최단 거리 제곱합, Levenberg–Marquardt.
+- **펜던트**: 영역 위 테두리에 닿은 성분 → 위쪽 폭이 일정한 구간 = 바늘(두 가장자리 직선 맞춤 → 지름·기울기) → 그 아래 윤곽에 [apex x·y, b, Bo, 기울기 ω] 맞춤. 바늘이 붙는 높이 = 적도 위에서 이론 곡선 반지름 = 바늘 반지름인 곳. γ = Δρ g b²/Bo, 부피·겉넓이 = 회전체 적분(바늘 끝까지), Worthington Wo = Δρ g V/(π γ D_바늘)(Berry et al. 2015). 눈금 = 바늘 바깥 지름(mm) ÷ 바늘 화소 폭, 없으면 영상 보정.
+- **접촉각** — 기준선: 자동(윤곽 열마다 가장 위 점 → RANSAC 직선 = 기판 윗면) 또는 선 ROI(Use line ROI). 방법 4 가지, 모두 액체 쪽에서 잰 각:
+  Young–Laplace(축대칭, 중력 포함 — 기준), 접선(접촉점 둘레 반지름 0.12·min(높이, 반폭) 안 윤곽을 호 길이 u 의 2 차식 x(u)·t(u) 로 맞춰 기준선까지 외삽 — θ > 90° 에서도 한 값; 기준선 쪽 3 px 은 흐림 구간이라 뺌; 문턱 등고선 사용), 타원(Fitzgibbon 1999 직접 맞춤, Halir–Flusser), 원(구면 모자 — Bo ≈ 0 에서만).
+  바늘이 방울 안에 꽂혀 있으면(영역 위 테두리에 닿음) 바늘 끝보다 위 윤곽은 맞춤에서 뺀다.
+- **경고**: 방법 사이 > 5°, 접선 왼·오른 차 > 5°, θ > 150° 접선, 잔차 rms > 1 px, Wo < 0.5, 기울기 > 5°, 눈금 없음.
+- 불확도: 표의 'fit SD' 는 맞춤 공분산(잔차 분산 × (JᵀJ)⁻¹, b·Bo 상관 포함 gᵀCg)에서 온 **맞춤 통계만**이다. 펜던트는 바늘 가장자리 ±0.3 px 가 눈금에 주는 몫을 'needle-scale SD' 로 따로 보인다(보통 맞춤 SD 보다 10–20 배 큼). 바늘 지름·밀도·g·가장자리 정의의 계통 오차는 들어 있지 않다 — 같은 방울 여러 장(스택 Frames: All)의 흩어짐이 더 정직한 값.
+- 결과: 아래 **Drop** 표(방법마다 한 줄, CSV·Copy), 스택은 시계열 그래프(Plots), 매크로 기록(op `drop` — 영역·기준선 좌표째).
+- 검증(`node test/test_drop.js` 21, `python3 test/ui_drop.py` 35):
+  ① 합성(정답 = `ref/gen_drop.py`, scipy DOP853 — 이 구현과 다른 적분기): 펜던트 16 장(Bo 0.1–0.45, γ 25–75 mN/m, 기울임 ±1.5°) γ 중앙 오차 0.06 %·최대 0.37 %, 부피 ≤ 0.53 %, 기울기 ≤ 0.024°. 세실 20 장(θ 20–160°, Bo 0.0005–0.6, 기울임 ±3°) YL ≤ 0.85°, 접선 θ ≤ 150° 에서 ≤ 1.40°·160° 에서 3.45°, 원(Bo ≈ 0) ≤ 0.15°. 바늘 꽂힌 세실 3 장 YL ≤ 0.08°.
+  ② 실측(OpenDrop 예제, `sh ref/fetch_drop.sh` — GPL-3 이라 저장소·배포 제외): water_in_air001 은 OpenDrop 결과 화면과 γ −1.17 %, V −0.87 %, A −0.56 %, Wo +0.34 %, Bo +0.50 %. 같은 물 방울 5 장 평균 γ 73.07 mN/m(물 20–25 °C 의 IAPWS R1-76 값 72.0–72.8 mN/m 근처; 온도 미상). drop_on_surface 접선 118.8° / 123.8° ↔ OpenDrop 120.0° / 124.2°.
+  Worthington 수가 작은 장(004: 0.22, 005: 0.10)은 γ 가 ±2 % 흔들린다 — Berry 2015 가 말한 대로이며 화면 경고로 알린다.
+
 ## 4. 화소 크기 (calibration) 규칙
 - 출처가 확실한 값만 자동 적용: Nikon ND2 `dCalibration`(bCalibrated 일 때), Zeiss CZI `Scaling/Distance`, ImageJ ImageDescription(unit)+XResolution, OME-XML PhysicalSize, FEI/Thermo 34680·34682 `[Scan] PixelWidth`, Zeiss 34118 `Image Pixel Size`, TESCAN 50431, Hitachi 옆 `.txt` `PixelSize`(nm), JEOL 옆 `.txt` 축척 막대, DM·MRC·EMD·BCF(앱 기존 파서), Igor wave scaling, Nanonis SCAN_RANGE, Gwyddion xreal/xres, Nanoscope Scan Size(전역 크기·종횡비 규칙), ARDF IDEF 간격.
 - TIFF/PNG 해상도 태그만 있으면 '후보'로 보이고 적용하지 않는다(72 dpi 같은 기본값이 흔함).
@@ -228,8 +244,14 @@ TIFF spacing 단위(nm 보정에서 z step 1000 배) · CZI 의 RGB 채널 + 회
 - 화면 골격 영어(문서 `docs/UI-English-style.md`): ImageJ 메뉴·대화 상자 이름, 패널·표·버튼. 알림·설명·경고는 한국어. 연산 id·매개변수 키·상태·저장 형식·.ijm 은 그대로.
 - IBW 값 단위(§3d), OIR 실측 검증(§3b-3).
 
+## 6g. v1.6 (2026-10-17) — Drop Shape (§3h) · 독립 검토 9 건 + 낮음 7 건
+- 높음: SD 가 맞춤 통계뿐인데 전체 불확도처럼 보임 → 'fit SD' 이름, b·Bo 공분산, 바늘 눈금 SD 따로. 세실 'γ est.' 가 θ 작거나 Bo ≈ 0 에서 수백 배 틀림 → Bo > 0.1·상대 SD < 10 %·θ ≥ 60°·한계 미접촉일 때만. 영역이 방울을 자르면 조용히 틀리거나 빠짐 → '잘렸습니다' 경고, 방법이 빠진 이유를 경고에.
+- 중간: Δρ ≤ 0 이면 음수 γ → 계산 안 하고 경고. 덧그림이 결과를 만든 장이 아닌 장에 → 만든 장 기록. 세실 시계열 그래프가 안 생김·실패 장이 있으면 x 밀림 → 이름 비교·실제 장 번호. 카드에 다른 측정 줄이 섞임 → 실행 id. 매크로를 다른 크기 영상에 → 경고. 방법 차이 경고가 YL 쪽으로만 → 비대칭이면 YL 도 틀릴 수 있음을 함께.
+- 낮음: 화소가 바뀐 뒤 옛 덧그림 숨김, CSV 에 Δρ·g·단위, 단위 micron·pm·μm, 비등방 화소 경고, NaN 화소 = 영역 중앙값(0 이 아니라), 큰 배열 Math.max(...) 제거. 남김: 좁은 영역에서 자동 기준선 실패(오류로 알림 — 선 ROI 사용), curveDist 탐색 창(수렴 뒤 영향 작음).
+
 ## 7. 한계 (다음 단계)
 - vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 보조 파일(_00001…)을 함께 읽지 않는다. 선 주사·RGB OIR 은 실측 미검증. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
 - 3D 연산(3D skeletonize·필터), bilinear·비강체(elastic) 정합은 없다.
 - 2.4×10⁷ 화소를 넘는 영상은 전체를 볼 때 줄여 보이고(확대하면 원래 해상도), 문턱 겹쳐 그림은 줄인 해상도.
 - 터치 두 손가락 확대 없음.
+- Drop: 거울 같은 기판(반사상)은 자동 기준선이 틀릴 수 있어 선 ROI 로 직접 정한다. 기울어진 기판의 비축대칭 방울(경사판 미끄럼각)·진동 방울·액막(captive bubble)은 아직 없다. 전진·후퇴각은 바늘 꽂힌 방울의 스택 시계열로 잰다(따로 자동 판정 없음).

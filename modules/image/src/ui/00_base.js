@@ -13,13 +13,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------------- 상태 ----------------
    S 는 JSON 으로 저장되는 부분(영상 메타데이터·ROI·결과·매크로·화면). 화소는 PX(id → Float32Array[]) 에 따로 둔다 */
-function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],
+function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],drops:[],dropFit:{},dropBase:{},
   measure:{cols:["Area","Mean","StdDev","Min","Max","X","Y","Perim.","Feret","MinFeret","Circ.","AR","Round","Solidity","ECD"]},
   macro:{rec:true,steps:[]},
   ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:true,manual:false,lower:0,upper:255,show:true},
       cthr:{space:"HSB",min:[0,0,0],max:[255,255,255],pass:[true,true,true],method:"Default",dark:false},
       pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0,maxCirc:1,exclude:false,holes:false,redirect:"",show:"outlines",addRoi:false},
-      dist:{col:"ECD",bins:0,log:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
+      dist:{col:"ECD",bins:0,log:false},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
 let S=defState(); const PX=new Map(); let ROOT=null, LOADED=false;
 const UNDO=new Map(); // id → [{planes, meta}]
 const cur=()=>S.images.find(i=>i.id===S.sel)||null;
@@ -50,7 +50,7 @@ function markDirty(id){ DIRTY.add(id); save(); }
 try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size)) flushSave(); }); }catch(e){}
 async function loadSaved(){
   const st=await dbGet("state"); if(!st||st.v!==1) return;
-  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{});
+  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
   const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
     if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
@@ -118,7 +118,7 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; delete S.ui.views[id];
+function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 영상마다 8 단계, 모든 영상 합쳐 1.2 GB
