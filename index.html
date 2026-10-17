@@ -999,6 +999,14 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 .imx .ct-ch{padding:4px 0 6px;border-bottom:1px solid var(--line,rgba(127,127,127,.18))}
 .imx .im-huebar{height:6px;margin:-2px 0 4px;border-radius:2px;background:linear-gradient(to right,hsl(0,100%,50%),hsl(60,100%,50%),hsl(120,100%,50%),hsl(180,100%,50%),hsl(240,100%,50%),hsl(300,100%,50%),hsl(360,100%,50%))}
 
+/* Drop 패널 */
+.imx .im-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 1px;vertical-align:-1px}
+.imx .im-mini{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;margin-top:4px}
+.imx .im-mini th{font-size:11px;color:var(--muted);font-weight:600;text-align:right;padding:2px 4px}
+.imx .im-mini td{text-align:right;padding:2px 4px;border-top:1px solid var(--line)}
+.imx .im-mini td:first-child,.imx .im-mini th:first-child{text-align:left}
+.imx .im-det{margin:6px 0}.imx .im-det summary{cursor:pointer;color:var(--muted)}
+
 /* Diffraction 탭 */
 .df-head{padding-bottom:12px}
 .df-head .seg{margin-top:2px}
@@ -48086,6 +48094,378 @@ if(typeof module!=="undefined"&&module.exports) module.exports=api;
 if(root&&root.IMG_CORE){ root.IMG_CORE.analyzeSkeleton=analyzeSkeleton; root.IMG_CORE.SKELETON_TAGS=api.TAGS; root.IMG_CORE.SKELETON_PRUNE=api.PRUNE; }
 })(typeof self!=="undefined"?self:globalThis);
 
+/* ============================================================
+   Drop Shape — 접촉각(sessile drop)·펜던트 드랍(pendant drop) 계산 엔진  (IMG_CORE.drop*)
+   - 윤곽: 가우스 흐림 → Otsu 문턱 → 가장 큰(또는 지정한) 어두운 성분 → marching squares 부화소 등고선
+   - Young–Laplace(무차원, apex 곡률 반지름 b 로 나눔): dx/ds = cos φ, dz/ds = sin φ,
+       세실(apex 위, z 아래로) dφ/ds = 2 + Bo·z − sin φ/x · 펜던트(apex 아래, z 위로) dφ/ds = 2 − Bo·z − sin φ/x,  Bo = Δρ g b²/γ
+     (Rotenberg, Boyce, Neumann, J. Colloid Interface Sci. 93 (1983) 169 — ADSA; Berry et al., J. Colloid Interface Sci. 454 (2015) 226)
+   - 맞춤: 윤곽 점 ↔ 이론 곡선 최단 거리 제곱합, Levenberg–Marquardt(수치 야코비안)
+   - 접촉각 방법: Young–Laplace · 원(구면 모자) · 타원(Fitzgibbon 1999 직접 맞춤) · 접선(접촉점 근처 2 차 다항식)
+   정답 자료: ref/gen_drop.py (scipy DOP853, 이 파일과 다른 구현) · 실측 OpenDrop 예제(test/drop_real, 저장소 제외)
+   ============================================================ */
+(function(){
+"use strict";
+const G=(typeof self!=="undefined")?self:globalThis;
+const IC=G.IMG_CORE||(G.IMG_CORE={});
+const D2R=Math.PI/180;
+const amax=(A,f)=>{ let m=-Infinity; for(const q of A){ const v=f(q); if(v>m) m=v; } return m; }, amin=(A,f)=>{ let m=Infinity; for(const q of A){ const v=f(q); if(v<m) m=v; } return m; }; // 큰 배열에서 Math.max(...) 는 RangeError
+
+/* ---------- Young–Laplace 적분 (RK4, 원점은 급수로 시작) ----------
+   mode "sessile"|"pendant". 멈춤: z > zMax 또는 φ ≥ phiMax 또는 x ≤ 0 (돌아옴) 또는 s > sMax.
+   반환 {s,x,z,p} (Float64Array, 무차원) */
+IC.dropYL=function(Bo,mode,o){ o=o||{}; const sg=mode==="pendant"?-1:1; const h=o.ds||0.002; const zMax=o.zMax==null?Infinity:o.zMax, phiMax=o.phiMax==null?Math.PI*0.999:o.phiMax, sMax=o.sMax||40;
+  const f=(x,z,p,out)=>{ const sx=x>1e-9?Math.sin(p)/x:1; out[0]=Math.cos(p); out[1]=Math.sin(p); out[2]=2+sg*Bo*z-sx; };
+  const N=Math.ceil(sMax/h)+2; const S=new Float64Array(N), X=new Float64Array(N), Z=new Float64Array(N), P=new Float64Array(N);
+  // 급수: x = s − s³/6·(…), 작은 s0 에서 x≈s, z≈s²/2, φ≈s
+  let s=1e-5, x=s, z=s*s/2, p=s; let n=0; S[n]=0; X[n]=0; Z[n]=0; P[n]=0; n++;
+  const k1=[0,0,0],k2=[0,0,0],k3=[0,0,0],k4=[0,0,0];
+  S[n]=s; X[n]=x; Z[n]=z; P[n]=p; n++;
+  while(n<N){ f(x,z,p,k1); f(x+h/2*k1[0],z+h/2*k1[1],p+h/2*k1[2],k2); f(x+h/2*k2[0],z+h/2*k2[1],p+h/2*k2[2],k3); f(x+h*k3[0],z+h*k3[1],p+h*k3[2],k4);
+    const xn=x+h/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]), zn=z+h/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]), pn=p+h/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
+    if(!(xn>0)||!isFinite(xn)||!isFinite(zn)) break; s+=h; x=xn; z=zn; p=pn; S[n]=s; X[n]=x; Z[n]=z; P[n]=p; n++;
+    if(z>zMax||p>=phiMax||s>=sMax) break; }
+  return {s:S.subarray(0,n),x:X.subarray(0,n),z:Z.subarray(0,n),p:P.subarray(0,n),n}; };
+
+/* 점 (r,z) 와 곡선(z 가 s 에 따라 단조 증가하는 부분)의 최단 거리 — z 로 이분 탐색 후 이웃 선분 검사 */
+function curveDist(C,r,z,win){ const Z=C.z, X=C.x, n=C.n; let lo=0, hi=n-1; if(n<2) return Infinity;
+  while(hi-lo>1){ const m=(lo+hi)>>1; if(Z[m]<z) lo=m; else hi=m; }
+  let best=Infinity; const a=Math.max(0,lo-win), b=Math.min(n-2,lo+win);
+  for(let i=a;i<=b;i++){ const x0=X[i], z0=Z[i], dx=X[i+1]-x0, dz=Z[i+1]-z0; const L2=dx*dx+dz*dz; let t=L2>0?((r-x0)*dx+(z-z0)*dz)/L2:0; t=t<0?0:t>1?1:t; const ex=x0+t*dx-r, ez=z0+t*dz-z; const d=ex*ex+ez*ez; if(d<best) best=d; }
+  if(z>Z[n-1]){ const ex=X[n-1]-r, ez=Z[n-1]-z; best=Math.min(best,ex*ex+ez*ez); }
+  return Math.sqrt(best); }
+IC._dropCurveDist=curveDist;
+/* z 가 단조 증가하는 앞부분만 (φ < π) */
+function monoPrefix(C){ let n=C.n; for(let i=1;i<C.n;i++){ if(C.z[i]<C.z[i-1]){ n=i; break; } } return {x:C.x,z:C.z,p:C.p,s:C.s,n}; }
+
+/* ---------- Otsu 문턱 ---------- */
+function otsu(vals){ let mn=Infinity,mx=-Infinity; for(const v of vals){ if(v<mn) mn=v; if(v>mx) mx=v; } if(!(mx>mn)) return mn; const B=256, h=new Float64Array(B);
+  for(const v of vals) h[Math.min(B-1,Math.floor((v-mn)/(mx-mn)*B))]++; const N=vals.length; let sum=0; for(let i=0;i<B;i++) sum+=i*h[i];
+  let w0=0,s0=0,best=-1,bi=0; for(let i=0;i<B;i++){ w0+=h[i]; if(!w0) continue; const w1=N-w0; if(!w1) break; s0+=i*h[i]; const m0=s0/w0, m1=(sum-s0)/w1; const v=w0*w1*(m0-m1)*(m0-m1); if(v>best){ best=v; bi=i; } }
+  return mn+(bi+1)/B*(mx-mn); }
+function gauss1(sig){ const r=Math.max(1,Math.ceil(3*sig)); const k=new Float64Array(2*r+1); let s=0; for(let i=-r;i<=r;i++){ k[i+r]=Math.exp(-i*i/(2*sig*sig)); s+=k[i+r]; } for(let i=0;i<k.length;i++) k[i]/=s; return {k,r}; }
+function blur(src,w,h,sig){ if(!(sig>0)) return Float64Array.from(src); const {k,r}=gauss1(sig); const t=new Float64Array(w*h), o=new Float64Array(w*h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ let s=0; for(let i=-r;i<=r;i++){ const xx=x+i<0?0:x+i>=w?w-1:x+i; s+=k[i+r]*src[y*w+xx]; } t[y*w+x]=s; }
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ let s=0; for(let i=-r;i<=r;i++){ const yy=y+i<0?0:y+i>=h?h-1:y+i; s+=k[i+r]*t[yy*w+x]; } o[y*w+x]=s; }
+  return o; }
+
+/* ---------- 윤곽 ----------
+   plane {w,h,data}, o.roi {x0,y0,x1,y1}(포함, 없으면 전체), o.sigma(1), o.dark(자동: 가운데가 어두운지), o.pick "largest"|"top"|"bottom"
+   반환 {pts:[[x,y]…] (영상 좌표, 닫힌 고리 순서), level, dark, comp:{area,x0,x1,y0,y1}, mask(roi 크기 Uint8Array), roi} */
+IC.dropContour=function(plane,o){ o=o||{}; const W=plane.w, H=plane.h, d=plane.data; const R=o.roi||{x0:0,y0:0,x1:W-1,y1:H-1};
+  const x0=Math.max(0,Math.floor(R.x0)), y0=Math.max(0,Math.floor(R.y0)), x1=Math.min(W-1,Math.ceil(R.x1)), y1=Math.min(H-1,Math.ceil(R.y1)); const w=x1-x0+1, h=y1-y0+1;
+  if(w<8||h<8) throw new Error("영역이 너무 작습니다");
+  const src=new Float64Array(w*h); let nNaN=0; for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const v=d[(y+y0)*W+x+x0]; if(v===v) src[y*w+x]=v; else { src[y*w+x]=NaN; nNaN++; } }
+  if(nNaN){ const fin=[]; for(let i=0;i<src.length;i+=Math.max(1,src.length>>14)) if(src[i]===src[i]) fin.push(src[i]); fin.sort((a,b)=>a-b); const med=fin.length?fin[fin.length>>1]:0; for(let i=0;i<src.length;i++) if(src[i]!==src[i]) src[i]=med; } // NaN = 영역 중앙값(바탕 쪽) — 0 이면 가짜 어두운 점
+  const sm=blur(src,w,h,o.sigma==null?1:o.sigma); const step=Math.max(1,Math.floor(Math.sqrt(w*h/200000))); const samp=[]; for(let i=0;i<sm.length;i+=step) samp.push(sm[i]);
+  const level=o.level!=null?o.level:otsu(samp);
+  // 방울이 어두운가: 영역 테두리(대부분 바탕 — 바늘·기판은 일부)의 중앙값이 문턱보다 밝으면 방울 = 어두움
+  let dark=o.dark; if(dark==null){ const c=[]; for(let x=0;x<w;x+=2){ c.push(sm[x]); c.push(sm[(h-1)*w+x]); } for(let y=0;y<h;y+=2){ c.push(sm[y*w]); c.push(sm[y*w+w-1]); } c.sort((a,b)=>a-b); dark=c[c.length>>1]>level; }
+  const inside=i=>dark?sm[i]<level:sm[i]>level;
+  // 4-연결 성분
+  const lab=new Int32Array(w*h).fill(-1), st=new Int32Array(w*h); const comps=[];
+  for(let i0=0;i0<w*h;i0++){ if(lab[i0]>=0||!inside(i0)) continue; const id=comps.length; let sp=0; st[sp++]=i0; lab[i0]=id; let n=0,cx0=w,cx1=0,cy0=h,cy1=0;
+    while(sp){ const p=st[--sp]; n++; const x=p%w, y=(p-x)/w; if(x<cx0) cx0=x; if(x>cx1) cx1=x; if(y<cy0) cy0=y; if(y>cy1) cy1=y;
+      if(x>0&&lab[p-1]<0&&inside(p-1)){ lab[p-1]=id; st[sp++]=p-1; } if(x<w-1&&lab[p+1]<0&&inside(p+1)){ lab[p+1]=id; st[sp++]=p+1; }
+      if(y>0&&lab[p-w]<0&&inside(p-w)){ lab[p-w]=id; st[sp++]=p-w; } if(y<h-1&&lab[p+w]<0&&inside(p+w)){ lab[p+w]=id; st[sp++]=p+w; } }
+    comps.push({id,area:n,x0:cx0,x1:cx1,y0:cy0,y1:cy1}); }
+  if(!comps.length) throw new Error("방울을 찾지 못했습니다 (문턱 "+level.toFixed(1)+")");
+  let pick=comps[0]; for(const c of comps){ const sc=c.area*(o.pick==="top"&&c.y0===0?4:1)*(o.pick==="bottom"&&c.y1===h-1?4:1), sb=pick.area*(o.pick==="top"&&pick.y0===0?4:1)*(o.pick==="bottom"&&pick.y1===h-1?4:1); if(sc>sb) pick=c; }
+  // 고른 성분의 구멍 메우기(바깥 테두리만) — 밝은 반사점이 방울 안에 있어도 윤곽이 하나가 되게
+  const m=new Uint8Array(w*h); for(let i=0;i<w*h;i++) if(lab[i]===pick.id) m[i]=1;
+  { const ext=new Uint8Array(w*h); let sp=0; const push=i=>{ if(!m[i]&&!ext[i]){ ext[i]=1; st[sp++]=i; } };
+    for(let x=0;x<w;x++){ push(x); push((h-1)*w+x); } for(let y=0;y<h;y++){ push(y*w); push(y*w+w-1); }
+    while(sp){ const p=st[--sp]; const x=p%w, y=(p-x)/w; if(x>0) push(p-1); if(x<w-1) push(p+1); if(y>0) push(p-w); if(y<h-1) push(p+w); }
+    for(let i=0;i<w*h;i++) if(!ext[i]) m[i]=1; }
+  // 성분 밖은 바탕 값, 성분 안은 원래(흐린) 값 — 성분 경계에서 문턱을 지나는 곳 = 윤곽. 구멍(메운 곳)은 안쪽 값으로
+  const far=dark?Math.max(level+1,level+Math.abs(level)*0.5+1):Math.min(level-1,level-Math.abs(level)*0.5-1), inv=dark?-Infinity:Infinity;
+  const F=new Float64Array(w*h); for(let i=0;i<w*h;i++){ if(!m[i]){ // 성분 둘레 1 px 은 실제 값(부화소 위치 보존), 더 먼 곳은 바탕
+      const x=i%w, y=(i-x)/w; let near=false; for(let dy=-1;dy<=1&&!near;dy++) for(let dx=-1;dx<=1;dx++){ const xx=x+dx, yy=y+dy; if(xx>=0&&yy>=0&&xx<w&&yy<h&&m[yy*w+xx]){ near=true; break; } }
+      F[i]=near?(dark?Math.max(sm[i],level+1e-9):Math.min(sm[i],level-1e-9)):far; }
+    else F[i]=inside(i)?sm[i]:(dark?level-1e-6:level+1e-6); }
+  // 영역 테두리에 닿은 성분: 바깥(영역 밖)을 바탕으로 보아 닫힌 고리를 만든다 — 한 줄 덧댐
+  const pw=w+2, ph=h+2, Fp=new Float64Array(pw*ph).fill(far); for(let y=0;y<h;y++) for(let x=0;x<w;x++) Fp[(y+1)*pw+x+1]=F[y*w+x];
+  const pts=marchingLoop(Fp,pw,ph,level,dark); if(!pts.length) throw new Error("윤곽을 만들지 못했습니다");
+  // 덧댄 줄 위의 점(영역 테두리를 따라 그은 가짜 윤곽)은 표시 — 맞춤에서 빼야 한다
+  const edge=pts.map(([x,y])=>x<0.75||y<0.75||x>pw-1.75||y>ph-1.75);
+  // 경사 최대 자리로 다듬기(Canny 처럼): 바탕 밝기가 고르지 않으면(비네팅) 한 문턱의 등고선은 가장자리에서 밀린다 → 법선 ±3 px 에서 |∂I/∂n| 최대(포물선 보간)
+  const loc=pts.map(([x,y])=>[x-1,y-1]); if(o.refine!==false){ const S=(x,y)=>{ x=x<0?0:x>w-1.001?w-1.001:x; y=y<0?0:y>h-1.001?h-1.001:y; const i=Math.floor(x), j=Math.floor(y), fx=x-i, fy=y-j, k=j*w+i; return sm[k]*(1-fx)*(1-fy)+sm[k+1]*fx*(1-fy)+sm[k+w]*(1-fx)*fy+sm[k+w+1]*fx*fy; };
+    for(let q=0;q<loc.length;q++){ if(edge[q]) continue; const [x,y]=loc[q]; if(x<4||y<4||x>w-5||y>h-5) continue; const gx=S(x+1,y)-S(x-1,y), gy=S(x,y+1)-S(x,y-1), gn=Math.hypot(gx,gy); if(!(gn>0)) continue; const nx=gx/gn, ny=gy/gn;
+      const T=[]; for(let t=-3;t<=3.001;t+=0.5) T.push(Math.abs(S(x+(t+1)*nx,y+(t+1)*ny)-S(x+(t-1)*nx,y+(t-1)*ny)));
+      let bi=0; for(let i=1;i<T.length;i++) if(T[i]>T[bi]) bi=i; if(bi===0||bi===T.length-1) continue; const den=T[bi-1]-2*T[bi]+T[bi+1]; const d=den<0?0.5*(T[bi-1]-T[bi+1])/den:0; const t=-3+(bi+d)*0.5;
+      if(Math.abs(t)<=2.5){ loc[q]=[x+t*nx,y+t*ny]; } } }
+  const out=loc.map(([x,y])=>[x+x0,y+y0]), raw=pts.map(([x,y])=>[x-1+x0,y-1+y0]);
+  return {nNaN,pts:out,raw,edge,level,dark,comp:{area:pick.area,x0:pick.x0+x0,x1:pick.x1+x0,y0:pick.y0+y0,y1:pick.y1+y0},mask:m,roi:{x0,y0,x1,y1}}; };
+
+/* marching squares: level 등고선 중 가장 긴 닫힌 고리 (점 = 선형 보간 교차점) */
+function marchingLoop(F,w,h,lv,dark){ const ins=v=>dark?v<lv:v>lv; const segs=new Map(); const key=(x,y,e)=>((y*w+x)*4+e);
+  // 칸 (x,y)~(x+1,y+1) 의 네 변: 0 위, 1 오른, 2 아래, 3 왼 — 변 id 는 공유되게 (위 = (x,y) 가로, 왼 = (x,y) 세로)
+  const eid=(x,y,e)=>e===0?((y*w+x)*2):e===2?(((y+1)*w+x)*2):e===3?((y*w+x)*2+1):((y*w+x+1)*2+1);
+  const pt=(x,y,e)=>{ let ax,ay,bx,by; if(e===0){ ax=x;ay=y;bx=x+1;by=y; } else if(e===1){ ax=x+1;ay=y;bx=x+1;by=y+1; } else if(e===2){ ax=x;ay=y+1;bx=x+1;by=y+1; } else { ax=x;ay=y;bx=x;by=y+1; }
+    const va=F[ay*w+ax], vb=F[by*w+bx]; const t=(lv-va)/(vb-va); const tt=isFinite(t)?Math.min(1,Math.max(0,t)):0.5; return [ax+tt*(bx-ax),ay+tt*(by-ay)]; };
+  const adj=new Map(), P=new Map(); const link=(a,b)=>{ (adj.get(a)||adj.set(a,[]).get(a)).push(b); (adj.get(b)||adj.set(b,[]).get(b)).push(a); };
+  for(let y=0;y<h-1;y++) for(let x=0;x<w-1;x++){ const a=ins(F[y*w+x])?1:0, b=ins(F[y*w+x+1])?1:0, c=ins(F[(y+1)*w+x+1])?1:0, d=ins(F[(y+1)*w+x])?1:0; const k=a|(b<<1)|(c<<2)|(d<<3);
+    if(k===0||k===15) continue; const E=[]; // 변에 교차가 있는 것
+    if(a!==b) E.push(0); if(b!==c) E.push(1); if(c!==d) E.push(2); if(d!==a) E.push(3);
+    for(const e of E){ const id=eid(x,y,e); if(!P.has(id)) P.set(id,pt(x,y,e)); }
+    if(E.length===2) link(eid(x,y,E[0]),eid(x,y,E[1]));
+    else if(E.length===4){ // 안장점: 칸 평균으로 연결 방식 결정
+      const mid=ins((F[y*w+x]+F[y*w+x+1]+F[(y+1)*w+x+1]+F[(y+1)*w+x])/4); const e=E.map(q=>eid(x,y,q));
+      if(mid===!!a){ link(e[0],e[1]); link(e[2],e[3]); } else { link(e[0],e[3]); link(e[1],e[2]); } } }
+  const seen=new Set(); let best=[];
+  for(const s0 of adj.keys()){ if(seen.has(s0)) continue; const loop=[]; let prev=-1, cur=s0; while(cur!=null&&!seen.has(cur)){ seen.add(cur); loop.push(P.get(cur)); const nb=adj.get(cur)||[]; const nx=nb.find(q=>q!==prev&&!seen.has(q)); prev=cur; cur=nx; }
+    if(loop.length>best.length) best=loop; }
+  return best; }
+
+/* ---------- 작은 선형대수 ---------- */
+function solveSym(A,b){ const n=b.length; const M=A.map((r,i)=>r.concat([b[i]]));
+  for(let c=0;c<n;c++){ let p=c; for(let r=c+1;r<n;r++) if(Math.abs(M[r][c])>Math.abs(M[p][c])) p=r; [M[c],M[p]]=[M[p],M[c]]; const v=M[c][c]; if(Math.abs(v)<1e-300) return null;
+    for(let r=0;r<n;r++){ if(r===c) continue; const f=M[r][c]/v; if(!f) continue; for(let k=c;k<=n;k++) M[r][k]-=f*M[c][k]; } }
+  return M.map((r,i)=>r[n]/r[i]); }
+function invSym(A){ const n=A.length; const out=[]; for(let j=0;j<n;j++){ const e=new Array(n).fill(0); e[j]=1; const x=solveSym(A,e); if(!x) return null; out.push(x); } return out[0].map((_,i)=>out.map(r=>r[i])); }
+/* Levenberg–Marquardt: fn(p) → 잔차 배열, 수치 야코비안(상대 단계 h) */
+function lm(fn,p0,o){ o=o||{}; let p=p0.slice(); let r=fn(p); if(!r) return null; let cost=r.reduce((a,v)=>a+v*v,0); let lam=o.lam0||1e-3; const n=p.length, it=o.iter||60, hs=o.h||p.map(v=>1e-4*Math.max(1,Math.abs(v)));
+  let J=null, JtJ=null, Jtr=null;
+  for(let k=0;k<it;k++){ J=[]; for(let j=0;j<n;j++){ const q=p.slice(); q[j]+=hs[j]; const rq=fn(q); if(!rq) return null; J.push(rq.map((v,i)=>(v-r[i])/hs[j])); }
+    JtJ=[...Array(n)].map((_,a)=>[...Array(n)].map((_,b)=>{ let s=0; const A=J[a], B=J[b]; for(let i=0;i<A.length;i++) s+=A[i]*B[i]; return s; }));
+    Jtr=[...Array(n)].map((_,a)=>{ let s=0; const A=J[a]; for(let i=0;i<A.length;i++) s+=A[i]*r[i]; return s; });
+    let improved=false;
+    for(let t=0;t<12;t++){ const M=JtJ.map((row,i)=>row.map((v,j)=>i===j?v*(1+lam)+1e-12:v)); const dp=solveSym(M,Jtr.map(v=>-v)); if(!dp){ lam*=10; continue; }
+      const q=p.map((v,i)=>v+dp[i]); if(o.clamp) o.clamp(q); const rq=fn(q); if(!rq){ lam*=10; continue; } const c2=rq.reduce((a,v)=>a+v*v,0);
+      if(c2<cost){ const rel=(cost-c2)/Math.max(cost,1e-300); p=q; r=rq; cost=c2; lam=Math.max(lam/3,1e-9); improved=true; if(rel<1e-10) k=it; break; } lam*=4; }
+    if(!improved) break; }
+  const m=r.length; const s2=cost/Math.max(1,m-n); const C=JtJ?invSym(JtJ):null; const sd=C?C.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2))):p.map(()=>NaN);
+  return {p,cost,rms:Math.sqrt(cost/Math.max(1,m)),sd,cov:C?C.map(row=>row.map(v=>v*s2)):null,m}; }
+IC._lm=lm;
+
+/* ---------- 바늘 (펜던트) ----------
+   윤곽 점에서 위쪽(바늘) 부분: 줄마다 왼·오른 가장자리 → 위에서부터 폭이 일정한 구간 = 바늘, 두 가장자리에 직선 맞춤
+   반환 {diam(px), axisDeg(세로에서 기운 각, 시계 +), yTip, left:{a,b}, right:{a,b}} (x = a + b·y) */
+IC.dropNeedle=function(pts,edge,o){ o=o||{}; const P=pts.filter((_,i)=>!(edge&&edge[i])); if(P.length<20) throw new Error("윤곽 점이 너무 적습니다");
+  let ymin=Infinity, ymax=-Infinity; for(const [,y] of P){ if(y<ymin) ymin=y; if(y>ymax) ymax=y; }
+  const rows=new Map(); for(const [x,y] of P){ const k=Math.round(y); const r=rows.get(k)||{l:Infinity,r:-Infinity}; if(x<r.l) r.l=x; if(x>r.r) r.r=x; rows.set(k,r); }
+  const ks=[...rows.keys()].sort((a,b)=>a-b); const top=ks.slice(0,Math.max(5,Math.floor(ks.length*0.08))); const wTop=top.map(k=>rows.get(k).r-rows.get(k).l).sort((a,b)=>a-b); const w0=wTop[wTop.length>>1];
+  if(!(w0>2)) throw new Error("바늘을 찾지 못했습니다 — 위쪽에 바늘이 보이게 영역을 잡으세요");
+  let yTip=ks[0]; for(const k of ks){ const r=rows.get(k); if(Math.abs((r.r-r.l)-w0)>Math.max(1.5,0.03*w0)) break; yTip=k; }
+  const span=yTip-ks[0]; if(span<5) throw new Error("바늘 구간이 너무 짧습니다 ("+span+" px) — 영역 위쪽에 바늘을 더 넣으세요");
+  const y1=ks[0]+0.1*span, y2=yTip-0.1*span; const L=[],Rr=[]; for(const [x,y] of P){ if(y<y1||y>y2) continue; const r=rows.get(Math.round(y)); if(!r) continue; if(Math.abs(x-r.l)<1.5) L.push([x,y]); else if(Math.abs(x-r.r)<1.5) Rr.push([x,y]); }
+  const fit=Q=>{ let sy=0,sx=0,syy=0,sxy=0; const n=Q.length; for(const [x,y] of Q){ sy+=y; sx+=x; syy+=y*y; sxy+=x*y; } const den=n*syy-sy*sy; const b=den?(n*sxy-sx*sy)/den:0; return {a:(sx-b*sy)/n,b,n}; };
+  if(L.length<4||Rr.length<4) throw new Error("바늘 가장자리를 맞추지 못했습니다");
+  const l=fit(L), r=fit(Rr); const bm=(l.b+r.b)/2; const ym=(y1+y2)/2; const diam=Math.abs((r.a+r.b*ym)-(l.a+l.b*ym))*Math.cos(Math.atan(bm));
+  return {diam,axisDeg:Math.atan(bm)/D2R,yTip,yTop:ks[0],left:l,right:r,cx:((l.a+l.b*ym)+(r.a+r.b*ym))/2,ym}; };
+
+/* ---------- 펜던트 드랍 맞춤 ----------
+   pts: 방울 윤곽(바늘 아래), o: {rot0(°), maxPts}. 매개변수 [x0, y0(apex), b(px), Bo, ω(rad)] — 영상 y 아래로, apex 가 가장 아래
+   반환 {apex:[x,y], b, Bo, omega(°), rms, sd:{…}, curve:{x,z}(무차원), zTop(무차원), n} */
+IC.fitPendant=function(pts,o){ o=o||{}; let Q=pts; const maxP=o.maxPts||900; if(Q.length>maxP){ const st=Q.length/maxP; Q=[...Array(maxP)].map((_,i)=>Q[Math.floor(i*st)]); }
+  // 초기값: apex = 가장 아래 점 근처, 축 = rot0, b = 아래 10 % 점에 원 맞춤, Bo = 거친 격자
+  const om0=(o.rot0||0)*D2R; let yb=-Infinity, xb=0; for(const [x,y] of Q) if(y>yb){ yb=y; xb=x; }
+  let ytop=Infinity; for(const [,y] of Q) if(y<ytop) ytop=y; const Hd=yb-ytop;
+  const low=Q.filter(([,y])=>y>yb-0.12*Hd); const circ=circleFit(low); const b0=circ&&circ.r>0?circ.r:Hd/2; const x00=circ?circ.cx:xb, y00=circ?circ.cy+circ.r:yb;
+  const zMaxOf=p=>{ let zm=0; const c=Math.cos(p[4]), s=Math.sin(p[4]); for(const [x,y] of Q){ const dx=x-p[0], dy=y-p[1]; const v=-dx*s+dy*c; if(-v>zm) zm=-v; } return zm/p[2]*1.03+0.05; };
+  const cache=new Map(); const curveOf=(Bo,zm)=>{ const k=Bo.toPrecision(10)+"|"+zm.toFixed(2); let C=cache.get(k); if(!C){ C=monoPrefix(IC.dropYL(Bo,"pendant",{zMax:zm,ds:0.003,phiMax:Math.PI*0.999})); if(cache.size>64) cache.clear(); cache.set(k,C); } return C; };
+  const res=p=>{ if(!(p[2]>2)||!(p[3]>-0.05&&p[3]<1.5)) return null; const zm=Math.ceil(zMaxOf(p)*4)/4; const C=curveOf(p[3],zm); if(C.n<10||C.z[C.n-1]<zm*0.97) return null; const c=Math.cos(p[4]), s=Math.sin(p[4]), b=p[2];
+    return Q.map(([x,y])=>{ const dx=x-p[0], dy=y-p[1]; const u=dx*c+dy*s, v=-dx*s+dy*c; return b*curveDist(C,Math.abs(u)/b,-v/b,40); }); };
+  let best=null; for(const Bo of [0.02,0.06,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]){ const p=[x00,y00,b0,Bo,om0]; const r=res(p); if(!r) continue; const c=r.reduce((a,v)=>a+v*v,0); if(!best||c<best.c) best={c,p}; }
+  if(!best) throw new Error("초기값을 찾지 못했습니다");
+  const F=lm(res,best.p,{iter:80,h:[0.02,0.02,0.01,1e-4,1e-5],clamp:q=>{ if(q[3]<-0.04) q[3]=-0.04; if(q[3]>1.4) q[3]=1.4; if(q[2]<3) q[2]=3; }});
+  const atBound=F&&(F.p[3]<=-0.0399||F.p[3]>=1.399);
+  if(!F) throw new Error("맞춤 실패");
+  const p=F.p; const zTop=zMaxOf(p)/1.03; const C=IC.dropYL(p[3],"pendant",{zMax:zTop+0.5,ds:0.002}); const Cm=monoPrefix(C);
+  return {apex:[p[0],p[1]],b:p[2],Bo:p[3],omega:p[4]/D2R,rms:F.rms,atBound,sd:{x0:F.sd[0],y0:F.sd[1],b:F.sd[2],Bo:F.sd[3],omega:F.sd[4]/D2R},cov:F.cov,curve:{x:Array.from(Cm.x.subarray(0,Cm.n)),z:Array.from(Cm.z.subarray(0,Cm.n))},n:Q.length}; };
+
+/* 회전체 부피·겉넓이 (무차원 곡선, z ≤ zTop 까지) */
+IC.dropVolArea=function(curve,zTop){ const X=curve.x, Z=curve.z; let V=0,A=0; for(let i=1;i<X.length;i++){ let x0=X[i-1],z0=Z[i-1],x1=X[i],z1=Z[i]; if(z0>=zTop) break; if(z1>zTop){ const t=(zTop-z0)/(z1-z0); x1=x0+t*(x1-x0); z1=zTop; }
+    const xm=(x0+x1)/2; V+=Math.PI*xm*xm*(z1-z0); A+=2*Math.PI*xm*Math.hypot(x1-x0,z1-z0); } return {V,A}; };
+
+/* 곡선에서 높이 zt 에서의 반지름 x (z 단조 부분 선형 보간) */
+function xAtZ(C,zt){ const Z=C.z, X=C.x; for(let i=1;i<Z.length;i++) if(Z[i]>=zt){ const t=(zt-Z[i-1])/(Z[i]-Z[i-1]); return X[i-1]+t*(X[i]-X[i-1]); } return NaN; }
+function phiAtZ(C,zt){ const Z=C.z, P=C.p; for(let i=1;i<C.n;i++) if(Z[i]>=zt){ const t=(zt-Z[i-1])/(Z[i]-Z[i-1]); return P[i-1]+t*(P[i]-P[i-1]); } return NaN; }
+
+/* ---------- 펜던트 전체: 윤곽 → 바늘 → 맞춤 → 물성 ----------
+   o: {roi, sigma, needleMM (바늘 지름 mm, 없으면 pxSize 사용), pxSize (mm/px, 선택), rhoIn, rhoOut (kg/m³), g (m/s²)} */
+IC.pendantDrop=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o.roi,sigma:o.sigma,pick:"top"});
+  const nd=IC.dropNeedle(ct.pts,ct.edge); const tipMargin=Math.max(2,0.02*(ct.comp.y1-nd.yTip));
+  const drop=ct.pts.filter((q,i)=>!ct.edge[i]&&q[1]>nd.yTip+tipMargin);
+  const fit=IC.fitPendant(drop,{rot0:-nd.axisDeg});
+  let mmPerPx=null, scaleFrom=""; if(o.needleMM>0){ mmPerPx=o.needleMM/nd.diam; scaleFrom="needle"; } else if(o.pxSize>0){ mmPerPx=o.pxSize; scaleFrom="image"; }
+  const drho=(o.rhoIn==null?1000:+o.rhoIn)-(o.rhoOut==null?0:+o.rhoOut), g=o.g||9.80665;
+  // 바늘 끝 높이(무차원): apex 에서 바늘 끝까지
+  const c=Math.cos(fit.omega*D2R), s=Math.sin(fit.omega*D2R); const tipPt=[nd.cx,nd.yTip]; const vTip=-(tipPt[0]-fit.apex[0])*s+(tipPt[1]-fit.apex[1])*c; let zTip=-vTip/fit.b;
+  // 바늘이 붙는 높이: 적도 위에서 이론 곡선 반지름 = 바늘 반지름인 곳 (폭 문턱으로 찾은 yTip 보다 정확 — 가장자리 흐림·문턱에 덜 민감). 곡선이 바늘보다 늘 넓으면 yTip 그대로
+  { const X=fit.curve.x, Z=fit.curve.z, rN=nd.diam/2/fit.b; let ie=0; for(let i=1;i<X.length;i++){ if(X[i]>X[ie]) ie=i; else if(X[i]<X[ie]*0.999) break; }
+    for(let i=ie+1;i<X.length;i++){ if(X[i]<=rN){ const t=(X[i-1]-rN)/(X[i-1]-X[i]); const zz=Z[i-1]+t*(Z[i]-Z[i-1]); if(Math.abs(zz-zTip)<0.15*zTip) zTip=zz; break; } } }
+  const VA=IC.dropVolArea(fit.curve,zTip); const out={contour:ct.pts,edge:ct.edge,level:ct.level,needle:nd,fit,zTip,R0px:fit.b,Bo:fit.Bo,rms:fit.rms,scaleFrom,mmPerPx};
+  out.xTip=xAtZ(fit.curve,zTip); // 바늘 끝에서 이론 곡선 반지름 (바늘 반지름과 비교 — 맞으면 ≈ diam/2/b)
+  out.warn=[]; if(!(drho>0)){ out.warn.push(`Δρ = ${isFinite(drho)?drho:"?"} kg/m³ — 방울이 바깥보다 무거워야 펜던트 γ 를 계산합니다 (밀도 칸 확인)`); mmPerPx=null; }
+  if(mmPerPx){ const b=fit.b*mmPerPx*1e-3; // m
+    out.R0mm=b*1e3; out.gamma=drho*g*b*b/fit.Bo*1e3; // mN/m
+    // 맞춤 SD: γ ∝ b²/Bo, b·Bo 상관(보통 −0.9)까지 넣은 gᵀCg. 눈금 SD: 바늘 가장자리 ±0.3 px 가 지름에 주는 몫(γ ∝ 눈금²) — 따로 보인다
+    const C=fit.cov; const gb=2/fit.b, gB=-1/fit.Bo; const v=C?(gb*gb*C[2][2]+gB*gB*C[3][3]+2*gb*gB*C[2][3]):NaN; out.gammaSd=out.gamma*Math.sqrt(Math.max(0,v));
+    out.gammaScaleSd=scaleFrom==="needle"?out.gamma*2*(0.3*Math.SQRT2/nd.diam):NaN;
+    out.V=VA.V*b*b*b*1e9; out.A=VA.A*b*b*1e6; // mm³, mm²
+    const Dn=nd.diam*mmPerPx*1e-3; out.needleMM=nd.diam*mmPerPx; out.Wo=drho*g*(out.V*1e-9)/(Math.PI*out.gamma*1e-3*Dn); }
+  out.drho=drho; out.g=g;
+  // 화면 덧그림(영상 좌표): 맞춘 이론 윤곽(양쪽, 바늘 끝까지) · 바늘 두 가장자리 · apex
+  { const c=Math.cos(fit.omega*D2R), s=Math.sin(fit.omega*D2R), b=fit.b, X=fit.curve.x, Z=fit.curve.z; const half=sg=>{ const L=[]; for(let i=0;i<X.length;i++){ if(Z[i]>zTip+1e-9) break; const u=sg*X[i]*b, v=-Z[i]*b; L.push([fit.apex[0]+u*c-v*s,fit.apex[1]+u*s+v*c]); } return L; };
+    const l=half(-1).reverse(), r=half(1); const ln=(f)=>[[f.a+f.b*nd.yTop,nd.yTop],[f.a+f.b*nd.yTip,nd.yTip]];
+    out.overlay={curves:[l.concat(r.slice(1))],needle:[ln(nd.left),ln(nd.right)],apex:fit.apex.slice()}; }
+  // 경고: Worthington 수가 작으면(방울이 작아 중력 변형이 약함) γ 정밀도가 떨어진다 — Berry et al. 2015
+  if(fit.atBound) out.warn.push(`Bond 수가 맞춤 한계(${fit.Bo.toFixed(3)})에 닿았습니다 — 바늘·영역·밝기를 확인하세요. γ 는 믿지 마세요`);
+  if(out.Wo!=null&&out.Wo<0.5) out.warn.push(`Worthington 수 ${out.Wo.toFixed(2)} — 0.5 보다 작아 γ 불확도가 큽니다(방울을 바늘에서 떨어지기 직전 크기에 가깝게)`);
+  if(fit.rms>1) out.warn.push(`맞춤 잔차 rms ${fit.rms.toFixed(2)} px — 윤곽에 바늘·잡티·반사가 섞였는지 보세요`);
+  if(Math.abs(fit.omega)>5) out.warn.push(`기울기 ${fit.omega.toFixed(1)}° — 카메라·바늘 수직을 확인하세요`);
+  if(!mmPerPx) out.warn.push("바늘 지름(mm)이나 영상 눈금이 없어 γ·부피는 계산하지 않았습니다 (Bo·모양만)");
+  return out; };
+
+/* ---------- 원 맞춤 (Kåsa → 기하 LM) ---------- */
+function circleFit(P){ const n=P.length; if(n<3) return null; let mx=0,my=0; for(const [x,y] of P){ mx+=x; my+=y; } mx/=n; my/=n;
+  let Suu=0,Svv=0,Suv=0,Suuu=0,Svvv=0,Suvv=0,Svuu=0; for(const [x,y] of P){ const u=x-mx, v=y-my; Suu+=u*u; Svv+=v*v; Suv+=u*v; Suuu+=u*u*u; Svvv+=v*v*v; Suvv+=u*v*v; Svuu+=v*u*u; }
+  const s=solveSym([[Suu,Suv],[Suv,Svv]],[(Suuu+Suvv)/2,(Svvv+Svuu)/2]); if(!s) return null; let cx=s[0]+mx, cy=s[1]+my, r=Math.sqrt(s[0]*s[0]+s[1]*s[1]+(Suu+Svv)/n);
+  const F=lm(p=>P.map(([x,y])=>Math.hypot(x-p[0],y-p[1])-p[2]),[cx,cy,r],{iter:30}); if(F){ [cx,cy,r]=F.p; return {cx,cy,r,rms:F.rms}; } return {cx,cy,r}; }
+IC.circleFit=circleFit;
+
+/* ---------- 타원(일반 원뿔) 직접 맞춤 — Fitzgibbon, Pilu, Fisher 1999 (Halir–Flusser 수치 안정판) ---------- */
+function ellipseFit(P){ const n=P.length; if(n<6) return null; let mx=0,my=0,sc=0; for(const [x,y] of P){ mx+=x; my+=y; } mx/=n; my/=n; for(const [x,y] of P) sc+=Math.hypot(x-mx,y-my); sc=sc/n||1;
+  const D1=[],D2=[]; for(const [x0,y0] of P){ const x=(x0-mx)/sc, y=(y0-my)/sc; D1.push([x*x,x*y,y*y]); D2.push([x,y,1]); }
+  const mul=(A,B)=>{ const r=[]; for(let i=0;i<3;i++){ r.push([]); for(let j=0;j<3;j++){ let s=0; for(let k=0;k<n;k++) s+=A[k][i]*B[k][j]; r[i].push(s); } } return r; };
+  const S1=mul(D1,D1), S2=mul(D1,D2), S3=mul(D2,D2); const S3i=invSym(S3); if(!S3i) return null;
+  const T=[0,1,2].map(i=>[0,1,2].map(j=>-(S3i[i][0]*S2[j][0]+S3i[i][1]*S2[j][1]+S3i[i][2]*S2[j][2]))); // T = −S3⁻¹ S2ᵀ
+  const M0=[0,1,2].map(i=>[0,1,2].map(j=>S1[i][j]+S2[i][0]*T[0][j]+S2[i][1]*T[1][j]+S2[i][2]*T[2][j]));
+  const M=[[M0[2][0]/2,M0[2][1]/2,M0[2][2]/2],[-M0[1][0],-M0[1][1],-M0[1][2]],[M0[0][0]/2,M0[0][1]/2,M0[0][2]/2]];
+  // 3×3 고유벡터: 특성다항식 실근마다 영공간 → 4ac − b² > 0 인 것
+  const ev=eig3(M); let a1=null; for(const v of ev){ if(4*v[0]*v[2]-v[1]*v[1]>0){ a1=v; break; } } if(!a1) return null;
+  const a2=[0,1,2].map(i=>T[i][0]*a1[0]+T[i][1]*a1[1]+T[i][2]*a1[2]);
+  // 원래 좌표로: x = mx + sc·X
+  let [A,B,C]=a1, [Dd,E,Fc]=a2; A/=sc*sc; B/=sc*sc; C/=sc*sc; Dd/=sc; E/=sc;
+  const D_=Dd-2*A*mx-B*my, E_=E-2*C*my-B*mx, F_=Fc+A*mx*mx+B*mx*my+C*my*my-Dd*mx-E*my;
+  return {A,B,C,D:D_,E:E_,F:F_}; }
+function eig3(M){ // 실 고유벡터들 (특성다항식 근 → (M−λI) 의 두 행 외적)
+  const a=M, tr=a[0][0]+a[1][1]+a[2][2]; const c2=-tr;
+  const m2=a[0][0]*a[1][1]-a[0][1]*a[1][0]+a[0][0]*a[2][2]-a[0][2]*a[2][0]+a[1][1]*a[2][2]-a[1][2]*a[2][1];
+  const det=a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1])-a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0])+a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0]);
+  const roots=cubicRoots(1,c2,m2,-det); const out=[];
+  for(const l of roots){ const B=[[a[0][0]-l,a[0][1],a[0][2]],[a[1][0],a[1][1]-l,a[1][2]],[a[2][0],a[2][1],a[2][2]-l]];
+    const cr=(u,v)=>[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]]; const cs=[cr(B[0],B[1]),cr(B[0],B[2]),cr(B[1],B[2])]; let v=cs[0]; for(const q of cs) if(Math.hypot(...q)>Math.hypot(...v)) v=q; const nv=Math.hypot(...v); if(nv>0) out.push(v.map(t=>t/nv)); }
+  return out; }
+function cubicRoots(a,b,c,d){ b/=a; c/=a; d/=a; const p=c-b*b/3, q=2*b*b*b/27-b*c/3+d; const D=q*q/4+p*p*p/27; const out=[];
+  if(D>1e-14){ const u=Math.cbrt(-q/2+Math.sqrt(D)), v=Math.cbrt(-q/2-Math.sqrt(D)); out.push(u+v-b/3); }
+  else if(Math.abs(D)<=1e-14){ const u=Math.cbrt(-q/2); out.push(2*u-b/3,-u-b/3); }
+  else { const r=Math.sqrt(-p*p*p/27), ph=Math.acos(Math.max(-1,Math.min(1,-q/(2*r)))), m=2*Math.cbrt(r); for(let k=0;k<3;k++) out.push(m*Math.cos((ph+2*Math.PI*k)/3)-b/3); }
+  return out; }
+IC.ellipseFit=ellipseFit;
+
+/* ---------- 기준선 자동 (세실) ----------
+   윤곽(방울 + 기판 한 덩어리)에서 열마다 가장 위 윤곽 y → RANSAC 직선(기판 표면) → 안쪽 점 최소제곱
+   반환 {p1:[x,y], p2:[x,y], angleDeg, inliers} — 방울 아래에 기판이 보여야 한다(거울 반사 기판은 수동 기준선) */
+IC.dropBaseline=function(pts,edge,o){ o=o||{}; const top=new Map(); pts.forEach(([x,y],i)=>{ if(edge&&edge[i]) return; const k=Math.round(x); const v=top.get(k); if(v==null||y<v[1]) top.set(k,[x,y]); });
+  const T=[...top.values()].sort((a,b)=>a[0]-b[0]); if(T.length<20) throw new Error("기준선: 점이 너무 적습니다");
+  let best=null; const tol=o.tol||1.5; const N=T.length; let seed=12345; const rnd=()=>((seed=(seed*1103515245+12345)>>>0)/4294967296);
+  for(let it=0;it<400;it++){ const a=T[Math.floor(rnd()*N)], b=T[Math.floor(rnd()*N)]; if(Math.abs(a[0]-b[0])<N*0.2) continue; const m=(b[1]-a[1])/(b[0]-a[0]); if(Math.abs(m)>0.3) continue;
+    let n=0; for(const q of T) if(Math.abs(q[1]-(a[1]+m*(q[0]-a[0])))<=tol) n++; if(!best||n>best.n) best={n,a,m}; }
+  if(!best||best.n<0.15*N) throw new Error("기준선(기판 표면)을 찾지 못했습니다 — 기준선을 직접 그으세요(Line ROI)");
+  const In=T.filter(q=>Math.abs(q[1]-(best.a[1]+best.m*(q[0]-best.a[0])))<=tol); let sx=0,sy=0,sxx=0,sxy=0; for(const [x,y] of In){ sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; } const n=In.length; const m=(n*sxy-sx*sy)/(n*sxx-sx*sx), c=(sy-m*sx)/n;
+  const x1=T[0][0], x2=T[N-1][0]; return {p1:[x1,c+m*x1],p2:[x2,c+m*x2],angleDeg:Math.atan(m)/D2R,inliers:n}; };
+
+/* ---------- 접촉각 ----------
+   o: {roi, sigma, baseline:{p1,p2} (없으면 자동), methods:["yl","circle","ellipse","poly"], polyFrac(0.15), pxSize(mm/px 선택), rhoIn/rhoOut/g}
+   좌표: 기준선이 x' 축(왼→오른), 높이 y' 는 기판에서 위로(+). 반환 {contour, baseline, profile(방울 점, 기준선 좌표), methods:{…}, width, height} */
+IC.contactAngle=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o.roi,sigma:o.sigma,pick:"bottom"});
+  let bl=o.baseline; let auto=false; if(!bl){ bl=IC.dropBaseline(ct.raw,ct.edge); auto=true; }
+  const [ax,ay]=bl.p1, [bx,by]=bl.p2; const L=Math.hypot(bx-ax,by-ay); const ux=(bx-ax)/L, uy=(by-ay)/L; // 기준선 방향(영상)
+  // 위쪽(+y') = 영상에서 기준선 왼쪽 법선 (영상 y 아래이므로 (uy,−ux))
+  const nx=uy, ny=-ux; const toB=([x,y])=>[(x-ax)*ux+(y-ay)*uy,(x-ax)*nx+(y-ay)*ny]; const toI=([s,t])=>[ax+s*ux+t*nx,ay+s*uy+t*ny];
+  // 기준선 가까이(접촉점 둘레 쐐기)는 두 가장자리가 겹쳐 경사 최대 다듬기가 흔들린다 → 문턱 등고선 그대로
+  const res0={}; const rawB=ct.raw.map(toB); const Hr=amax(rawB.filter((_,i)=>!ct.edge[i]),q=>q[1]); const tKeep=Math.max(6,0.04*Hr);
+  const all=ct.pts.map((q,i)=>rawB[i][1]<tKeep?rawB[i]:toB(q)); const Hmax=amax(all.filter((_,i)=>!ct.edge[i]),q=>q[1]); if(!(Hmax>4)) throw new Error("기준선 위에 방울이 없습니다");
+  // 방울 안에 바늘(주사기)이 꽂혀 영역 위 테두리까지 이어지면: 위쪽 폭이 일정한 구간 = 바늘 → 그 아래 끝(+여유)보다 위 점은 맞춤에서 뺀다 (접선법은 접촉점 둘레만 보므로 영향 없음)
+  let cutT=Infinity; if(ct.comp.y0<=ct.roi.y0+1){ try{ const nd=IC.dropNeedle(ct.raw,ct.edge); const tipT=Math.max(...[[nd.left.a+nd.left.b*nd.yTip,nd.yTip],[nd.right.a+nd.right.b*nd.yTip,nd.yTip]].map(q=>toB(q)[1]));
+      if(nd.diam<0.8*(amax(rawB,q=>q[0])-amin(rawB,q=>q[0]))){ cutT=tipT-Math.max(4,0.03*Hr); res0.needle={diam:nd.diam,yTip:nd.yTip,cutT}; } }catch(e){} }
+  const minH=Math.max(1.5,0.01*Hmax); res0.cut=rawB.some((q,i)=>ct.edge[i]&&q[1]>Math.max(3,0.03*Hmax)&&q[1]<cutT-2);
+  const prof=all.filter((q,i)=>!ct.edge[i]&&q[1]>minH&&q[1]<cutT), profRaw=rawB.filter((q,i)=>!ct.edge[i]&&q[1]>minH&&q[1]<cutT); // 접선법은 접촉점 둘레만 보므로 문턱 등고선(profRaw)
+  // 방울 점만: 기준선 위로 솟은 덩어리 — 꼭대기 열 둘레로 이어진 x' 범위 (기판 윗면 점은 높이가 minH 아래라 이미 빠짐)
+  if(prof.length<20) throw new Error("방울 윤곽 점이 너무 적습니다");
+  const res={nNaN:ct.nNaN,contour:ct.pts,edge:ct.edge,level:ct.level,baseline:{p1:bl.p1,p2:bl.p2,auto,angleDeg:Math.atan2(by-ay,bx-ax)/D2R},height:Hmax,methods:{},needle:res0.needle||null,cut:!!res0.cut,why:{}};
+  // 접촉점 근사: 낮은 점들 중 왼쪽·오른쪽 끝
+  let xl=Infinity,xr=-Infinity; for(const [s,t] of prof){ if(t<minH+0.1*Hmax){ if(s<xl) xl=s; if(s>xr) xr=s; } } res.width=xr-xl;
+  const M=new Set(o.methods||["yl","circle","ellipse","poly"]); const inside=(sx,dir)=>dir; // 표시용
+  // 접선 각: 접촉점에서 위로 가는 접선 (dx'/dy' = c) → 왼쪽 θ = atan2(1, c), 오른쪽 θ = atan2(1, −c)
+  const angL=c=>Math.atan2(1,c)/D2R, angR=c=>Math.atan2(1,-c)/D2R;
+  // --- 다항식(접선) ---
+  if(M.has("poly")){ const side=sgn=>polyTangent(profRaw,sgn,xl,xr,Hmax,o); const l=side(-1), r=side(1);
+    if(!(l&&r)) res.why.poly="접촉점 둘레 윤곽 점이 모자랍니다("+(!l&&!r?"양쪽":!l?"왼쪽":"오른쪽")+")";
+    if(l&&r) res.methods.poly={left:l.theta,right:r.theta,mean:(l.theta+r.theta)/2,contactL:toI([l.x,0]),contactR:toI([r.x,0]),n:l.n+r.n,fitRadius:l.R}; }
+  // --- 원 ---
+  if(M.has("circle")){ const c=circleFit(prof); if(c&&c.r>0&&Math.abs(c.cy)<c.r){ const th=(90+Math.asin(c.cy/c.r)/D2R); const dx=Math.sqrt(c.r*c.r-c.cy*c.cy);
+      res.methods.circle={left:th,right:th,mean:th,center:toI([c.cx,c.cy]),r:c.r,rms:c.rms,contactL:toI([c.cx-dx,0]),contactR:toI([c.cx+dx,0]),cB:[c.cx,c.cy]}; } }
+  // --- 타원 ---
+  if(M.has("ellipse")){ const e=ellipseFit(prof); if(e){ // y'=0 에서 A x² + D x + F = 0
+      const {A,B,C,D,E,F}=e; const disc=D*D-4*A*F; if(disc>0&&A!==0){ const r1=(-D-Math.sqrt(disc))/(2*A), r2=(-D+Math.sqrt(disc))/(2*A); const xL=Math.min(r1,r2), xR=Math.max(r1,r2);
+        // 접선: ∇ = (2Ax + By + D, Bx + 2Cy + E) 에 수직 → dx/dy = −(Bx+2Cy+E)/(2Ax+By+D)
+        const sl=x=>-(B*x+E)/(2*A*x+D); res.methods.ellipse={left:angL(sl(xL)),right:angR(sl(xR)),contactL:toI([xL,0]),contactR:toI([xR,0]),conic:e};
+        res.methods.ellipse.mean=(res.methods.ellipse.left+res.methods.ellipse.right)/2; } } }
+  // --- Young–Laplace (축대칭) ---
+  if(M.has("yl")){ try{ const Y=fitSessile(prof,Hmax,xl,xr); if(!Y) res.why.yl="초기값·수렴 실패 (방울 윗부분이 잘렸거나 윤곽이 방울이 아님)"; if(Y){ res.methods.yl=Y; Y.contactL=toI([Y.x0-Y.rc,0]); Y.contactR=toI([Y.x0+Y.rc,0]); Y.apexImg=toI([Y.x0,Y.yApex]); } }catch(e){ res.methods.ylError=String(e.message||e); } }
+  // 물성(선택): 부피·Bond — 화소 크기 있을 때
+  if(o.pxSize>0){ const s=o.pxSize; const Y=res.methods.yl; if(Y){ res.V=Y.V*Math.pow(Y.b*s,3); res.R0mm=Y.b*s; res.baseDiameterMM=2*Y.rc*s; res.heightMM=Y.yApex*s;
+      const drho=(o.rhoIn==null?1000:+o.rhoIn)-(o.rhoOut==null?0:+o.rhoOut), g=o.g||9.80665; const relBo=Y.BoSd/Math.max(Y.Bo,1e-9); if(drho>0&&Y.Bo>0.1&&relBo<0.1&&Y.mean>=60&&!Y.atBound){ res.gammaEst=drho*g*Math.pow(Y.b*s*1e-3,2)/Y.Bo*1e3; res.gammaEstSd=res.gammaEst*Math.sqrt(4*Math.pow(Y.bSd/Y.b,2)+relBo*relBo); } } // 세실 형상에서 γ: Bo 가 충분히 크고 잘 정해질 때만 (작은 θ·작은 Bo 에서는 형상에 정보가 없음)
+    const Cc=res.methods.circle; if(Cc){ const h=Cc.r+Cc.cB[1], a=Math.sqrt(Math.max(0,Cc.r*Cc.r-Cc.cB[1]*Cc.cB[1])); res.Vcap=Math.PI*h*(3*a*a+h*h)/6*Math.pow(s,3); } }
+  // 화면 덧그림(영상 좌표): 기준선 · 방법마다 접촉점의 접선(액체 쪽에서 잰 θ) · YL·원 맞춤 곡선
+  { const ov={baseline:[bl.p1.slice(),bl.p2.slice()],tangents:[],curves:[]}; const Lt=Math.max(20,0.35*Hmax);
+    const tan=(m,k)=>{ if(!m||!m.contactL) return; const d=(th,sg)=>{ const a=th*D2R; const ds=sg*Math.cos(a), dt=Math.sin(a); return [ds*ux+dt*nx,ds*uy+dt*ny]; };
+      const dl=d(m.left,1), dr=d(m.right,-1); ov.tangents.push({m:k,p:m.contactL,d:dl,len:Lt,theta:m.left,side:"L"},{m:k,p:m.contactR,d:dr,len:Lt,theta:m.right,side:"R"}); };
+    for(const k of ["yl","poly","ellipse","circle"]) tan(res.methods[k],k);
+    const Y=res.methods.yl; if(Y){ const half=sg=>{ const L=[]; for(let i=0;i<Y.curve.x.length;i++){ const z=Y.curve.z[i]*Y.b; if(z>Y.yApex+1e-9) break; L.push(toI([Y.x0+sg*Y.curve.x[i]*Y.b,Y.yApex-z])); } return L; }; ov.curves.push({m:"yl",pts:half(-1).reverse().concat(half(1).slice(1))}); }
+    const Cc=res.methods.circle; if(Cc){ const L=[]; const a1=Math.asin(Math.max(-1,Math.min(1,-Cc.cB[1]/Cc.r))); for(let i=0;i<=120;i++){ const a=a1+(Math.PI-2*a1)*i/120; L.push(toI([Cc.cB[0]+Cc.r*Math.cos(a),Cc.cB[1]+Cc.r*Math.sin(a)])); } ov.curves.push({m:"circle",pts:L}); }
+    if(res.needle){ const c=res.needle.cutT; ov.needle=[[toI([xl-0.1*res.width,c]),toI([xr+0.1*res.width,c])]]; } // 바늘 때문에 이 선 위 윤곽은 뺌
+    res.overlay=ov; }
+  res.warn=[]; if(res.cut) res.warn.push("방울 윤곽이 영역(ROI) 테두리에 잘렸습니다 — 방울 전체가 들어가게 영역을 넓히세요. 잘린 채 맞춘 값은 틀릴 수 있습니다");
+  for(const [k,v] of Object.entries(res.why)) res.warn.push(({poly:"접선",yl:"Young–Laplace"})[k]+" 없음: "+v);
+  if(res.methods.yl&&res.methods.yl.atBound) res.warn.push("Young–Laplace Bond 수가 맞춤 한계에 닿았습니다 — 그 θ 는 믿지 마세요");
+  if(res.nNaN) res.warn.push(`영역 안 NaN 화소 ${res.nNaN} 개를 바탕 값으로 채웠습니다`);
+  if(res.needle) res.warn.push(`방울 안에 바늘(폭 ${res.needle.diam.toFixed(0)} px)이 있어 그 아래 끝보다 위의 윤곽은 맞춤에서 뺐습니다 — 높이·부피는 바늘 부피를 포함하지 않은 값`); const vals=Object.entries(res.methods).filter(([k,v])=>v&&v.mean!=null).map(([k,v])=>v.mean); if(vals.length>1&&Math.max(...vals)-Math.min(...vals)>5) res.warn.push(`방법 사이 차이 ${(Math.max(...vals)-Math.min(...vals)).toFixed(1)}° — 중력으로 납작한(Bo 큼) 대칭 방울이면 원·타원이 틀리고 Young–Laplace 가 맞습니다. 왼·오른 각이 다르면(비대칭·접촉선 고정) 축대칭 가정이 깨져 Young–Laplace 도 틀릴 수 있으니 접선법 왼·오른 값을 함께 보세요`);
+  const Pm=res.methods.poly; if(Pm&&Math.abs(Pm.left-Pm.right)>5) res.warn.push(`접선법 왼·오른 차 ${Math.abs(Pm.left-Pm.right).toFixed(1)}° — 방울이 비대칭(고정·이력)이거나 기준선이 기울었습니다. 축대칭인 Young–Laplace·원·타원은 이 경우 평균만 줍니다`);
+  if(Pm&&Pm.mean>150) res.warn.push("θ > 150° 에서는 접촉점 둘레 쐐기가 좁아 접선법 오차가 커집니다 — Young–Laplace 권장");
+  if(Y_ok(res)&&res.methods.yl.rms>1) res.warn.push(`Young–Laplace 잔차 rms ${res.methods.yl.rms.toFixed(2)} px — 바늘·반사·기판 그림자가 윤곽에 섞였는지 보세요`);
+  if(res.methods.ylError) res.warn.push("Young–Laplace 맞춤 실패: "+res.methods.ylError);
+  return res; };
+const Y_ok=r=>!!(r.methods&&r.methods.yl);
+
+/* 접선(다항식) 접촉각 — 접촉점 둘레 반지름 R 안의 윤곽 점을 접촉점에서 멀어지는 순으로 늘어놓고
+   호 길이 u 의 2 차식 x'(u), t(u) 로 맞춘 뒤 t(u)=0 (기준선) 으로 외삽 → 그 자리 접선 (x', t) 미분 방향으로 θ.
+   x(t) 꼴 맞춤과 달리 θ > 90° (방울이 접촉점 위로 넘어감) 에서도 한 값. 바닥 가까이 흐림 구간(t < tMin) 은 뺌. */
+function polyTangent(prof,sgn,xl,xr,Hmax,o){ const mid=(xl+xr)/2; let xc=sgn<0?xl:xr, tb=Infinity; const tMin0=Math.max(o.polyTmin||3,0.01*Hmax);
+  for(const [s,t] of prof) if((sgn<0?s<mid:s>mid)&&t>=tMin0&&t<tb){ tb=t; xc=s; } // 접촉점 근사 = 그 쪽에서 기준선에 가장 가까운 점 (θ > 90° 면 불룩한 곳보다 안쪽)
+  const R=Math.max(8,(o.polyFrac||0.12)*Math.min(Hmax,(xr-xl)/2)); const tMin=Math.max(o.polyTmin||3,0.01*Hmax);
+  const Q=prof.filter(([s,t])=>(sgn<0?s<mid:s>mid)&&t>=tMin&&Math.hypot(s-xc,t)<=R+tMin); if(Q.length<6) return null;
+  Q.sort((a,b)=>Math.hypot(a[0]-xc,a[1])-Math.hypot(b[0]-xc,b[1]));
+  const U=[0]; for(let i=1;i<Q.length;i++) U.push(U[i-1]+Math.hypot(Q[i][0]-Q[i-1][0],Q[i][1]-Q[i-1][1]));
+  const fit2=(V)=>{ const S=[[0,0,0],[0,0,0],[0,0,0]], b=[0,0,0]; for(let i=0;i<Q.length;i++){ const u=U[i], v=[1,u,u*u]; for(let a=0;a<3;a++){ b[a]+=v[a]*V(i); for(let c=0;c<3;c++) S[a][c]+=v[a]*v[c]; } } return solveSym(S,b); };
+  const cx=fit2(i=>Q[i][0]), ct=fit2(i=>Q[i][1]); if(!cx||!ct) return null;
+  // t(u) = 0 의 u (가장 0 에 가까운 근, 보통 음수 = 외삽)
+  let u0; if(Math.abs(ct[2])<1e-12) u0=-ct[0]/ct[1]; else { const D=ct[1]*ct[1]-4*ct[2]*ct[0]; if(D<0) u0=-ct[1]/(2*ct[2]); else { const r1=(-ct[1]-Math.sqrt(D))/(2*ct[2]), r2=(-ct[1]+Math.sqrt(D))/(2*ct[2]); u0=Math.abs(r1)<Math.abs(r2)?r1:r2; } }
+  const dx=cx[1]+2*cx[2]*u0, dt=ct[1]+2*ct[2]*u0; const x0=cx[0]+cx[1]*u0+cx[2]*u0*u0;
+  // u 가 커지면 위로(t 증가) — 접선 방향 (dx, dt), 액체 쪽에서 잰 각: 왼쪽 θ = atan2(dt, dx), 오른쪽 θ = atan2(dt, −dx)
+  const th=(sgn<0?Math.atan2(dt,dx):Math.atan2(dt,-dx))/D2R; return {theta:th,x:x0,n:Q.length,R}; }
+/* 세실 Young–Laplace 맞춤: 매개변수 [x0, yApex(기준선 위 높이), b, Bo] (기준선 좌표, 축은 기준선에 수직) */
+function fitSessile(prof,Hmax,xl,xr){ const Q0=prof; let Q=Q0; if(Q.length>900){ const st=Q.length/900; Q=[...Array(900)].map((_,i)=>Q0[Math.floor(i*st)]); }
+  const c0=circleFit(Q); const x00=c0?c0.cx:(xl+xr)/2, b0=c0?c0.r:Hmax/2;
+  const cache=new Map(); const curveOf=(Bo,zm)=>{ const k=Bo.toPrecision(10)+"|"+zm.toFixed(2); let C=cache.get(k); if(!C){ C=monoPrefix(IC.dropYL(Bo,"sessile",{zMax:zm,ds:0.003})); if(cache.size>64) cache.clear(); cache.set(k,C); } return C; };
+  const res=p=>{ const [x0,ya,b,Bo]=p; if(!(b>2)||!(Bo>-0.05&&Bo<5)||!(ya>1)) return null; const zm=Math.ceil((ya/b*1.02+0.05)*4)/4; const C=curveOf(Bo,zm); if(C.n<10) return null;
+    if(C.z[C.n-1]<ya/b){ // φ 가 π 에 닿아 기준선까지 못 감 → 벌점
+      return null; }
+    return Q.map(([s,t])=>b*curveDist(C,Math.abs(s-x0)/b,(ya-t)/b,40)); };
+  let best=null; for(const Bo of [0.0005,0.05,0.15,0.3,0.6,1.0,1.6]){ for(const bf of [0.8,1,1.25]){ const p=[x00,Hmax,b0*bf,Bo]; const r=res(p); if(!r) continue; const c=r.reduce((a,v)=>a+v*v,0); if(!best||c<best.c) best={c,p}; } }
+  if(!best) return null;
+  const F=lm(res,best.p,{iter:80,h:[0.02,0.02,0.01,1e-4],clamp:q=>{ if(q[3]<-0.04) q[3]=-0.04; if(q[2]<3) q[2]=3; }}); if(!F) return null; const atBound=F.p[3]<=-0.0399;
+  const [x0,ya,b,Bo]=F.p; const C=monoPrefix(IC.dropYL(Bo,"sessile",{zMax:ya/b+0.2,ds:0.002})); const zt=ya/b; const th=phiAtZ(C,zt)/D2R; const rc=xAtZ(C,zt)*b; const VA=IC.dropVolArea({x:Array.from(C.x.subarray(0,C.n)),z:Array.from(C.z.subarray(0,C.n))},zt);
+  // θ 불확도: Bo·b·yApex 공분산을 수치 미분으로 전파
+  let thSd=NaN; if(F.cov){ const thOf=p=>{ const Cq=monoPrefix(IC.dropYL(p[3],"sessile",{zMax:p[1]/p[2]+0.2,ds:0.002})); return phiAtZ(Cq,p[1]/p[2])/D2R; }; const g=[0,0,0,0]; const hs=[0,0.05,0.05,1e-3];
+    for(const j of [1,2,3]){ const q=F.p.slice(); q[j]+=hs[j]; const t2=thOf(q); g[j]=(t2-th)/hs[j]; } let v=0; for(let i=0;i<4;i++) for(let j=0;j<4;j++) v+=g[i]*g[j]*F.cov[i][j]; thSd=Math.sqrt(Math.max(0,v)); }
+  return {left:th,right:th,mean:th,thetaSd:thSd,atBound,BoSd:F.sd[3],bSd:F.sd[2],x0,yApex:ya,b,Bo,rc,rms:F.rms,V:VA.V,A:VA.A,curve:{x:Array.from(C.x.subarray(0,C.n)),z:Array.from(C.z.subarray(0,C.n))},n:Q.length}; }
+IC._fitSessile=fitSessile;
+})();
+
 </script>
 <script id="img-io">
 /* fzstd 0.1.1 — Zstandard 해독기 (CZI zstd0/zstd1 subblock 용). 원본 그대로, 감싸기만 함.
@@ -50599,13 +50979,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------------- 상태 ----------------
    S 는 JSON 으로 저장되는 부분(영상 메타데이터·ROI·결과·매크로·화면). 화소는 PX(id → Float32Array[]) 에 따로 둔다 */
-function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],
+function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],drops:[],dropFit:{},dropBase:{},
   measure:{cols:["Area","Mean","StdDev","Min","Max","X","Y","Perim.","Feret","MinFeret","Circ.","AR","Round","Solidity","ECD"]},
   macro:{rec:true,steps:[]},
   ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:true,manual:false,lower:0,upper:255,show:true},
       cthr:{space:"HSB",min:[0,0,0],max:[255,255,255],pass:[true,true,true],method:"Default",dark:false},
       pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0,maxCirc:1,exclude:false,holes:false,redirect:"",show:"outlines",addRoi:false},
-      dist:{col:"ECD",bins:0,log:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
+      dist:{col:"ECD",bins:0,log:false},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
 let S=defState(); const PX=new Map(); let ROOT=null, LOADED=false;
 const UNDO=new Map(); // id → [{planes, meta}]
 const cur=()=>S.images.find(i=>i.id===S.sel)||null;
@@ -50636,7 +51016,7 @@ function markDirty(id){ DIRTY.add(id); save(); }
 try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size)) flushSave(); }); }catch(e){}
 async function loadSaved(){
   const st=await dbGet("state"); if(!st||st.v!==1) return;
-  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{});
+  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
   const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
     if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
@@ -50704,7 +51084,7 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; delete S.ui.views[id];
+function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 영상마다 8 단계, 모든 영상 합쳐 1.2 GB
@@ -51127,7 +51507,7 @@ function draw(){
   if(v.zoom>=24){ ox.strokeStyle="rgba(255,255,255,.08)"; ox.lineWidth=1; ox.beginPath(); const [ax,ay]=toImg(v,0,0), [bx,by]=toImg(v,W,H);
     for(let x=Math.max(0,Math.floor(ax));x<=Math.min(im.w,Math.ceil(bx));x++){ const s=toScr(v,x,0)[0]; ox.moveTo(s,0); ox.lineTo(s,H); }
     for(let y=Math.max(0,Math.floor(ay));y<=Math.min(im.h,Math.ceil(by));y++){ const s=toScr(v,0,y)[1]; ox.moveTo(0,s); ox.lineTo(W,s); } ox.stroke(); }
-  drawThreshold(im,ox,v); drawParticles(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
+  drawThreshold(im,ox,v); drawParticles(im,ox,v); drawDrop(im,ox,v); drawRois(im,ox,v); drawScaleBar(im,ox,v,W,H);
   drawStatus(); drawProfileMini(); drawPolyBar();
 }
 function thrRange(im){ const T=S.ui.thr; return {lo:+T.lower,hi:+T.upper}; }
@@ -51173,8 +51553,8 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); }
-function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; }
+function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="drop"&&typeof panelDrop==="function") renderPanel(); } // Drop 패널은 영역·기준선 ROI 를 보여 줌
+function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
 function roiGeom(im,r){ // {mask, rect, poly, kind} — IC.measureRoi 형식
@@ -51347,7 +51727,7 @@ function drawProfileMini(){
 /* ============================================================
    오른쪽 패널: Adjust · Process · Threshold · Binary · Analyze · Measure · Macro · Info
    ============================================================ */
-const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["measure","Measure"],["macro","Macro"],["info","Info"]];
+const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["drop","Drop"],["measure","Measure"],["macro","Macro"],["info","Info"]];
 
 /* ---------- 매개변수 입력 칸 (등록부에서 만든다) ---------- */
 const FORM={}; // op id → 마지막 값
@@ -51375,7 +51755,7 @@ function drawTabs(){ const el=$q(ROOT,"#imTabs"); if(!el) return; el.innerHTML=P
   $a(el,"button").forEach(b=>b.onclick=()=>{ S.ui.panel=b.dataset.p; clearPreview(); save(); drawTabs(); renderPanel(); draw(); }); }
 function renderPanel(){ const el=$q(ROOT,"#imPanel"); if(!el) return; const im=cur(); if(S.ui.panel!=="process"&&PREVIEW.plane){ PREVIEW.plane=false; PREVIEW.planes=null; PREVIEW.key=""; DISP.key=null; }
   if(!im&&S.ui.panel!=="macro"){ el.innerHTML=`<div class="im-empty sm">영상을 열면 여기에서 조정·처리·분석합니다.</div>`; return; }
-  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
+  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,drop:panelDrop,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
 
 /* ---------- 히스토그램 SVG ---------- */
 function histSVG(h,o){ o=o||{}; const W=o.w||380, H=o.h||110, n=h.h.length; let mx=0; for(let i=0;i<n;i++) mx=Math.max(mx,o.log?Math.log1p(h.h[i]):h.h[i]); if(!mx) mx=1;
@@ -51825,12 +52205,12 @@ function roiAdd(im){ const a=activeRoi(im); if(!a){ note("ROI 가 없습니다")
 
 /* ============================================================ 아래쪽 표 ============================================================ */
 function drawBottom(){
-  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["skeleton",`Skeleton (${S.skelTrees.length})`],["plots",`Plots (${S.plots.length})`]];
+  const el=ROOT&&$q(ROOT,"#imBottom"); if(!el) return; const tabs=[["results",`Results (${S.results.length})`],["particles","Particles"],["summary",`Summary (${S.summary.length})`],["dist","Distribution"],["skeleton",`Skeleton (${S.skelTrees.length})`],["plots",`Plots (${S.plots.length})`],["drop",`Drop (${(S.drops||[]).length})`]];
   el.innerHTML=`<div class="im-btabs">${tabs.map(([k,l])=>`<button data-b="${k}" class="${S.ui.bottom===k?"active":""}">${l}</button>`).join("")}<span class="sp"></span><button class="btn xs" id="imBtog">${S.ui.bottomOpen?"Collapse":"Expand"}</button></div><div class="im-bbody" ${S.ui.bottomOpen?"":"hidden"} id="imBbody"></div>`;
   $a(el,"[data-b]").forEach(b=>b.onclick=()=>{ S.ui.bottom=b.dataset.b; S.ui.bottomOpen=true; save(); drawBottom(); });
   $q(el,"#imBtog").onclick=()=>{ S.ui.bottomOpen=!S.ui.bottomOpen; save(); drawBottom(); };
   if(!S.ui.bottomOpen) return; const B=$q(el,"#imBbody");
-  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,skeleton:bSkeleton,plots:bPlots}[S.ui.bottom]||bResults)(B);
+  ({results:bResults,particles:bParticles,summary:bSummary,dist:bDist,skeleton:bSkeleton,plots:bPlots,drop:bDrop}[S.ui.bottom]||bResults)(B);
 }
 function tableHTML(rows,cols,o){ o=o||{}; if(!rows.length) return `<div class="xs muted im-empty">${o.empty||"표가 비었습니다"}</div>`;
   return `<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }
@@ -51914,6 +52294,121 @@ function bPlots(B){ if(!S.plots.length){ B.innerHTML=`<div class="xs muted im-em
 function downloadBlob(name,blob){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500); }
 function downloadText(name,text,mime){ downloadBlob(name,new Blob([mime&&mime.includes("svg")?text:"﻿"+text],{type:(mime||"text/csv")+";charset=utf-8"})); }
 function copyText(t){ try{ navigator.clipboard.writeText(t).then(()=>note("복사했습니다 — Excel·Origin 에 붙여 넣으세요","ok")); }catch(e){ note("복사하지 못했습니다","warn"); } }
+
+/* ============================================================
+   Drop 패널 — 접촉각(sessile drop) · 펜던트 드랍(pendant drop) 표면장력
+   계산: core/88_drop.js (IMG_CORE.contactAngle / pendantDrop, Worker)
+   영역 = 사각형 ROI (없으면 영상 전체) · 기준선 = 자동(기판 윗면 RANSAC) 또는 선 ROI 로 지정
+   결과: S.drops (아래 'Drop' 표), 덧그림 S.dropFit[영상 id]
+   ============================================================ */
+const DROP_M=[["yl","Young–Laplace"],["poly","Tangent (polynomial)"],["ellipse","Ellipse"],["circle","Circle (spherical cap)"]];
+const DROP_COL={yl:"#ff3ccf",poly:"#2bdc4a",ellipse:"#ffa000",circle:"#4ea6ff"};
+const MM_OF={m:1e3,meter:1e3,cm:10,mm:1,"µm":1e-3,"μm":1e-3,um:1e-3,micron:1e-3,microns:1e-3,nm:1e-6,"Å":1e-7,A:1e-7,pm:1e-9};
+const mmPerPxOf=im=>{ const c=calOf(im); const f=MM_OF[String(c.unit).trim()]; return im.cal&&f?c.pw*f:null; };
+const calAniso=im=>{ const c=calOf(im); return im.cal&&Math.abs(c.ph/c.pw-1)>0.005; };
+const dropUi=()=>S.ui.drop||(S.ui.drop=defState().ui.drop);
+/* 기판·용액 밀도 기본값: 물 20 °C 998.2, 공기 1.204 kg/m³ (CRC Handbook) — 이 값은 바꿔 쓰는 자리 */
+function dropFrames(im,P){ if(P.frames!=="all"||!isStack(im)) return [{z:im.z,t:im.t,label:""}]; const L=[];
+  if(im.nt>1){ for(let t=0;t<im.nt;t++) L.push({z:im.z,t,label:`t${t+1}`}); } else for(let z=0;z<im.nz;z++) L.push({z,t:im.t,label:`${z+1}`}); return L; }
+function dropRegion(im,P){ if(P.roi&&P.roi.length===4){ const [x0,y0,x1,y1]=P.roi; return {x0,y0,x1,y1}; } return null; }
+
+op("drop",{label:"Drop Shape",group:"meas",hidden:true,kind:"measure",params:[],
+  run:async(im,P)=>{ /* 색 영상은 밝기(0.299 R + 0.587 G + 0.114 B)로 */
+    const fr=dropFrames(im,P); const roi=dropRegion(im,P); const mmpp=P.pxMM>0?+P.pxMM:mmPerPxOf(im); const rows=[]; let last=null, lastF=null, fails=0; const runId=uid(); const pre=[];
+    if(P.imgW&&(P.imgW!==im.w||P.imgH!==im.h)&&(P.roi||P.baseline)) pre.push(`기록한 영역·기준선은 ${P.imgW}×${P.imgH} 영상의 좌표입니다 — 이 영상(${im.w}×${im.h})에서는 자리가 맞지 않을 수 있습니다`);
+    if(calAniso(im)) pre.push("화소가 가로·세로 크기가 달라(비등방) 형상 맞춤이 맞지 않습니다 — 먼저 Scale 로 정사각 화소로");
+    for(let k=0;k<fr.length;k++){ const f=fr[k]; if(fr.length>1) setProg(`Drop ${k+1}/${fr.length}`,k/fr.length);
+      const pl=im.rgb?lumaPlane(im,f.z,f.t):planeAt(im,im.c,f.z,f.t);
+      let r; try{
+        if(P.mode==="pendant") r=await call("pendantDrop",[pl,{roi,needleMM:+P.needleMM>0?+P.needleMM:null,pxSize:mmpp,rhoIn:+P.rhoIn,rhoOut:+P.rhoOut,g:+P.g||9.80665}]);
+        else r=await call("contactAngle",[pl,{roi,baseline:P.baseline?{p1:P.baseline[0],p2:P.baseline[1]}:null,methods:P.methods,pxSize:mmpp,rhoIn:+P.rhoIn,rhoOut:+P.rhoOut,g:+P.g||9.80665}]);
+      }catch(e){ fails++; rows.push({run:runId,Image:im.name,Frame:f.label,Mode:P.mode==="pendant"?"Pendant":"Sessile",Note:"실패: "+(e.message||e)}); if(fr.length===1) throw e; continue; }
+      if(pre.length) r.warn=pre.concat(r.warn||[]); const rr=dropRows(im,f.label,P,r,mmpp); rr.forEach(x=>{ x.run=runId; x._k=k+1; }); rows.push(...rr);
+      if(f.z===im.z&&f.t===im.t||!last){ last=r; lastF=f; } }
+    hideProg(); if(!S.drops) S.drops=[]; S.drops.push(...rows);
+    if(last) S.dropFit[im.id]={run:runId,mode:P.mode,ov:last.overlay,contour:last.contour,edge:last.edge,warn:last.warn||[],z:lastF.z,t:lastF.t,ver:im.ver,frame:lastF.label}; /* 결과를 만든 장 — 그 장에서만 덧그림 */
+    if(fr.length>1){ const lab=P.mode==="pendant"?"Pendant":DROP_M.find(x=>x[0]===dropMainMethod(P))[1]; const ok=rows.filter(r=>r.Method===lab&&(P.mode==="pendant"?r["γ"]!=null:r["θ mean"]!=null));
+      const y=P.mode==="pendant"?ok.map(r=>r["γ"]):ok.map(r=>r["θ mean"]); if(ok.length>1) S.plots.push({id:uid(),kind:"xy",title:`${P.mode==="pendant"?"Surface tension":"Contact angle ("+lab+")"} — ${im.name}`,xl:"frame",yl:P.mode==="pendant"?"γ (mN/m)":"θ (°)",series:[{name:P.mode==="pendant"?"γ":"θ",x:ok.map(r=>r._k),y}]}); }
+    record({op:"drop",params:Object.assign(clean(P),{imgW:im.w,imgH:im.h}),label:P.mode==="pendant"?"Pendant drop":"Contact angle"},im);
+    S.ui.bottom="drop"; S.ui.bottomOpen=true; save();
+    const w=last&&last.warn&&last.warn.length?" · "+last.warn[0]:"";
+    if(P.mode==="pendant"){ const r0=last; note(r0&&r0.gamma!=null?`γ = ${r0.gamma.toFixed(2)} mN/m (맞춤 ± ${r0.gammaSd.toFixed(2)}${r0.gammaScaleSd===r0.gammaScaleSd?`, 바늘 눈금 ± ${r0.gammaScaleSd.toFixed(2)}`:""}) · Bo ${r0.Bo.toFixed(4)} · Wo ${r0.Wo.toFixed(3)}${fr.length>1?` (${fr.length-fails}/${fr.length} 장)`:""}${w}`:`Bo = ${r0?r0.Bo.toFixed(4):"—"} — 바늘 지름(mm)을 넣으면 γ 를 계산합니다${w}`,w?"warn":"ok"); }
+    else { const m=last&&last.methods[dropMainMethod(P)]; note(m?`θ = ${m.left.toFixed(1)}° / ${m.right.toFixed(1)}° (${DROP_M.find(x=>x[0]===dropMainMethod(P))[1]})${fr.length>1?` (${fr.length-fails}/${fr.length} 장)`:""}${w}`:"접촉각을 계산하지 못했습니다",w||!m?"warn":"ok"); } },
+  ij:P=>`// Drop Shape (${P.mode==="pendant"?"pendant drop":"contact angle"}): ImageJ 기본 명령 없음 — DropSnake / LB-ADSA / Pendent_Drop 플러그인에 해당`,
+  help:"접촉각(Young–Laplace · 접선 · 타원 · 원)과 펜던트 드랍 표면장력(Young–Laplace, 바늘 지름으로 눈금)."});
+function dropMainMethod(P){ const m=P.methods||[]; return ["yl","poly","ellipse","circle"].find(k=>m.includes(k))||"yl"; }
+function lumaPlane(im,z,t){ const R=planeAt(im,0,z,t).data, G=planeAt(im,1,z,t).data, B=planeAt(im,2,z,t).data; const o=new Float32Array(R.length); for(let i=0;i<o.length;i++) o[i]=0.299*R[i]+0.587*G[i]+0.114*B[i]; return {w:im.w,h:im.h,bit:32,data:o}; }
+function dropRows(im,frame,P,r,mmpp){ const base={Image:im.name,Frame:frame}; const W=(r.warn||[]).join(" / ");
+  if(P.mode==="pendant") return [Object.assign(base,{Mode:"Pendant",Method:"Pendant","γ":r.gamma,"γ SD":r.gammaSd,"γ scale SD":r.gammaScaleSd,Bo:r.Bo,Wo:r.Wo,"V (mm³)":r.V,"A (mm²)":r.A,"R0 (mm)":r.R0mm,"Needle (px)":r.needle.diam,"Needle (mm)":r.needleMM,"Tilt (°)":r.fit.omega,"rms (px)":r.rms,Scale:r.scaleFrom==="needle"?"needle":r.scaleFrom==="image"?"image calibration":"none","Δρ":r.drho,g:r.g,Note:W})];
+  const out=[]; for(const [k,l] of DROP_M){ const m=r.methods[k]; if(!m) continue; const row=Object.assign({},base,{Mode:"Sessile",Method:l,"θ left":m.left,"θ right":m.right,"θ mean":m.mean,"θ SD":m.thetaSd,Baseline:r.baseline.auto?`auto ${r.baseline.angleDeg.toFixed(2)}°`:`line ${r.baseline.angleDeg.toFixed(2)}°`,Note:W});
+    if(k==="yl"){ Object.assign(row,{Bo:m.Bo,"rms (px)":m.rms}); if(mmpp){ Object.assign(row,{"V (mm³)":r.V,"Base Ø (mm)":r.baseDiameterMM,"Height (mm)":r.heightMM,"R0 (mm)":r.R0mm}); if(r.gammaEst!=null){ row["γ est."]=r.gammaEst; row["γ est. SD"]=r.gammaEstSd; } } row["Δρ"]=+P.rhoIn-(+P.rhoOut); row.g=+P.g||9.80665; }
+    if(k==="circle"&&mmpp&&r.Vcap!=null) row["V (mm³)"]=r.Vcap; out.push(row); } return out; }
+
+/* ---------- 패널 ---------- */
+function panelDrop(el,im){ const D=dropUi(); const a=activeRoi(im); const roiR=a&&a.type==="rect"?roiBounds(a):null; const line=a&&a.type==="line"?a:null; const mmpp=mmPerPxOf(im); const fit=S.dropFit[im.id]; const B=(S.dropBase||{})[im.id];
+  const pend=D.mode==="pendant";
+  el.innerHTML=`<div class="im-h">Drop Shape <span class="muted xs">ImageJ DropSnake · LB-ADSA · Pendent Drop 대응</span></div>
+  <div class="im-row"><div class="seg" id="dpMode"><button data-m="sessile" class="${pend?"":"active"}">Contact angle</button><button data-m="pendant" class="${pend?"active":""}">Pendant drop</button></div></div>
+  <div class="xs muted">${pend?"방울이 바늘 아래에 매달린 영상. 영역(사각형 ROI)의 <b>위쪽 테두리가 바늘을 가로지르게</b> 잡으세요 — 바늘 폭으로 눈금을 정합니다.":"기판 위 방울의 옆모습. 영역(사각형 ROI)에 방울과 그 아래 기판 윗면이 들어가게 잡으세요. 거울 같은 기판(반사상)은 기준선을 직접 그으세요."}</div>
+  <div class="im-row"><span class="xs">Region: <b>${roiR?`rect ${Math.round(roiR.w)}×${Math.round(roiR.h)} @ (${Math.round(roiR.x)}, ${Math.round(roiR.y)})`:"whole image"}</b></span><span class="xs muted">${roiR?"":"— 사각형 ROI 를 그리면 그 안만"}</span></div>
+  ${pend?`<div class="im-row"><label class="im-f"><span>Needle Ø</span><input type="number" id="dpNd" value="${esc(D.needleMM)}" step="any" min="0" placeholder="mm"><span class="u">mm</span></label><span class="xs muted">${mmpp?`없으면 영상 눈금 ${g4(mmpp*1000)} µm/px 사용`:"바늘 바깥 지름 (예: 22 G = 0.718 mm)"}</span></div>`
+  :`<div class="im-row"><span class="xs">Baseline: <b>${B?`line (${B[0].map(v=>v.toFixed(0)).join(", ")}) → (${B[1].map(v=>v.toFixed(0)).join(", ")})`:"auto (substrate edge)"}</b></span><span class="sp"></span><button class="btn xs" id="dpBl" ${line?"":"disabled"} title="Draw a straight line along the substrate surface first">Use line ROI</button><button class="btn xs" id="dpBlA" ${B?"":"disabled"}>Auto</button></div>
+  <div class="im-row">${DROP_M.map(([k,l])=>`<label class="im-chk"><input type="checkbox" data-dm="${k}" ${D.methods.includes(k)?"checked":""}> <i class="im-dot" style="background:${DROP_COL[k]}"></i>${esc(l)}</label>`).join("")}</div>`}
+  <details class="im-det" ${D.physOpen?"open":""} id="dpPhys"><summary class="xs">Densities · gravity ${pend?"":"(volume · Bond 수 용)"}</summary>
+   <div class="im-row"><label class="im-f"><span>ρ drop</span><input type="number" id="dpRi" value="${esc(D.rhoIn)}" step="any"><span class="u">kg/m³</span></label><label class="im-f"><span>ρ outside</span><input type="number" id="dpRo" value="${esc(D.rhoOut)}" step="any"><span class="u">kg/m³</span></label></div>
+   <div class="im-row"><label class="im-f"><span>g</span><input type="number" id="dpG" value="${esc(D.g)}" step="any"><span class="u">m/s²</span></label><span class="xs muted">물 20 °C 998.2 · 공기 1.204 · 표준 중력 9.80665</span></div></details>
+  ${isStack(im)?`<div class="im-row"><label class="im-f"><span>Frames</span><select class="im-sel" id="dpFr"><option value="current" ${D.frames!=="all"?"selected":""}>Current</option><option value="all" ${D.frames==="all"?"selected":""}>All ${im.nt>1?im.nt:im.nz} (time series)</option></select></label></div>`:""}
+  ${!mmpp&&!pend?`<div class="xs muted">영상 눈금이 없어 부피·지름은 빼고 각만 계산합니다 (Adjust ▸ Set Scale).</div>`:""}
+  <div class="im-row"><span class="sp"></span><button class="btn sm" id="dpClr" ${fit?"":"disabled"}>Clear overlay</button><button class="btn primary sm" id="dpRun">${pend?"Measure γ":"Measure θ"}</button></div>
+  ${fit?dropCard(im,fit):""}
+  <div class="xs muted">${pend?"Young–Laplace 맞춤(Rotenberg 1983 · Berry 2015). γ = Δρ g R0² / Bo. Worthington 수 Wo = Δρ g V / (π γ D) 가 1 에 가까울수록 정밀.":"Young–Laplace(축대칭, 중력 포함)가 기준. 원은 Bo ≈ 0(작은 방울)에서만 맞고, 접선법은 접촉점 둘레만 봅니다."}</div>`;
+  const q=s=>$q(el,s); const up=()=>save();
+  $a(el,"#dpMode button").forEach(b=>b.onclick=()=>{ D.mode=b.dataset.m; up(); renderPanel(); draw(); });
+  if(q("#dpNd")) q("#dpNd").onchange=e=>{ D.needleMM=e.target.value===""?"":+e.target.value; up(); };
+  q("#dpRi").onchange=e=>{ D.rhoIn=+e.target.value; up(); }; q("#dpRo").onchange=e=>{ D.rhoOut=+e.target.value; up(); }; q("#dpG").onchange=e=>{ D.g=+e.target.value||9.80665; up(); };
+  q("#dpPhys").ontoggle=e=>{ D.physOpen=e.target.open; up(); };
+  if(q("#dpFr")) q("#dpFr").onchange=e=>{ D.frames=e.target.value; up(); };
+  $a(el,"[data-dm]").forEach(cb=>cb.onchange=()=>{ const s=new Set(D.methods); cb.checked?s.add(cb.dataset.dm):s.delete(cb.dataset.dm); D.methods=DROP_M.map(x=>x[0]).filter(k=>s.has(k)); up(); draw(); });
+  if(q("#dpBl")) q("#dpBl").onclick=()=>{ const ln=activeRoi(im); if(!ln||ln.type!=="line"){ note("먼저 기판 윗면을 따라 직선(Line) ROI 를 그으세요","warn"); return; } const [p,r]=ln.pts; const L=p[0]<=r[0]?[p.slice(),r.slice()]:[r.slice(),p.slice()]; (S.dropBase||(S.dropBase={}))[im.id]=L; up(); renderPanel(); draw(); note("기준선을 정했습니다 — 선 ROI 를 지워도 남습니다","ok"); };
+  if(q("#dpBlA")) q("#dpBlA").onclick=()=>{ if(S.dropBase) delete S.dropBase[im.id]; up(); renderPanel(); draw(); };
+  q("#dpClr").onclick=()=>{ delete S.dropFit[im.id]; up(); renderPanel(); draw(); };
+  q("#dpRun").onclick=()=>{ if(!pend&&!D.methods.length){ note("방법을 하나 이상 고르세요","warn"); return; }
+    const a2=activeRoi(im), rr=a2&&a2.type==="rect"?roiBounds(a2):null; // 누른 때의 ROI (그린 뒤 옮겼어도)
+    const P={mode:D.mode,methods:D.methods.slice(),needleMM:D.needleMM,rhoIn:D.rhoIn,rhoOut:D.rhoOut,g:D.g,frames:D.frames,roi:rr?[rr.x,rr.y,rr.x+rr.w-1,rr.y+rr.h-1]:null,baseline:!pend&&B?B.map(p=>p.slice()):null};
+    runOp("drop",P); };
+}
+function dropCard(im,F){ const rows=(S.drops||[]).filter(r=>r.run===F.run&&(F.frame==null||r.Frame===F.frame)); const ov=F.ov||{};
+  const pend=F.mode==="pendant"; const last=pend?rows.filter(r=>r.Mode==="Pendant").slice(-1)[0]:null; const ses=!pend?rows.filter(r=>r.Mode==="Sessile"):[];
+  const stale=F.ver!==im.ver||F.z!==im.z||F.t!==im.t; void stale;
+  return `<div class="im-card">${F.ver!==im.ver?`<div class="note warn xs">이 결과 뒤에 화소가 바뀌었습니다(필터 등) — 다시 Measure 하세요.</div>`:F.z!==im.z||F.t!==im.t?`<div class="xs muted">결과는 ${esc(F.frame||"다른")} 장에서 — 그 장으로 가면 덧그림이 보입니다.</div>`:""}
+  ${pend&&last?`<div class="im-stats"><div><span>γ</span><b>${last["γ"]!=null?`${fmt(last["γ"],2)} mN/m <span class="xs muted">± ${fmt(last["γ SD"],2)} fit${last["γ scale SD"]===last["γ scale SD"]&&last["γ scale SD"]!=null?` · ± ${fmt(last["γ scale SD"],2)} needle ±0.3 px`:""}</span>`:"— (scale?)"}</b></div><div><span>Bond number</span><b>${fmt(last.Bo,4)}</b></div><div><span>Worthington</span><b>${fmt(last.Wo,3)}</b></div>
+    <div><span>Volume</span><b>${fmt(last["V (mm³)"],3)} mm³</b></div><div><span>Surface area</span><b>${fmt(last["A (mm²)"],3)} mm²</b></div><div><span>R0 (apex)</span><b>${fmt(last["R0 (mm)"],4)} mm</b></div><div><span>Tilt</span><b>${fmt(last["Tilt (°)"],2)}°</b></div><div><span>Fit rms</span><b>${fmt(last["rms (px)"],3)} px</b></div></div>`:""}
+  ${!pend&&ses.length?`<table class="im-mini"><tr><th></th><th>Left</th><th>Right</th><th>Mean</th></tr>${ses.map(r=>{ const k=(DROP_M.find(x=>x[1]===r.Method)||[""])[0]; return `<tr><td><i class="im-dot" style="background:${DROP_COL[k]||"#999"}"></i>${esc(r.Method)}</td><td>${fmt(r["θ left"],1)}°</td><td>${fmt(r["θ right"],1)}°</td><td><b>${fmt(r["θ mean"],1)}°</b>${r["θ SD"]===r["θ SD"]&&r["θ SD"]!=null?` <span class="xs muted">± ${fmt(r["θ SD"],2)} fit</span>`:""}</td></tr>`; }).join("")}</table>`:""}
+  ${(F.warn||[]).map(w=>`<div class="note warn xs">${esc(w)}</div>`).join("")}</div>`; }
+
+/* ---------- 덧그림 ---------- */
+function drawDrop(im,ox,v){ const F=S.dropFit&&S.dropFit[im.id]; const D=dropUi(); const B=(S.dropBase||{})[im.id];
+  ox.save(); const path=(pts,close)=>{ ox.beginPath(); pts.forEach((p,i)=>{ const [sx,sy]=toScr(v,p[0],p[1]); i?ox.lineTo(sx,sy):ox.moveTo(sx,sy); }); if(close) ox.closePath(); };
+  if(S.ui.panel==="drop"&&D.mode!=="pendant"&&B){ ox.setLineDash([6,4]); ox.strokeStyle="#ffe600"; ox.lineWidth=1.5; path(B); ox.stroke(); ox.setLineDash([]); }
+  if(!F||!F.ov||F.z!==im.z||F.t!==im.t||F.ver!==im.ver){ ox.restore(); return; } /* 화소가 바뀌면(필터) 옛 덧그림을 그리지 않음 */ const ov=F.ov;
+  if(F.contour&&F.contour.length){ ox.strokeStyle="rgba(0,220,255,.85)"; ox.lineWidth=1; ox.beginPath(); let pen=false; F.contour.forEach((p,i)=>{ const [sx,sy]=toScr(v,p[0],p[1]); if(F.edge&&F.edge[i]){ pen=false; return; } pen?ox.lineTo(sx,sy):ox.moveTo(sx,sy); pen=true; }); ox.stroke(); }
+  if(ov.baseline){ ox.strokeStyle="#ffe600"; ox.lineWidth=1.5; path(ov.baseline); ox.stroke(); }
+  const show=k=>F.mode==="pendant"||D.methods.includes(k);
+  const pr={circle:0,ellipse:1,poly:2,yl:3}; (ov.curves||[]).slice().sort((a,b)=>(pr[a.m]||0)-(pr[b.m]||0)).forEach(c=>{ /* 주 방법(YL)을 맨 위에 */ const pts=Array.isArray(c)?c:c.pts, m=Array.isArray(c)?"yl":c.m; if(!show(m)) return; ox.strokeStyle=DROP_COL[m]||"#ff3ccf"; ox.lineWidth=2; path(pts); ox.stroke(); });
+  (ov.needle||[]).forEach(l=>{ ox.strokeStyle="#ffe600"; ox.lineWidth=2; path(l); ox.stroke(); });
+  if(ov.apex){ const [sx,sy]=toScr(v,ov.apex[0],ov.apex[1]); ox.fillStyle="#ff3ccf"; ox.beginPath(); ox.arc(sx,sy,3.5,0,7); ox.fill(); }
+  ox.font="600 12px DM Sans, system-ui, sans-serif"; ox.textBaseline="middle";
+  const tg=(ov.tangents||[]).filter(t=>show(t.m)); const main=["yl","poly","ellipse","circle"].find(k=>tg.some(t=>t.m===k));
+  tg.forEach(t=>{ const [x0,y0]=toScr(v,t.p[0],t.p[1]); const L=t.len*v.zoom; ox.strokeStyle=DROP_COL[t.m]; ox.lineWidth=t.m===main?2:1.2; ox.beginPath(); ox.moveTo(x0,y0); ox.lineTo(x0+t.d[0]*L,y0+t.d[1]*L); ox.stroke();
+    if(t.m===main){ const tx=x0+t.d[0]*L*1.08+(t.side==="L"?-6:6), ty=y0+t.d[1]*L*1.08; const s=t.theta.toFixed(1)+"°"; ox.textAlign=t.side==="L"?"right":"left"; ox.lineWidth=3; ox.strokeStyle="rgba(0,0,0,.7)"; ox.strokeText(s,tx,ty); ox.fillStyle=DROP_COL[t.m]; ox.fillText(s,tx,ty); } });
+  ox.restore(); }
+
+/* ---------- 아래 표 ---------- */
+function bDrop(B){ const R=S.drops||[]; const keys=["Image","Frame","Mode","Method","θ left","θ right","θ mean","θ SD","γ","γ SD","γ scale SD","Bo","Wo","V (mm³)","A (mm²)","R0 (mm)","Base Ø (mm)","Height (mm)","Needle (mm)","Tilt (°)","rms (px)","γ est.","γ est. SD","Δρ","g","Baseline","Scale","Note"];
+  const cols=keys.filter(k=>R.some(r=>r[k]!=null&&r[k]!=="")).map(k=>({k,label:({"γ":"γ (mN/m)","γ SD":"γ fit SD (mN/m)","γ scale SD":"γ needle-scale SD (mN/m)","γ est.":"γ est. (mN/m)","γ est. SD":"γ est. fit SD (mN/m)","θ left":"θ left (°)","θ right":"θ right (°)","θ mean":"θ mean (°)","θ SD":"θ fit SD (°)","Δρ":"Δρ (kg/m³)","g":"g (m/s²)"})[k]||k}));
+  B.innerHTML=`<div class="im-row"><button class="btn xs" id="drCsv" ${R.length?"":"disabled"}>CSV</button><button class="btn xs" id="drCopy" ${R.length?"":"disabled"} title="Copy as tab-separated text (paste into Excel or Origin)">Copy</button><button class="btn xs" id="drClr" ${R.length?"":"disabled"}>Clear</button><span class="xs muted">Drop 패널의 측정이 한 줄씩 쌓입니다 (접촉각은 방법마다 한 줄)</span></div>${tableHTML(R,cols,{empty:"Drop 패널에서 Measure 를 누르세요."})}`;
+  $q(B,"#drCsv").onclick=()=>downloadText("Drop.csv",csvOf(R,cols)); $q(B,"#drCopy").onclick=()=>copyText(tsvOf(R,cols));
+  $q(B,"#drClr").onclick=()=>{ if(confirm2("drclr","Drop 표를 비울까요? 한 번 더 누르면 비웁니다")){ S.drops=[]; save(); drawBottom(); } }; }
 
 /* ============================================================
    Macro: 자동 기록 → 단계 편집 → 다른 영상·파일에 batch 적용 → ImageJ .ijm 로 내보내기
