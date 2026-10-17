@@ -51553,7 +51553,7 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="drop"&&typeof panelDrop==="function") renderPanel(); } // Drop 패널은 영역·기준선 ROI 를 보여 줌
+function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
 function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
@@ -51727,7 +51727,7 @@ function drawProfileMini(){
 /* ============================================================
    오른쪽 패널: Adjust · Process · Threshold · Binary · Analyze · Measure · Macro · Info
    ============================================================ */
-const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["drop","Drop"],["measure","Measure"],["macro","Macro"],["info","Info"]];
+const PANELS=[["adjust","Adjust"],["process","Process"],["threshold","Threshold"],["binary","Binary"],["analyze","Analyze"],["measure","Measure"],["macro","Macro"],["info","Info"]];
 
 /* ---------- 매개변수 입력 칸 (등록부에서 만든다) ---------- */
 const FORM={}; // op id → 마지막 값
@@ -51753,9 +51753,9 @@ async function runOp(id,params,im){
 /* ---------- 패널 그리기 ---------- */
 function drawTabs(){ const el=$q(ROOT,"#imTabs"); if(!el) return; el.innerHTML=PANELS.map(([k,l])=>`<button data-p="${k}" class="${S.ui.panel===k?"active":""}">${l}</button>`).join("");
   $a(el,"button").forEach(b=>b.onclick=()=>{ S.ui.panel=b.dataset.p; clearPreview(); save(); drawTabs(); renderPanel(); draw(); }); }
-function renderPanel(){ const el=$q(ROOT,"#imPanel"); if(!el) return; const im=cur(); if(S.ui.panel!=="process"&&PREVIEW.plane){ PREVIEW.plane=false; PREVIEW.planes=null; PREVIEW.key=""; DISP.key=null; }
+function renderPanel(){ const el=$q(ROOT,"#imPanel"); if(!el) return; if(S.ui.panel==="drop") S.ui.panel="analyze"; /* 예전 Drop 탭 → Analyze 안 */ const im=cur(); if(S.ui.panel!=="process"&&PREVIEW.plane){ PREVIEW.plane=false; PREVIEW.planes=null; PREVIEW.key=""; DISP.key=null; }
   if(!im&&S.ui.panel!=="macro"){ el.innerHTML=`<div class="im-empty sm">영상을 열면 여기에서 조정·처리·분석합니다.</div>`; return; }
-  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,drop:panelDrop,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
+  ({adjust:panelAdjust,process:panelProcess,threshold:panelThreshold,binary:panelBinary,analyze:panelAnalyze,measure:panelMeasure,macro:panelMacro,info:panelInfo}[S.ui.panel]||panelAdjust)(el,im); }
 
 /* ---------- 히스토그램 SVG ---------- */
 function histSVG(h,o){ o=o||{}; const W=o.w||380, H=o.h||110, n=h.h.length; let mx=0; for(let i=0;i<n;i++) mx=Math.max(mx,o.log?Math.log1p(h.h[i]):h.h[i]); if(!mx) mx=1;
@@ -52139,7 +52139,7 @@ op("skeleton",{label:"Analyze Skeleton (2D/3D)",group:"analyze",kind:"analyze",h
 function panelAnalyze(el,im){
   const A=S.ui.pa; const bin=!im.rgb&&IC.isBinary(curPlaneOf(im)); const c=calOf(im); const us=A.unitPx?"px²":unitSq(im); const fm=formVals(OPS.findMaxima);
   const reds=S.images.filter(x=>x.id!==im.id&&x.w===im.w&&x.h===im.h);
-  el.innerHTML=`<div class="im-h">Analyze Particles</div>
+  el.innerHTML=`<div class="im-h">Analyze Particles<span class="sp"></span><button class="btn xs" id="anToDrop" title="Contact angle · pendant drop">Drop Shape ↓</button></div>
   <div class="xs muted">${bin?"이진 영상: 255 인 화소를 입자로 셉니다.":`문턱: <b>${S.ui.thr.manual?`수동 ${g4(S.ui.thr.lower)}–${g4(S.ui.thr.upper)}`:`${S.ui.thr.method}${S.ui.thr.dark?" dark":""}`}</b> (Threshold 탭 설정) 범위의 화소를 입자로 셉니다.`}</div>
   <div class="im-row"><label class="im-f"><span>Size</span><input type="number" id="paMin" value="${esc(A.minSize)}" step="any" min="0"><span>–</span><input type="number" id="paMax" value="${esc(A.maxSize)}" step="any" placeholder="∞"><span class="u">${esc(us)}</span></label><label class="im-chk"><input type="checkbox" id="paPx" ${A.unitPx?"checked":""}> Pixel units</label></div>
   <div class="im-row"><label class="im-f"><span>Circularity</span><input type="number" id="paC0" value="${A.minCirc}" min="0" max="1" step="0.05"><span>–</span><input type="number" id="paC1" value="${A.maxCirc}" min="0" max="1" step="0.05"></label></div>
@@ -52155,7 +52155,8 @@ function panelAnalyze(el,im){
   <div class="im-tool"><b>Radial Profile</b><span class="xs muted">중심 = 점·타원 ROI</span><div id="rpForm">${formHTML(OPS.radial,im)}</div><button class="btn sm" id="rpRun">Plot</button></div>
   <div class="im-tool"><b>Orientation</b><span class="xs muted">구조 텐서 (OrientationJ 정의)</span><div id="orForm">${formHTML(OPS.orientation,im)}</div><button class="btn sm" id="orRun">Analyze</button></div>
   <div class="im-tool"><b>Analyze Skeleton (2D/3D)</b><span class="xs muted">가지·접점·길이 (Fiji 와 같은 결과)${im.nz>1?" · 스택 = 3D":""}</span><div id="skForm">${formHTML(OPS.skeleton,im)}</div><button class="btn sm" id="skRun">Analyze</button></div>
-  ${isStack(im)?`<div class="im-tool"><b>Z-axis Profile</b><span class="xs muted">ROI 평균의 장별 변화</span><button class="btn sm" id="zpRun">Plot</button></div>`:""}`;
+  ${isStack(im)?`<div class="im-tool"><b>Z-axis Profile</b><span class="xs muted">ROI 평균의 장별 변화</span><button class="btn sm" id="zpRun">Plot</button></div>`:""}
+  <div id="anDrop"></div>`;
   const q=s=>$q(el,s); const up=()=>save();
   q("#paMin").onchange=e=>{ A.minSize=e.target.value===""?0:+e.target.value; up(); }; q("#paMax").onchange=e=>{ A.maxSize=e.target.value; up(); }; q("#paPx").onchange=e=>{ A.unitPx=e.target.checked; up(); renderPanel(); };
   q("#paC0").onchange=e=>{ A.minCirc=+e.target.value; up(); }; q("#paC1").onchange=e=>{ A.maxCirc=+e.target.value; up(); };
@@ -52166,6 +52167,8 @@ function panelAnalyze(el,im){
   q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
   q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
+  q("#anToDrop").onclick=()=>{ const d=q("#anDrop"); if(d) d.scrollIntoView({behavior:"smooth",block:"start"}); };
+  panelDrop(q("#anDrop"),im); // 접촉각·펜던트 드랍 (35_drop.js)
 }
 function particleCard(im){ const pa=S.particles[im.id]; const s=pa.summary; const ss=IC.sizeSummary(pa.rows.map(r=>r.ECD)); const u=pa.unit;
   return `<div class="im-card"><div class="im-row"><b>${s.Count} particles</b><span class="xs muted">${esc(s.Threshold)}</span><span class="sp"></span><button class="btn xs" data-dist="1">Size distribution</button></div>
@@ -52345,9 +52348,11 @@ function dropRows(im,frame,P,r,mmpp){ const base={Image:im.name,Frame:frame}; co
     if(k==="circle"&&mmpp&&r.Vcap!=null) row["V (mm³)"]=r.Vcap; out.push(row); } return out; }
 
 /* ---------- 패널 ---------- */
+/* Analyze 패널 안의 한 칸 (#anDrop). ROI 가 바뀌면 이 칸만 다시 그린다 */
+function dropRefresh(){ const el=ROOT&&$q(ROOT,"#anDrop"), im=cur(); if(el&&im) panelDrop(el,im); }
 function panelDrop(el,im){ const D=dropUi(); const a=activeRoi(im); const roiR=a&&a.type==="rect"?roiBounds(a):null; const line=a&&a.type==="line"?a:null; const mmpp=mmPerPxOf(im); const fit=S.dropFit[im.id]; const B=(S.dropBase||{})[im.id];
   const pend=D.mode==="pendant";
-  el.innerHTML=`<div class="im-h">Drop Shape <span class="muted xs">ImageJ DropSnake · LB-ADSA · Pendent Drop 대응</span></div>
+  el.innerHTML=`<hr class="im-hr"><div class="im-h">Drop Shape <span class="muted xs">접촉각 · 펜던트 드랍</span></div>
   <div class="im-row"><div class="seg" id="dpMode"><button data-m="sessile" class="${pend?"":"active"}">Contact angle</button><button data-m="pendant" class="${pend?"active":""}">Pendant drop</button></div></div>
   <div class="xs muted">${pend?"방울이 바늘 아래에 매달린 영상. 영역(사각형 ROI)의 <b>위쪽 테두리가 바늘을 가로지르게</b> 잡으세요 — 바늘 폭으로 눈금을 정합니다.":"기판 위 방울의 옆모습. 영역(사각형 ROI)에 방울과 그 아래 기판 윗면이 들어가게 잡으세요. 거울 같은 기판(반사상)은 기준선을 직접 그으세요."}</div>
   <div class="im-row"><span class="xs">Region: <b>${roiR?`rect ${Math.round(roiR.w)}×${Math.round(roiR.h)} @ (${Math.round(roiR.x)}, ${Math.round(roiR.y)})`:"whole image"}</b></span><span class="xs muted">${roiR?"":"— 사각형 ROI 를 그리면 그 안만"}</span></div>
@@ -52363,15 +52368,15 @@ function panelDrop(el,im){ const D=dropUi(); const a=activeRoi(im); const roiR=a
   ${fit?dropCard(im,fit):""}
   <div class="xs muted">${pend?"Young–Laplace 맞춤(Rotenberg 1983 · Berry 2015). γ = Δρ g R0² / Bo. Worthington 수 Wo = Δρ g V / (π γ D) 가 1 에 가까울수록 정밀.":"Young–Laplace(축대칭, 중력 포함)가 기준. 원은 Bo ≈ 0(작은 방울)에서만 맞고, 접선법은 접촉점 둘레만 봅니다."}</div>`;
   const q=s=>$q(el,s); const up=()=>save();
-  $a(el,"#dpMode button").forEach(b=>b.onclick=()=>{ D.mode=b.dataset.m; up(); renderPanel(); draw(); });
+  $a(el,"#dpMode button").forEach(b=>b.onclick=()=>{ D.mode=b.dataset.m; up(); dropRefresh(); draw(); });
   if(q("#dpNd")) q("#dpNd").onchange=e=>{ D.needleMM=e.target.value===""?"":+e.target.value; up(); };
   q("#dpRi").onchange=e=>{ D.rhoIn=+e.target.value; up(); }; q("#dpRo").onchange=e=>{ D.rhoOut=+e.target.value; up(); }; q("#dpG").onchange=e=>{ D.g=+e.target.value||9.80665; up(); };
   q("#dpPhys").ontoggle=e=>{ D.physOpen=e.target.open; up(); };
   if(q("#dpFr")) q("#dpFr").onchange=e=>{ D.frames=e.target.value; up(); };
   $a(el,"[data-dm]").forEach(cb=>cb.onchange=()=>{ const s=new Set(D.methods); cb.checked?s.add(cb.dataset.dm):s.delete(cb.dataset.dm); D.methods=DROP_M.map(x=>x[0]).filter(k=>s.has(k)); up(); draw(); });
-  if(q("#dpBl")) q("#dpBl").onclick=()=>{ const ln=activeRoi(im); if(!ln||ln.type!=="line"){ note("먼저 기판 윗면을 따라 직선(Line) ROI 를 그으세요","warn"); return; } const [p,r]=ln.pts; const L=p[0]<=r[0]?[p.slice(),r.slice()]:[r.slice(),p.slice()]; (S.dropBase||(S.dropBase={}))[im.id]=L; up(); renderPanel(); draw(); note("기준선을 정했습니다 — 선 ROI 를 지워도 남습니다","ok"); };
-  if(q("#dpBlA")) q("#dpBlA").onclick=()=>{ if(S.dropBase) delete S.dropBase[im.id]; up(); renderPanel(); draw(); };
-  q("#dpClr").onclick=()=>{ delete S.dropFit[im.id]; up(); renderPanel(); draw(); };
+  if(q("#dpBl")) q("#dpBl").onclick=()=>{ const ln=activeRoi(im); if(!ln||ln.type!=="line"){ note("먼저 기판 윗면을 따라 직선(Line) ROI 를 그으세요","warn"); return; } const [p,r]=ln.pts; const L=p[0]<=r[0]?[p.slice(),r.slice()]:[r.slice(),p.slice()]; (S.dropBase||(S.dropBase={}))[im.id]=L; up(); dropRefresh(); draw(); note("기준선을 정했습니다 — 선 ROI 를 지워도 남습니다","ok"); };
+  if(q("#dpBlA")) q("#dpBlA").onclick=()=>{ if(S.dropBase) delete S.dropBase[im.id]; up(); dropRefresh(); draw(); };
+  q("#dpClr").onclick=()=>{ delete S.dropFit[im.id]; up(); dropRefresh(); draw(); };
   q("#dpRun").onclick=()=>{ if(!pend&&!D.methods.length){ note("방법을 하나 이상 고르세요","warn"); return; }
     const a2=activeRoi(im), rr=a2&&a2.type==="rect"?roiBounds(a2):null; // 누른 때의 ROI (그린 뒤 옮겼어도)
     const P={mode:D.mode,methods:D.methods.slice(),needleMM:D.needleMM,rhoIn:D.rhoIn,rhoOut:D.rhoOut,g:D.g,frames:D.frames,roi:rr?[rr.x,rr.y,rr.x+rr.w-1,rr.y+rr.h-1]:null,baseline:!pend&&B?B.map(p=>p.slice()):null};
@@ -52389,7 +52394,7 @@ function dropCard(im,F){ const rows=(S.drops||[]).filter(r=>r.run===F.run&&(F.fr
 /* ---------- 덧그림 ---------- */
 function drawDrop(im,ox,v){ const F=S.dropFit&&S.dropFit[im.id]; const D=dropUi(); const B=(S.dropBase||{})[im.id];
   ox.save(); const path=(pts,close)=>{ ox.beginPath(); pts.forEach((p,i)=>{ const [sx,sy]=toScr(v,p[0],p[1]); i?ox.lineTo(sx,sy):ox.moveTo(sx,sy); }); if(close) ox.closePath(); };
-  if(S.ui.panel==="drop"&&D.mode!=="pendant"&&B){ ox.setLineDash([6,4]); ox.strokeStyle="#ffe600"; ox.lineWidth=1.5; path(B); ox.stroke(); ox.setLineDash([]); }
+  if(S.ui.panel==="analyze"&&D.mode!=="pendant"&&B){ ox.setLineDash([6,4]); ox.strokeStyle="#ffe600"; ox.lineWidth=1.5; path(B); ox.stroke(); ox.setLineDash([]); }
   if(!F||!F.ov||F.z!==im.z||F.t!==im.t||F.ver!==im.ver){ ox.restore(); return; } /* 화소가 바뀌면(필터) 옛 덧그림을 그리지 않음 */ const ov=F.ov;
   if(F.contour&&F.contour.length){ ox.strokeStyle="rgba(0,220,255,.85)"; ox.lineWidth=1; ox.beginPath(); let pen=false; F.contour.forEach((p,i)=>{ const [sx,sy]=toScr(v,p[0],p[1]); if(F.edge&&F.edge[i]){ pen=false; return; } pen?ox.lineTo(sx,sy):ox.moveTo(sx,sy); pen=true; }); ox.stroke(); }
   if(ov.baseline){ ox.strokeStyle="#ffe600"; ox.lineWidth=1.5; path(ov.baseline); ox.stroke(); }
@@ -52406,7 +52411,7 @@ function drawDrop(im,ox,v){ const F=S.dropFit&&S.dropFit[im.id]; const D=dropUi(
 /* ---------- 아래 표 ---------- */
 function bDrop(B){ const R=S.drops||[]; const keys=["Image","Frame","Mode","Method","θ left","θ right","θ mean","θ SD","γ","γ SD","γ scale SD","Bo","Wo","V (mm³)","A (mm²)","R0 (mm)","Base Ø (mm)","Height (mm)","Needle (mm)","Tilt (°)","rms (px)","γ est.","γ est. SD","Δρ","g","Baseline","Scale","Note"];
   const cols=keys.filter(k=>R.some(r=>r[k]!=null&&r[k]!=="")).map(k=>({k,label:({"γ":"γ (mN/m)","γ SD":"γ fit SD (mN/m)","γ scale SD":"γ needle-scale SD (mN/m)","γ est.":"γ est. (mN/m)","γ est. SD":"γ est. fit SD (mN/m)","θ left":"θ left (°)","θ right":"θ right (°)","θ mean":"θ mean (°)","θ SD":"θ fit SD (°)","Δρ":"Δρ (kg/m³)","g":"g (m/s²)"})[k]||k}));
-  B.innerHTML=`<div class="im-row"><button class="btn xs" id="drCsv" ${R.length?"":"disabled"}>CSV</button><button class="btn xs" id="drCopy" ${R.length?"":"disabled"} title="Copy as tab-separated text (paste into Excel or Origin)">Copy</button><button class="btn xs" id="drClr" ${R.length?"":"disabled"}>Clear</button><span class="xs muted">Drop 패널의 측정이 한 줄씩 쌓입니다 (접촉각은 방법마다 한 줄)</span></div>${tableHTML(R,cols,{empty:"Drop 패널에서 Measure 를 누르세요."})}`;
+  B.innerHTML=`<div class="im-row"><button class="btn xs" id="drCsv" ${R.length?"":"disabled"}>CSV</button><button class="btn xs" id="drCopy" ${R.length?"":"disabled"} title="Copy as tab-separated text (paste into Excel or Origin)">Copy</button><button class="btn xs" id="drClr" ${R.length?"":"disabled"}>Clear</button><span class="xs muted">Analyze ▸ Drop Shape 의 측정이 한 줄씩 쌓입니다 (접촉각은 방법마다 한 줄)</span></div>${tableHTML(R,cols,{empty:"Analyze ▸ Drop Shape 에서 Measure 를 누르세요."})}`;
   $q(B,"#drCsv").onclick=()=>downloadText("Drop.csv",csvOf(R,cols)); $q(B,"#drCopy").onclick=()=>copyText(tsvOf(R,cols));
   $q(B,"#drClr").onclick=()=>{ if(confirm2("drclr","Drop 표를 비울까요? 한 번 더 누르면 비웁니다")){ S.drops=[]; save(); drawBottom(); } }; }
 
