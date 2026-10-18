@@ -1,0 +1,17 @@
+/* 탭 막대 맞춤 (nav_fit.js) — 데스크톱은 늘 한 줄 */
+@media (min-width:721px){
+  #nav{flex-wrap:nowrap!important}
+  #nav button{white-space:nowrap;flex:none}
+  #nav button.nav-hid{display:none!important}
+  #nav.nav-short button .nl{font-size:0}
+  #nav.nav-short button .nl::after{content:attr(data-short);font-size:13px}
+  #nav .nav-more{margin-left:auto}
+  #nav .nav-more.has::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,var(--primary));margin-left:5px;vertical-align:2px}
+}
+.nav-menu{position:fixed;z-index:80;min-width:190px;background:var(--card,var(--surface,#fff));border:1px solid var(--line,var(--border));border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:4px;display:flex;flex-direction:column}
+.nav-menu button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;font-size:13.5px;color:var(--ink,inherit);cursor:pointer}
+.nav-menu button:hover,.nav-menu button:focus-visible{background:var(--chip,var(--surface-2))}
+.nav-menu button:disabled{opacity:.45;cursor:not-allowed}
+.nav-menu .cnt{margin-left:auto;font-size:11px;color:var(--muted)}
+/* EM Image 안 보기 전환 (Image · Metadata) */
+.emsub{margin:0 0 12px}

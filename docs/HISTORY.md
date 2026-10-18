@@ -5,6 +5,10 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-19 탭 막대 정리 — 한 줄 · 짧은 이름 · More ▾, EM Metadata 를 EM Image 안으로**(modules/nav/nav_fit.js·css, inject_all.py):
+  데스크톱 탭 막대가 820–1280 px 에서 두 줄로 꺾이던 것 → 늘 한 줄: 전체 이름 → 안 들어가면 짧은 이름(휴대폰과 같은 data-short) → 그래도 넘치면 뒤쪽 탭을 More ▾ 메뉴로(지금 탭은 남김, Esc·밖 클릭으로 닫힘, 폭이 바뀌면 다시 맞춤). 휴대폰 아래 막대는 9 칸.
+  EM Metadata 탭 없앰 → EM Image 위 Image · Metadata 전환(보기 키 meta 그대로, 영상 없는 파일은 바로 Metadata, 탭 막대는 EM Image 표시). 출처 줄 링크 'Set in Lattice FFT' → 'Set in Diffraction'.
+  시험: ui_nav 29(360–1920 px 9 폭 × 2 탭 한 줄, More 메뉴·Esc·메뉴로 이동·넓어지면 사라짐, Metadata 보기) · ui_touch 72 · ui_shell 18 · ui_drop 38 · ui_diff 61.
 - **10-17 Image Analysis v1.6 — Drop Shape: 접촉각 · 펜던트 드랍 표면장력**(modules/image/SPEC.md §3h·§6g):
   ImageJ DropSnake·LB-ADSA·Pendent Drop 대응. 처음엔 따로 Drop 탭이었으나 요청으로 **Analyze 패널 맨 아래 칸 Drop Shape** 로 옮김(머리의 "Drop Shape ↓" 단추, 예전 저장 상태 panel=drop → Analyze). 윤곽 = Otsu + marching squares + 경사 최대 다듬기, Young–Laplace(RK4) Levenberg–Marquardt 맞춤.
   접촉각: Young–Laplace · 접선(호 길이 2 차식, θ > 90° 에서도) · 타원(Fitzgibbon) · 원, 자동 기준선(RANSAC) 또는 선 ROI, 바늘 꽂힌 방울 자동 제외. 펜던트: 바늘 지름 눈금, γ·Bo·Wo·V·A·기울기, Wo < 0.5 경고.

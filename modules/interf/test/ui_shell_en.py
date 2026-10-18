@@ -29,15 +29,16 @@ with sync_playwright() as p:
     pg.goto('file://'+os.path.abspath(html)); pg.wait_for_timeout(1500)
     labels=pg.eval_on_selector_all('#nav button','els=>els.map(e=>[e.dataset.v,e.textContent.trim(),e.getAttribute("aria-label"),e.querySelector(".nl")&&e.querySelector(".nl").dataset.short])')
     print(labels)
-    exp=['XPS','EM Image','Image Analysis','EDS Maps','EDS Spectrum','Diffraction','EDS Interference','EM Metadata','Energy Diagram','DRE Kinetics']
-    chk([l[1].rstrip('0123456789') for l in labels]==exp,'nav shows 10 English names',[l[1] for l in labels])
-    chk([l[0] for l in labels]==['xps','image','imgx','maps','spectrum','lattice','interf','meta','energy','dre'],'view keys unchanged')
+    exp=['XPS','EM Image','Image Analysis','EDS Maps','EDS Spectrum','Diffraction','EDS Interference','Energy Diagram','DRE Kinetics']  # EM Metadata = EM Image 안 보기 (10-19)
+    chk([l[1].rstrip('0123456789') for l in labels]==exp,'nav shows 9 English names',[l[1] for l in labels])
+    chk([l[0] for l in labels]==['xps','image','imgx','maps','spectrum','lattice','interf','energy','dre'],'view keys unchanged (meta → EM Image 안)')
     pg.screenshot(path=f'{out}/d_welcome.png')
     # open an EM file (TIFF)
     pg.set_input_files('#fin',TIF); pg.wait_for_timeout(1500)
     chk(pg.evaluate('state.files.length')==1,'EM file (tif) opened', pg.evaluate('state.files[0].name'))
     for v in ['image','lattice','interf','meta']:
-        pg.click(f'#nav button[data-v="{v}"]'); pg.wait_for_timeout(700)
+        if v=='meta': pg.click('#nav button[data-v="image"]'); pg.wait_for_timeout(500); pg.click('.emsub button[data-sv="meta"]'); pg.wait_for_timeout(700)
+        else: pg.click(f'#nav button[data-v="{v}"]'); pg.wait_for_timeout(700)
         pg.screenshot(path=f'{out}/d_{v}.png',full_page=True)
         chk(pg.evaluate('state.view')==v,f'tab {v} renders')
     # interf with elements -> run + suggestion
@@ -79,7 +80,7 @@ with sync_playwright() as p:
     chk(all(i['sw']<=i['cw']+0 for i in info),'mobile nav: no label overflow at 390px',[ (i['v'],i['sw'],i['cw']) for i in info if i['sw']>i['cw']])
     chk(pg.evaluate('document.documentElement.scrollWidth<=window.innerWidth'),'mobile: no horizontal page scroll')
     pg.screenshot(path=f'{out}/m_nav.png',clip={'x':0,'y':844-70,'width':390,'height':70})
-    for v in ['lattice','interf','meta','spectrum','maps']:
+    for v in ['lattice','interf','spectrum','maps']:
         pg.click(f'#nav button[data-v="{v}"]'); pg.wait_for_timeout(600); pg.screenshot(path=f'{out}/m_{v}.png',full_page=False)
     pg.set_viewport_size({'width':360,'height':780}); pg.wait_for_timeout(400)
     info2=pg.evaluate('''()=>[...document.querySelectorAll('#nav button')].map(b=>[b.dataset.v,b.scrollWidth,b.clientWidth])''')

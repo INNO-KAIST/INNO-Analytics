@@ -88,6 +88,8 @@ with sync_playwright() as p:
         return pg.evaluate("s=>{ const r=document.querySelector(s).getBoundingClientRect(); return [r.left,r.top,r.width,r.height]; }", sel)
     def hscroll(): return pg.evaluate('document.documentElement.scrollWidth>window.innerWidth+1')
     def go(v):
+        if v == 'meta':  # EM Metadata 는 탭이 아니라 EM Image 안의 보기 (10-19)
+            pg.click('#nav button[data-v="image"]'); pg.wait_for_timeout(500); pg.click('.emsub button[data-sv="meta"]'); pg.wait_for_timeout(700); return
         pg.click(f'#nav button[data-v="{v}"]'); pg.wait_for_timeout(700)
     def gestures(key, label, cx, cy, d0=70, d1=180, shift=(14, 8), pan=(-50, -36), only_x=False, tol=3.0):
         """핀치·끌기·두 번 탭 — key = window.TP 의 항목"""

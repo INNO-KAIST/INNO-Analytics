@@ -9,7 +9,7 @@ HERE=os.path.dirname(os.path.abspath(__file__))
 ED=os.path.join(HERE,'energy_diagram','src'); DF=os.path.join(HERE,'diffraction','src'); TO=os.path.join(HERE,'touch','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
 inp,outp=sys.argv[1],sys.argv[2]
 s=open(inp,encoding='utf-8').read()
-s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH|DIFF):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
+s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH|DIFF|NAV):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
 def R(desc,pat,rep,flags=0):
     global s
     n=len(re.findall(pat,s,flags))
@@ -18,18 +18,19 @@ def R(desc,pat,rep,flags=0):
 # XPS 는 맨 왼쪽(사용자 요청 10-15), Energy Diagram·DRE 는 메타데이터 뒤
 # 탭 이름은 영어(docs/UI-English-style.md). 옛 한글 이름·옛 영어 이름·이미 주입된 판본 모두 같은 결과가 나오도록 라벨은 [^"]* 로 받는다.
 # 키(xps,image,imgx,maps,spectrum,lattice,interf,meta,energy,dre)는 바꾸지 않는다.
-TAB_LIST='const VIEWS=[["xps","XPS"],["image","EM Image"],["imgx","Image Analysis"],["maps","EDS Maps"],["spectrum","EDS Spectrum"],["lattice","Diffraction"],["interf","EDS Interference"],["meta","EM Metadata"],["energy","Energy Diagram"],["dre","DRE Kinetics"]];'
+# EM Metadata 는 탭에서 빼고 EM Image 안의 'Metadata' 보기로 (10-19 사용자 요청 — 탭 수 줄이기). 키 meta 는 보기 이름으로 남는다.
+TAB_LIST='const VIEWS=[["xps","XPS"],["image","EM Image"],["imgx","Image Analysis"],["maps","EDS Maps"],["spectrum","EDS Spectrum"],["lattice","Diffraction"],["interf","EDS Interference"],["energy","Energy Diagram"],["dre","DRE Kinetics"]];'
 _L=r'"[^"]*"'
-R('탭 목록',r'const VIEWS=\[(?:\["xps",'+_L+r'\],)?\["image",'+_L+r'\],(?:\["imgx",'+_L+r'\],)?\["maps",'+_L+r'\],\["spectrum",'+_L+r'\],\["lattice",'+_L+r'\],\["interf",'+_L+r'\],\["meta",'+_L+r'\](?:,\["energy",'+_L+r'\])?(?:,\["dre",'+_L+r'\])?(?:,\["xps",'+_L+r'\])?\];',
+R('탭 목록',r'const VIEWS=\[(?:\["xps",'+_L+r'\],)?\["image",'+_L+r'\],(?:\["imgx",'+_L+r'\],)?\["maps",'+_L+r'\],\["spectrum",'+_L+r'\],\["lattice",'+_L+r'\],\["interf",'+_L+r'\],(?:\["meta",'+_L+r'\],?)?(?:,?\["energy",'+_L+r'\])?(?:,\["dre",'+_L+r'\])?(?:,\["xps",'+_L+r'\])?\];',
   lambda m:TAB_LIST)
 # 휴대폰 하단 탭(열 10개, 폭 ≈39px): 짧은 이름. 라벨 글자는 DOM 에 남기고(접근성·테스트) CSS 가 data-short 를 보여 준다.
-NAV_SHORT_JS='const NAV_SHORT={xps:"XPS",image:"EM Img",imgx:"Analysis",maps:"Maps",spectrum:"Spectra",lattice:"Diffr.",interf:"Interf.",meta:"Meta",energy:"Energy",dre:"DRE"};'
+NAV_SHORT_JS='const NAV_SHORT={xps:"XPS",image:"EM Img",imgx:"Analysis",maps:"Maps",spectrum:"Spectra",lattice:"Diffr.",interf:"Interf.",energy:"Energy",dre:"DRE"};'
 if 'const NAV_SHORT=' not in s:
     s=s.replace(TAB_LIST, TAB_LIST+'\n/* 휴대폰 하단 탭용 짧은 이름 — 키가 없으면 전체 이름 */\n'+NAV_SHORT_JS,1)
 else:
     s,_n=re.subn(r'const NAV_SHORT=\{[^}]*\};',lambda m:NAV_SHORT_JS,s); assert _n==1, 'NAV_SHORT 일치 %d개'%_n
-R('탭 버튼 라벨(짧은 이름)',r'return `<button data-v="\$\{k\}" class="\$\{state\.view===k\?"active":""\}"(?: aria-label="\$\{esc\(t\)\}")? \$\{dis\}>(?:<span class="nl" data-short="\$\{esc\(NAV_SHORT\[k\]\|\|t\)\}">\$\{t\}</span>|\$\{t\})\$\{cnt\}</button>`;',
-  lambda m:'return `<button data-v="${k}" class="${state.view===k?"active":""}" aria-label="${esc(t)}" ${dis}><span class="nl" data-short="${esc(NAV_SHORT[k]||t)}">${t}</span>${cnt}</button>`;')
+R('탭 버튼 라벨(짧은 이름)',r'return `<button data-v="\$\{k\}" class="\$\{(?:state\.view===k|\(state\.view===k\|\|\(k==="image"&&state\.view==="meta"\)\))\?"active":""\}"(?: aria-label="\$\{esc\(t\)\}")? \$\{dis\}>(?:<span class="nl" data-short="\$\{esc\(NAV_SHORT\[k\]\|\|t\)\}">\$\{t\}</span>|\$\{t\})\$\{cnt\}</button>`;',
+  lambda m:'return `<button data-v="${k}" class="${(state.view===k||(k==="image"&&state.view==="meta"))?"active":""}" aria-label="${esc(t)}" ${dis}><span class="nl" data-short="${esc(NAV_SHORT[k]||t)}">${t}</span>${cnt}</button>`;')
 R('파일 없이 열리는 탭',r'if\(!rec && state\.view!=="interf"(?: && state\.view!=="energy")?(?: && state\.view!=="dre")?(?: && state\.view!=="xps")?(?: && state\.view!=="imgx")?(?: && state\.view!=="lattice")?\)\{ renderWelcome\(root\); return; \}',
   'if(!rec && state.view!=="interf" && state.view!=="energy" && state.view!=="dre" && state.view!=="xps" && state.view!=="imgx" && state.view!=="lattice"){ renderWelcome(root); return; }')
 # Diffraction 탭(키 lattice): 파일 없이도 열림(Phase DB·SAED 파일 열기), 분기 = DIFF_UI (FFT 모드 안에서 기존 renderLattice)
@@ -43,7 +44,16 @@ R('출처 줄·파일 열',r'  renderSidebar\(\);\n(?:  const _noFile=state\.vie
   '  renderSidebar();\n  const _noFile=state.view==="energy"||state.view==="dre"||state.view==="xps"||state.view==="imgx";\n  renderProv(_noFile?null:rec);\n  { const a=document.getElementById("app"); if(a) a.classList.toggle("ed-on",_noFile); }\n')
 R('간섭 검사 라인 추천 훅',r'(?:  const _run=\(\)=>\{ run\(\); if\(window\.IF_SUG\) IF_SUG\.after\(\); \};\n)?  \$\("#ifRun"\)\.onclick=(?:run|_run);\n(?:  if\(window\.IF_SUG\) IF_SUG\.setup\(root\);\n)?  if\(P\.els\.length>=(?:1|2)\) (?:run|_run)\(\);\n',
   '  const _run=()=>{ run(); if(window.IF_SUG) IF_SUG.after(); };\n  $("#ifRun").onclick=_run;\n  if(window.IF_SUG) IF_SUG.setup(root);\n  if(P.els.length>=1) _run();\n')
-R('휴대폰 하단 탭',r'grid-template-columns:repeat\((?:6|7|8|9|10),1fr\);gap:0!important;','grid-template-columns:repeat(10,1fr);gap:0!important;')
+R('휴대폰 하단 탭',r'grid-template-columns:repeat\((?:6|7|8|9|10),1fr\);gap:0!important;','grid-template-columns:repeat(9,1fr);gap:0!important;')
+# EM Image 탭: 영상이 없어도(스펙트럼만 있는 파일) 파일이 있으면 열림 → 그 안의 Metadata 보기로
+R('EM Image 탭 활성 조건',r'if\(k==="image"\)\{ const n=rec\?rec\.images\.length:0; cnt=`<span class="cnt">\$\{n\}</span>`; if\(!(?:n|rec)\) dis="disabled"; \}',
+  'if(k==="image"){ const n=rec?rec.images.length:0; cnt=`<span class="cnt">${n}</span>`; if(!rec) dis="disabled"; }')
+# EM Image 안 보기 전환 막대 (Image · Metadata) + 탭 막대 맞춤(NAV_FIT: 한 줄 · 짧은 이름 · More)
+R('EM Image 보기 전환',r'  try\{\n(?:    if\(rec&&\(state\.view==="image"\|\|state\.view==="meta"\)\)[^\n]*\n)?    if\(state\.view==="image"\) renderImage\(root\);\n',
+  '  try{\n    if(rec&&(state.view==="image"||state.view==="meta")){ if(state.view==="image"&&!rec.images.length) state.view="meta"; const sw=h(`<div class="seg emsub" role="tablist" aria-label="EM Image view"><button data-sv="image" class="${state.view==="image"?"active":""}" ${rec.images.length?"":"disabled title=\\"No image in this file\\""}>Image</button><button data-sv="meta" class="${state.view==="meta"?"active":""}">Metadata</button></div>`); sw.querySelectorAll("button").forEach(b=>{ if(!b.disabled) b.onclick=()=>{ state._viewUser=b.dataset.sv; go(b.dataset.sv); }; }); root.appendChild(sw); }\n    if(state.view==="image") renderImage(root);\n')
+R('출처 줄: 화소 크기 설정 링크 이름',r'<a href="#" id="provToLat">Set in (?:Lattice FFT|Diffraction)</a>','<a href="#" id="provToLat">Set in Diffraction</a>')
+R('탭 막대 맞춤 호출',r'  nav\.querySelectorAll\("button"\)\.forEach\(b=>\{ if\(!b\.disabled\) b\.onclick=\(\)=>\{ state\._viewUser=b\.dataset\.v; go\(b\.dataset\.v\); if\(window\.matchMedia&&matchMedia\("\(max-width:720px\)"\)\.matches\) window\.scrollTo\(0,0\); \}; \}\);\n(?:  if\(window\.NAV_FIT\) NAV_FIT\(\);\n)?',
+  lambda m:m.group(0).split('\n')[0]+'\n  if(window.NAV_FIT) NAV_FIT();\n')
 R('전역 끌어놓기 → XPS·Image 탭이면 그 탭으로',r'if\(ev==="drop"\) ?(?:loadFiles\(e\.dataTransfer\.files\);|\{ if\(state\.view==="xps"&&window\.XPS_UI\) XPS_UI\._load\(e\.dataTransfer\.files\);(?: else if\(state\.view==="imgx"&&window\.IMG_UI\) IMG_UI\._load\(e\.dataTransfer\.files\);)? else loadFiles\(e\.dataTransfer\.files\); \})',
   'if(ev==="drop"){ if(state.view==="xps"&&window.XPS_UI) XPS_UI._load(e.dataTransfer.files); else if(state.view==="imgx"&&window.IMG_UI) IMG_UI._load(e.dataTransfer.files); else loadFiles(e.dataTransfer.files); }')
 rd=lambda p:open(p,encoding='utf-8').read()
@@ -67,6 +77,8 @@ head='<!-- INNO-ED:BEGIN css -->\n<style id="ed-css">\n'+css+'</style>\n<!-- INN
 # 공용 터치 제스처(window.INNO_TOUCH) — 모든 탭·나중의 Diffraction 이 같이 쓴다. head 에 두어 어느 탭 코드보다 먼저 정의된다.
 tjs=rd(f'{TO}/inno_touch.js'); assert '</script' not in tjs.lower(), 'inno_touch: script 종료 태그'
 head+='<!-- INNO-TOUCH:BEGIN css+js -->\n<style id="inno-touch-css">\n'+rd(f'{TO}/touch.css')+'</style>\n<script id="inno-touch-js">\n'+tjs+'</script>\n<!-- INNO-TOUCH:END -->\n'
+NV=os.path.join(HERE,'nav'); njs=rd(f'{NV}/nav_fit.js'); assert '</script' not in njs.lower()
+head+='<!-- INNO-NAV:BEGIN css+js -->\n<style id="inno-nav-css">\n'+rd(f'{NV}/nav_fit.css')+'</style>\n<script id="inno-nav-js">\n'+njs+'</script>\n<!-- INNO-NAV:END -->\n'
 i=s.index('</head>'); s=s[:i]+head+s[i:]
 edjs=''.join(rd(f'{ED}/{f}')+'\n' for f in ('ed_data.js','ed_core.js','ed_ui.js'))
 core=rd(f'{DR}/dre_core.js'); ui=rd(f'{DR}/dre_ui.js'); ifjs=rd(f'{IF}/interf_suggest.js')
