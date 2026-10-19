@@ -293,7 +293,7 @@ function analyzeSkeleton(vol,cal,opt){
   const mode=pruneMode(opt.prune); const rem=new Uint8Array(c.n); let pruned=false;
   if(opt.pruneEnds){ pruneEndsStep(c,cls,g,rem); pruned=true; }
   if(mode>0){ let orig=opt.orig&&opt.orig.data;
-    if(mode>=2&&(!orig||orig.length<c.N)){ warn.push("세기(intensity) 기준 고리 가지치기에는 같은 크기의 원본 영상이 필요합니다 — 고리는 자르지 않았습니다"); orig=null; }
+    if(mode>=2&&(!orig||orig.length<c.N)){ warn.push("세기(intensity) 기준 고리 가지치기에는 같은 크기의 원본 이미지가 필요합니다 — 고리는 자르지 않았습니다"); orig=null; }
     if(mode===1||orig){ const cuts=cycleCuts(c,cls,g,mode,orig);
       if(cuts.length){ for(const v of cuts) rem[v]=1; for(let i=0;i<c.n;i++) if(rem[i]) active[i]=0; // re-analyse the modified skeleton
         cls=classify(c,active); g=buildGraph(c,cls); pruned=false; if(prog) prog(0.7); } } }

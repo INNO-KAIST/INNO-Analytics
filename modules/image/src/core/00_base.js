@@ -59,7 +59,7 @@ IC.to8bitScaled=function(p,min,max){
 };
 
 /* ---------- 측정 통계 (ImageJ ImageStatistics / ByteStatistics / FloatStatistics) ----------
-   mask: Uint8Array(w*h) — null 이면 rect 전체. rect={x,y,w,h} (없으면 영상 전체).
+   mask: Uint8Array(w*h) — null 이면 rect 전체. rect={x,y,w,h} (없으면 이미지 전체).
    cal = {pw, ph} (화소 크기). 반환: area, mean, stdDev(n-1), min, max, median, mode, skewness, kurtosis,
    xCentroid, yCentroid (화소 중심 = +0.5), xCM, yCM, rawIntDen, intDen, n */
 IC.stats=function(p,mask,rect,cal,local,opt){ // local=true: mask 가 rect 크기(rect 좌표). opt.noMedian: 중앙값·최빈값 생략(빠름)

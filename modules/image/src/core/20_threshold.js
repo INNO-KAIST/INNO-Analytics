@@ -196,7 +196,7 @@ IC.autoThreshold=function(p,method,dark,mask){
     if(mx>mn){
       if(lower===0){ lower=p.bit===32?Math.min(mn,-1e30):0; } else lower=mn+(lower/255)*(mx-mn);
       if(upper===255){ upper=p.bit===16?65535:Math.max(mx,1e30); } else upper=mn+(upper/255)*(mx-mn);
-    } else { return {lower:NaN,upper:NaN,level:t,hist:h8,min:mn,max:mx,none:true}; } // 일정한 16/32-bit 영상: ImageJ 는 문턱 없음(−1,−1)
+    } else { return {lower:NaN,upper:NaN,level:t,hist:h8,min:mn,max:mx,none:true}; } // 일정한 16/32-bit 이미지: ImageJ 는 문턱 없음(−1,−1)
     if(p.bit===16){ lower=Math.round(lower); upper=Math.round(upper); } // ShortProcessor.setThreshold: 정수로 반올림
   }
   return {lower,upper,level:t,hist:h8,min:mn,max:mx};
@@ -217,9 +217,9 @@ IC.applyThreshold=function(p,lower,upper){
    Phansalkar: 0..1 로 정규화, t = mean·(1 + p·exp(−q·mean) + k·(sd/r − 1)) (k=0.25, r=0.5, p=2, q=10)
    Bernsen: 대비(max−min) < c(15) 이면 중간값 ≥ 128 을 물체로, 아니면 화소 ≥ (max+min)/2
    Mean / Median / MidGrey: 화소 > 지역값 − c (c=0)     Contrast: max·min 중 가까운 쪽
-   sd 는 모집단 표준편차(RankFilters VARIANCE 의 제곱근). 물체 = 255 (밝은 물체 기준; dark=false 면 반전 영상에서) */
+   sd 는 모집단 표준편차(RankFilters VARIANCE 의 제곱근). 물체 = 255 (밝은 물체 기준; dark=false 면 반전 이미지에서) */
 IC.localThreshold=function(p,method,o){
-  if(p.bit!==8) throw new Error("Local threshold 는 8-bit 영상에서만 씁니다 (Image ▸ Type ▸ 8-bit)");
+  if(p.bit!==8) throw new Error("Local threshold 는 8-bit 이미지에서만 씁니다 (Image ▸ Type ▸ 8-bit)");
   o=o||{}; const r=+o.radius||15, W=p.w,H=p.h, N=W*H; let src=p;
   if(o.dark===false){ const d=new Float32Array(N); for(let i=0;i<N;i++) d[i]=255-p.data[i]; src={w:W,h:H,bit:8,data:d}; }
   const v=src.data, out=new Float32Array(N);

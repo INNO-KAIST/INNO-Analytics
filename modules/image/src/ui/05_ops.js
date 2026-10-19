@@ -8,7 +8,7 @@ const GROUPS=[["smooth","Smooth & denoise"],["rank","Rank & morphology (gray)"],
 function op(id,o){ OPS[id]=Object.assign({id,params:[],kind:"plane"},o); }
 const R=(k,label,def,o)=>Object.assign({k,label,type:"num",def},o||{});
 /* 값 단위(valueUnit·siScale — AFM 높이 nm 등): 같은 물리량을 남기는 연산만 이어받는다. 화소를 바꾸는 나머지(형 변환의 눈금 바꾸기·문턱·FFT·곱셈 등)는 지운다.
-   제자리 연산은 im.ver 가 바뀌었는지로, 새 영상은 돌려받은 영상에 붙인다. 되돌리기는 pushUndo 의 meta 가 되살린다. */
+   제자리 연산은 im.ver 가 바뀌었는지로, 새 이미지는 돌려받은 이미지에 붙인다. 되돌리기는 pushUndo 의 meta 가 되살린다. */
 const KEEP_UNIT={gaussian:1,median:1,mean:1,despeckle:1,outliers:1,smooth3:1,minimum:1,maximum:1,tophat:1,subtractBg:1,sharpen:1,unsharp:1,
   convolve:P=>{ if(!P.normalize) return false; const v=String(P.kernel).trim().split(/[\s,]+/).map(Number); return Math.abs(v.reduce((a,b)=>a+b,0))>1e-12; }, /* 합으로 나눈 커널 = 가중 평균 */
   bandpass:P=>!P.autoscale&&!P.saturate, math:P=>["add","sub","min","max","set","abs"].includes(P.fn), nanbg:1, invert:1,
@@ -35,7 +35,7 @@ async function mapPlanes(im,fn,argsOf,all,label){
   return {planes:P,bit:im.rgb?im.bit:outBit};
 }
 async function runPlaneOp(im,P,fn,argsOf,label){
-  if(P.__pv) return await mapPlanes(im,fn,argsOf,false,label); // 미리 보기: 현재 장만 계산해 돌려주고 영상은 그대로
+  if(P.__pv) return await mapPlanes(im,fn,argsOf,false,label); // 미리 보기: 현재 장만 계산해 돌려주고 이미지는 그대로
   const all=!!P.stack; const r=await mapPlanes(im,fn,argsOf,all||(!isStack(im)),label);
   setPlanes(im,r.planes,r.bit!==im.bit?{bit:r.bit}:null,label,{op:P.__op,params:clean(P),label});
 }
@@ -63,7 +63,7 @@ op("tophat",{label:"Top Hat",group:"rank",params:[R("radius","Radius",5,{min:0.5
 /* ---------- Background ---------- */
 op("subtractBg",{label:"Subtract Background",group:"bg",params:[R("radius","Rolling ball radius",50,{min:1,step:1,unit:"px"}),R("light","Light background",false,{type:"bool"}),R("create","Create background (don't subtract)",false,{type:"bool"}),R("nosmooth","Disable smoothing",false,{type:"bool"}),stackParam],
   run:(im,P)=>runPlaneOp(im,P,"subtractBackground",p=>[p,{radius:+P.radius,light:!!P.light,createBackground:!!P.create,smooth:!P.nosmooth}],`Subtract Background r=${P.radius}`),
-  ij:P=>`run("Subtract Background...", "rolling=${P.radius}${P.light?" light":""}${P.create?" create":""}${P.nosmooth?" disable":""}${ijStack(P)}");`,help:"반지름은 배경에 속하지 않는 가장 큰 물체의 반지름보다 크게. 반지름 > 10 px 는 ImageJ 처럼 영상을 줄여 계산합니다."});
+  ij:P=>`run("Subtract Background...", "rolling=${P.radius}${P.light?" light":""}${P.create?" create":""}${P.nosmooth?" disable":""}${ijStack(P)}");`,help:"반지름은 배경에 속하지 않는 가장 큰 물체의 반지름보다 크게. 반지름 > 10 px 는 ImageJ 처럼 이미지를 줄여 계산합니다."});
 /* ---------- Edges ---------- */
 op("edges",{label:"Find Edges (Sobel)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"edges"],"Find Edges"),ij:P=>`run("Find Edges"${P.stack?', "stack"':', " "'});`});
 op("sharpen",{label:"Sharpen (3×3)",group:"edge",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"filter3",p=>[p,"sharpen"],"Sharpen"),ij:P=>`run("Sharpen"${P.stack?', "stack"':', " "'});`});
@@ -82,21 +82,21 @@ op("fft",{label:"FFT",group:"freq",kind:"new",params:[R("window","Window","none"
     n.info=[["Description","ln(1+|F|) 를 0–255 로. 가운데 = 0 주파수"],["Frequency step",im.cal?`1/(${r.w}·${g4(calOf(im).pw)} ${calOf(im).unit})`:`1/${r.w} px⁻¹`]]; record({op:"fft",params:clean(P),label:"FFT"},im); return n; },
   ij:()=>`run("FFT");`,help:"표시용 power spectrum. 그 위에 ROI 를 그리고 Inverse FFT 로 주기 잡음 제거·격자 필터를 할 수 있습니다 (Process ▸ Frequency ▸ Inverse FFT)."});
 op("ifft",{label:"Inverse FFT",group:"freq",kind:"new",params:[R("mode","Inside the ROI","keep",{type:"sel",opts:[["keep","Pass (clear the rest)"],["remove","Filter out (pass the rest)"]]}),R("sym","Add symmetric ROI about origin",true,{type:"bool"})],
-  run:async(im,P)=>{ if(im.kind!=="fft"||!im.fft) throw new Error("FFT power spectrum 영상에서 실행하세요"); const src=byId(im.fft.of); if(!src) throw new Error("원본 영상이 닫혔습니다");
-    const Sx=im.fft.S; const m=roisMask(im,true); if(!m) throw new Error("FFT 영상 위에 ROI(사각형·타원·다각형)를 그리세요");
+  run:async(im,P)=>{ if(im.kind!=="fft"||!im.fft) throw new Error("FFT power spectrum 이미지에서 실행하세요"); const src=byId(im.fft.of); if(!src) throw new Error("원본 이미지가 닫혔습니다");
+    const Sx=im.fft.S; const m=roisMask(im,true); if(!m) throw new Error("FFT 이미지 위에 ROI(사각형·타원·다각형)를 그리세요");
     if(P.sym){ for(let y=0;y<Sx;y++) for(let x=0;x<Sx;x++){ const xs=(Sx-x)%Sx, ys=(Sx-y)%Sx; if(m[y*Sx+x]) m[ys*Sx+xs]=1; } }
     const p=planeAt(src,im.fft.c,im.fft.z,im.fft.t); const r=await call("fftMaskFilter",[p,m,Sx,P.mode==="keep"]);
     const n=addImage({name:"Inverse FFT of "+src.name,w:r.w,h:r.h,bit:32,planes:[r.data],cal:src.cal},{parent:src.id,src:"derived"}); return n; },
-  ij:P=>`run("Inverse FFT");`,help:"FFT 영상 위에 그린 ROI 를 마스크로 역변환합니다 (주기 잡음 제거·격자 필터)."});
+  ij:P=>`run("Inverse FFT");`,help:"FFT 이미지 위에 그린 ROI 를 마스크로 역변환합니다 (주기 잡음 제거·격자 필터)."});
 /* ---------- Contrast ---------- */
 op("enhance",{label:"Enhance Contrast",group:"contrast",params:[R("saturated","Saturated pixels",0.35,{min:0,max:50,step:0.05,unit:"%"}),R("normalize","Normalize",false,{type:"bool"}),R("equalize","Equalize histogram",false,{type:"bool"}),R("classic","Classic equalization",false,{type:"bool"}),stackParam],
   run:async(im,P)=>{ if(P.equalize){ if(im.bit===32&&!im.rgb) throw new Error("32-bit 은 Equalize 하지 않습니다 (ImageJ 와 같음)"); return runPlaneOp(im,P,"equalize",p=>[p,!!P.classic],"Equalize"); }
-    if(!P.normalize){ if(P.__pv) return null; const p=curPlaneOf(im); const r=await call("enhanceContrast",[p,{saturated:+P.saturated}]); if(!r.range){ note("영상이 거의 일정해 표시 범위를 바꾸지 않았습니다 (ImageJ 와 같음)","warn"); return; } const c=im.rgb?0:im.c; im.disp[c].min=r.range[0]; im.disp[c].max=r.range[1]; invalidate(); save(); rerender(); /* 표시만 바뀜 — ver 를 올리면 저장된 화소가 '오래됨' 으로 버려짐 */ note(`표시 범위 ${g4(r.range[0])} – ${g4(r.range[1])} (화소 값은 그대로)`); return; }
+    if(!P.normalize){ if(P.__pv) return null; const p=curPlaneOf(im); const r=await call("enhanceContrast",[p,{saturated:+P.saturated}]); if(!r.range){ note("이미지가 거의 일정해 표시 범위를 바꾸지 않았습니다 (ImageJ 와 같음)","warn"); return; } const c=im.rgb?0:im.c; im.disp[c].min=r.range[0]; im.disp[c].max=r.range[1]; invalidate(); save(); rerender(); /* 표시만 바뀜 — ver 를 올리면 저장된 화소가 '오래됨' 으로 버려짐 */ note(`표시 범위 ${g4(r.range[0])} – ${g4(r.range[1])} (화소 값은 그대로)`); return; }
     return runPlaneOp(im,P,"enhanceContrast",p=>[p,{saturated:+P.saturated,normalize:true}],`Normalize ${P.saturated}%`); },
   ij:P=>P.equalize?`${P.classic?'setKeyDown("alt"); ':""}run("Enhance Contrast...", "saturated=${P.saturated} equalize${P.stack?" process_all":""}");${P.classic?' setKeyDown("none");':""}`:`run("Enhance Contrast...", "saturated=${P.saturated}${P.normalize?" normalize":""}${P.stack&&P.normalize?" process_all":""}");`,
   help:"Normalize 를 끄면 표시 범위만 바꿉니다(측정값 그대로). 세기 비교에는 Normalize·Equalize 를 쓰지 마세요 (둘 다 화소 값을 바꿉니다). Equalize 는 ImageJ 기본이 제곱근 방식이고, Classic 을 켜면 원래 방식입니다."});
 op("applyLut",{label:"Apply LUT",group:"contrast",params:[stackParam],
-  run:(im,P)=>{ if(im.rgb||im.bit===32) throw new Error("8/16-bit 영상에서만 (ImageJ 와 같음)"); const d=im.disp[im.c]; if(P.min==null||P.max==null){ P.min=d.min; P.max=d.max; } // 기록 = 그때의 표시 범위 (재생도 같게)
+  run:(im,P)=>{ if(im.rgb||im.bit===32) throw new Error("8/16-bit 이미지에서만 (ImageJ 와 같음)"); const d=im.disp[im.c]; if(P.min==null||P.max==null){ P.min=d.min; P.max=d.max; } // 기록 = 그때의 표시 범위 (재생도 같게)
     const mn=+P.min, mx=+P.max; return runPlaneOp(im,P,"applyLut",p=>[p,mn,mx],`Apply LUT ${g4(mn)}–${g4(mx)}`); },
   ij:P=>`${P.min!=null?`setMinAndMax(${P.min}, ${P.max});\n`:""}run("Apply LUT"${P.stack?', "stack"':', " "'});`,hidden:true});
 /* ---------- Math ---------- */
@@ -105,7 +105,7 @@ op("math",{label:"Math",group:"math",params:[R("fn","Operation","add",{type:"sel
   run:(im,P)=>runPlaneOp(im,P,"math",p=>[p,P.fn,+P.value],`${(MATHS.find(m=>m[0]===P.fn)||[0,P.fn])[1]}${MATHS.find(m=>m[0]===P.fn)[2]!==undefined?" "+P.value:""}`),
   ij:P=>{ const m=MATHS.find(x=>x[0]===P.fn); const nm=m[1]; return m[2]!==undefined?`run("${nm}...", "value=${P.value}${ijStack(P)}");`:`run("${nm}"${P.stack?', "stack"':', " "'});`; },
   help:"8/16-bit 은 ImageJ 정수 규칙(반올림·범위 자르기). 소수 결과가 필요하면 먼저 32-bit 로."});
-op("nanbg",{label:"NaN Background",group:"math",params:[R("lower","Lower",0),R("upper","Upper",255)],help:"32-bit 영상에서 Lower–Upper 범위 밖 화소를 NaN 으로 바꿉니다.",run:(im,P)=>{ if(im.bit!==32) throw new Error("32-bit 영상에서만"); return runPlaneOp(im,P,"math",p=>[p,"nan",[+P.lower,+P.upper]],"NaN Background"); },ij:P=>`setThreshold(${P.lower}, ${P.upper}); run("NaN Background");`});
+op("nanbg",{label:"NaN Background",group:"math",params:[R("lower","Lower",0),R("upper","Upper",255)],help:"32-bit 이미지에서 Lower–Upper 범위 밖 화소를 NaN 으로 바꿉니다.",run:(im,P)=>{ if(im.bit!==32) throw new Error("32-bit 이미지에서만"); return runPlaneOp(im,P,"math",p=>[p,"nan",[+P.lower,+P.upper]],"NaN Background"); },ij:P=>`setThreshold(${P.lower}, ${P.upper}); run("NaN Background");`});
 op("invert",{label:"Invert",group:"math",params:[stackParam],run:(im,P)=>runPlaneOp(im,P,"invert",p=>[p],"Invert"),ij:P=>`run("Invert"${P.stack?', "stack"':', " "'});`,help:"8-bit: 255−v. 16/32-bit: (min+max)−v (화소 범위)."});
 /* ---------- Geometry ---------- */
 op("crop",{label:"Crop",group:"geom",kind:"image",params:[],help:"사각형 ROI 를 먼저 그린 뒤 그 영역으로 자릅니다.",
@@ -139,11 +139,11 @@ op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8
       for(let c=0;c<im.nc;c++){ const planes=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) planes.push(Float32Array.from(planesOf(im)[pIndex(im,c,z,t)]));
         last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
       record({op:"type",params:clean(P),label:"Split Channels"},im); return last; }
-    if(P.to==="rgb2gray"){ if(!im.rgb) throw new Error("RGB 영상이 아닙니다"); const out=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=planeAt(im,0,z,t), g=planeAt(im,1,z,t), b=planeAt(im,2,z,t); out.push(IC.rgbToGray(r,g,b,!!P.weighted).data); }
+    if(P.to==="rgb2gray"){ if(!im.rgb) throw new Error("RGB 이미지가 아닙니다"); const out=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=planeAt(im,0,z,t), g=planeAt(im,1,z,t), b=planeAt(im,2,z,t); out.push(IC.rgbToGray(r,g,b,!!P.weighted).data); }
       setPlanes(im,out,{rgb:false,nc:1,bit:8,c:0,composite:false},"RGB → 8-bit",{op:"type",params:clean(P),label:"RGB → 8-bit"}); im.disp=[{min:0,max:255,lut:"Grays"}]; return; }
     if(im.rgb) throw new Error("RGB 는 먼저 'RGB → 8-bit gray' 또는 'Split channels'");
     const to=+P.to; if(to===im.bit){ note("이미 "+to+"-bit 입니다"); return; }
-    // 비례 변환 범위: 기록된 값이 있으면 그대로(매크로 재생), 없으면 지금 표시 범위 — 화소 min–max 와 같으면 "minmax" 로 기록해 영상마다 다시 구함
+    // 비례 변환 범위: 기록된 값이 있으면 그대로(매크로 재생), 없으면 지금 표시 범위 — 화소 min–max 와 같으면 "minmax" 로 기록해 이미지마다 다시 구함
     const mm=c=>{ let a=Infinity,b=-Infinity; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=IC.minMax(planesOf(im)[pIndex(im,c,z,t)]); if(r[0]<a) a=r[0]; if(r[1]>b) b=r[1]; } return [a,b]; };
     if(P.range===undefined){ const disp=im.disp.map(d=>[d.min,d.max]); P.range=disp.every((r,c)=>{ const m=mm(c); return Math.abs(r[0]-m[0])<1e-9*(1+Math.abs(m[0]))&&Math.abs(r[1]-m[1])<1e-9*(1+Math.abs(m[1])); })?"minmax":disp; }
     const rng=c=>P.range==="minmax"||!Array.isArray(P.range)?mm(c):(P.range[c]||P.range[0]);
@@ -168,7 +168,7 @@ op("zproject",{label:"Z Project",group:"stack",kind:"new",params:[R("method","Pr
     if(!im.rgb) im.disp.forEach((d,c)=>{ if(n.disp[c]) n.disp[c].lut=d.lut; });
     if(im.rgb&&!rgbOut){ ["Red","Green","Blue"].forEach((l,c)=>n.disp[c].lut=l); n.composite=true; } // RGB 의 합·SD 는 R·G·B 3 채널(32-bit) 로
     record({op:"zproject",params:clean(P),label:"Z Project "+nm},im); return n; },
-  ij:P=>`run("Z Project...", "projection=[${{avg:"Average Intensity",max:"Max Intensity",min:"Min Intensity",sum:"Sum Slices",sd:"Standard Deviation",median:"Median"}[P.method]}] all");`,help:"Hyperstack 은 시간마다 z 를 투영합니다(z 가 하나면 시간을 투영). ImageJ 1.54u 와 같이 평균·최대·최소는 원래 형식으로 (int)(v+0.5) — 정밀도가 필요하면 32-bit 를 켜세요. RGB 의 Sum·SD 는 R·G·B 3 채널 32-bit 영상이 됩니다."});
+  ij:P=>`run("Z Project...", "projection=[${{avg:"Average Intensity",max:"Max Intensity",min:"Min Intensity",sum:"Sum Slices",sd:"Standard Deviation",median:"Median"}[P.method]}] all");`,help:"Hyperstack 은 시간마다 z 를 투영합니다(z 가 하나면 시간을 투영). ImageJ 1.54u 와 같이 평균·최대·최소는 원래 형식으로 (int)(v+0.5) — 정밀도가 필요하면 32-bit 를 켜세요. RGB 의 Sum·SD 는 R·G·B 3 채널 32-bit 이미지가 됩니다."});
 op("register",{label:"StackReg",group:"stack",kind:"image",params:[
     R("method","Transformation","rigid",{type:"sel",opts:[["translation","Translation"],["rigid","Rigid Body"],["scaled","Scaled Rotation"],["affine","Affine"],["phase","Translation (phase corr.)"]]}),
     R("ref","Reference","previous",{type:"sel",opts:[["previous","Previous slice"],["first","First slice(s)"],["mean","Mean image"]]}),
@@ -191,7 +191,7 @@ op("register",{label:"StackReg",group:"stack",kind:"image",params:[
     else { setProg("StackReg 변환 추정…",0.05); const mats=await anchored(anc,P.ref,(L,f0,f1)=>call("stackRegMatrices",[L,P.method,P.ref,Math.max(1,+P.nFirst||1)],f=>setProg("StackReg 변환 추정…",(f0+(f1-f0)*f)*0.7)));
       const jobs=[]; for(let k=0;k<N;k++) for(let c=0;c<im.nc;c++) for(let z=0;z<(both?im.nz:1);z++){ const i=along==="t"?pIndex(im,c,both?z:0,k):pIndex(im,c,k,0); jobs.push([i,k]); }
       let done=0; await Promise.all(jobs.map(([i,k])=>call("turboTransform",[{w:im.w,h:im.h,bit:im.bit,data:out[i]},mats[k],P.method]).then(r=>{ out[i]=IC.roundTo(Float32Array.from(r),im.bit); setProg("변환 적용…",0.7+0.3*(++done)/jobs.length); })));
-      // M: 기준 좌표 → 움직인 장 좌표 (x=열, y=행, y 아래로). drift = 영상 중심이 옮겨진 양, 각도 = 화면에서 반시계 + (Orientation 과 같은 규약)
+      // M: 기준 좌표 → 움직인 장 좌표 (x=열, y=행, y 아래로). drift = 이미지 중심이 옮겨진 양, 각도 = 화면에서 반시계 + (Orientation 과 같은 규약)
       const cx=(im.w-1)/2, cy=(im.h-1)/2; rows=mats.map(m=>{ const a=m[0][0],b=m[0][1],c=m[1][0],d=m[1][1]; const X=a*cx+b*cy+m[0][2], Y=c*cx+d*cy+m[1][2];
         return {dx:X-cx,dy:Y-cy,angle:-Math.atan2(c-b,a+d)*180/Math.PI,scale:Math.sqrt(Math.abs(a*d-b*c))}; }); }
     hideProg(); delete S.particles[im.id]; clearRois(im);
@@ -201,10 +201,10 @@ op("register",{label:"StackReg",group:"stack",kind:"image",params:[
     if(P.method!=="phase"&&P.method!=="translation") S.plots.push({id:uid(),kind:"xy",title:`Rotation — ${im.name}`,xl:along==="t"?"frame":"slice",yl:"rotation (°, CCW +)",series:[{name:"θ",x:xs,y:rows.map(r=>r.angle)}].concat(P.method!=="rigid"?[{name:"scale×100",x:xs,y:rows.map(r=>100*r.scale)}]:[])});
     const mx=Math.max(...rows.map(r=>Math.hypot(r.dx,r.dy))); note(`정렬 완료 — ${N} 장${P.ref==="previous"?`, 기준 장 ${anc+1}`:""}, 최대 이동 ${mx.toFixed(2)} px${both?" (t 마다 z 최대 투영으로 추정, 모든 z 에 적용)":""} · Plots 탭`,"ok"); S.ui.bottom="plots"; },
   ij:P=>P.method==="phase"?`// translation 정렬(phase correlation): Fiji 'Correct 3D Drift' 또는 StackReg Translation 과 같은 목적`:(P.ref!=="previous"?`// 주의: ImageJ StackReg 는 '이전 장' 기준만 있습니다 (여기서는 ${P.ref==="first"?"첫 장":"평균"} 기준)\n`:"")+(P.ref==="previous"&&P.anchor?`setSlice(${P.anchor});\n`:"")+`run("StackReg ", "transformation=[${{translation:"Translation",rigid:"Rigid Body",scaled:"Scaled Rotation",affine:"Affine"}[P.method]}]");`,
-  help:"StackReg/TurboReg (Thévenaz, Ruttimann, Unser, IEEE Trans. Image Process. 7, 27–41, 1998) — B-spline 피라미드에서 세기 차 제곱합 최소화, pystackreg 와 같은 계산. Rigid Body = 이동+회전, Scaled Rotation = +배율, Affine = +전단. Previous slice = 지금 보이는 장에서 앞뒤로 이웃끼리 맞춰 누적(ImageJ StackReg 와 같음). 기준 채널의 변환을 모든 채널에, z·t 가 모두 있으면 t 마다 z 최대 투영으로. 영상 밖은 0."});
+  help:"StackReg/TurboReg (Thévenaz, Ruttimann, Unser, IEEE Trans. Image Process. 7, 27–41, 1998) — B-spline 피라미드에서 세기 차 제곱합 최소화, pystackreg 와 같은 계산. Rigid Body = 이동+회전, Scaled Rotation = +배율, Affine = +전단. Previous slice = 지금 보이는 장에서 앞뒤로 이웃끼리 맞춰 누적(ImageJ StackReg 와 같음). 기준 채널의 변환을 모든 채널에, z·t 가 모두 있으면 t 마다 z 최대 투영으로. 이미지 밖은 0."});
 /* ---------- Image Calculator ---------- */
 op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image 2","",{type:"img"}),R("fn","Operation","sub",{type:"sel",opts:[["add","Add"],["sub","Subtract"],["mul","Multiply"],["div","Divide"],["and","AND"],["or","OR"],["xor","XOR"],["min","Min"],["max","Max"],["average","Average"],["difference","Difference"],["copy","Copy"],["transparent-zero","Transparent-zero"]]}),R("float","32-bit (float) result",true,{type:"bool"})],
-  run:async(im,P)=>{ const b=byId(P.b)||S.images.find(x=>x.name===P.bName); if(!b) throw new Error("두 번째 영상을 고르세요"); if(b.w!==im.w||b.h!==im.h) throw new Error("두 영상의 크기가 같아야 합니다");
+  run:async(im,P)=>{ const b=byId(P.b)||S.images.find(x=>x.name===P.bName); if(!b) throw new Error("두 번째 이미지를 고르세요"); if(b.w!==im.w||b.h!==im.h) throw new Error("두 이미지의 크기가 같아야 합니다");
     const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
   ij:P=>`imageCalculator("${{add:"Add",sub:"Subtract",mul:"Multiply",div:"Divide",and:"AND",or:"OR",xor:"XOR",min:"Min",max:"Max",average:"Average",difference:"Difference",copy:"Copy","transparent-zero":"Transparent-zero"}[P.fn]} create${P.float?" 32-bit":""}", getTitle(), "${ijq(P.bName||"image2")}");`});
 
@@ -223,11 +223,11 @@ op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,par
     if(P.newImage){ const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record(step,im); note(msg,"ok"); return n; }
     setPlanes(im,out,{bit:8,nc:1,c:0,composite:false,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1},"Convert to Mask",step); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; note(msg,"ok"); },
   ij:P=>P.local?`run("Auto Local Threshold", "method=${P.local.method} radius=${P.local.radius} parameter_1=${P.local.p1||0} parameter_2=${P.local.p2||0}${P.dark?" white":""}");`:(P.manual?`setThreshold(${P.lower}, ${P.upper}); setOption("BlackBackground", true); run("Convert to Mask", "method=Default background=${P.dark?"Dark":"Light"} black");`:`setAutoThreshold("${P.method}${P.dark?" dark":""}"); setOption("BlackBackground", true); run("Convert to Mask", "method=${P.method} background=${P.dark?"Dark":"Light"}${P.stack?" calculate":""} black");`)}); // 스택: calculate = 장마다 문턱, 아니면 지금 장의 문턱을 모든 장에
-/* Color Threshold (ImageJ ColorThresholder): RGB 영상 → 8-bit mask. P: {space, min[3], max[3], pass[3], stack, newImage} */
+/* Color Threshold (ImageJ ColorThresholder): RGB 이미지 → 8-bit mask. P: {space, min[3], max[3], pass[3], stack, newImage} */
 const ctFilt=P=>({space:P.space,min:P.min.map(Number),max:P.max.map(Number),pass:P.pass.map(Boolean)});
 op("colorThreshold",{label:"Color Threshold",group:"thr",kind:"plane",hidden:true,params:[],
-  run:async(im,P)=>{ if(!im.rgb) throw new Error("Color Threshold 는 RGB 영상에서 — 회색조는 Threshold");
-    if(!P.newImage&&isStack(im)&&!P.stack) throw new Error("스택을 제자리에서 바꾸려면 '모든 장' 을 켜세요 (아니면 '새 영상으로')");
+  run:async(im,P)=>{ if(!im.rgb) throw new Error("Color Threshold 는 RGB 이미지에서 — 회색조는 Threshold");
+    if(!P.newImage&&isStack(im)&&!P.stack) throw new Error("스택을 제자리에서 바꾸려면 '모든 장' 을 켜세요 (아니면 '새 이미지로')");
     if(!IC.COLOR_SPACES.includes(P.space)) throw new Error("색 공간: "+P.space); const o=ctFilt(P); const planes=planesOf(im); const out=[];
     const zt=[]; if(P.stack){ for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) zt.push([z,t]); } else zt.push([im.z,im.t]);
     let k=0; for(const [z,t] of zt){ setProg(`Color Threshold ${++k}/${zt.length}`,k/zt.length);
@@ -238,7 +238,7 @@ op("colorThreshold",{label:"Color Threshold",group:"thr",kind:"plane",hidden:tru
     if(P.newImage){ const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz,nt,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record(step,im); note(msg,"ok"); return n; }
     setPlanes(im,out,{rgb:false,bit:8,nc:1,c:0,composite:false,nz,nt},"Color Threshold",step); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; note(msg,"ok"); },
   ij:P=>{ const o=ctFilt(P); const L=[];
-    // 한 장(지금 선택된 RGB 영상 하나)에 대한 ImageJ ColorThresholder 매크로 단계 → 결과 mask 창이 선택된 채로 끝남
+    // 한 장(지금 선택된 RGB 이미지 하나)에 대한 ImageJ ColorThresholder 매크로 단계 → 결과 mask 창이 선택된 채로 끝남
     const pipe=[...(o.space==="HSB"?['run("HSB Stack");','run("Convert Stack to Images");','selectWindow("Hue"); rename("0");','selectWindow("Saturation"); rename("1");','selectWindow("Brightness"); rename("2");']
         :[...(o.space==="Lab"?['call("ij.plugin.frame.ColorThresholder.RGBtoLab");']:o.space==="YUV"?['call("ij.plugin.frame.ColorThresholder.RGBtoYUV");']:[]),'run("RGB Stack");','run("Convert Stack to Images");','selectWindow("Red"); rename("0");','selectWindow("Green"); rename("1");','selectWindow("Blue"); rename("2");']),
       `ct_min=newArray(${o.min.join(",")}); ct_max=newArray(${o.max.join(",")}); ct_f=newArray("${o.pass.map(p=>p?"pass":"stop").join('","')}");`,
@@ -265,7 +265,7 @@ op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","
       P2[k]=r.data; }
     setPlanes(im,P2,{keepDisplay:f!=="edm"&&f!=="uep"},lab,{op:"binary",params:clean(P),label:lab+((f==="erode"||f==="dilate"||f==="open"||f==="close")?` (×${P.iterations}, count ${P.count})`:"")});
     if(f==="edm"||f==="uep"){ im.kind=""; } },
-  ij:P=>{ const nm=(BIN.find(b=>b[0]===P.fn)||[0,P.fn])[1]; if(["erode","dilate","open","close"].includes(P.fn)) return `run("Options...", "iterations=${P.iterations} count=${P.count} black do=Nothing"); run("${nm==="Close-"?"Close-":nm}"${P.stack?', "stack"':', " "'});`; if(P.fn==="edm"&&P.edm32) return `run("Duplicate...", "title=edm_src"); run("Options...", "iterations=1 count=1 black edm=32-bit"); run("Distance Map"); run("Options...", "iterations=1 count=1 black edm=Overwrite");`; /* 앱: 지금 장에서 32-bit 새 영상 */ return `run("${nm}"${P.stack?', "stack"':', " "'});`; }});
+  ij:P=>{ const nm=(BIN.find(b=>b[0]===P.fn)||[0,P.fn])[1]; if(["erode","dilate","open","close"].includes(P.fn)) return `run("Options...", "iterations=${P.iterations} count=${P.count} black do=Nothing"); run("${nm==="Close-"?"Close-":nm}"${P.stack?', "stack"':', " "'});`; if(P.fn==="edm"&&P.edm32) return `run("Duplicate...", "title=edm_src"); run("Options...", "iterations=1 count=1 black edm=32-bit"); run("Distance Map"); run("Options...", "iterations=1 count=1 black edm=Overwrite");`; /* 앱: 지금 장에서 32-bit 새 이미지 */ return `run("${nm}"${P.stack?', "stack"':', " "'});`; }});
 
 /* 현재 장 plane (RGB 면 밝기) */
 function curPlaneOf(im){ if(im.rgb){ return IC.rgbToGray(planeAt(im,0),planeAt(im,1),planeAt(im,2),false); } return planeAt(im); }

@@ -3,13 +3,13 @@
    · 구조: 머리 48 바이트 "OLYMPUSRAWFORMAT" … u64 파일 크기(@32), u64 block index 위치(@40). index = 0xFFFFFFFF 뒤 u64 블록 위치 목록(0 에서 끝).
      블록 = [u32 길이][u32 종류] + 내용: 0 METADATA(XML 여러 개 — fileinfo·lsmimage·lut·cameraimage…), 1 FRAMEPROPERTIES(면 XML),
      2 BMP(썸네일), 3 UID(u32 ×3 뒤 ASCII UID — 바로 다음 index 항목의 PIXEL 블록 이름), 4 PIXEL(화소).
-     UID = [l###][z###][t###][_a_b]_<채널 GUID>_<블록 번호> — 한 면이 PIXEL 블록 여러 개로 나뉘면 번호 차례로 이어 붙인다. REF_… = 참조(개관) 영상.
+     UID = [l###][z###][t###][_a_b]_<채널 GUID>_<블록 번호> — 한 면이 PIXEL 블록 여러 개로 나뉘면 번호 차례로 이어 붙인다. REF_… = 참조(개관) 이미지.
    · 크기: FRAMEPROPERTIES 의 width·height·depth(바이트/화소: 1 → 8-bit, 2 → 16-bit, 4 → 32-bit float)·bitCounts·colorType,
      채널 = lsmimage 의 channel(id·order·name·파장), 화소 크기 = lsmimage 의 첫 length 요소(x·y, µm), Z 간격 = 면 위치(axisValue ZSTACK)
      또는 축 설정 step.
    · 앱 배치: c + nc·(z + nz·t). λ(파장 주사) 축은 T 에 잇는다 (t' = λ + nλ·t, LIF 읽기와 같은 방식).
    · 시험 (test/test_oir.js): 공개 실측 FV4000 시료 13 개(ref/real/oir, CC BY 4.0 — ref/gen_oir_real.py) 의 모든 면이 oirfile = Bio-Formats 7.3.1
-     (= 같은 출처의 .ome.tif 3 개) 와 같음 (λ 는 oirfile — Bio-Formats 는 λ1 면을 되풀이), 화소 크기·z step·frame interval·채널 이름·참조 영상까지.
+     (= 같은 출처의 .ome.tif 3 개) 와 같음 (λ 는 oirfile — Bio-Formats 는 λ1 면을 되풀이), 화소 크기·z step·frame interval·채널 이름·참조 이미지까지.
      경계 사례는 실측 배치를 본뜬 합성 파일(ref/gen_oir_synth.py). 실측으로 확인 못 한 것: 선 주사·RGB·깊이 4 바이트·보조 파일(_00001)·POIR.
 
    Format knowledge from oirfile (BSD-3-Clause, Copyright (c) 2025-2026 Christoph Gohlke)
@@ -186,12 +186,12 @@ async function readOIR(name,u8,ctx,opt){
     if(R.scanned) throw new Error("OIR: 파일이 잘려 화소 블록을 찾지 못했습니다 (block index 없음) — 파일이 끝까지 복사되었는지 확인하세요");
     if(!R.pairs.length&&fr&&fr.w*fr.h>1e8) throw new Error(`OIR: 지도(Map) 파일입니다 — ${fr.w}×${fr.h} 화소 크기의 개관 설정만 있고 화소 자료가 없습니다. 같은 폴더의 타일 파일(…_A01_G001_0001.oir 등)을 여세요`);
     throw new Error(R.pairs.length?"OIR: 화소 블록 이름(UID)을 해석하지 못했습니다":"OIR 안에 화소 자료가 없습니다 (메타데이터만 있는 파일)"); }
-  if(!(W>0&&H>0)) throw new Error("OIR: 영상 크기(width·height)를 찾지 못했습니다"+(R.scanned?" — 파일이 잘려 메타데이터가 없습니다":""));
+  if(!(W>0&&H>0)) throw new Error("OIR: 이미지 크기(width·height)를 찾지 못했습니다"+(R.scanned?" — 파일이 잘려 메타데이터가 없습니다":""));
   if(!R.xml.lsmimage) warn.push(`메타데이터(lsmimage)가 없습니다${R.truncated||R.scanned?" (파일이 잘림)":""} — 채널 이름·화소 크기·Z 간격을 알 수 없어 화소만 읽었습니다`);
   if(![1,2,4].includes(depth)) throw new Error(`OIR: 화소 깊이 ${depth||"?"} 바이트는 읽지 않습니다 (1·2·4 만)`);
-  if(!map.size){ // 참조(개관) 영상만
-    const ri=refImage(R,lsm,refs,{W,H,depth,name:dname,u8}); if(!ri) throw new Error("OIR: 참조 영상 자료가 비었습니다");
-    ri.warn.unshift("이 파일에는 본 영상(화소 블록)이 없고 참조(개관) 영상만 있습니다 — 그것만 열었습니다"); return {images:[ri],warn}; }
+  if(!map.size){ // 참조(개관) 이미지만
+    const ri=refImage(R,lsm,refs,{W,H,depth,name:dname,u8}); if(!ri) throw new Error("OIR: 참조 이미지 자료가 비었습니다");
+    ri.warn.unshift("이 파일에는 본 이미지(화소 블록)가 없고 참조(개관) 이미지만 있습니다 — 그것만 열었습니다"); return {images:[ri],warn}; }
   // 축 범위: UID 번호의 최소~최대 (가운데 빠진 면 = 0 으로 두고 알림; oirfile 은 있는 번호만 모아 당기고, Bio-Formats 는 번호 자리를 지킨다 → Bio-Formats 와 같게)
   const rng=key=>{ let lo=Infinity, hi=-Infinity; for(const v of map.values()){ lo=Math.min(lo,v[key]); hi=Math.max(hi,v[key]); } return [lo,hi]; };
   const [t0,t1]=rng("t"), [l0,l1]=rng("l"), [z0,z1]=rng("z"); const nt0=t1-t0+1, nl=l1-l0+1, nz=z1-z0+1;
@@ -214,7 +214,7 @@ async function readOIR(name,u8,ctx,opt){
   const pick=(list,n)=>n<=1?[0]:list?list.filter(v=>v>=0&&v<n):[...Array(n).keys()];
   const zs=pick(sel.z,nz), ts=pick(sel.t,nt); if(!zs.length||!ts.length) throw new Error("OIR: 고른 Z·T 범위가 비었습니다");
   const tot=W*H*4*nc*zs.length*ts.length; const lim=(ctx&&ctx.maxBytes)||IO.MAXBYTES;
-  if(tot>lim) throw new Error(`OIR: 고른 영상이 너무 큼 (${(tot/1e9).toFixed(2)} GB, 32-bit 메모리 한도 ${(lim/1e9).toFixed(1)} GB) — Z·T 일부만 고르세요`);
+  if(tot>lim) throw new Error(`OIR: 고른 이미지가 너무 큼 (${(tot/1e9).toFixed(2)} GB, 32-bit 메모리 한도 ${(lim/1e9).toFixed(1)} GB) — Z·T 일부만 고르세요`);
   // 화소
   const per=W*H*depth; const buf=new Uint8Array(per);
   // 실측 파일의 UID 블록 머리 [u32 면 안 위치][u32 PIXEL 길이] 가 맞으면 그 위치에 놓는다 (빠진 블록이 있어도 뒤 블록이 밀리지 않음); 아니면 차례로 잇는다 (oirfile 과 같음)
@@ -269,7 +269,7 @@ async function readOIR(name,u8,ctx,opt){
   const nBlk=[...map.values()].reduce((a,v)=>Math.max(a,v.blocks.length),0); if(nBlk>1) info.push(["Pixel blocks",`면마다 ${nBlk} 개`]);
   if(R.noMarker) info.push(["Block index","0xFFFFFFFF 표지 없음 — 위치들이 블록 머리를 가리켜 그대로 씀"]);
   if(R.bmp) info.push(["Thumbnail","BMP 썸네일 있음 (읽지 않음)"]);
-  if(lineScan){ w2.push("선 주사(line scan) — 세로 축 = 시간 (줄마다 한 번 주사). 화소 높이는 화소 너비와 같게 두었습니다 (실측 선 주사 파일로는 확인하지 못한 읽기)"); info.push(["영상 면","X–시간 (kymograph)"]); if(lsm.scanner&&lsm.scanner.seriesInterval>0) info.push(["Line interval",`${g6(lsm.scanner.seriesInterval)} ms`]); }
+  if(lineScan){ w2.push("선 주사(line scan) — 세로 축 = 시간 (줄마다 한 번 주사). 화소 높이는 화소 너비와 같게 두었습니다 (실측 선 주사 파일로는 확인하지 못한 읽기)"); info.push(["이미지 면","X–시간 (kymograph)"]); if(lsm.scanner&&lsm.scanner.seriesInterval>0) info.push(["Line interval",`${g6(lsm.scanner.seriesInterval)} ms`]); }
   if(/^rgb$/i.test(color)&&nc!==3) w2.push(`colorType 이 RGB 인데 채널이 ${nc} 개라 채널별로 열었습니다`);
   if(rgbNote) w2.push(rgbNote);
   if(rgb) w2.push("RGB(colorType RGB) OIR 읽기는 실측 파일로 확인하지 못했습니다 — 색 순서를 FluoView 와 비교해 주세요");
@@ -286,8 +286,8 @@ async function readOIR(name,u8,ctx,opt){
   else if(rgb) Object.assign(im,{bit,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]});
   else Object.assign(im,{bit,rgb:false,chNames,chLut:luts.some(Boolean)?luts:null});
   const images=[im];
-  // 참조(개관) 영상: REF_… 블록 — 크기는 imagedefinition → 정사각 → 본 영상 높이·너비 순으로 맞춤 (oirfile 과 같음)
-  if(refs.size&&!opt.noRef){ try{ const ri=refImage(R,lsm,refs,{W,H:fh,depth,name:dname,u8}); if(ri) images.push(ri); }catch(e){ warn.push("참조 영상: "+e.message); } }
+  // 참조(개관) 이미지: REF_… 블록 — 크기는 imagedefinition → 정사각 → 본 이미지 높이·너비 순으로 맞춤 (oirfile 과 같음)
+  if(refs.size&&!opt.noRef){ try{ const ri=refImage(R,lsm,refs,{W,H:fh,depth,name:dname,u8}); if(ri) images.push(ri); }catch(e){ warn.push("참조 이미지: "+e.message); } }
   return {images,warn};
 }
 function refImage(R,lsm,refs,o){
@@ -297,20 +297,20 @@ function refImage(R,lsm,refs,o){
   const gs=[]; for(const c of lsm.channels) if(refs.has(c.id)) gs.push(c.id); gs.push(...[...refs.keys()].filter(g=>!gs.includes(g)).sort());
   const first=refs.get([...refs.keys()][0]); const tp=Math.floor(first.reduce((a,b)=>a+b.len,0)/dep); if(!tp) return null;
   const sq=Math.floor(Math.sqrt(tp)); let w,h; const rw2=[];
-  if(rw>0&&rh>0&&rw*rh===tp){ w=rw; h=rh; } else if(sq*sq===tp){ w=h=sq; } else if(o.H>0&&tp%o.H===0){ h=o.H; w=tp/o.H; } else if(o.W>0&&tp%o.W===0){ w=o.W; h=tp/o.W; } else { w=tp; h=1; rw2.push("참조 영상의 크기를 알 수 없어 한 줄로 열었습니다"); }
+  if(rw>0&&rh>0&&rw*rh===tp){ w=rw; h=rh; } else if(sq*sq===tp){ w=h=sq; } else if(o.H>0&&tp%o.H===0){ h=o.H; w=tp/o.H; } else if(o.W>0&&tp%o.W===0){ w=o.W; h=tp/o.W; } else { w=tp; h=1; rw2.push("참조 이미지의 크기를 알 수 없어 한 줄로 열었습니다"); }
   let short=0;
   const planes=gs.map(g=>{ const P=new Float32Array(w*h), b=new Uint8Array(w*h*dep); let q=0; for(const B of refs.get(g)){ const n=Math.min(B.avail,b.length-q); if(n<=0) break; b.set(o.u8.subarray(B.off,B.off+n),q); q+=n; }
     if(q<b.length) short++;
     if(dep===1) for(let i=0;i<w*h;i++) P[i]=b[i]; else if(dep===2) P.set(new Uint16Array(b.buffer,0,w*h)); else P.set(new Float32Array(b.buffer,0,w*h)); return P; });
-  if(short) rw2.push(`참조 영상 채널 ${short} 개의 자료가 모자라 빈 부분을 0 으로 채웠습니다`);
+  if(short) rw2.push(`참조 이미지 채널 ${short} 개의 자료가 모자라 빈 부분을 0 으로 채웠습니다`);
   const names=gs.map((g,i)=>{ const c=lsm.channels.find(x=>x.id===g); return c&&c.name?c.name:`CH${i+1}`; });
-  const cal=lsm.pxX>0?calOpt(lsm.pxX*1e-6,(lsm.pxY||lsm.pxX)*1e-6,"OIR lsmimage length x·y (µm) — 본 영상의 값"):null;
-  if(cal) rw2.push("참조 영상(REF, FluoView 가 함께 저장한 주사 영상)의 화소 크기는 파일에 따로 없어 본 영상의 값을 붙였습니다 — 확대(zoom)를 바꿨다면 다를 수 있습니다");
+  const cal=lsm.pxX>0?calOpt(lsm.pxX*1e-6,(lsm.pxY||lsm.pxX)*1e-6,"OIR lsmimage length x·y (µm) — 본 이미지의 값"):null;
+  if(cal) rw2.push("참조 이미지(REF, FluoView 가 함께 저장한 주사 이미지)의 화소 크기는 파일에 따로 없어 본 이미지의 값을 붙였습니다 — 확대(zoom)를 바꿨다면 다를 수 있습니다");
   return {name:o.name+" · reference",w,h,nc:planes.length,nz:1,nt:1,order:"czt",planes,bit:dep===1?8:dep===2?16:32,rgb:false,chNames:names,chLut:null,cal,calCandidates:[],
-    info:[["Format","Olympus OIR 참조(개관) 영상"],["Dimensions",`X${w} Y${h} · C${planes.length}`]],warn:rw2,zStep:0}; }
+    info:[["Format","Olympus OIR 참조(개관) 이미지"],["Dimensions",`X${w} Y${h} · C${planes.length}`]],warn:rw2,zStep:0}; }
 
 /* ============================================================ POIR (ZIP 안의 OIR 여러 개) ============================================================
-   메모리 한도는 묶음 전체에 (앞 파일이 쓴 만큼 줄여 넘김), 진행 막대는 항목마다 나눠, 고르기 창을 도중에 취소하면 이미 읽은 영상은 남긴다. */
+   메모리 한도는 묶음 전체에 (앞 파일이 쓴 만큼 줄여 넘김), 진행 막대는 항목마다 나눠, 고르기 창을 도중에 취소하면 이미 읽은 이미지는 남긴다. */
 async function readPOIR(name,u8,ctx){
   ctx=ctx||{}; const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength), N=u8.length; let e=-1;
   for(let p=N-22;p>=Math.max(0,N-65557);p--) if(dv.getUint32(p,true)===0x06054b50){ e=p; break; }
@@ -336,7 +336,7 @@ async function readPOIR(name,u8,ctx){
       for(const im of r.images) used+=im.planes.length*im.w*im.h*4;
       images.push(...r.images); r.warn.forEach(w=>warn.push(`${x.fn}: ${w}`)); }
     catch(err){ warn.push(`${x.fn}: ${err.message} — 건너뜀`); } }
-  if(!images.length) throw new Error("POIR: 읽은 영상이 없습니다"+(warn.length?" — "+warn.join(", "):""));
+  if(!images.length) throw new Error("POIR: 읽은 이미지가 없습니다"+(warn.length?" — "+warn.join(", "):""));
   return {images,warn};
 }
 

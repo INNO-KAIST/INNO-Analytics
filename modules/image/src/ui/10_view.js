@@ -39,7 +39,7 @@ function qMap(bit,mn,mx){
     return v=>v!==v?0:t[v<0?0:v>=N?N-1:v|0]; }
   const sc=255/(mx-mn); return v=>{ if(v!==v) return 0; let x=v-mn; if(x<0) x=0; const q=Math.floor(x*sc+0.5); return q>255||q!==q?(x>0?255:0):q; };
 }
-/* 영상 영역 R={x,y,w,h,sc} 를 표시 색으로 (sc>1 이면 sc 칸마다 한 화소) — 화면·썸네일·PNG 내보내기 공용 */
+/* 이미지 영역 R={x,y,w,h,sc} 를 표시 색으로 (sc>1 이면 sc 칸마다 한 화소) — 화면·썸네일·PNG 내보내기 공용 */
 function renderRegion(im,R,cvIn){
   const W=Math.max(1,Math.ceil(R.w/R.sc)), H=Math.max(1,Math.ceil(R.h/R.sc)); let cv=cvIn; if(!cv||cv.width!==W||cv.height!==H){ cv=document.createElement("canvas"); cv.width=W; cv.height=H; }
   const cx=cv.getContext("2d"), id=cx.createImageData(W,H), o=id.data;
@@ -66,7 +66,7 @@ function buildDisplay(im){
   const key=dispKey(im); if(DISP.key===key&&DISP.cv) return DISP;
   const sc=fullScale(im); DISP.cv=renderRegion(im,{x:0,y:0,w:im.w,h:im.h,sc},DISP.cv); DISP.key=key; DISP.scale=sc; return DISP;
 }
-/* 아주 큰 영상(> 2.4×10⁷ 화소)을 확대했을 때: 보이는 영역만 원래 해상도로 (여유 25 %, 영역 안에서 움직이면 다시 그리지 않음) */
+/* 아주 큰 이미지(> 2.4×10⁷ 화소)를 확대했을 때: 보이는 영역만 원래 해상도로 (여유 25 %, 영역 안에서 움직이면 다시 그리지 않음) */
 const DISPZ={key:null,cv:null,R:null};
 function zoomRegion(im,v,W,H){
   const sc=fullScale(im); if(sc===1||v.zoom*sc<=1.0001) return null;
@@ -120,7 +120,7 @@ function drawThreshold(im,ox,v){
   if(OVL.key!==key){ const sc=im.w*im.h>MAXDISP?Math.ceil(Math.sqrt(im.w*im.h/MAXDISP)):1; const W=Math.ceil(im.w/sc),H=Math.ceil(im.h/sc);
     const c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d"), idd=g.createImageData(W,H), o=idd.data;
     const lp=S.ui.thr.localPreview&&THR_LOCAL.mask&&THR_LOCAL.key===S.ui.thr.localPreview?THR_LOCAL.mask:null; const d=planesOf(im)[pIndex(im,im.c,im.z,im.t)];
-    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=(y*sc)*im.w+x*sc; const inn=im.rgb?ctInside(i):lp?lp[i]>0:(d[i]>=lo&&d[i]<=hi); if(inn){ const j=(y*W+x)*4; o[j]=255; o[j+1]=im.rgb?0:38; o[j+2]=im.rgb?0:38; o[j+3]=im.rgb?235:150; } } /* RGB 는 ImageJ Color Threshold 처럼 진한 빨강 (색 영상 위에서도 보이게) */
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=(y*sc)*im.w+x*sc; const inn=im.rgb?ctInside(i):lp?lp[i]>0:(d[i]>=lo&&d[i]<=hi); if(inn){ const j=(y*W+x)*4; o[j]=255; o[j+1]=im.rgb?0:38; o[j+2]=im.rgb?0:38; o[j+3]=im.rgb?235:150; } } /* RGB 는 ImageJ Color Threshold 처럼 진한 빨강 (색 이미지 위에서도 보이게) */
     g.putImageData(idd,0,0); OVL.thr=c; OVL.key=key; }
   ox.save(); ox.imageSmoothingEnabled=false; const [x0,y0]=toScr(v,0,0); ox.drawImage(OVL.thr,x0,y0,im.w*v.zoom,im.h*v.zoom); ox.restore();
 }
@@ -136,12 +136,12 @@ function drawParticles(im,ox,v){
 /* 축척 막대 (Analyze ▸ Tools ▸ Scale Bar): 화면 폭의 약 1/5 에 맞는 1·2·5 × 10ⁿ 길이 */
 function niceLen(x){ const p=Math.pow(10,Math.floor(Math.log10(x))); const m=x/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; }
 function scaleBarSpec(im,viewW){ const c=calOf(im); if(!im.cal) return null; const fov=viewW*c.pw; const auto=niceLen(fov/5); let L=S.ui.scalebar.len>0?+S.ui.scalebar.len:auto;
-  if(L/c.pw>0.9*viewW) L=auto; // 지정 길이가 보이는 영상보다 길면 자동 길이로
+  if(L/c.pw>0.9*viewW) L=auto; // 지정 길이가 보이는 이미지보다 길면 자동 길이로
   return {L,px:L/c.pw,unit:c.unit,user:S.ui.scalebar.len>0&&L===+S.ui.scalebar.len}; }
 /* 눈금 막대 글자: 값이 1–1000 이 되는 단위로 (0.02 µm → 20 nm, 2000 nm → 2 µm, Å → nm) */
 function sbLabel(L,u){ const M={pm:1e-12,"Å":1e-10,nm:1e-9,"µm":1e-6,um:1e-6,mm:1e-3,cm:1e-2,m:1}; if(!(u in M)) return `${g4(L)} ${u}`; const m=L*M[u];
   for(const [nu,k] of [["m",1],["mm",1e-3],["µm",1e-6],["nm",1e-9],["pm",1e-12]]) if(m>=k*0.9999||nu==="pm") return `${g4(m/k)} ${nu}`; return `${g4(L)} ${u}`; }
-/* 화면·내보내기 공용: 보이는 영상 영역 안에 두고, 글자·막대 굵기는 그 영역 크기에 비례 */
+/* 화면·내보내기 공용: 보이는 이미지 영역 안에 두고, 글자·막대 굵기는 그 영역 크기에 비례 */
 function drawScaleBar(im,ox,v,W,H){
   if(!S.ui.scalebar.on||!im.cal) return;
   const [sx0,sy0]=toScr(v,0,0), [sx1,sy1]=toScr(v,im.w,im.h); const ax=Math.max(0,sx0), ay=Math.max(0,sy0), bx=Math.min(W,sx1), by=Math.min(H,sy1); const vw=bx-ax, vh=by-ay; if(vw<40||vh<30) return;
@@ -199,7 +199,7 @@ function insideRoi(im,r,ix,iy){ if(r.type==="rect"||r.type==="oval"){ const b=ro
   if(r.type==="poly"||r.type==="free"||r.type==="traced"){ let c=false; const P=r.pts; for(let i=0,j=P.length-1;i<P.length;j=i++){ if((P[i][1]>iy)!==(P[j][1]>iy)&&ix<(P[j][0]-P[i][0])*(iy-P[i][1])/(P[j][1]-P[i][1])+P[i][0]) c=!c; } return c; }
   if(r.type==="line"){ const v=viewOf(im); const [a,b]=r.pts; const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1; const t=clamp(((ix-a[0])*(b[0]-a[0])+(iy-a[1])*(b[1]-a[1]))/(L*L),0,1); const d=Math.hypot(ix-(a[0]+t*(b[0]-a[0])),iy-(a[1]+t*(b[1]-a[1]))); return d*v.zoom<(LASTPT==="touch"?12:5); }
   return false; }
-const snapI=v=>Math.floor(v); // ImageJ: 화면 → 영상 좌표는 (int) 내림
+const snapI=v=>Math.floor(v); // ImageJ: 화면 → 이미지 좌표는 (int) 내림
 function onDown(e){
   const im=cur(); if(!im) return; const [sx,sy]=evPos(e); const v=viewOf(im); const [ix,iy]=toImg(v,sx,sy); const tool=S.ui.tool;
   if(e.button===2) return; // 오른쪽 단추는 그리지 않음
@@ -288,7 +288,7 @@ function drawPolyBar(){ const el=ROOT&&$q(ROOT,"#imPolyBar"); if(!el) return;
   el.innerHTML=DRAG.mode==="poly"?`<span class="t">${n} pts</span><button class="btn sm primary" id="imPolyDone" ${n<3?"disabled":""}>Finish</button><button class="btn sm" id="imPolyEsc">Cancel</button>`:`<span class="t">Angle ${n}/3</span><button class="btn sm" id="imPolyEsc">Cancel</button>`;
   const d=$q(el,"#imPolyDone"); if(d) d.onclick=()=>{ const im=cur(); if(im&&DRAG&&DRAG.mode==="poly") finishPoly(im); };
   $q(el,"#imPolyEsc").onclick=()=>{ DRAG=null; draw(); }; }
-/* Wand: 문턱 범위(Threshold 탭)·이진 영상이면 그 범위로, 아니면 클릭한 값과 같은 화소(허용 tolerance)로 8-연결 외곽선 */
+/* Wand: 문턱 범위(Threshold 탭)·이진 이미지면 그 범위로, 아니면 클릭한 값과 같은 화소(허용 tolerance)로 8-연결 외곽선 */
 let WAND_BUSY=false;
 async function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; if(WAND_BUSY){ note("Wand: 앞의 외곽선을 아직 찾는 중입니다"); return; }
   const p=curPlaneOf(im); let lo,hi;
@@ -298,7 +298,7 @@ async function wandAt(im,x,y){ if(x<0||y<0||x>=im.w||y>=im.h) return; if(WAND_BU
   catch(e){ if(!/취소/.test(e.message)) note("Wand: "+e.message,"warn"); return; }
   finally{ WAND_BUSY=false; if(big) hideProg(); }
   if(!ol){ note("클릭한 화소가 범위 밖입니다"); return; }
-  const im2=S.images.find(z=>z.id===id); if(!im2) return; // 그 사이 닫힌 영상
+  const im2=S.images.find(z=>z.id===id); if(!im2) return; // 그 사이 닫힌 이미지
   setActive(im2,{id:uid(),type:"traced",pts:ol.xs.map((xx,k)=>[xx,ol.ys[k]])});
 }
 

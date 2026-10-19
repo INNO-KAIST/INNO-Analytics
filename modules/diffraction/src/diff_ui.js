@@ -22,7 +22,7 @@ let S=null;
 const fresh=()=>({key:null,name:"",img:null,w:0,h:0,meta:{},res:null,type:null,busy:false,err:null,center:null,lat:0,spotsEdit:null,cands:null,sel:-1,rcands:null,rsel:-1,
   view:null,tool:"view",disp:null,maskCv:null,gamma:"log",lohi:[0.5,99.95],barVal:null,barLen:null,manualScale:null,savedCal:null,mres:null,progress:""});
 
-/* ---------- 원본 영상 ---------- */
+/* ---------- 원본 이미지 ---------- */
 function tagsOf(im){ return (im&&im.md&&im.md.__dm)||{}; }
 function readSource(){ const rec=typeof curRec==="function"?curRec():null; if(!rec||!rec.images||!rec.images.length) return null; const c=typeof loadImageData==="function"?loadImageData():null; if(!c) return null;
   const im=c.im||{}; const key=rec.name+"|"+(im.uid||"")+"|"+c.w+"x"+c.h; return {key,name:rec.name+(rec.images.length>1?" · "+(im.title||""):""),c,im}; }
@@ -106,7 +106,7 @@ function predictPx(L,C,h){ const z=DI().predictPx({center:L.center,R1:L.R1,R2:L.
 const curLat=()=>S.res&&S.res.spots&&S.res.spots.lattices[S.lat]||null;
 
 /* ---------- 분석 ---------- */
-async function analyze(){ if(!S.img||S.busy) return; const my=S; S.busy=true; S.err=null; S.cands=null; S.rcands=null; S.sel=-1; S.rsel=-1; S.progress="패턴을 읽는 중… (큰 영상은 몇 초)"; paint();
+async function analyze(){ if(!S.img||S.busy) return; const my=S; S.busy=true; S.err=null; S.cands=null; S.rcands=null; S.sel=-1; S.rsel=-1; S.progress="패턴을 읽는 중… (큰 이미지는 몇 초)"; paint();
   try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:P.pattern,radial:P.radial,topN:P.topN,maxLattices:3,center:S.center}},[copy.buffer]);
     if(S!==my) return; // 분석 중 다른 파일로 바뀜 — 버림
     S.res=r; S.type=P.pattern==="auto"?r.type:P.pattern; S.spotsEdit=null; S.lat=0; S.maskCv=null; if(S.barLen==null&&r.scaleBar) S.barLen=r.scaleBar.lenPx;
@@ -127,7 +127,7 @@ async function identify(){ if(!S.res) return; const my=S; S.idBusy=true; const r
   S.idBusy=false; paint(); }
 
 /* ---------- 화면 ---------- */
-/* 모드: 사용자가 고른 것(파일마다) → 없으면 파일 종류로: 역공간 교정·회절 모드 태그 → SAED, 실공간 영상 → FFT, 파일 없음 → SAED(열기 안내) */
+/* 모드: 사용자가 고른 것(파일마다) → 없으면 파일 종류로: 역공간 교정·회절 모드 태그 → SAED, 실공간 이미지 → FFT, 파일 없음 → SAED(열기 안내) */
 const MODE={key:null,mode:null};
 function curMode(){ const src=readSource(); const key=src?src.key:"(none)"; if(MODE.key===key&&MODE.mode) return MODE.mode; if(!src) return "saed";
   const m=metaOf(src.im,src.c); if(m.recip||m.diffMode) return "saed"; if(m.unit&&/^(nm|µm|um|Å|A|pm)$/i.test(m.unit)&&!/diff|saed|sad\b/i.test(src.name)) return "fft";
@@ -138,11 +138,11 @@ function render(root){ if(!S) S=fresh(); const mode=curMode(); P.mode=mode;
     <div class="seg" id="dfMode" role="tablist">${[["fft","FFT (HRTEM)"],["saed","SAED"],["db","Phase DB"]].map(([k,t])=>`<button data-m="${k}" class="${mode===k?"active":""}">${t}</button>`).join("")}</div></div><div id="dfBody"></div>`;
   $all("#dfMode button",root).forEach(b=>b.onclick=()=>{ const src=readSource(); MODE.key=src?src.key:"(none)"; MODE.mode=b.dataset.m; render(root); });
   const body=$q("#dfBody",root);
-  if(P.mode==="fft"){ const rec=typeof curRec==="function"?curRec():null; if(!rec||!rec.images||!rec.images.length){ body.innerHTML=`<div class="card"><div class="note">FFT 는 HRTEM 영상이 필요합니다. 왼쪽에서 파일을 여세요.</div></div>`; return; } if(typeof renderLattice==="function") renderLattice(body); return; }
+  if(P.mode==="fft"){ const rec=typeof curRec==="function"?curRec():null; if(!rec||!rec.images||!rec.images.length){ body.innerHTML=`<div class="card"><div class="note">FFT 는 HRTEM 이미지가 필요합니다. 왼쪽에서 파일을 여세요.</div></div>`; return; } if(typeof renderLattice==="function") renderLattice(body); return; }
   if(P.mode==="db"){ if(window.DIFF_DB_UI&&DIFF_DB_UI.render) DIFF_DB_UI.render(body,{}); else body.innerHTML=`<div class="card"><div class="note">Phase DB 화면을 불러오지 못했습니다.</div></div>`; return; }
   renderSaed(body); }
 function renderSaed(body){ const src=readSource();
-  if(!src){ body.innerHTML=`<div class="card"><h3>SAED</h3><div class="note">회절 영상(.dm3 · .dm4 · .tif)을 여세요. 왼쪽 파일 목록에 추가되고 여기서 바로 분석합니다.</div>
+  if(!src){ body.innerHTML=`<div class="card"><h3>SAED</h3><div class="note">회절 이미지(.dm3 · .dm4 · .tif)를 여세요. 왼쪽 파일 목록에 추가되고 여기서 바로 분석합니다.</div>
       <div class="row" style="margin-top:10px"><button class="btn primary" id="dfOpen">Open file…</button></div></div>`; $q("#dfOpen",body).onclick=openFile; return; }
   if(S.key!==src.key){ S=fresh(); S.key=src.key; S.name=src.name; const c=src.c; S.w=c.w; S.h=c.h; S.img=Float32Array.from(c.data); S.meta=metaOf(src.im,c); buildDisplay(); S.view=null; setTimeout(analyze,0); }
   body.innerHTML=`<div class="df-grid">
@@ -164,10 +164,10 @@ function renderSaed(body){ const src=readSource();
       <div id="dfResult">${S.err?`<div class="card"><div class="note danger">${E(S.err)}</div></div>`:""}${resultCards()}</div>
     </div></div>`;
   wire(body); draw(); if(S.type==="rings") drawProfile(); }
-function toolHint(){ if(S.tool==="center") return "영상을 눌러 직접빔(중심)을 지정합니다. 지정한 중심으로 격자를 다시 맞춥니다."; if(S.tool==="spots") return "스폿을 누르면 빼고, 빈 곳을 누르면 그 자리의 밝은 점을 더합니다."; return "끌어서 이동 · 휠/두 손가락으로 확대 · 두 번 눌러 맞춤"; }
+function toolHint(){ if(S.tool==="center") return "이미지를 눌러 직접빔(중심)을 지정합니다. 지정한 중심으로 격자를 다시 맞춥니다."; if(S.tool==="spots") return "스폿을 누르면 빼고, 빈 곳을 누르면 그 자리의 밝은 점을 더합니다."; return "끌어서 이동 · 휠/두 손가락으로 확대 · 두 번 눌러 맞춤"; }
 function sourceCard(src){ const m=S.meta; const warn=[];
   if(m.unit&&!m.recip&&m.dmScale>0&&(m.diffMode||/diff/i.test(S.name))) warn.push(`파일의 교정 단위가 <b>${E(m.unit)}</b> (실공간) 입니다 — 회절 패턴이면 교정값이 잘못 저장된 것입니다. 스케일바·저장한 보정·표준 시료로 보정하세요.`);
-  else if(m.unit&&!m.recip&&m.dmScale>0) warn.push(`교정 단위가 <b>${E(m.unit)}</b> 입니다 — 회절 영상이 아니라면 FFT (HRTEM) 모드를 쓰세요.`);
+  else if(m.unit&&!m.recip&&m.dmScale>0) warn.push(`교정 단위가 <b>${E(m.unit)}</b> 입니다 — 회절 이미지가 아니라면 FFT (HRTEM) 모드를 쓰세요.`);
   if(m.eightBit) warn.push("8비트 표시용 사본입니다 — 포화된 스폿은 덩어리 중심으로 위치를 잡고 세기는 하한값입니다.");
   const L=calib(); const camL=m.kV&&m.camPx&&L.scale?(m.camPx*1e-6*m.bin)/(lambda(m.kV)*1e-9*L.scale*1e9)*1e3:null;
   return `<div class="card"><h3>Source</h3><div class="df-kv">
@@ -193,7 +193,7 @@ function calCard(){ const m=S.meta, c=calib(); const bar=S.res&&S.res.scaleBar; 
     <div class="row"><label class="f" title="후보 순위에 보정값을 쓸지 (Auto = 저장한 표준 보정·직접 넣은 값일 때만)">Rank with calibration<select id="dfRankCal">${[["auto","Auto"],["on","On"],["off","Off"]].map(([k,t])=>`<option value="${k}" ${P.rankCal===k?"selected":""}>${t}</option>`).join("")}</select></label><span class="muted">${c.rank?"순위에 보정 사용":"순위는 보정 없이"}</span></div>
     ${c.ellip>1.0001?`<div class="muted">저장한 보정의 찌그러짐 ${f((c.ellip-1)*100,2)} % (1/nm/px 가 큰 방향 ${f(c.phi*180/Math.PI,1)}°) 을 격자에 적용합니다.</div>`:""}</div></div>`; }
 function labelNote(){ const lb=S.res&&S.res.scaleLabel; if(!lb) return S.res&&S.res.scaleBar?"이름표 숫자를 읽지 못했습니다 — 값을 넣으세요.":"";
-  const t=`이름표 "${E(lb.text)}" 를 읽었습니다 (확신 ${f(lb.conf*100,0)} %)`; if(!lb.recip) return `<span class="df-kbad">${t} — 실공간 단위입니다. 회절 영상이 아니면 FFT (HRTEM) 모드를 쓰세요.</span>`;
+  const t=`이름표 "${E(lb.text)}" 를 읽었습니다 (확신 ${f(lb.conf*100,0)} %)`; if(!lb.recip) return `<span class="df-kbad">${t} — 실공간 단위입니다. 회절 이미지가 아니면 FFT (HRTEM) 모드를 쓰세요.</span>`;
   if(S.barFromOCR&&S.barVal===+lb.valueInvNm.toPrecision(6)) return lb.conf>=0.9?`${t} → 값에 넣었습니다.`:`<span class="df-kbad">${t} → 값에 넣었지만 확신이 낮습니다. 그림과 맞는지 확인하세요.</span>`; return t+"."; }
 function savedCalUI(){ const list=S.calList||[]; return list.length?`<label class="f">Saved calibration<select id="dfSaved"><option value="">— choose —</option>${list.map((c,i)=>`<option value="${i}" ${S.savedCal&&S.savedCal.id===c.id?"selected":""}>${E(c.name)} · ${E(c.scale.toPrecision(5))}${c.ellip>1.0001?` · e ${f((c.ellip-1)*100,1)}%`:""}</option>`).join("")}</select></label>`:`<div class="muted">저장한 보정이 없습니다. 표준 시료(Au·Al·Si 등) 패턴을 분석한 뒤 결과에서 'Use as calibration' 을 누르세요.</div>`; }
 function patternCard(){ return `<div class="card"><h3>Pattern</h3><div class="row">

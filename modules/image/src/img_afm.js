@@ -1,16 +1,16 @@
 /* ============================================================
    INNO Analytics — AFM·SPM 형식 읽기 (IMG_IO 에 덧붙임)
    · Gwyddion GWY (GWYP 직렬화): GwyContainer 안 GwyDataField(/N/data)·mask(/N/mask)·GwyBrick(/brick/N), 제목·SI 단위·meta.
-     그래프(1D)·XYZ 점 자료·curve map·spectra 는 영상이 아니므로 읽지 않고 알린다. GWYO(Gwyddion 1.x)는 읽지 않는다.
+     그래프(1D)·XYZ 점 자료·curve map·spectra 는 이미지가 아니므로 읽지 않고 알린다. GWYO(Gwyddion 1.x)는 읽지 않는다.
    · Gwyddion Simple Field (GSF): 머리(Key = Value) + NUL 채움(4 바이트 경계) + float32 LE.
    · Bruker/Veeco Nanoscope (.spm, .000–.999, .pfc): ASCII 머리(\*File list … \*File list end) + 16/32-bit 정수 자료.
      값 = 원시 정수 / 256^(Bytes/pixel) × @2:Z scale 의 hard value(V) × soft scale(@Sens. …, 예 nm/V).
      해석 규칙(머리 길이 찾기, 9.2 이후 32-bit, Ciao scan list 의 전역 해상도, 종횡비, 위아래 뒤집기)은 Gwyddion 2.64
      modules/file/nanoscope.c 의 동작을 따랐다 — 시험도 Gwyddion 이 같은 파일을 읽은 결과와 대조한다.
-     힘 곡선 파일(\*Force file list)·텍스트형(?*File list)은 읽지 않는다(분명한 오류). Force Volume 은 영상 채널만.
-   · Asylum Research ARDF (force map·fast force mapping): FTOC → IMAG(TTOC·IDEF·IBOX·IDAT·GAMI) 영상 채널.
+     힘 곡선 파일(\*Force file list)·텍스트형(?*File list)은 읽지 않는다(분명한 오류). Force Volume 은 이미지 채널만.
+   · Asylum Research ARDF (force map·fast force mapping): FTOC → IMAG(TTOC·IDEF·IBOX·IDAT·GAMI) 이미지 채널.
      IDEF 의 간격·단위·이름을 쓴다(Gwyddion 은 FastScanSize 와 제목으로 추정 — 정사각이 아니면 틀림).
-     영상은 Igor wave 처럼 첫 줄이 아래(IBW 와 같은 방향) — magic-afm 도 origin="lower" 로 그린다. 힘 곡선(VOLM)은 알리기만.
+     이미지는 Igor wave 처럼 첫 줄이 아래(IBW 와 같은 방향) — magic-afm 도 origin="lower" 로 그린다. 힘 곡선(VOLM)은 알리기만.
    값 단위: 길이(m)는 nm 로, N·Pa·A·F·S 는 값 크기에 맞는 접두어로(예 MPa, nN) 바꾸고 바꾼 배율을 정보에 적는다.
    ============================================================ */
 (function(){
@@ -164,9 +164,9 @@ function readGWY(name,u8){
   }
   const cnt=re=>keys.filter(k=>re.test(k)).length;
   const ng=cnt(/^\/\d+\/graph\/graph\/\d+$/)+cnt(/^\/graph\/\d+$/), nx=cnt(/^\/xyz\/\d+$/), nl=cnt(/^\/lawn\/\d+$/), ns=cnt(/^\/sps\/\d+$/)+cnt(/^\/\d+\/spectra$/);
-  if(ng) warn.push(`그래프(1D) ${ng} 개는 영상이 아니므로 읽지 않았습니다`); if(nx) warn.push(`XYZ 점 자료 ${nx} 개는 격자가 아니므로 읽지 않았습니다`);
+  if(ng) warn.push(`그래프(1D) ${ng} 개는 이미지가 아니므로 읽지 않았습니다`); if(nx) warn.push(`XYZ 점 자료 ${nx} 개는 격자가 아니므로 읽지 않았습니다`);
   if(nl) warn.push(`curve map(lawn) ${nl} 개는 읽지 않았습니다`); if(ns) warn.push(`분광(spectra) ${ns} 묶음은 읽지 않았습니다`);
-  if(!imgs.length) throw new Error("GWY 안에 영상(GwyDataField·GwyBrick)이 없습니다"+(warn.length?" — "+warn.join(", "):""));
+  if(!imgs.length) throw new Error("GWY 안에 이미지(GwyDataField·GwyBrick)가 없습니다"+(warn.length?" — "+warn.join(", "):""));
   return {images:imgs,warn};
 }
 
@@ -227,8 +227,8 @@ function readNanoscope(name,u8){
   for(const L of lists){ const om=get(L,"Operating mode"); if(om) mode=om.hvStr; if(/^(File list|EC File list|Force file list)$/.test(L.self)){ const v=get(L,"Version"); if(v) version=parseInt(v.hvStr,16)||0; const sc=get(L,"Start context"); if(sc) startCtx=sc.hvStr; } }
   let kind=mode==="Force Volume"?"fvol":mode==="Force"?"force":mode==="Image"?"image":(forceMagic?"force":"image");
   if(startCtx==="FVOL"&&kind==="image") kind="fvol"; if(startCtx==="FOL") kind="force"; else if(startCtx&&/VAR$/.test(startCtx)&&kind==="image") kind="profiles";
-  if(kind==="force") throw new Error("Nanoscope 힘 곡선 파일(Force)입니다 — 영상이 아니어서 읽지 않습니다");
-  if(kind==="profiles") throw new Error("Nanoscope 단면(profile) 묶음 파일(Deep Trench 등)입니다 — 영상이 아니어서 읽지 않습니다");
+  if(kind==="force") throw new Error("Nanoscope 힘 곡선 파일(Force)입니다 — 이미지가 아니어서 읽지 않습니다");
+  if(kind==="profiles") throw new Error("Nanoscope 단면(profile) 묶음 파일(Deep Trench 등)입니다 — 이미지가 아니어서 읽지 않습니다");
   const bpp=version>=0x09200000?4:2;
   let scanner=null, scan=null, contr=null, gx=0, gy=0, gNonsq=false; const imgs=[], warn=[]; let nForceImg=0;
   const nonsq=L=>{ const v=get(L,"Aspect ratio"); if(!v||v.hvStr==="1:1") return false; const a=parseFloat(v.hvStr); return a>0&&a!==1; };
@@ -259,8 +259,8 @@ function readNanoscope(name,u8){
     if(!ok) throw new Error(`Nanoscope: 자료 크기가 맞지 않습니다 (기대 ${bpp*W*H} 바이트, 머리 ${size})`);
     if(glob){ if(gxx){ xr*=gxx/W; W=gxx; } if(gyy){ yr*=gyy/H; H=gyy; } }
     else if(ns){ if(gNonsq){ yr*=H; yr/=W; } else { yr*=H; yr/=gyy; } }
-    if(!(W>0&&H>0)) throw new Error("Nanoscope: 영상 크기가 0 입니다");
-    if(W*H*4>IO.MAXBYTES) throw new Error("Nanoscope: 영상이 너무 큽니다");
+    if(!(W>0&&H>0)) throw new Error("Nanoscope: 이미지 크기가 0 입니다");
+    if(W*H*4>IO.MAXBYTES) throw new Error("Nanoscope: 이미지가 너무 큽니다");
     const sc=nsScale(L); const k=sc.q/Math.pow(256,qbpp);
     const dv=new DataView(u8.buffer,u8.byteOffset+off,bpp*W*H); const raw=new Float64Array(W*H);
     for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=y*W+x; const r=bpp===4?dv.getInt32(4*i,true):dv.getInt16(2*i,true); raw[(H-1-y)*W+x]=r*k; } // 첫 줄이 아래 (Gwyddion: invert)
@@ -284,8 +284,8 @@ function readNanoscope(name,u8){
       return {q,unit:{p10:0,u:u.u},base:unitStr(u),how:`${g6(v.hv)} ${v.hvU||"V"} × ${v.soft} ${g6(sv.hv)} ${sv.hvU}`}; }
     const u=unitParse(v.hvU); return {q:v.hv*Math.pow(10,u.p10),unit:{p10:0,u:u.u},base:unitStr(u),how:`${g6(v.hv)} ${v.hvU||""} (soft scale 없음)`};
   }
-  if(nForceImg) warn.push(`Force Volume: 힘 곡선 묶음 ${nForceImg} 개는 읽지 않았습니다 (영상 채널만)`);
-  if(!imgs.length) throw new Error("Nanoscope 파일에 영상 채널이 없습니다");
+  if(nForceImg) warn.push(`Force Volume: 힘 곡선 묶음 ${nForceImg} 개는 읽지 않았습니다 (이미지 채널만)`);
+  if(!imgs.length) throw new Error("Nanoscope 파일에 이미지 채널이 없습니다");
   return {images:imgs,warn};
 }
 
@@ -322,7 +322,7 @@ function readARDF(name,u8){
       const xu=cs(o+40,32), yu=cs(o+72,32), title=cs(o+104,32), units=cs(o+136,32);
       const ib=hdr(d.o+184,"IBOX",32); const isz=u64(ib.o+16), nl=dv.getUint32(ib.o+24,true), st=dv.getUint32(ib.o+28,true);
       if(nl!==H||st!==16+4*W) throw new Error(`ARDF: '${title}' 의 IBOX(${nl} 줄, 줄 ${st} 바이트)가 IDEF(${W}×${H})와 맞지 않습니다`);
-      if(ib.o+32+H*st>N||ib.o+isz>N) throw new Error(`ARDF: '${title}' 영상 자료가 파일 끝을 넘습니다 (파일이 잘림)`);
+      if(ib.o+32+H*st>N||ib.o+isz>N) throw new Error(`ARDF: '${title}' 이미지 자료가 파일 끝을 넘습니다 (파일이 잘림)`);
       hdr(ib.o+isz,"GAMI",16);
       if(W*H*4>IO.MAXBYTES) throw new Error(`ARDF: '${title}' 이 너무 큽니다`);
       const raw=new Float64Array(W*H); let empty=0;
@@ -339,11 +339,11 @@ function readARDF(name,u8){
     } else if(e.name==="VOLM"){
       try{ const vt=toc(e.p,"VOLM",24); const tt=toc(vt.end,"TTOC",32); const vd=hdr(tt.end,"VDEF"); const P=dv.getUint32(vd.o+16,true), Lh=dv.getUint32(vd.o+20,true); const ch=[]; let q=vd.o+vd.size;
         for(let i=0;i<16;i++){ const h=hdr(q); if(h.name!=="VCHN") break; ch.push(cs(q+16,32)); q+=h.size; }
-        warn.push(`힘 곡선 묶음(VOLM) ${P}×${Lh} 점${ch.length?" — 채널 "+ch.join("·"):""} 은 읽지 않았습니다 (영상 채널만 읽음)`); }
-      catch(err){ warn.push("힘 곡선 묶음(VOLM)이 있으나 구조를 해석하지 못했습니다 — 영상 채널은 정상 ("+err.message+")"); }
+        warn.push(`힘 곡선 묶음(VOLM) ${P}×${Lh} 점${ch.length?" — 채널 "+ch.join("·"):""} 은 읽지 않았습니다 (이미지 채널만 읽음)`); }
+      catch(err){ warn.push("힘 곡선 묶음(VOLM)이 있으나 구조를 해석하지 못했습니다 — 이미지 채널은 정상 ("+err.message+")"); }
     } else warn.push(`ARDF 목차 항목 '${e.name}' 은 읽지 않았습니다`);
   }
-  if(!imgs.length) throw new Error("ARDF 안에 영상 채널(IMAG)이 없습니다"+(warn.length?" — "+warn.join(" "):""));
+  if(!imgs.length) throw new Error("ARDF 안에 이미지 채널(IMAG)이 없습니다"+(warn.length?" — "+warn.join(" "):""));
   return {images:imgs,warn};
 }
 

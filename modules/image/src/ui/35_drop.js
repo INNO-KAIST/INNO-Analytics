@@ -1,8 +1,8 @@
 /* ============================================================
    Drop 패널 — 접촉각(sessile drop) · 펜던트 드랍(pendant drop) 표면장력
    계산: core/88_drop.js (IMG_CORE.contactAngle / pendantDrop, Worker)
-   영역 = 사각형 ROI (없으면 영상 전체) · 기준선 = 자동(기판 윗면 RANSAC) 또는 선 ROI 로 지정
-   결과: S.drops (아래 'Drop' 표), 덧그림 S.dropFit[영상 id]
+   영역 = 사각형 ROI (없으면 이미지 전체) · 기준선 = 자동(기판 윗면 RANSAC) 또는 선 ROI 로 지정
+   결과: S.drops (아래 'Drop' 표), 덧그림 S.dropFit[이미지 id]
    ============================================================ */
 const DROP_M=[["yl","Young–Laplace"],["poly","Tangent (polynomial)"],["ellipse","Ellipse"],["circle","Circle (spherical cap)"]];
 const DROP_COL={yl:"#ff3ccf",poly:"#2bdc4a",ellipse:"#ffa000",circle:"#4ea6ff"};
@@ -16,9 +16,9 @@ function dropFrames(im,P){ if(P.frames!=="all"||!isStack(im)) return [{z:im.z,t:
 function dropRegion(im,P){ if(P.roi&&P.roi.length===4){ const [x0,y0,x1,y1]=P.roi; return {x0,y0,x1,y1}; } return null; }
 
 op("drop",{label:"Drop Shape",group:"meas",hidden:true,kind:"measure",params:[],
-  run:async(im,P)=>{ /* 색 영상은 밝기(0.299 R + 0.587 G + 0.114 B)로 */
+  run:async(im,P)=>{ /* 색 이미지는 밝기(0.299 R + 0.587 G + 0.114 B)로 */
     const fr=dropFrames(im,P); const roi=dropRegion(im,P); const mmpp=P.pxMM>0?+P.pxMM:mmPerPxOf(im); const rows=[]; let last=null, lastF=null, fails=0; const runId=uid(); const pre=[];
-    if(P.imgW&&(P.imgW!==im.w||P.imgH!==im.h)&&(P.roi||P.baseline)) pre.push(`기록한 영역·기준선은 ${P.imgW}×${P.imgH} 영상의 좌표입니다 — 이 영상(${im.w}×${im.h})에서는 자리가 맞지 않을 수 있습니다`);
+    if(P.imgW&&(P.imgW!==im.w||P.imgH!==im.h)&&(P.roi||P.baseline)) pre.push(`기록한 영역·기준선은 ${P.imgW}×${P.imgH} 이미지의 좌표입니다 — 이 이미지(${im.w}×${im.h})에서는 자리가 맞지 않을 수 있습니다`);
     if(calAniso(im)) pre.push("화소가 가로·세로 크기가 달라(비등방) 형상 맞춤이 맞지 않습니다 — 먼저 Scale 로 정사각 화소로");
     for(let k=0;k<fr.length;k++){ const f=fr[k]; if(fr.length>1) setProg(`Drop ${k+1}/${fr.length}`,k/fr.length);
       const pl=im.rgb?lumaPlane(im,f.z,f.t):planeAt(im,im.c,f.z,f.t);
@@ -54,16 +54,16 @@ function panelDrop(el,im){ const D=dropUi(); const a=activeRoi(im); const roiR=a
   const pend=D.mode==="pendant";
   el.innerHTML=`<hr class="im-hr"><div class="im-h">Drop Shape <span class="muted xs">접촉각 · 펜던트 드랍</span></div>
   <div class="im-row"><div class="seg" id="dpMode"><button data-m="sessile" class="${pend?"":"active"}">Contact angle</button><button data-m="pendant" class="${pend?"active":""}">Pendant drop</button></div></div>
-  <div class="xs muted">${pend?"방울이 바늘 아래에 매달린 영상. 영역(사각형 ROI)의 <b>위쪽 테두리가 바늘을 가로지르게</b> 잡으세요 — 바늘 폭으로 눈금을 정합니다.":"기판 위 방울의 옆모습. 영역(사각형 ROI)에 방울과 그 아래 기판 윗면이 들어가게 잡으세요. 거울 같은 기판(반사상)은 기준선을 직접 그으세요."}</div>
+  <div class="xs muted">${pend?"방울이 바늘 아래에 매달린 이미지. 영역(사각형 ROI)의 <b>위쪽 테두리가 바늘을 가로지르게</b> 잡으세요 — 바늘 폭으로 눈금을 정합니다.":"기판 위 방울의 옆모습. 영역(사각형 ROI)에 방울과 그 아래 기판 윗면이 들어가게 잡으세요. 거울 같은 기판(반사상)은 기준선을 직접 그으세요."}</div>
   <div class="im-row"><span class="xs">Region: <b>${roiR?`rect ${Math.round(roiR.w)}×${Math.round(roiR.h)} @ (${Math.round(roiR.x)}, ${Math.round(roiR.y)})`:"whole image"}</b></span><span class="xs muted">${roiR?"":"— 사각형 ROI 를 그리면 그 안만"}</span></div>
-  ${pend?`<div class="im-row"><label class="im-f"><span>Needle Ø</span><input type="number" id="dpNd" value="${esc(D.needleMM)}" step="any" min="0" placeholder="mm"><span class="u">mm</span></label><span class="xs muted">${mmpp?`없으면 영상 눈금 ${g4(mmpp*1000)} µm/px 사용`:"바늘 바깥 지름 (예: 22 G = 0.718 mm)"}</span></div>`
+  ${pend?`<div class="im-row"><label class="im-f"><span>Needle Ø</span><input type="number" id="dpNd" value="${esc(D.needleMM)}" step="any" min="0" placeholder="mm"><span class="u">mm</span></label><span class="xs muted">${mmpp?`없으면 이미지 눈금 ${g4(mmpp*1000)} µm/px 사용`:"바늘 바깥 지름 (예: 22 G = 0.718 mm)"}</span></div>`
   :`<div class="im-row"><span class="xs">Baseline: <b>${B?`line (${B[0].map(v=>v.toFixed(0)).join(", ")}) → (${B[1].map(v=>v.toFixed(0)).join(", ")})`:"auto (substrate edge)"}</b></span><span class="sp"></span><button class="btn xs" id="dpBl" ${line?"":"disabled"} title="Draw a straight line along the substrate surface first">Use line ROI</button><button class="btn xs" id="dpBlA" ${B?"":"disabled"}>Auto</button></div>
   <div class="im-row">${DROP_M.map(([k,l])=>`<label class="im-chk"><input type="checkbox" data-dm="${k}" ${D.methods.includes(k)?"checked":""}> <i class="im-dot" style="background:${DROP_COL[k]}"></i>${esc(l)}</label>`).join("")}</div>`}
   <details class="im-det" ${D.physOpen?"open":""} id="dpPhys"><summary class="xs">Densities · gravity ${pend?"":"(volume · Bond 수 용)"}</summary>
    <div class="im-row"><label class="im-f"><span>ρ drop</span><input type="number" id="dpRi" value="${esc(D.rhoIn)}" step="any"><span class="u">kg/m³</span></label><label class="im-f"><span>ρ outside</span><input type="number" id="dpRo" value="${esc(D.rhoOut)}" step="any"><span class="u">kg/m³</span></label></div>
    <div class="im-row"><label class="im-f"><span>g</span><input type="number" id="dpG" value="${esc(D.g)}" step="any"><span class="u">m/s²</span></label><span class="xs muted">물 20 °C 998.2 · 공기 1.204 · 표준 중력 9.80665</span></div></details>
   ${isStack(im)?`<div class="im-row"><label class="im-f"><span>Frames</span><select class="im-sel" id="dpFr"><option value="current" ${D.frames!=="all"?"selected":""}>Current</option><option value="all" ${D.frames==="all"?"selected":""}>All ${im.nt>1?im.nt:im.nz} (time series)</option></select></label></div>`:""}
-  ${!mmpp&&!pend?`<div class="xs muted">영상 눈금이 없어 부피·지름은 빼고 각만 계산합니다 (Adjust ▸ Set Scale).</div>`:""}
+  ${!mmpp&&!pend?`<div class="xs muted">이미지 눈금이 없어 부피·지름은 빼고 각만 계산합니다 (Adjust ▸ Set Scale).</div>`:""}
   <div class="im-row"><span class="sp"></span><button class="btn sm" id="dpClr" ${fit?"":"disabled"}>Clear overlay</button><button class="btn primary sm" id="dpRun">${pend?"Measure γ":"Measure θ"}</button></div>
   ${fit?dropCard(im,fit):""}
   <div class="xs muted">${pend?"Young–Laplace 맞춤(Rotenberg 1983 · Berry 2015). γ = Δρ g R0² / Bo. Worthington 수 Wo = Δρ g V / (π γ D) 가 1 에 가까울수록 정밀.":"Young–Laplace(축대칭, 중력 포함)가 기준. 원은 Bo ≈ 0(작은 방울)에서만 맞고, 접선법은 접촉점 둘레만 봅니다."}</div>`;

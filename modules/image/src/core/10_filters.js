@@ -349,7 +349,7 @@ IC.unsharp=function(p,o){
 };
 
 /* ---------- Subtract Background — Rolling ball (ij/plugin/filter/BackgroundSubtracter.java) ----------
-   ImageJ 와 같이: 반지름 > 10 이면 영상을 줄여(최솟값) 공을 굴리고 쌍선형으로 되돌린다.
+   ImageJ 와 같이: 반지름 > 10 이면 이미지를 줄여(최솟값) 공을 굴리고 쌍선형으로 되돌린다.
    공은 위쪽 일부만 쓴다(arcTrim 24/32/40 %). 사전 3×3 평균(smoothing) 기본 켬.
    o: {radius, light, createBackground, smooth(기본 true)} */
 function rollingBall(radius){
@@ -407,7 +407,7 @@ function filter3mean(px,w,h){
 IC.rollingBackground=function(p,o){
   const W=p.w,H=p.h, radius=+o.radius, invert=!!o.light, smooth=o.smooth!==false;
   const ball=rollingBall(radius);
-  if(ball.shrink>1&&(Math.ceil(W/ball.shrink)<2||Math.ceil(H/ball.shrink)<2)) throw new Error(`Subtract Background: 영상(${W}×${H})이 반지름 ${radius} 에 비해 너무 얇습니다 — 반지름을 줄이세요 (ImageJ 도 처리하지 않음)`);
+  if(ball.shrink>1&&(Math.ceil(W/ball.shrink)<2||Math.ceil(H/ball.shrink)<2)) throw new Error(`Subtract Background: 이미지(${W}×${H})가 반지름 ${radius} 에 비해 너무 얇습니다 — 반지름을 줄이세요 (ImageJ 도 처리하지 않음)`);
   const bg=Float32Array.from(p.data);
   if(invert) for(let i=0;i<bg.length;i++) bg[i]=-bg[i];
   if(smooth) filter3mean(bg,W,H);

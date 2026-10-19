@@ -1,9 +1,9 @@
 /* ============================================================
    INNO Analytics — Leica LIF 읽기 (IMG_IO 에 덧붙임)
    · 구조: [0x70, 크기, 0x2A, 글자 수, XML(UTF-16LE)] 다음에 memory block 이 잇달아 — [0x70, ?, 0x2A, 크기(v1 int32 · v2 int64), 0x2A, 글자 수, ID(UTF-16LE), 자료].
-   · XML 의 Element 마다 Data/Image/ImageDescription 이 영상 하나: Channels(ChannelDescription: Resolution·DataType·BytesInc·LUTName),
+   · XML 의 Element 마다 Data/Image/ImageDescription 이 이미지 하나: Channels(ChannelDescription: Resolution·DataType·BytesInc·LUTName),
      Dimensions(DimensionDescription: DimID 1 X·2 Y·3 Z·4 T·5 λ·9 Λ·10 tile(M) …, NumberOfElements·Length·Unit·BytesInc), Memory(MemoryBlockID·Size).
-   · 앞의 두 차원이 영상 면(XZ 주사면 세로 = Z), 남은 공간 차원 하나 = Z, 시간·파장 차원(T·λ·Λ·그 밖)은 하나의 T 로 잇는다, tile(M)마다 영상 따로 —
+   · 앞의 두 차원이 이미지 면(XZ 주사면 세로 = Z), 남은 공간 차원 하나 = Z, 시간·파장 차원(T·λ·Λ·그 밖)은 하나의 T 로 잇는다, tile(M)마다 이미지 따로 —
      Bio-Formats(LIFReader) 와 같은 배치. 화소 크기 = Length/(N−1) (Bio-Formats·liffile 과 같음).
    · 시험: 실측 LIF 9 파일(readlif·bioio-lif 시험 자료)의 모든 series 를 Bio-Formats 7.3.1 과 liffile(C. Gohlke) 이 읽은 값과 대조.
    ============================================================ */
@@ -55,13 +55,13 @@ async function readLIF(name,u8,ctx){
     if(p+2*sl>N){ warn.push(`memory block 이름이 파일 끝에서 잘렸습니다 (바이트 ${o})`); break; }
     const id=td16.decode(u8.subarray(p,p+2*sl)); p+=2*sl;
     blocks.set(id,{off:p,size,avail:Math.max(0,Math.min(size,N-p))}); o=p+size; }
-  // 영상 요소 (문서 순서)
+  // 이미지 요소 (문서 순서)
   const series=[]; const walk=(el,pre)=>{ for(const e of kids(el,"Element")){ const nm=e.a.Name||""; const full=pre?pre+"/"+nm:nm;
       const img=path(e,"Data/Image"), mem=kid(e,"Memory");
       if(img&&kid(img,"ImageDescription")&&mem&&+mem.a.Size>0) series.push({el:e,img,mem,name:nm,path:full});
       const ch=kid(e,"Children"); if(ch) walk(ch,full); } };
   walk(hdr,"");
-  if(!series.length) throw new Error("LIF 안에 영상이 없습니다");
+  if(!series.length) throw new Error("LIF 안에 이미지가 없습니다");
   // 이름: 잎 이름이 겹치면 경로(맨 위 요소 뺌)로
   { const cnt=new Map(); for(const s of series) cnt.set(s.name,(cnt.get(s.name)||0)+1);
     for(const s of series) if(cnt.get(s.name)>1){ const q=s.path.split("/"); s.name=q.length>1?q.slice(1).join("/"):s.path; } }
@@ -89,7 +89,7 @@ async function readLIF(name,u8,ctx){
       const tags=C.map(c=>c.tag); order=tags.every(t=>t>=1&&t<=3)&&new Set(tags).size===3?[1,2,3].map(t=>tags.indexOf(t)):C.map((_,k)=>k).sort((a,b)=>C[b].inc-C[a].inc); }
     for(let m=0;m<nM;m++) plan.push({s,D,C,bps,fx,fy,zD,mD,tDs,nz,nt,m,nM,blk,rgb,order});
   }
-  if(!plan.length) throw new Error("LIF 안에 읽을 영상이 없습니다"+(warn.length?" — "+warn.join(", "):""));
+  if(!plan.length) throw new Error("LIF 안에 읽을 이미지가 없습니다"+(warn.length?" — "+warn.join(", "):""));
   // 고르기 (위치 = series·tile). series 마다 Z·T 가 다르면 가장 큰 값으로 묻고 series 마다 그 안의 것만
   const nc0=plan[0].C.length; const same=plan.every(p=>p.fx.n===plan[0].fx.n&&p.fy.n===plan[0].fy.n&&p.nz===plan[0].nz&&p.nt===plan[0].nt&&p.C.length===nc0);
   const posBytes=plan.map(p=>p.fx.n*p.fy.n*p.C.length*p.nz*p.nt*4);
@@ -99,7 +99,7 @@ async function readLIF(name,u8,ctx){
     if(!r) return {images:[],warn:[],cancel:true}; sel=Object.assign(sel,r); }
   const pick=(list,n)=>n<=1?[0]:list?list.filter(v=>v<n):[...Array(n).keys()];
   const tot=sel.p.reduce((a,i)=>{ const P=plan[i]; return a+posBytes[i]*pick(sel.z,P.nz).length/P.nz*pick(sel.t,P.nt).length/P.nt; },0);
-  const lim=(ctx&&ctx.maxBytes)||IO.MAXBYTES; if(tot>lim) throw new Error(`LIF: 고른 영상이 너무 큼 (${(tot/1e9).toFixed(2)} GB, 32-bit 메모리 한도 ${(lim/1e9).toFixed(1)} GB) — 위치·Z·T 일부만 고르세요`);
+  const lim=(ctx&&ctx.maxBytes)||IO.MAXBYTES; if(tot>lim) throw new Error(`LIF: 고른 이미지가 너무 큼 (${(tot/1e9).toFixed(2)} GB, 32-bit 메모리 한도 ${(lim/1e9).toFixed(1)} GB) — 위치·Z·T 일부만 고르세요`);
   const images=[]; let done=0; const allPl=sel.p.reduce((a,i)=>a+pick(sel.z,plan[i].nz).length*pick(sel.t,plan[i].nt).length,0)||1;
   for(const pi of sel.p){ const P=plan[pi]; const {D,C,bps,fx,fy,zD,mD,tDs,nz,nt,blk,rgb,order}=P; const W=fx.n, H=fy.n, nc=C.length;
     const zs=pick(sel.z,nz), ts=pick(sel.t,nt);
@@ -135,8 +135,8 @@ async function readLIF(name,u8,ctx){
     else { const names=chanNames(P.s,C); const luts=C.map(c=>LUTN[(c.lut||"").toLowerCase()]||null);
       images.push({...common,bit,rgb:false,chNames:names,chLut:luts.some(Boolean)?luts:null}); }
   }
-  if(!images.length) throw new Error("LIF: 읽은 영상이 없습니다"+(warn.length?" — "+warn.join(", "):""));
-  { const fst=plan[sel.p[0]].s.el; const t=xml.slice(fst.s0,fst.s1); images[0].metaText=t.length>200000?t.slice(0,200000)+"…":t; } // 첫 영상 요소의 XML 원문 (저장 공간 — 첫 영상에만)
+  if(!images.length) throw new Error("LIF: 읽은 이미지가 없습니다"+(warn.length?" — "+warn.join(", "):""));
+  { const fst=plan[sel.p[0]].s.el; const t=xml.slice(fst.s0,fst.s1); images[0].metaText=t.length>200000?t.slice(0,200000)+"…":t; } // 첫 이미지 요소의 XML 원문 (저장 공간 — 첫 이미지에만)
   return {images,warn};
 }
 /* 채널 이름: ChannelProperty DyeName → (모두 없으면) HardwareSetting 의 MultiBand DyeName(채널 수와 같을 때) → 순차 주사 단계마다 하나씩 → C1… (liffile 과 같은 차례) */

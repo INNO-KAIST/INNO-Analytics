@@ -1,6 +1,6 @@
 /* ============================================================
-   INNO Analytics — Diffraction: 영상에서 패턴 읽기 (SAED 스폿·링). DOM 없음, Worker·Node 공용.
-   · mask: 빔스토퍼(어둡고 큰 덩어리), 영상 위 글자·스케일바(가늘고 밝은 선)
+   INNO Analytics — Diffraction: 이미지에서 패턴 읽기 (SAED 스폿·링). DOM 없음, Worker·Node 공용.
+   · mask: 빔스토퍼(어둡고 큰 덩어리), 이미지 위 글자·스케일바(가늘고 밝은 선)
    · spots: 대역 통과(가우스 차) → 국소 최대 → 배경 뺀 무게 중심 (부화소)
    · center: 직접빔 → 없으면 Friedel 짝 투표(세기 닮음 가중, 빔스토퍼 안 우선)
    · lattice: 짧은 벡터 쌍으로 2D 역격자 → 가장 성긴(점유율 높은) 격자 → 모든 지수 스폿으로 최소제곱(중심 포함) → R1·R2·R3, 불확도
@@ -69,13 +69,13 @@ DP.findOverlay=function(img,w,h){ let mx=-Infinity; for(let i=0;i<img.length;i++
   const box=(x0,x1,y0,y1)=>{ for(let y=Math.max(0,y0);y<=Math.min(h-1,y1);y++) for(let x=Math.max(0,x0);x<=Math.min(w-1,x1);x++) mask[y*w+x]=1; };
   for(const t of text) box(t.x0-2,t.x1+2,t.y0-2,t.y1+2); for(const b of bars) box(b.x0-10,b.x1+10,b.y0-4*b.thick-30,b.y1+10);
   return {mask:dilate(w,h,mask,3),bars,text}; };
-/* 빔스토퍼: 배경 중앙값의 25 % 보다 어둡고 큰(영상의 0.2 % 이상) 성분 */
+/* 빔스토퍼: 배경 중앙값의 25 % 보다 어둡고 큰(이미지의 0.2 % 이상) 성분 */
 DP.findBeamStop=function(img,w,h,opt){ opt=opt||{}; const [lo,med,hi]=DP.percentiles(img,[1,50,99.5]);
-  // 배경이 바닥값으로 잘린 영상(8-bit 내보내기의 검은 배경): 빔스토퍼를 어둡기로 가를 수 없다 → 가리지 않는다 (가리면 영상 대부분이 사라짐)
+  // 배경이 바닥값으로 잘린 이미지(8-bit 내보내기의 검은 배경): 빔스토퍼를 어둡기로 가를 수 없다 → 가리지 않는다 (가리면 이미지 대부분이 사라짐)
   if(!(med-lo>0.02*(hi-lo))) return {mask:new Uint8Array(w*h),parts:[],clipped:true};
   const thr=lo+(med-lo)*(opt.frac||0.25);
   const comps=DP.components(w,h,i=>img[i]<=thr,Math.max(50,Math.round(0.002*w*h))); const mask=new Uint8Array(w*h); const parts=[];
-  for(const c of comps){ if(c.n>0.25*w*h) continue; // 영상의 1/4 넘는 어두운 덩어리는 빔스토퍼가 아니라 배경 — 가장자리의 작은 어두운 띠(검출기 바깥)는 가린다
+  for(const c of comps){ if(c.n>0.25*w*h) continue; // 이미지의 1/4 넘는 어두운 덩어리는 빔스토퍼가 아니라 배경 — 가장자리의 작은 어두운 띠(검출기 바깥)는 가린다
     let sx=0,sy=0; for(const p of c.px){ mask[p]=1; sx+=p%w; sy+=(p-p%w)/w; } parts.push({n:c.n,cx:sx/c.n,cy:sy/c.n,x0:c.x0,x1:c.x1,y0:c.y0,y1:c.y1}); }
   return {mask:dilate(w,h,mask,opt.pad!=null?opt.pad:4),parts}; };
 
@@ -93,7 +93,7 @@ DP.noiseMap=function(d,w,h,mask,blk){ const nx=Math.max(1,Math.round(w/blk)), ny
 /* opt: sigma(스폿 크기, px), bg(배경 σ), k(잡음 배수), minDist, mask */
 DP.findSpots=function(img,w,h,opt){ opt=opt||{}; const sz=Math.max(w,h); const s1=opt.sigma||Math.max(1,sz/1024*1.5), s2=opt.bg||s1*6; const mask=opt.mask||null;
   const a=DP.blur(img,w,h,s1,mask), b=DP.blur(img,w,h,s2,mask); const d=new Float32Array(w*h); for(let i=0;i<w*h;i++) d[i]=mask&&mask[i]?0:a[i]-b[i];
-  // 잡음: 칸마다 대역 통과 값의 MAD → 쌍선형 보간. Poisson 잡음은 배경 세기를 따르므로, 영상 전체 한 값이면 밝은 가운데에서 거짓 스폿이 생긴다
+  // 잡음: 칸마다 대역 통과 값의 MAD → 쌍선형 보간. Poisson 잡음은 배경 세기를 따르므로, 이미지 전체 한 값이면 밝은 가운데에서 거짓 스폿이 생긴다
   const nz=DP.noiseMap(d,w,h,mask,opt.block||Math.max(32,Math.round(8*s2))); const mad=nz.global; const kk=opt.k||6;
   // 포화 덩어리: 최댓값(잘림)과 같은 화소가 이어진 4 화소 이상 (8-bit 내보내기, 검출기 포화). 고원은 DoG 가 가장자리 고리로 잘못 잡으므로 덩어리 하나 = 스폿 하나
   let vmax=-Infinity; for(let i=0;i<w*h;i++) if(!(mask&&mask[i])&&img[i]>vmax) vmax=img[i];
@@ -114,7 +114,7 @@ DP.findSpots=function(img,w,h,opt){ opt=opt||{}; const sz=Math.max(w,h); const s
   spots.sort((p,q)=>q.I-p.I); return {spots,noise:mad,k:kk,noiseMap:nz,saturated:blobs.length}; };
 
 /* ---------- 중심 ---------- */
-/* 직접빔이 보이면 가장 크고 밝은 스폿(영상 가운데 쪽), 아니면 Friedel 짝 중점 투표 */
+/* 직접빔이 보이면 가장 크고 밝은 스폿(이미지 가운데 쪽), 아니면 Friedel 짝 중점 투표 */
 DP.findCenter=function(spots,w,h,opt){ opt=opt||{}; const stop=opt.beamStop; const top=spots.slice(0,Math.min(80,spots.length));
   if(top.length<2) return null; const tol=opt.tol||Math.max(1.5,Math.max(w,h)/1024*2);
   // 후보 중점: 세기가 비슷한 짝 (작은 쪽/큰 쪽 ≥ 0.33)
@@ -144,7 +144,7 @@ DP.findCenter=function(spots,w,h,opt){ opt=opt||{}; const stop=opt.beamStop; con
   const res=cands.map(c=>{ const r=support(c); r.src=c.src; if(c.spot) r.direct=c.spot; r.valid=valid(r); return r; }).filter(r=>r.pairs>=2);
   const order=(p,q)=>q.pairs-p.pairs||(p.src==="friedel"?-1:1); const ok=res.filter(r=>r.valid).sort(order), all=res.slice().sort(order);
   let pick=ok[0]||all[0];
-  // 사용자가 찍은 중심: 그 근처(영상 크기의 5 % 또는 30 px 안)에서 거울 짝으로 다듬은 점을 쓴다
+  // 사용자가 찍은 중심: 그 근처(이미지 크기의 5 % 또는 30 px 안)에서 거울 짝으로 다듬은 점을 쓴다
   if(opt.hint){ const lim=Math.max(30,0.05*Math.max(w,h)); const near=res.filter(r=>Math.hypot(r.x-opt.hint.x,r.y-opt.hint.y)<=lim).sort((p,q)=>q.pairs-p.pairs); pick=near[0]||null;
     if(!pick) return {x:opt.hint.x,y:opt.hint.y,pairs:0,source:"user",origin:"user"}; pick.src="user"; pick.valid=pick.valid||"user"; }
   if(pick){ const out=Object.assign({},best,{x:pick.x,y:pick.y,pairs:pick.pairs,source:pick.src,origin:pick.valid||"none"}); if(pick.direct) out.directBeam=pick.direct;
@@ -290,7 +290,7 @@ function cubicRoots(a,b,c,d){ b/=a; c/=a; d/=a; const q=(3*c-b*b)/9, r=(9*b*c-27
 /* 타원 보정 방위 적분: 화소를 원으로 펴서(장축 방향으로 b/a 배) 반지름 칸(0.5 px)의 평균 */
 DP.azimuthal=function(img,w,h,el,opt){ opt=opt||{}; const mask=opt.mask; const step=opt.step||0.5; const cs=Math.cos(el.phi), sn=Math.sin(el.phi); const k=el.b/el.a; // 장축 성분을 k 배 → 반지름 = 단축 기준
   const rmax=opt.rmax||Math.hypot(w,h); const nb=Math.ceil(rmax/step)+1; const sum=new Float64Array(nb), cnt=new Float64Array(nb);
-  const inv=1/step; // 줄마다 u·v 를 증분으로 (큰 영상에서 화소 1 천만 개 넘게 돈다)
+  const inv=1/step; // 줄마다 u·v 를 증분으로 (큰 이미지에서 화소 1 천만 개 넘게 돈다)
   for(let y=0;y<h;y++){ const dy=y-el.cy; let u=(0-el.cx)*cs+dy*sn, v=-(0-el.cx)*sn+dy*cs; const row=y*w;
     for(let x=0;x<w;x++,u+=cs,v-=sn){ const i=row+x; if(mask&&mask[i]) continue; const uk=u*k; const b=(Math.sqrt(uk*uk+v*v)*inv+0.5)|0; if(b<nb){ sum[b]+=img[i]; cnt[b]++; } } }
   const r=[], I=[], n=[]; for(let b=0;b<nb;b++){ if(cnt[b]<3) continue; r.push(b*step); I.push(sum[b]/cnt[b]); n.push(cnt[b]); } return {r,I,n,radiusIs:"minor"}; };
@@ -325,7 +325,7 @@ DP.peaks1d=function(r,y,bg,opt){ opt=opt||{}; const n=y.length; const d=y.map((v
   if(out.length>=3){ const f=out.map(p=>p.fwhm).sort((a,b)=>a-b); const med=f[f.length>>1]; for(const p of out) p.broad=p.fwhm>2.5*med; }
   return {peaks:out,noise:gNoise}; };
 
-/* 링 중심 자동: 줄인 영상(≤ 512)에서 방위 평균 프로파일이 가장 날카로운 점 (Σ (ΔI)², 빈 1 px) — 거칠게 → 곱게.
+/* 링 중심 자동: 줄인 이미지(≤ 512)에서 방위 평균 프로파일이 가장 날카로운 점 (Σ (ΔI)², 빈 1 px) — 거칠게 → 곱게.
    대칭인 링 패턴은 참 중심에서 봉우리가 가장 좁고 높다. 빔스토퍼·덧그림은 mask 로 뺀다 */
 DP.ringCenter=function(img,w,h,opt){ opt=opt||{};
   const f=Math.max(1,Math.ceil(Math.max(w,h)/(opt.work||384))); const W=Math.floor(w/f), H=Math.floor(h/f); const a=new Float32Array(W*H), m=new Uint8Array(W*H);
@@ -338,7 +338,7 @@ DP.ringCenter=function(img,w,h,opt){ opt=opt||{};
     let o=0, prev=null, pn=0; const r0=opt.rmin?opt.rmin/f:Math.max(3,0.05*Math.min(W,H)); for(let b=Math.ceil(r0);b<=rmax;b++){ if(cnt[b]<8) { prev=null; continue; } const v=sum[b]/cnt[b];
       if(prev!=null){ const n=Math.min(cnt[b],pn); o+=n*(v-prev)*(v-prev)/(Math.abs(v)+Math.abs(prev)+1e-9); } prev=v; pn=cnt[b]; } return o; };
   let best={x:opt.x0!=null?opt.x0/f:W/2,y:opt.y0!=null?opt.y0/f:H/2}; best.o=obj(best.x,best.y); const span=opt.span!=null?opt.span/f:Math.min(W,H)/4;
-  // 거친 격자(span/6 간격) 한 번, 그다음 간격을 반씩 줄이며 ±2 간격 — 줄인 영상 0.5 px 까지 (원래 영상 f/2 px; 나머지는 타원 맞춤이 다듬는다)
+  // 거친 격자(span/6 간격) 한 번, 그다음 간격을 반씩 줄이며 ±2 간격 — 줄인 이미지 0.5 px 까지 (원래 이미지 f/2 px; 나머지는 타원 맞춤이 다듬는다)
   const st0=Math.max(1,Math.round(span/(opt.coarseStep||6))); for(let st=st0;;){ const cx=best.x, cy=best.y; const R=st===st0?span:st*2;
     for(let dy=-R;dy<=R+1e-9;dy+=st) for(let dx=-R;dx<=R+1e-9;dx+=st){ if(!dx&&!dy&&st!==st0) continue; const o=obj(cx+dx,cy+dy); if(o>best.o) best={x:cx+dx,y:cy+dy,o}; }
     if(st<=0.5) break; st=st/2; }
@@ -358,7 +358,7 @@ DP.fitEllipseRobust=function(pts){ let P=pts, e=null; for(let it=0;it<4;it++){ i
   return e; };
 /* 링 패턴 한 번에: 중심 → 가장 센 링들로 타원 → 타원 보정 방위 적분 → 배경 → 봉우리 */
 DP.analyzeRings=function(img,w,h,opt){ opt=opt||{}; const mask=opt.mask; const init=opt.init||null; const c0=init?{x:init.cx,y:init.cy}:(opt.center||DP.ringCenter(img,w,h,{mask,rmin:opt.rmin}));
-  let el=init?{cx:init.cx,cy:init.cy,a:init.a/init.b,b:1,phi:init.phi}:{cx:c0.x,cy:c0.y,a:1,b:1,phi:0}; /* init = 줄인 영상에서 얻은 타원(원래 좌표) → ① 건너뛰고 ② 만 */ const rmax=opt.rmax||0.98*Math.hypot(Math.max(c0.x,w-c0.x),Math.max(c0.y,h-c0.y)); // 가장 먼 모서리까지 (부분 원호도 쓴다 — 잡음은 국소 잡음 문턱이 감안)
+  let el=init?{cx:init.cx,cy:init.cy,a:init.a/init.b,b:1,phi:init.phi}:{cx:c0.x,cy:c0.y,a:1,b:1,phi:0}; /* init = 줄인 이미지에서 얻은 타원(원래 좌표) → ① 건너뛰고 ② 만 */ const rmax=opt.rmax||0.98*Math.hypot(Math.max(c0.x,w-c0.x),Math.max(c0.y,h-c0.y)); // 가장 먼 모서리까지 (부분 원호도 쓴다 — 잡음은 국소 잡음 문턱이 감안)
   let az=DP.azimuthal(img,w,h,el,{mask,rmax}); let bg=DP.background1d(az.I,Math.max(6,Math.round(rmax/40))); let pk=DP.peaks1d(az.r,az.I,bg,{k:opt.k||6,win:Math.max(3,Math.round(rmax/200))}).peaks.filter(p=>p.r>(opt.rmin||rmax*0.05));
   const fits=[]; const nRay=opt.nRay||360; const rMinFit=Math.max(0.08*rmax,(opt.rmin||0));
   // ① 처음 타원: 원형 평균에서 가장 센 링 근처(±12 %)를 광선마다 찾아 튀는 점을 빼며 맞춤 — 찌그러짐이 커서(≥ 5 %) 원형 평균의 링이 갈라져도 광선 점은 한 링을 따른다
@@ -392,12 +392,12 @@ DP.analyzeRings=function(img,w,h,opt){ opt=opt||{}; const mask=opt.mask; const i
   for(const p of pk) p.nearStop=rStop>0&&p.r<rStop+2*mfw+3;
   return {ellipse:el,ratio:el.a/el.b,center:{x:el.cx,y:el.cy},profile:az,background:bg,peaks:pk,ringFits:fits,unc,coarse:c0,rStop}; };
 
-/* ---------- 큰 영상: 줄여서 찾고 원래 해상도에서 다듬기 ---------- */
+/* ---------- 큰 이미지: 줄여서 찾고 원래 해상도에서 다듬기 ---------- */
 /* f×f 평균으로 줄이기 (줄인 화소 X 의 중심 = 원래 X·f + (f−1)/2) */
 DP.downsample=function(img,w,h,f){ const W=Math.floor(w/f), H=Math.floor(h/f); const o=new Float32Array(W*H); const k=1/(f*f);
   for(let Y=0;Y<H;Y++){ const r=Y*W; for(let j=0;j<f;j++){ const rr=(Y*f+j)*w; for(let X=0;X<W;X++){ let s2=0; const b=rr+X*f; for(let i=0;i<f;i++) s2+=img[b+i]; o[r+X]+=s2; } } } for(let i=0;i<o.length;i++) o[i]*=k; return {img:o,w:W,h:H}; };
 DP.upMask=function(m,W,H,w,h,f){ const o=new Uint8Array(w*h); for(let y=0;y<h;y++){ const Y=Math.min(H-1,(y/f)|0); for(let x=0;x<w;x++){ const X=Math.min(W-1,(x/f)|0); if(m[Y*W+X]) o[y*w+x]=1; } } return o; };
-/* 줄인 영상의 스폿 → 원래 해상도에서 무게 중심 다시 (창 반지름 R, 둘레 고리의 중앙값 = 배경, 두 번). 포화는 고원 중심 */
+/* 줄인 이미지의 스폿 → 원래 해상도에서 무게 중심 다시 (창 반지름 R, 둘레 고리의 중앙값 = 배경, 두 번). 포화는 고원 중심 */
 DP.refineSpots=function(img,w,h,list,f,opt){ opt=opt||{}; const R=Math.max(3,Math.round(opt.r||2.5*f)); const mask=opt.mask; let vmax=-Infinity; if(list.some(s=>s.saturated)) for(let i=0;i<img.length;i++) if(img[i]>vmax) vmax=img[i];
   return list.map(s=>{ let x=s.x*f+(f-1)/2, y=s.y*f+(f-1)/2;
     if(s.saturated){ const rr=Math.ceil((s.radius||1)*f*1.6+2); let n=0,sx=0,sy=0; for(let dy=-rr;dy<=rr;dy++) for(let dx=-rr;dx<=rr;dx++){ const xx=Math.round(x)+dx, yy=Math.round(y)+dy; if(xx<0||yy<0||xx>=w||yy>=h) continue; if(img[yy*w+xx]>=vmax-1e-6*Math.abs(vmax)){ n++; sx+=xx; sy+=yy; } }
@@ -407,7 +407,7 @@ DP.refineSpots=function(img,w,h,list,f,opt){ opt=opt||{}; const R=Math.max(3,Mat
       for(let dy=-R;dy<=R;dy++) for(let dx=-R;dx<=R;dx++){ if(dx*dx+dy*dy>R*R) continue; const xx=xi+dx, yy=yi+dy; if(xx<0||yy<0||xx>=w||yy>=h) continue; const j=yy*w+xx; if(mask&&mask[j]) continue; const q=img[j]-bg; if(q>0){ sw+=q; sx+=q*xx; sy+=q*yy; } }
       if(!(sw>0)) break; const nx=sx/sw, ny=sy/sw; if(Math.hypot(nx-x,ny-y)>R) break; x=nx; y=ny; I=sw; }
     return Object.assign({},s,{x,y,I,radius:(s.radius||0)*f}); }); };
-/* 스케일바를 원래 해상도에서 다시 (줄인 영상 막대 상자 ± 2f 를 잘라 findOverlay) */
+/* 스케일바를 원래 해상도에서 다시 (줄인 이미지 막대 상자 ± 2f 를 잘라 findOverlay) */
 DP.refineBar=function(img,w,h,b,f){ if(!b) return null; const m=3*f+2; const x0=Math.max(0,b.x0*f-m), x1=Math.min(w-1,(b.x1+1)*f+m), y0=Math.max(0,b.y0*f-m), y1=Math.min(h-1,(b.y1+1)*f+m); const W=x1-x0+1, H=y1-y0+1; const c=new Float32Array(W*H);
   for(let y=0;y<H;y++) for(let x=0;x<W;x++) c[y*W+x]=img[(y0+y)*w+x0+x]; const ov=DP.findOverlay(c,W,H); const sb=DP.scaleBar(ov,W,H);
   if(!sb) return Object.assign({},b,{x0:b.x0*f,x1:b.x1*f+f-1,y0:b.y0*f,y1:b.y1*f+f-1,lenPx:b.lenPx*f,outerPx:b.outerPx*f,refined:false});

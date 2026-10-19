@@ -564,13 +564,13 @@ function checkPlane(p,name){ if(!p||!(p.w>=2)||!(p.h>=2)||!p.data||p.data.length
 /* StackReg.register(ref, mov): pystackreg 처럼 ref[:-1,:-1], mov[:-1,:-1] 로 잘라 정합 */
 IC.turboReg=function(refPlane,movPlane,mode){
   const tr=modeCode(mode); checkPlane(refPlane,"ref"); checkPlane(movPlane,"mov");
-  if(refPlane.w!==movPlane.w||refPlane.h!==movPlane.h) throw new Error("StackReg: 두 영상 크기가 다름");
-  if(refPlane.w<16||refPlane.h<16) throw new Error("StackReg: 영상이 너무 작습니다 (가로·세로 16 px 이상)");
-  for(const q of [refPlane,movPlane]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("StackReg: 영상에 NaN·무한대 화소가 있습니다 — 값으로 바꾼 뒤 정렬하세요"); } }
+  if(refPlane.w!==movPlane.w||refPlane.h!==movPlane.h) throw new Error("StackReg: 두 이미지 크기가 다름");
+  if(refPlane.w<16||refPlane.h<16) throw new Error("StackReg: 이미지가 너무 작습니다 (가로·세로 16 px 이상)");
+  for(const q of [refPlane,movPlane]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("StackReg: 이미지에 NaN·무한대 화소가 있습니다 — 값으로 바꾼 뒤 정렬하세요"); } }
   const r=registerRaw(cropData(refPlane),cropData(movPlane),refPlane.w-1,refPlane.h-1,tr);
   return {mat:shortToLong(r.short,tr),refPts:r.refPts,movPts:r.movPts};
 };
-/* StackReg.transform(mov, tmat): 같은 크기의 영상 (Float32Array) */
+/* StackReg.transform(mov, tmat): 같은 크기의 이미지 (Float32Array) */
 IC.turboTransform=function(movPlane,mat,mode){
   const tr=modeCode(mode); checkPlane(movPlane,"mov");
   return transformRaw(movPlane.data,movPlane.w,movPlane.h,longToShort(mat,tr));

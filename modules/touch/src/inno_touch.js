@@ -36,7 +36,7 @@
    })  → detach()
 
    보조
-   INNO_TOUCH.affine(v0,g,{min,max})   보기 {zoom,x,y} (화면 = (영상 − x)·zoom) 에 핀치·이동을 적용한 새 값 — 핀치 중심 고정
+   INNO_TOUCH.affine(v0,g,{min,max})   보기 {zoom,x,y} (화면 = (이미지 − x)·zoom) 에 핀치·이동을 적용한 새 값 — 핀치 중심 고정
    INNO_TOUCH.cssZoom(target,{frame,view,min,max,clip,onTap,onDoubleTap,onChange,...})
                                        확대 기능이 없는 캔버스에 CSS transform 으로 확대·이동(다시 그리지 않음).
                                        view = {s,tx,ty} 객체(앱이 다시 그려도 그대로 쓰도록 앱이 들고 있음)
@@ -166,7 +166,7 @@ function attach(el,opts){
   return detach;
 }
 
-/* 보기 {zoom,x,y}: 화면 = (영상 − x)·zoom. 시작 중심 아래의 영상 점이 지금 중심 아래에 오도록 */
+/* 보기 {zoom,x,y}: 화면 = (이미지 − x)·zoom. 시작 중심 아래의 이미지 점이 지금 중심 아래에 오도록 */
 function affine(v0,g,lim){ lim=lim||{}; const mn=lim.min!=null?lim.min:1e-3, mx=lim.max!=null?lim.max:1e3;
   const ix=v0.x+g.x0/v0.zoom, iy=v0.y+g.y0/v0.zoom; const z=Math.min(mx,Math.max(mn,v0.zoom*g.scale));
   return {zoom:z,x:ix-g.x/z,y:iy-g.y/z}; }

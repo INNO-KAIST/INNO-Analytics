@@ -55,7 +55,7 @@ function blur(src,w,h,sig){ if(!(sig>0)) return Float64Array.from(src); const {k
 
 /* ---------- 윤곽 ----------
    plane {w,h,data}, o.roi {x0,y0,x1,y1}(포함, 없으면 전체), o.sigma(1), o.dark(자동: 가운데가 어두운지), o.pick "largest"|"top"|"bottom"
-   반환 {pts:[[x,y]…] (영상 좌표, 닫힌 고리 순서), level, dark, comp:{area,x0,x1,y0,y1}, mask(roi 크기 Uint8Array), roi} */
+   반환 {pts:[[x,y]…] (이미지 좌표, 닫힌 고리 순서), level, dark, comp:{area,x0,x1,y0,y1}, mask(roi 크기 Uint8Array), roi} */
 IC.dropContour=function(plane,o){ o=o||{}; const W=plane.w, H=plane.h, d=plane.data; const R=o.roi||{x0:0,y0:0,x1:W-1,y1:H-1};
   const x0=Math.max(0,Math.floor(R.x0)), y0=Math.max(0,Math.floor(R.y0)), x1=Math.min(W-1,Math.ceil(R.x1)), y1=Math.min(H-1,Math.ceil(R.y1)); const w=x1-x0+1, h=y1-y0+1;
   if(w<8||h<8) throw new Error("영역이 너무 작습니다");
@@ -159,7 +159,7 @@ IC.dropNeedle=function(pts,edge,o){ o=o||{}; const P=pts.filter((_,i)=>!(edge&&e
   return {diam,axisDeg:Math.atan(bm)/D2R,yTip,yTop:ks[0],left:l,right:r,cx:((l.a+l.b*ym)+(r.a+r.b*ym))/2,ym}; };
 
 /* ---------- 펜던트 드랍 맞춤 ----------
-   pts: 방울 윤곽(바늘 아래), o: {rot0(°), maxPts}. 매개변수 [x0, y0(apex), b(px), Bo, ω(rad)] — 영상 y 아래로, apex 가 가장 아래
+   pts: 방울 윤곽(바늘 아래), o: {rot0(°), maxPts}. 매개변수 [x0, y0(apex), b(px), Bo, ω(rad)] — 이미지 y 아래로, apex 가 가장 아래
    반환 {apex:[x,y], b, Bo, omega(°), rms, sd:{…}, curve:{x,z}(무차원), zTop(무차원), n} */
 IC.fitPendant=function(pts,o){ o=o||{}; let Q=pts; const maxP=o.maxPts||900; if(Q.length>maxP){ const st=Q.length/maxP; Q=[...Array(maxP)].map((_,i)=>Q[Math.floor(i*st)]); }
   // 초기값: apex = 가장 아래 점 근처, 축 = rot0, b = 아래 10 % 점에 원 맞춤, Bo = 거친 격자
@@ -210,7 +210,7 @@ IC.pendantDrop=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o.
     out.V=VA.V*b*b*b*1e9; out.A=VA.A*b*b*1e6; // mm³, mm²
     const Dn=nd.diam*mmPerPx*1e-3; out.needleMM=nd.diam*mmPerPx; out.Wo=drho*g*(out.V*1e-9)/(Math.PI*out.gamma*1e-3*Dn); }
   out.drho=drho; out.g=g;
-  // 화면 덧그림(영상 좌표): 맞춘 이론 윤곽(양쪽, 바늘 끝까지) · 바늘 두 가장자리 · apex
+  // 화면 덧그림(이미지 좌표): 맞춘 이론 윤곽(양쪽, 바늘 끝까지) · 바늘 두 가장자리 · apex
   { const c=Math.cos(fit.omega*D2R), s=Math.sin(fit.omega*D2R), b=fit.b, X=fit.curve.x, Z=fit.curve.z; const half=sg=>{ const L=[]; for(let i=0;i<X.length;i++){ if(Z[i]>zTip+1e-9) break; const u=sg*X[i]*b, v=-Z[i]*b; L.push([fit.apex[0]+u*c-v*s,fit.apex[1]+u*s+v*c]); } return L; };
     const l=half(-1).reverse(), r=half(1); const ln=(f)=>[[f.a+f.b*nd.yTop,nd.yTop],[f.a+f.b*nd.yTip,nd.yTip]];
     out.overlay={curves:[l.concat(r.slice(1))],needle:[ln(nd.left),ln(nd.right)],apex:fit.apex.slice()}; }
@@ -219,7 +219,7 @@ IC.pendantDrop=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o.
   if(out.Wo!=null&&out.Wo<0.5) out.warn.push(`Worthington 수 ${out.Wo.toFixed(2)} — 0.5 보다 작아 γ 불확도가 큽니다(방울을 바늘에서 떨어지기 직전 크기에 가깝게)`);
   if(fit.rms>1) out.warn.push(`맞춤 잔차 rms ${fit.rms.toFixed(2)} px — 윤곽에 바늘·잡티·반사가 섞였는지 보세요`);
   if(Math.abs(fit.omega)>5) out.warn.push(`기울기 ${fit.omega.toFixed(1)}° — 카메라·바늘 수직을 확인하세요`);
-  if(!mmPerPx) out.warn.push("바늘 지름(mm)이나 영상 눈금이 없어 γ·부피는 계산하지 않았습니다 (Bo·모양만)");
+  if(!mmPerPx) out.warn.push("바늘 지름(mm)이나 이미지 눈금이 없어 γ·부피는 계산하지 않았습니다 (Bo·모양만)");
   return out; };
 
 /* ---------- 원 맞춤 (Kåsa → 기하 LM) ---------- */
@@ -276,8 +276,8 @@ IC.dropBaseline=function(pts,edge,o){ o=o||{}; const top=new Map(); pts.forEach(
    좌표: 기준선이 x' 축(왼→오른), 높이 y' 는 기판에서 위로(+). 반환 {contour, baseline, profile(방울 점, 기준선 좌표), methods:{…}, width, height} */
 IC.contactAngle=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o.roi,sigma:o.sigma,pick:"bottom"});
   let bl=o.baseline; let auto=false; if(!bl){ bl=IC.dropBaseline(ct.raw,ct.edge); auto=true; }
-  const [ax,ay]=bl.p1, [bx,by]=bl.p2; const L=Math.hypot(bx-ax,by-ay); const ux=(bx-ax)/L, uy=(by-ay)/L; // 기준선 방향(영상)
-  // 위쪽(+y') = 영상에서 기준선 왼쪽 법선 (영상 y 아래이므로 (uy,−ux))
+  const [ax,ay]=bl.p1, [bx,by]=bl.p2; const L=Math.hypot(bx-ax,by-ay); const ux=(bx-ax)/L, uy=(by-ay)/L; // 기준선 방향(이미지)
+  // 위쪽(+y') = 이미지에서 기준선 왼쪽 법선 (이미지 y 아래이므로 (uy,−ux))
   const nx=uy, ny=-ux; const toB=([x,y])=>[(x-ax)*ux+(y-ay)*uy,(x-ax)*nx+(y-ay)*ny]; const toI=([s,t])=>[ax+s*ux+t*nx,ay+s*uy+t*ny];
   // 기준선 가까이(접촉점 둘레 쐐기)는 두 가장자리가 겹쳐 경사 최대 다듬기가 흔들린다 → 문턱 등고선 그대로
   const res0={}; const rawB=ct.raw.map(toB); const Hr=amax(rawB.filter((_,i)=>!ct.edge[i]),q=>q[1]); const tKeep=Math.max(6,0.04*Hr);
@@ -314,7 +314,7 @@ IC.contactAngle=function(plane,o){ o=o||{}; const ct=IC.dropContour(plane,{roi:o
   if(o.pxSize>0){ const s=o.pxSize; const Y=res.methods.yl; if(Y){ res.V=Y.V*Math.pow(Y.b*s,3); res.R0mm=Y.b*s; res.baseDiameterMM=2*Y.rc*s; res.heightMM=Y.yApex*s;
       const drho=(o.rhoIn==null?1000:+o.rhoIn)-(o.rhoOut==null?0:+o.rhoOut), g=o.g||9.80665; const relBo=Y.BoSd/Math.max(Y.Bo,1e-9); if(drho>0&&Y.Bo>0.1&&relBo<0.1&&Y.mean>=60&&!Y.atBound){ res.gammaEst=drho*g*Math.pow(Y.b*s*1e-3,2)/Y.Bo*1e3; res.gammaEstSd=res.gammaEst*Math.sqrt(4*Math.pow(Y.bSd/Y.b,2)+relBo*relBo); } } // 세실 형상에서 γ: Bo 가 충분히 크고 잘 정해질 때만 (작은 θ·작은 Bo 에서는 형상에 정보가 없음)
     const Cc=res.methods.circle; if(Cc){ const h=Cc.r+Cc.cB[1], a=Math.sqrt(Math.max(0,Cc.r*Cc.r-Cc.cB[1]*Cc.cB[1])); res.Vcap=Math.PI*h*(3*a*a+h*h)/6*Math.pow(s,3); } }
-  // 화면 덧그림(영상 좌표): 기준선 · 방법마다 접촉점의 접선(액체 쪽에서 잰 θ) · YL·원 맞춤 곡선
+  // 화면 덧그림(이미지 좌표): 기준선 · 방법마다 접촉점의 접선(액체 쪽에서 잰 θ) · YL·원 맞춤 곡선
   { const ov={baseline:[bl.p1.slice(),bl.p2.slice()],tangents:[],curves:[]}; const Lt=Math.max(20,0.35*Hmax);
     const tan=(m,k)=>{ if(!m||!m.contactL) return; const d=(th,sg)=>{ const a=th*D2R; const ds=sg*Math.cos(a), dt=Math.sin(a); return [ds*ux+dt*nx,ds*uy+dt*ny]; };
       const dl=d(m.left,1), dr=d(m.right,-1); ov.tangents.push({m:k,p:m.contactL,d:dl,len:Lt,theta:m.left,side:"L"},{m:k,p:m.contactR,d:dr,len:Lt,theta:m.right,side:"R"}); };

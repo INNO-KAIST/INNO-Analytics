@@ -1,5 +1,5 @@
 /* ============================================================
-   화면 뼈대 · 파일 열기 · 영상 목록 · 도구 막대 · 스택 막대 · 단축키 · 외부 API
+   화면 뼈대 · 파일 열기 · 이미지 목록 · 도구 막대 · 스택 막대 · 단축키 · 외부 API
    ============================================================ */
 const svgI=d=>`<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
 function render(root){
@@ -36,7 +36,7 @@ function build(root){
   q("#imFmts").onclick=showFormats;
   q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveP").onclick=exportPNG;
   q("#imClose").onclick=()=>{ const im=cur(); if(im){ closeImage(im.id); rerender(); } };
-  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 영상·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); DIRTY.add(id); }); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
+  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 이미지·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); DIRTY.add(id); }); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
   q("#imStop").onclick=()=>{ cancelAll(); note("계산을 중단했습니다"); };
   ["dragenter","dragover"].forEach(ev=>x.addEventListener(ev,e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes("Files")){ e.preventDefault(); e.stopPropagation(); x.classList.add("over"); } }));
   x.addEventListener("dragleave",e=>{ if(e.target===x) x.classList.remove("over"); });
@@ -49,14 +49,14 @@ function build(root){
 }
 function rerender(){ if(!ROOT||!$q(ROOT,".imx")) return; drawSide(); drawTools(); drawStack(); drawTabs(); renderPanel(); draw(); drawBottom(); drawMsg(); }
 
-/* ---------- 왼쪽: 영상 목록 ---------- */
+/* ---------- 왼쪽: 이미지 목록 ---------- */
 const THUMB=new Map();
 function thumbOf(im){ const k=im.id+"|"+im.ver+"|"+JSON.stringify(im.disp)+"|"+im.composite; const t=THUMB.get(im.id); if(t&&t.k===k) return t.url;
   try{ const sc=Math.max(1,Math.floor(Math.max(im.w,im.h)/112)); const src=renderRegion(im,{x:0,y:0,w:im.w,h:im.h,sc}); const s=56/Math.max(im.w,im.h); const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(im.w*s)); c.height=Math.max(1,Math.round(im.h*s)); // 작은 표본에서 바로 (전체 표시를 다시 만들지 않음)
     const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(src,0,0,c.width,c.height); const url=c.toDataURL(); THUMB.set(im.id,{k,url}); return url; }catch(e){ return ""; } }
 function drawSide(){ const el=ROOT&&$q(ROOT,"#imList"); if(!el) return;
   if(!S.images.length){ el.innerHTML=`<div class="im-dropbox" id="imDrop">Drop image files here<br><b>or click to open</b><br><span class="xs">TIFF · ND2 · CZI · PNG · DM3 · MRC · EMD · GWY · Nanoscope · ARDF · IBW · SXM …</span></div>
-    <ol class="im-steps0"><li><b>Open</b> — SEM·TEM·AFM·광학 영상. 화소 크기는 메타데이터에서 자동으로</li><li><b>Check the scale</b> — 없으면 Set Scale 도구로 축척 막대에 선</li><li><b>Threshold</b> → <b>Analyze Particles</b> — 크기 분포·면적 분율</li><li><b>Macro</b> — 같은 처리를 다른 영상·파일에 batch</li></ol>`; $q(el,"#imDrop").onclick=()=>$q(ROOT,"#imFin").click(); return; }
+    <ol class="im-steps0"><li><b>Open</b> — SEM·TEM·AFM·광학 이미지. 화소 크기는 메타데이터에서 자동으로</li><li><b>Check the scale</b> — 없으면 Set Scale 도구로 축척 막대에 선</li><li><b>Threshold</b> → <b>Analyze Particles</b> — 크기 분포·면적 분율</li><li><b>Macro</b> — 같은 처리를 다른 이미지·파일에 batch</li></ol>`; $q(el,"#imDrop").onclick=()=>$q(ROOT,"#imFin").click(); return; }
   const depth=im=>{ let d=0, p=im.parent; while(p&&byId(p)&&d<4){ d++; p=byId(p).parent; } return d; };
   el.innerHTML=`<div class="im-lh"><b>Images</b><span class="muted xs">${S.images.length}</span></div>`+S.images.map(im=>`<div class="it ${im.id===S.sel?"sel":""}" data-id="${im.id}" style="padding-left:${6+depth(im)*12}px" title="${esc(im.name)}"><img src="${thumbOf(im)}" alt=""><div class="tx"><div class="nm">${esc(im.name)}</div><div class="xs muted">${im.w}×${im.h} · ${im.rgb?"RGB":im.bit+"-bit"}${isStack(im)?` · ${im.nz*im.nt}`:""}${im.nc>1&&!im.rgb?` · ${im.nc}ch`:""}${im.cal?` · ${g4(im.cal.pw)} ${esc(im.cal.unit)}`:` · <span class="warnc">no scale</span>`}</div></div><button class="x" data-x="${im.id}" title="Close">×</button></div>`).join("");
   $a(el,".it").forEach(d=>d.onclick=e=>{ if(e.target.dataset.x){ closeImage(e.target.dataset.x); rerender(); return; } if(S.sel!==d.dataset.id){ S.sel=d.dataset.id; clearPreview(); invalidate(); save(); rerender(); } }); }
@@ -102,7 +102,7 @@ async function loadFiles(list){
     }catch(e){ errs.push(`${f.name}: ${e.message||e}`); }
     await sleep(0); }
   hideProg(); save(); rerender();
-  if(n){ const im=cur(); note(`영상 ${n}개를 열었습니다${side.length?` (옆 파일 ${side.length}개 메타데이터 사용)`:""}${im&&!im.cal?" — 화소 크기가 없습니다: Adjust ▸ Set Scale":""}`,im&&!im.cal?"warn":"ok"); }
+  if(n){ const im=cur(); note(`이미지 ${n}개를 열었습니다${side.length?` (옆 파일 ${side.length}개 메타데이터 사용)`:""}${im&&!im.cal?" — 화소 크기가 없습니다: Adjust ▸ Set Scale":""}`,im&&!im.cal?"warn":"ok"); }
   errs.slice(0,6).forEach(e=>note(e,"warn"));
 }
 function showFormats(){ modal(`<div class="im-h">Supported Formats</div><table class="im-kv sm">${IO.FORMATS.map(([a,b,c])=>`<tr><td><b>${esc(a)}</b><div class="xs muted">.${esc(b.split(",").join(" ."))}</div></td><td>${esc(c)}</td></tr>`).join("")}</table>
@@ -146,7 +146,7 @@ function askRaw(name,size){ return new Promise(res=>{ const m=modal(`<div class=
 /* ---------- 저장·내보내기 ---------- */
 function saveTIFF(){ const im=cur(); if(!im) return; const t=tiffOf(im); downloadBlob(t.name,new Blob([t.data],{type:"image/tiff"})); note(`${t.name} — ImageJ/Fiji 에서 보정·스택 정보와 함께 열립니다`,"ok"); }
 function exportPNG(){ const im=cur(); if(!im) return; const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
-  if(fullScale(im)===1){ const D=buildDisplay(im); g.drawImage(D.cv,0,0); } else { const hs=Math.max(1,Math.floor(8e6/im.w)); for(let y=0;y<im.h;y+=hs){ const st=renderRegion(im,{x:0,y,w:im.w,h:Math.min(hs,im.h-y),sc:1}); g.drawImage(st,0,y); } } // 큰 영상도 원래 해상도 (띠로 나눠)
+  if(fullScale(im)===1){ const D=buildDisplay(im); g.drawImage(D.cv,0,0); } else { const hs=Math.max(1,Math.floor(8e6/im.w)); for(let y=0;y<im.h;y+=hs){ const st=renderRegion(im,{x:0,y,w:im.w,h:Math.min(hs,im.h-y),sc:1}); g.drawImage(st,0,y); } } // 큰 이미지도 원래 해상도 (띠로 나눠)
   const v={zoom:1,x:0,y:0}; drawThreshold(im,g,v); drawParticles(im,g,v); if(S.ui.showAll!==false) roiList(im).forEach(r=>drawRoi(g,v,r,false,im)); const a=activeRoi(im); if(a) drawRoi(g,v,a,false,im); drawScaleBar(im,g,v,im.w,im.h);
   c.toBlob(b=>downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_view.png",b),"image/png"); }
 

@@ -17,7 +17,7 @@ function handler(G){
     verify:c.verify&&{nObs:c.verify.nObs,nStrongPred:c.verify.nStrongPred,completeness:c.verify.completeness,doubleDiff:c.verify.doubleDiff,missing:c.verify.missing.slice(0,12),rows:c.verify.rows.map(r=>({x:r.spot.x,y:r.spot.y,n:r.spot.n,h:r.h,d:r.d,I:r.I,absent:r.absent,weak:r.weak,Id:r.Id,dd:r.dd,gm:r.gm,dz:r.dz}))},kin:c.kin||null,dyn:c.dyn||null,dynError:c.dynError||null});
   return function(cmd,a){
     if(cmd==="analyze"){ const t0=Date.now(); const {w,h}=a, o=a.opt||{}; const SZ=DP.sanitize(a.img); const imgF=SZ.img;
-      // 큰 영상(긴 변 > 1024): f×f 평균으로 줄여(≤ 1024) 찾고, 위치·중심·격자·링·스케일바는 원래 해상도에서 다듬는다 (2048² 2–3 배, 4096² 약 5 배 빠름, 메모리 ↓)
+      // 큰 이미지(긴 변 > 1024): f×f 평균으로 줄여(≤ 1024) 찾고, 위치·중심·격자·링·스케일바는 원래 해상도에서 다듬는다 (2048² 2–3 배, 4096² 약 5 배 빠름, 메모리 ↓)
       const f=o.full?1:Math.max(1,Math.ceil(Math.max(w,h)/(o.work||1024)));
       // 스케일바 이름표 읽기 (DIFF_OCR, 원래 해상도) — 막대를 못 찾았으면 OCR 의 막대 찾기가 받는다
       const label=(out)=>{ const OC=G.DIFF_OCR; if(!OC) return; try{ const t=Date.now(); const r=OC.readAuto(imgF,w,h,out.scaleBar,{expect:"recip"});
@@ -48,7 +48,7 @@ function handler(G){
       if(doSpots){ const t=Date.now(); const S=DP.findSpots(img,w,h,{mask}); let c=o.center?Object.assign({},o.center,{source:"user",origin:"user"}):DP.findCenter(S.spots,w,h,{beamStop:bs.mask});
         const subset=o.topN>0?S.spots.slice(0,o.topN):S.spots; const M=c?DP.fitLattices(subset,c,{size:Math.max(w,h),radial:o.radial==null?"auto":o.radial,max:o.maxLattices||1}):{lattices:[],unindexed:subset};
         out.spots={list:S.spots.map(s=>({x:s.x,y:s.y,I:s.I,snr:s.snr,saturated:!!s.saturated,radius:s.radius||0})),noise:S.noise,saturated:S.saturated,center:c,lattices:M.lattices.map(slimFit),nUnindexed:M.unindexed.length}; T.spots=Date.now()-t; }
-      // 자동: 스폿 격자가 뚜렷하면(지수 12 개 이상, 설명 85 % 이상, 기저가 영상의 3 % 이상 — 링의 얼룩 격자가 아님) 링 분석을 건너뛴다 (휴대폰 시간 절약)
+      // 자동: 스폿 격자가 뚜렷하면(지수 12 개 이상, 설명 85 % 이상, 기저가 이미지의 3 % 이상 — 링의 얼룩 격자가 아님) 링 분석을 건너뛴다 (휴대폰 시간 절약)
       let skipRings=false; if(doSpots&&doRings&&o.pattern==="auto"){ const L=out.spots.lattices[0]; skipRings=!!(L&&L.nIndexed>=12&&L.fracI>=0.85&&Math.min(L.len[0],L.len[1])>=0.03*Math.max(w,h)); }
       if(doRings&&!skipRings){ const t=Date.now(); const R=DP.analyzeRings(img,w,h,{mask,center:o.ringCenter||null}); const pr=R.profile;
         out.rings={ellipse:R.ellipse,ratio:R.ratio,center:R.center,coarse:R.coarse,unc:R.unc,rStop:R.rStop,peaks:R.peaks,ringFits:R.ringFits.map(f=>({r:f.r,n:f.n,nSig:f.nSig,medSig:f.medSig,cx:f.cx,cy:f.cy,a:f.a,b:f.b,phi:f.phi})),profile:{r:pr.r,I:pr.I,n:pr.n},background:Array.from(R.background)}; T.rings=Date.now()-t; }

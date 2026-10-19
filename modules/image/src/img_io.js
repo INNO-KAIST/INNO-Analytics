@@ -83,8 +83,8 @@ async function tiffDecode(T,u8,pi,limitPx){
   if(![1,2,4,8,16,32,64].includes(bits)) throw new Error(bits+"-bit TIFF 는 읽지 않습니다");
   if(comp===7||comp===6) throw new Error("JPEG 압축 TIFF 는 아직 읽지 않습니다 (무손실 TIFF 로 다시 저장하세요)");
   if(![1,5,8,32946,32773].includes(comp)) throw new Error("압축 방식 "+comp+" 은 지원하지 않습니다");
-  if(limitPx&&W*H>limitPx) throw new Error(`영상이 너무 큽니다 (${W}×${H})`);
-  if(W*H*Math.min(spp,4)*4>IO.MAXBYTES) throw new Error(`영상이 너무 큽니다: ${W}×${H}×${spp} = ${(W*H*Math.min(spp,4)*4/1e9).toFixed(2)} GB (32-bit 메모리, 한도 ${(IO.MAXBYTES/1e9).toFixed(1)} GB)`);
+  if(limitPx&&W*H>limitPx) throw new Error(`이미지가 너무 큽니다 (${W}×${H})`);
+  if(W*H*Math.min(spp,4)*4>IO.MAXBYTES) throw new Error(`이미지가 너무 큽니다: ${W}×${H}×${spp} = ${(W*H*Math.min(spp,4)*4/1e9).toFixed(2)} GB (32-bit 메모리, 한도 ${(IO.MAXBYTES/1e9).toFixed(1)} GB)`);
   const tiled=!!tg[322]; const tw=tiled?tv(tg[322]):W, th=tiled?tv(tg[323]):Math.min(H,tv(tg[278],H)); // RowsPerStrip 기본값 2³²−1
   const offs=ta(tiled?tg[324]:tg[273]), cnts=ta(tiled?tg[325]:tg[279]);
   if(!offs) throw new Error("화소 자료 위치(StripOffsets) 태그가 없습니다");
@@ -152,7 +152,7 @@ function f16(h){ const s=(h&0x8000)?-1:1, e=(h>>10)&31, m=h&1023; if(e===0) retu
 const UNIT={ "m":1,"meter":1,"mm":1e-3,"millimeter":1e-3,"cm":1e-2,"um":1e-6,"µm":1e-6,"μm":1e-6,"micron":1e-6,"microns":1e-6,"nm":1e-9,"nanometer":1e-9,"pm":1e-12,"Å":1e-10,"A":1e-10,"angstrom":1e-10,"inch":0.0254,"in":0.0254 };
 IO.unitToM=u=>{ if(u==null) return null; const s=String(u).trim().replace(/^\\u00B5/,"µ"); if(UNIT[s]!=null) return UNIT[s]; if(UNIT[s.toLowerCase()]!=null) return UNIT[s.toLowerCase()]; if(/^\\?mu?m$/i.test(s)||/^micro/i.test(s)) return 1e-6; return null; };
 /* 미터 단위 화소 크기 → 사람이 읽기 좋은 단위 */
-IO.niceUnit=function(m){ if(!(m>0)) return {unit:"px",f:1}; if(m<1e-9) return {unit:"pm",f:1e12}; if(m<1e-6) return {unit:"nm",f:1e9}; if(m<1e-3) return {unit:"µm",f:1e6}; return {unit:"mm",f:1e3}; };
+IO.niceUnit=function(m){ if(!(m>0)) return {unit:"px",f:1}; if(m>=1e-4) return {unit:"mm",f:1e3}; if(m>=1e-7) return {unit:"µm",f:1e6}; if(m>=1e-11) return {unit:"nm",f:1e9}; return {unit:"pm",f:1e12}; }; // 화소 값이 0.1 이상이 되는 가장 큰 단위 — TEM 0.55 nm/px 는 nm (예전엔 552 pm 이라 Size 칸에 nm² 로 넣은 값이 10⁶ 배 틀림, 10-19). pm 은 0.01 nm 미만에서만
 IO.calFromMeters=function(pwm,phm,src,unit){ const k=unit&&IO.unitToM(unit); const nu=k&&k!==0.0254&&k!==1e-2&&k!==1?{unit:k===1e-6?"µm":k===1e-9?"nm":k===1e-12?"pm":k===1e-10?"Å":k===1e-3?"mm":null,f:1/k}:null; const u=nu&&nu.unit?nu:IO.niceUnit(pwm); return {pw:pwm*u.f,ph:(phm||pwm)*u.f,unit:u.unit,src}; }; // unit: 파일이 밝힌 단위가 있으면 그 단위로 (micron → µm)
 function parseImageJDesc(s){ const o={}; s.split(/\r?\n/).forEach(l=>{ const i=l.indexOf("="); if(i>0) o[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); return o; }
 function parseOME(s){ const L=parseOMEAll(s); return L.length?L[0]:null; }
@@ -317,7 +317,7 @@ function fromRec(rec,name,kind){
     const per=W*H;
     if(kind==="emd"&&N>1){ // Velox: [H,W,N] 프레임이 마지막 축
       const maxFrames=Math.max(1,Math.floor(4e8/(per*4)));
-      if(N>maxFrames){ warn.push(`${im.title}: 프레임 ${N}장은 메모리에 다 올릴 수 없어 합친 영상 1장으로 읽었습니다`); const acc=new Float32Array(per); const chunk=Math.max(1,Math.min(N,Math.floor(8e6/per)));
+      if(N>maxFrames){ warn.push(`${im.title}: 프레임 ${N}장은 메모리에 다 올릴 수 없어 합친 이미지 1장으로 읽었습니다`); const acc=new Float32Array(per); const chunk=Math.max(1,Math.min(N,Math.floor(8e6/per)));
         for(let f0=0;f0<N;f0+=chunk){ const f1=Math.min(N,f0+chunk), blk=ds.slice([[0,H],[0,W],[f0,f1]]), nf=f1-f0; for(let i=0;i<per;i++){ let s=0; for(let k=0;k<nf;k++) s+=blk[i*nf+k]; acc[i]+=s; } } planes=[acc]; N=1; }
       else { const blk=ds.slice([[0,H],[0,W],[0,N]]); for(let k=0;k<N;k++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=blk[i*N+k]; planes.push(p); } }
     } else {
@@ -335,7 +335,7 @@ function fromRec(rec,name,kind){
     if(im.dmMag) info.push(["Mag (actual)",im.dmMag]);
     out.push({name:(rec.images.length>1?`${name} · ${im.title||im.det||""}`:name),w:W,h:H,bit,rgb:false,nc:1,nz:planes.length,nt:1,order:"czt",planes,cal,calCandidates:[],info,warn:[]});
   }
-  if(!out.length) throw new Error("영상이 들어 있지 않습니다");
+  if(!out.length) throw new Error("이미지가 들어 있지 않습니다");
   return {images:out,warn};
 }
 
@@ -361,7 +361,7 @@ function readIBW(name,u8){
   let o=dataOff+npnts*bs+formulaSize; const note=tdu.decode(u8.subarray(o,o+noteSize)).replace(/\r/g,"\n"); o+=noteSize+dataEUnitsSize;
   const dimEUstr=[]; for(let k=0;k<4;k++){ dimEUstr.push(td.decode(u8.subarray(o,o+dimEU[k]))); o+=dimEU[k]; }
   const labels=[]; for(let k=0;k<4;k++){ const L=[]; for(let j=0;j*32<dimLab[k];j++) L.push(td.decode(u8.subarray(o+32*j,o+32*j+32)).replace(/\0.*$/,"")); labels.push(L); o+=dimLab[k]; }
-  const nx=nDim[0]||npnts, ny=nDim[1]||1, nl=nDim[2]||1; if(ny<2) throw new Error("1D wave 는 영상이 아닙니다");
+  const nx=nDim[0]||npnts, ny=nDim[1]||1, nl=nDim[2]||1; if(ny<2) throw new Error("1D wave 는 이미지가 아닙니다");
   const iwarn=[]; if(nDim[3]>1) iwarn.push(`4D wave (${nDim.join("×")}) — 넷째 차원의 첫 묶음만 읽었습니다`);
   // Igor: 첫 차원(행)이 가로(x), 둘째 차원이 세로(y, 위로 증가) → 화면은 위가 큰 y
   const planes=[]; for(let l=0;l<nl;l++){ const p=new Float32Array(nx*ny); for(let y=0;y<ny;y++) for(let x=0;x<nx;x++) p[(ny-1-y)*nx+x]=rd(x+nx*y+nx*ny*l); planes.push(p); }
@@ -409,13 +409,13 @@ function readNPY(name,u8){
   const major=u8[6]; const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength); const hl=major>=2?dv.getUint32(8,true):dv.getUint16(8,true); const ho=major>=2?12:10;
   const h=td.decode(u8.subarray(ho,ho+hl)); const descr=(h.match(/'descr':\s*'([^']+)'/)||[])[1], fo=/'fortran_order':\s*True/.test(h), shape=((h.match(/'shape':\s*\(([^)]*)\)/)||[])[1]||"").split(",").map(s=>s.trim()).filter(Boolean).map(Number);
   if(fo) throw new Error("Fortran 순서 NPY 는 읽지 않습니다 (np.ascontiguousarray 로 저장)");
-  if(!descr) throw new Error("NPY: 구조체(structured) dtype 은 영상으로 읽지 않습니다");
+  if(!descr) throw new Error("NPY: 구조체(structured) dtype 은 이미지로 읽지 않습니다");
   const le=descr[0]!==">"; const t=descr.replace(/^[<>|=]/,""); const sz=+t.slice(1); const kind=t[0];
-  if(!"fiub".includes(kind)||!(sz>0)||(kind==="f"&&![2,4,8].includes(sz))) throw new Error("NPY dtype '"+descr+"' 은 영상으로 읽지 않습니다 (실수·정수·bool 만)");
+  if(!"fiub".includes(kind)||!(sz>0)||(kind==="f"&&![2,4,8].includes(sz))) throw new Error("NPY dtype '"+descr+"' 은 이미지로 읽지 않습니다 (실수·정수·bool 만)");
   const rd=(o)=>kind==="f"?(sz===4?dv.getFloat32(o,le):sz===8?dv.getFloat64(o,le):f16(dv.getUint16(o,le))):kind==="u"?(sz===1?dv.getUint8(o):sz===2?dv.getUint16(o,le):sz===4?dv.getUint32(o,le):Number(dv.getBigUint64(o,le))):kind==="i"?(sz===1?dv.getInt8(o):sz===2?dv.getInt16(o,le):sz===4?dv.getInt32(o,le):Number(dv.getBigInt64(o,le))):kind==="b"?dv.getUint8(o):NaN;
   let H,W,N=1,rgb=false,chLast=0; if(shape.length===2){ [H,W]=shape; }
   else if(shape.length===3&&(shape[2]===3||shape[2]===4)&&shape[0]>4&&shape[1]>4){ [H,W]=shape; chLast=shape[2]; rgb=kind==="u"&&sz===1; } // (H, W, 3|4) = 색 채널
-  else if(shape.length===3){ [N,H,W]=shape; } else throw new Error("NPY 모양 "+JSON.stringify(shape)+" 은 영상으로 읽지 않습니다");
+  else if(shape.length===3){ [N,H,W]=shape; } else throw new Error("NPY 모양 "+JSON.stringify(shape)+" 은 이미지로 읽지 않습니다");
   const off=ho+hl, per=W*H; const planes=[]; if(off+per*N*Math.max(1,chLast)*sz>u8.length) throw new Error("NPY: 자료가 짧습니다 — 파일이 잘렸거나 손상됨");
   if(per*N*Math.min(3,Math.max(1,chLast))*4>IO.MAXBYTES) throw new Error("NPY: 너무 큼 (32-bit 메모리 한도 1.6 GB)");
   if(chLast){ for(let c=0;c<3;c++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=rd(off+(i*chLast+c)*sz); planes.push(p); } }
@@ -434,7 +434,7 @@ function readText(name,u8){
   for(const l of lines){ let tk=delim?l.split(delim):l.trim().split(/\s+/); if(delim&&tk.length>1&&tk[tk.length-1].trim()==="") tk=tk.slice(0,-1); // 줄 끝 구분자
     const v=tk.map(num); if(v.some(x=>x===null)){ if(!rows.length) header++; else bad++; continue; } rows.push(v); }
   const W=Math.max(0,...rows.map(r=>r.length)); const good=rows.filter(r=>r.length===W); const short=rows.length-good.length;
-  if(good.length<2||W<2) throw new Error("숫자 행렬(텍스트 영상)로 읽을 수 없습니다");
+  if(good.length<2||W<2) throw new Error("숫자 행렬(텍스트 이미지)로 읽을 수 없습니다");
   const H=good.length, p=new Float32Array(W*H); good.forEach((r,y)=>r.forEach((v,x)=>p[y*W+x]=v));
   let isInt=true,mn=Infinity,mx=-Infinity; for(const v of p){ if(!isFinite(v)){ isInt=false; continue; } if(v!==Math.floor(v)) isInt=false; if(v<mn) mn=v; if(v>mx) mx=v; }
   const bit=isInt&&mn>=0&&mx<=255?8:isInt&&mn>=0&&mx<=65535?16:32;
@@ -457,11 +457,11 @@ IO.readRaw=function(name,u8,o){
 IO.FORMATS=[
   ["TIFF / BigTIFF","tif,tiff,ome.tif,btf,tf8,gel","8·16·32-bit, float, RGB, 스택, ImageJ·OME 메타데이터, Zeiss·FEI·TESCAN SEM 태그"],
   ["PNG","png","1–16-bit (16-bit 그대로)"],["JPEG · BMP · GIF · WebP","jpg,jpeg,bmp,gif,webp,avif","브라우저 해독 (8-bit)"],
-  ["Gatan DM3 / DM4","dm3,dm4","보정·스택"],["MRC / CCP4","mrc,mrcs,st,rec,ali,map","CELLA 보정"],["Velox EMD / HDF5","emd,h5,hdf5","프레임 스택"],["Bruker BCF","bcf","HeaderData 안 영상"],
-  ["Nikon ND2","nd2","NIS-Elements v2·v3: 채널·Z·T·XY 위치, lossless, 채널 이름·색, µm/px·z step (v1 JPEG 2000 제외)"],["Leica LIF","lif","LAS X·LAS AF: series·tile, 채널·Z·T(λ 포함), XZ 주사, LUT 색, µm/px·z step"],["Olympus/Evident OIR · POIR","oir,poir","FluoView FV3000·FV4000: 채널·Z·T·λ(T 에 이음), 8/12/16-bit·float, RGB, 선 주사, 참조 영상, 채널 이름·파장, µm/px·z step (보조 파일 _00001… 은 함께 읽지 않음)"],["Zeiss CZI","czi","ZEN: 채널·Z·T·scene·mosaic tile 합성, 비압축·zstd·JPG, Scaling·채널 이름·색 (JPEG XR 제외)"],
+  ["Gatan DM3 / DM4","dm3,dm4","보정·스택"],["MRC / CCP4","mrc,mrcs,st,rec,ali,map","CELLA 보정"],["Velox EMD / HDF5","emd,h5,hdf5","프레임 스택"],["Bruker BCF","bcf","HeaderData 안 이미지"],
+  ["Nikon ND2","nd2","NIS-Elements v2·v3: 채널·Z·T·XY 위치, lossless, 채널 이름·색, µm/px·z step (v1 JPEG 2000 제외)"],["Leica LIF","lif","LAS X·LAS AF: series·tile, 채널·Z·T(λ 포함), XZ 주사, LUT 색, µm/px·z step"],["Olympus/Evident OIR · POIR","oir,poir","FluoView FV3000·FV4000: 채널·Z·T·λ(T 에 이음), 8/12/16-bit·float, RGB, 선 주사, 참조 이미지, 채널 이름·파장, µm/px·z step (보조 파일 _00001… 은 함께 읽지 않음)"],["Zeiss CZI","czi","ZEN: 채널·Z·T·scene·mosaic tile 합성, 비압축·zstd·JPG, Scaling·채널 이름·색 (JPEG XR 제외)"],
   ["Gwyddion GWY · GSF","gwy,gsf","채널(DataField)·mask·volume(Brick), 제목·SI 단위·meta"],["Bruker Nanoscope","spm,000–999,pfc","채널·Trace/Retrace, Z scale × soft scale(nm/V 등) → 물리값, 16/32-bit (힘 곡선 파일 제외)"],
-  ["Asylum ARDF","ardf","force map 영상 채널(Height·Adhesion·Modulus 등), IDEF 간격·단위 (힘 곡선은 알리기만)"],
-  ["Igor IBW (Asylum AFM)","ibw","채널별 영상, wave scaling"],["Nanonis SXM","sxm","채널·방향별"],["NumPy","npy","2D·3D"],["텍스트 행렬","txt,csv,tsv,dat,asc","숫자 표"],["Raw","raw,bin","크기·형식 직접 지정"]];
+  ["Asylum ARDF","ardf","force map 이미지 채널(Height·Adhesion·Modulus 등), IDEF 간격·단위 (힘 곡선은 알리기만)"],
+  ["Igor IBW (Asylum AFM)","ibw","채널별 이미지, wave scaling"],["Nanonis SXM","sxm","채널·방향별"],["NumPy","npy","2D·3D"],["텍스트 행렬","txt,csv,tsv,dat,asc","숫자 표"],["Raw","raw,bin","크기·형식 직접 지정"]];
 IO.ACCEPT=".nd2,.czi,.lif,.oir,.poir,.gwy,.gsf,.spm,.ardf,.pfc,"+Array.from({length:1000},(_,i)=>"."+String(i).padStart(3,"0")).join(",")+",.tif,.tiff,.btf,.png,.jpg,.jpeg,.bmp,.gif,.webp,.avif,.dm3,.dm4,.mrc,.mrcs,.st,.rec,.ali,.map,.emd,.h5,.hdf5,.bcf,.ibw,.sxm,.npy,.txt,.csv,.tsv,.dat,.asc,.raw,.bin";
 IO.sniff=function(name,u8){
   const n=name.toLowerCase(); const b=u8;

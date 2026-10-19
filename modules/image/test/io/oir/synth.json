@@ -432,7 +432,7 @@
    "Green",
    "Red"
   ],
-  "warn": "참조 영상",
+  "warn": "참조 이미지",
   "truth": "oirfile = Bio-Formats",
   "key": "ref.oir",
   "ref": {
@@ -762,7 +762,7 @@
   "nc": 1,
   "nz": 1,
   "nt": 1,
-  "warn": "참조(개관) 영상만",
+  "warn": "참조(개관) 이미지만",
   "chNames": [
    "CH1"
   ],

@@ -68,7 +68,7 @@ DI.spearman=function(a,b){ const n=a.length; if(n<3) return 0; const rk=v=>{ con
 DI.rhoUnsat=function(rows,Io,Ip){ const a=[], b=[]; rows.forEach((r,i)=>{ if(r.spot&&r.spot.saturated) return; a.push(Io[i]); b.push(Ip[i]); }); return a.length>=4?DI.spearman(a,b):null; };
 const rhoTerm=r=>r==null?0.5:(1-r);
 DI.rankSpots=function(fit,phases,opt){ opt=opt||{}; const meas=DI.measured(fit,opt); const C=DI.matchSpots(meas,phases,Object.assign({},opt,{top:opt.nVerify||80}));
-  // 예측 위치가 영상 밖·가린 곳이면 '빠짐' 으로 세지 않는다
+  // 예측 위치가 이미지 밖·가린 곳이면 '빠짐' 으로 세지 않는다
   const W=opt.w, H=opt.h, M=opt.mask; const PF=opt.posFit||fit; const mk=c=>(W&&H)?(h=>{ const q=DI.predictPx(PF,c,h); const x=Math.round(q.x), y=Math.round(q.y); if(x<4||y<4||x>=W-4||y>=H-4) return true; return !!(M&&M[y*W+x]); }):null;
   for(const c of C){ const V=DI.verifyZone(fit,c,Object.assign({},opt,{isMasked:mk(c)})); const Io=V.rows.map(r=>Math.max(0,r.spot.I)), Ip=V.rows.map(r=>r.I); const tot=Io.reduce((a,b)=>a+b,0)||1; let forb=0; V.rows.forEach((r,i)=>{ if(r.I<0.01) forb+=Io[i]; });
     c.verify=V; c.hasF=!!(c.phase.atoms&&c.phase.atoms.length);

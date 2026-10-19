@@ -1,5 +1,5 @@
 /* ============================================================
-   INNO Analytics — Image 탭 UI (ImageJ 를 본뜬 영상 분석)
+   INNO Analytics — Image 탭 UI (ImageJ 를 본뜬 이미지 분석)
    계산 = IMG_CORE (Web Worker), 파일 = IMG_IO. 이 파일들은 inject_all.py 가 하나의 IIFE 로 묶는다.
    ============================================================ */
 const IC=window.IMG_CORE, IO=window.IMG_IO;
@@ -12,13 +12,13 @@ const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slic
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------------- 상태 ----------------
-   S 는 JSON 으로 저장되는 부분(영상 메타데이터·ROI·결과·매크로·화면). 화소는 PX(id → Float32Array[]) 에 따로 둔다 */
+   S 는 JSON 으로 저장되는 부분(이미지 메타데이터·ROI·결과·매크로·화면). 화소는 PX(id → Float32Array[]) 에 따로 둔다 */
 function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[],particles:{},summary:[],plots:[],skelTrees:[],skelBranches:[],drops:[],dropFit:{},dropBase:{},
   measure:{cols:["Area","Mean","StdDev","Min","Max","X","Y","Perim.","Feret","MinFeret","Circ.","AR","Round","Solidity","ECD"]},
   macro:{rec:true,steps:[]},
-  ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:true,manual:false,lower:0,upper:255,show:true},
+  ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:false,manual:false,lower:0,upper:255,show:true},
       cthr:{space:"HSB",min:[0,0,0],max:[255,255,255],pass:[true,true,true],method:"Default",dark:false},
-      pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0,maxCirc:1,exclude:false,holes:false,redirect:"",show:"outlines",addRoi:false},
+      pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0.5,maxCirc:1,exclude:true,_d1019:1,holes:false,redirect:"",show:"outlines",addRoi:false},
       dist:{col:"ECD",bins:0,log:false},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
 let S=defState(); const PX=new Map(); let ROOT=null, LOADED=false;
 const UNDO=new Map(); // id → [{planes, meta}]
@@ -45,19 +45,20 @@ async function flushSave(){ clearTimeout(_svT); _svT=null; const snap=JSON.parse
   await dbPut("state",snap);
   for(const id of [...DIRTY]){ DIRTY.delete(id); const P=PX.get(id); if(!P) { await dbDel("px:"+id); continue; } const im=byId(id); const ok=await dbPut("px:"+id,{v:im?im.ver:0,P}); // 판 번호와 함께 → 불러올 때 맞는지 확인
     if(!ok) DIRTY.add(id); // 다음 저장 때 다시
-    if(!ok&&!_quotaWarned){ _quotaWarned=true; note("브라우저 저장 공간이 부족해 일부 영상 화소를 저장하지 못했습니다 — 새로 고치면 그 영상은 다시 열어야 합니다","warn"); } } }
+    if(!ok&&!_quotaWarned){ _quotaWarned=true; note("브라우저 저장 공간이 부족해 일부 이미지 화소를 저장하지 못했습니다 — 새로 고치면 그 이미지는 다시 열어야 합니다","warn"); } } }
 function markDirty(id){ DIRTY.add(id); save(); }
 try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size)) flushSave(); }); }catch(e){}
 async function loadSaved(){
   const st=await dbGet("state"); if(!st||st.v!==1) return;
-  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{}); S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
+  const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{});
+  if(!((st.ui||{}).pa||{})._d1019){ S.ui.pa._d1019=1; if(!(+S.ui.pa.minCirc>0)) S.ui.pa.minCirc=0.5; S.ui.pa.exclude=true; S.ui.thr.dark=false; } // 10-19 권장값으로 한 번 바꿈(사용자 요청) — 그 뒤 바꾼 값은 그대로 S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
   const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
     if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
-  if(stale) setTimeout(()=>note(`영상 ${stale}개는 마지막 작업의 화소가 저장되지 않아 열지 않았습니다 — 다시 여세요`,"warn"),60);
-  { const ids=new Set(keep.map(x=>"px:"+x.id)); for(const k of await dbKeys()) if(typeof k==="string"&&k.startsWith("px:")&&!ids.has(k)) dbDel(k); } // 닫힌 영상의 화소 지움
+  if(stale) setTimeout(()=>note(`이미지 ${stale}개는 마지막 작업의 화소가 저장되지 않아 열지 않았습니다 — 다시 여세요`,"warn"),60);
+  { const ids=new Set(keep.map(x=>"px:"+x.id)); for(const k of await dbKeys()) if(typeof k==="string"&&k.startsWith("px:")&&!ids.has(k)) dbDel(k); } // 닫힌 이미지의 화소 지움
   const lost=S.images.length-keep.length; S.images=keep; if(S.sel&&!byId(S.sel)) S.sel=keep[0]?keep[0].id:null;
-  if(lost) setTimeout(()=>note(`저장되지 않은 영상 ${lost}개는 다시 열어야 합니다`,"warn"),50);
+  if(lost) setTimeout(()=>note(`저장되지 않은 이미지 ${lost}개는 다시 열어야 합니다`,"warn"),50);
 }
 
 /* ---------------- 알림 줄 ---------------- */
@@ -104,7 +105,7 @@ const CANCELS=new Set();
 let CANCEL_GEN=0; // 중단할 때마다 늘림: 기다리던 일·batch 고리도 이 값을 보고 멈춤
 function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.clear(); hideProg(); } // BUSY 는 그 작업이 끝나며 직접 풂
 
-/* ---------------- 영상 추가·삭제·되돌리기 ---------------- */
+/* ---------------- 이미지 추가·삭제·되돌리기 ---------------- */
 function addImage(d,o){
   o=o||{}; const id=uid(); const nc=d.nc||1;
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:d.cal||null,calCandidates:d.calCandidates||[],info:d.info||[],warn:d.warn||[],
@@ -118,10 +119,10 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 영상을 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
+function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
-const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 영상마다 8 단계, 모든 영상 합쳐 1.2 GB
+const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB
 function pushUndo(im,label){ const L=UNDO.get(im.id)||[]; const e={label,planes:planesOf(im),macroAt:null,calChanged:false,
     meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
   L.push(e); while(L.length>UNDO_MAX) L.shift(); UNDO.set(im.id,L);
@@ -138,7 +139,7 @@ function undo(){ const im=cur(); if(!im) return; if(BUSY){ note("계산 중에�
   invalidate(im); save(); rerender(); note(`되돌림: ${u.label}`); }
 /* 화소 교체 (제자리 연산) */
 function setPlanes(im,planes,meta,label,step){
-  if(!byId(im.id)) throw new Error("영상이 닫혔습니다"); // 계산 중 닫힌 영상에 결과를 쓰지 않음
+  if(!byId(im.id)) throw new Error("이미지가 닫혔습니다"); // 계산 중 닫힌 이미지에 결과를 쓰지 않음
   const u=pushUndo(im,label); u.uid=uid(); const cal0=im.cal, nc0=im.nc; PX.set(im.id,planes); if(meta) Object.assign(im,meta); if(im.nc!==nc0||im.rgb) im.chNames=null; /* 채널 수가 바뀌면 이름은 더 맞지 않음 */ im.ver++; u.calChanged=im.cal!==cal0;
   if(step){ im.ops.push(step); const n=S.macro.steps.length; record(Object.assign({},step,{_u:u.uid}),im); if(S.macro.steps.length>n) u.macroAt=n; }
   if(meta&&(meta.bit!=null||meta.nc!=null)){ im.disp=[...Array(im.rgb?1:im.nc)].map((_,c)=>({min:0,max:255,lut:(im.disp[c]&&im.disp[c].lut)||defaultLut(im,c)})); }

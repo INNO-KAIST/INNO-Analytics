@@ -1,7 +1,7 @@
 /* ============================================================
    Process ▸ Find Maxima  —  ij/plugin/filter/MaximumFinder.java 이식 (watershed 분할 포함)
    prominence(=noise tolerance): 더 높은 극대로 가는 능선보다 이 값보다 더 솟아야 극대로 인정
-   output: "points"(목록) | "count" | "single"(Single Points 영상) | "within"(Maxima Within Tolerance) | "segmented"
+   output: "points"(목록) | "count" | "single"(Single Points 이미지) | "within"(Maxima Within Tolerance) | "segmented"
    ============================================================ */
 (function(){
 "use strict";
@@ -212,7 +212,7 @@ MF.prototype.deleteEdgeParticles=function(pix,types){
 };
 
 /* 8-연결 성분 + 그 안의 구멍(= ImageJ 가 traced polygon 을 채운 것과 같은 화소 집합)
-   상자 크기 결과 {x0,y0,w,h,m}: 입자마다 영상 전체 크기 배열을 만들지 않음 (입자 많은 큰 영상에서 수십 배 빠름) */
+   상자 크기 결과 {x0,y0,w,h,m}: 입자마다 이미지 전체 크기 배열을 만들지 않음 (입자 많은 큰 이미지에서 수십 배 빠름) */
 let CF_STAMP=null, CF_GEN=0;
 IC.componentFilledBox=function(pix,W,H,x0,y0,inside){
   if(!CF_STAMP||CF_STAMP.length!==W*H){ CF_STAMP=new Int32Array(W*H); CF_GEN=0; } const gen=++CF_GEN; if(gen>2e9){ CF_STAMP.fill(0); CF_GEN=1; }

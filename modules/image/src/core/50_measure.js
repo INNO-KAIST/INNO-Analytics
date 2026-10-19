@@ -122,8 +122,8 @@ IC.measureRoi=function(p,roi,cal){
   const s=IC.stats(p,roi.mask||null,r,{pw,ph},true);
   const out={Area:s.area,Mean:s.mean,StdDev:s.stdDev,Mode:s.mode,Min:s.min,Max:s.max,X:s.xCentroid,Y:s.yCentroid,XM:s.xCM,YM:s.yCM,
     IntDen:s.intDen,RawIntDen:s.rawIntDen,Median:s.median,Skew:s.skewness,Kurt:s.kurtosis,
-    BX:r.x*pw,BY:r.y*ph,Width:r.w*pw,Height:r.h*ph,_n:s.n}; // 경계 상자는 영상 안으로 자른 것 (ImageJ 와 같음)
-  const bb=roi.bounds||r; // 둘레: 영상 밖으로 나간 부분도 포함한 ROI 모양 (ImageJ 와 같음)
+    BX:r.x*pw,BY:r.y*ph,Width:r.w*pw,Height:r.h*ph,_n:s.n}; // 경계 상자는 이미지 안으로 자른 것 (ImageJ 와 같음)
+  const bb=roi.bounds||r; // 둘레: 이미지 밖으로 나간 부분도 포함한 ROI 모양 (ImageJ 와 같음)
   // 둘레
   let per;
   if(roi.kind==="traced") per=IC.tracedPerimeter(roi.poly.xs,roi.poly.ys,pw,ph);
@@ -149,13 +149,19 @@ IC.measureRoi=function(p,roi,cal){
 };
 
 /* ---------- Analyze Particles ----------
-   bin: 문턱 판정 함수 대신 0/1 Uint8Array(w*h) (물체=1). intensity: 측정용 plane(redirect; 없으면 bin 영상)
+   bin: 문턱 판정 함수 대신 0/1 Uint8Array(w*h) (물체=1). intensity: 측정용 plane(redirect; 없으면 bin 이미지)
    o: {minSize, maxSize (화소 수), minCirc, maxCirc, excludeEdges, includeHoles, fourConnected(false)}
    반환: {particles:[{n, rect, poly, mask, meas}], count, totalArea, labels:Int32Array} */
+/* 8-연결 성분의 화소 수만 (측정 없이, 빠름) — 자동 Size 최솟값 정할 때 */
+IC.componentAreas=function(bin,W,H){ const seen=new Uint8Array(W*H), st=new Int32Array(W*H); const out=[];
+  for(let i0=0;i0<W*H;i0++){ if(!bin[i0]||seen[i0]) continue; let sp=0, n=0; st[sp++]=i0; seen[i0]=1;
+    while(sp){ const i=st[--sp]; n++; const x=i%W, y=(i-x)/W; for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(bin[j]&&!seen[j]){ seen[j]=1; st[sp++]=j; } } } }
+    out.push(n); } return out; };
 IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
   o=o||{}; cal=cal||{pw:1,ph:1};
   const minS=o.minSize!=null?o.minSize:0, maxS=o.maxSize!=null?o.maxSize:Infinity, minC=o.minCirc||0, maxC=o.maxCirc!=null?o.maxCirc:1;
   const done=new Uint8Array(W*H); const labels=new Int32Array(W*H); const parts=[]; let count=0;
+  const maxN=o.maxCount>0?o.maxCount:Infinity; let tooMany=false; // 입자 상한(앱 보호): 넘으면 측정을 멈추고 개수만 센다 — 잡음·극성 반대 설정에서 수십만 개를 재다 멈추는 것을 막음
   const cur=new Uint8Array(W*H);
   for(let y=0;y<H;y++){ for(let x=0;x<W;x++){ const i0=y*W+x; if(!bin[i0]||done[i0]) continue;
     // 8-연결 성분 (처리 안 된 물체 화소)
@@ -173,10 +179,11 @@ IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
     for(const i of maskPix) done[i]=1;
     const np=mask?maskPix.length:rect.w*rect.h;
     let include=true;
-    if(o.excludeEdges&&(rect.x===0||rect.y===0||rect.x+rect.w===W||rect.y+rect.h===H)) include=false;
+    { const B=o.bounds||{x0:0,y0:0,x1:W,y1:H}; if(o.excludeEdges&&(rect.x<=B.x0||rect.y<=B.y0||rect.x+rect.w>=B.x1||rect.y+rect.h>=B.y1)) include=false; } // bounds = 사각형 ROI (없으면 이미지)
     if(minC>0||maxC!==1){ const per=IC.tracedPerimeter(ol.xs,ol.ys,1,1); let c=per===0?0:4*Math.PI*(np/(per*per)); if(c>1&&maxC<=1) c=1; if(c<minC||c>maxC) include=false; }
     if(np>=minS&&np<=maxS&&include){
       count++;
+      if(count>maxN){ tooMany=true; continue; }
       const roi={mask,rect,poly:ol,kind:"traced"};
       if(!intensity) intensity={w:W,h:H,bit:8,data:Float32Array.from(bin,v=>v?255:0)}; // 한 번만 만듦
       const meas=IC.measureRoi(intensity,roi,cal);
@@ -185,6 +192,7 @@ IC.analyzeParticles=function(bin,W,H,intensity,cal,o){
     }
   }
   if((y&31)===0) IC.progress(y/H); }
+  if(tooMany) return {tooMany:true,count,maxCount:maxN,particles:[],totalArea:NaN,labels:null};
   let tot=0; for(const q of parts) tot+=q.meas.Area;
   return {particles:parts,count,totalArea:tot,labels};
 };
@@ -231,7 +239,7 @@ IC.polygonMask=function(xs,ys,W,H){
     for(let i=0;i+1<act.length;i+=2){ let x1=Math.trunc(ex[act[i]]+0.5), x2=Math.trunc(ex[act[i+1]]+0.5); if(x1<0) x1=0; if(x1>bw) x1=bw; if(x2<0) x2=0; if(x2>bw) x2=bw; for(let x=x1;x<x2;x++) mask[y*bw+x]=1; }
     let prev=-Number.MAX_VALUE, sorted=true; for(const i of act){ ex[i]+=esl[i]; if(ex[i]<prev) sorted=false; prev=ex[i]; } if(!sorted) sortAct();
   }
-  // 영상 밖으로 나간 부분 자르기
+  // 이미지 밖으로 나간 부분 자르기
   const rx=Math.max(0,bx), ry=Math.max(0,by), rx2=Math.min(W,bx+bw), ry2=Math.min(H,by+bh), rw=Math.max(0,rx2-rx), rh=Math.max(0,ry2-ry);
   if(rx===bx&&ry===by&&rw===bw&&rh===bh) return {mask,rect:{x:bx,y:by,w:bw,h:bh}};
   const m2=new Uint8Array(rw*rh); for(let y=0;y<rh;y++) for(let x=0;x<rw;x++) m2[y*rw+x]=mask[(y+ry-by)*bw+(x+rx-bx)];

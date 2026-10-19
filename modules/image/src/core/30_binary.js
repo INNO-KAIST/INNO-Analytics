@@ -3,7 +3,7 @@
    Distance Map (EDM), Ultimate Points, Watershed
    원본: ij/process/ByteProcessor.java (filter ERODE/DILATE), ij/process/BinaryProcessor.java,
          ij/plugin/filter/Binary.java, ij/plugin/filter/EDM.java
-   규칙: Black background (물체 = 255, 배경 = 0). 영상 밖 = 배경 (Prefs.padEdges=false)
+   규칙: Black background (물체 = 255, 배경 = 0). 이미지 밖 = 배경 (Prefs.padEdges=false)
    ============================================================ */
 (function(){
 "use strict";
@@ -13,7 +13,7 @@ const FG=255, BG=0;
 
 function isBinary(p){ if(p.bit!==8) return false; const d=p.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==0&&v!==255) return false; } return true; }
 IC.isBinary=isBinary;
-function needBinary(p){ if(!isBinary(p)) throw new Error("이진(0/255) 8-bit 영상이 필요합니다 — 먼저 Threshold ▸ Apply (Convert to Mask)"); }
+function needBinary(p){ if(!isBinary(p)) throw new Error("이진(0/255) 8-bit 이미지가 필요합니다 — 먼저 Threshold ▸ Apply (Convert to Mask)"); }
 
 function erodeDilate(src,W,H,count,erode){
   const out=new Float32Array(W*H);

@@ -249,7 +249,7 @@ CASES = [
     ('linescan.oir', spec(W=16, H=1, lines=40, blocks=4, axes_enabled='T', maxSize={'T': 40}), '선 주사 (면 높이 1, 40 줄을 블록 4 개로)',
      {'follow': 'oirfile', 'why': 'Bio-Formats 7.3.1 은 Y 1 줄만 읽음; oirfile 은 PIXEL 자료 길이로 40 줄 (kymograph) — 앱은 oirfile', 'warn': '선 주사'}),
     ('ref.oir', spec(nc=2, ref=(12, 10)), '참조(개관) 영상 REF_ 블록 포함',
-     {'follow': 'oirfile', 'why': '실측처럼 REF_ 블록이 파일 맨 앞이면 Bio-Formats 도 본 영상은 같게 읽음 (본 화소 뒤에 두면 덮어씀); 참조 영상은 oirfile 만 따로 냄 — 앱은 본 영상 + 참조 영상 2 개', 'ref': True, 'warn': '참조 영상'}),
+     {'follow': 'oirfile', 'why': '실측처럼 REF_ 블록이 파일 맨 앞이면 Bio-Formats 도 본 영상은 같게 읽음 (본 화소 뒤에 두면 덮어씀); 참조 영상은 oirfile 만 따로 냄 — 앱은 본 영상 + 참조 영상 2 개', 'ref': True, 'warn': '참조 이미지'}),
 ]
 
 
@@ -318,7 +318,7 @@ def review_probes(out, table):
     run('p14_rgb_bgr.oir', [frame(spR)] + sum((pix_pair(f'_0_1_{spR["guids"][c]}_0'.encode(), dR[c].tobytes()) for c in range(3)), []) + [meta(spR)], dR[::-1],
         'RGB, 채널 차례 B·G·R (이름) → R·G·B 로', dict(w=6, h=4, nc=3, nz=1, nt=1, bit=8, rgb=True, warn='RGB 성분'))
     run('p15_refonly.oir', [frame(sp3)] + pix_pair(f'REF_CAMERA0_{sp3["guids"][0]}_0'.encode(), d3.tobytes()) + [meta(sp3)], d3,
-        'REF_ 블록만 (본 영상 없음) → 참조 영상만 + 알림', dict(w=8, h=6, nc=1, nz=1, nt=1, warn='참조(개관) 영상만', chNames=['CH1'], refonly=True))
+        'REF_ 블록만 (본 영상 없음) → 참조 영상만 + 알림', dict(w=8, h=6, nc=1, nz=1, nt=1, warn='참조(개관) 이미지만', chNames=['CH1'], refonly=True))
     sp16 = spec(nz=3, nt=2, Zstep=0.5); d16 = np.random.default_rng(2).integers(0, 4096, (2, 3, 6, 8)).astype('<u2'); bl = []; later = []
     for t in range(2):
         for z in range(3):

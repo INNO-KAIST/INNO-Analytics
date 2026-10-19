@@ -5,6 +5,14 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-19 원클릭 Analyze particles (auto) · 권장값을 기본값으로 · '영상' → '이미지'**(modules/image/SPEC.md §6i):
+  Analyze 패널 맨 위 [Analyze particles (auto)]: 원본 그대로 두고 사본에서 Gaussian σ 2 → Threshold Default(극성 자동) → Fill Holes → Watershed → 축척 막대·글자 자동 제외(눈금 없으면 막대 글자로 정함) → Size ≥ 성분 넓이 중앙값 ¼ · Circularity 0.5–1 · edge 제외 · 세기는 원본 → Size distribution 탭. 손으로 하는 Analyze 는 아래 '고급'.
+  기본값: Circularity 0.5–1, Exclude on edges, Dark background 꺼짐(저장된 상태도 한 번 바꿈). 화면·안내·사용 가이드의 '영상' → '이미지'(조사 맞춤).
+  사용자 TEM 이미지: 5.7 s, 432 개, ECD 23.7 ± 4.6 nm (D50 23.3). 합성 421 개 → 421. 시험 ui_pa_guard 12 · test_img 103 · oir 54 · ui_drop 38 · ui_nav 29 · ui_touch 72 · ui_shell 18 · ui_diff 61.
+- **10-19 Analyze Particles 보호 장치 · ROI 안만 세기 · nm 단위**(modules/image/SPEC.md §6h):
+  기본 문턱 Dark background 꺼짐(ImageJ 와 같음 — TEM 명시야에서 바탕 70 % 를 입자로 세던 것). Max count(기본 2000): 넘으면 측정 대신 1–2 s 에 멈추고 원인 안내(잡음 점 15 만 개를 재다 페이지가 멈추던 것). 선택 > 50 % 경고. 표는 앞 3000 줄.
+  영역 ROI 안만 셈(축척 막대·글자 빼기), Exclude on edges = 사각형 ROI 테두리 포함, 매크로에 ROI. 화소 단위: 0.55 nm/px 가 552.6 pm 으로 보이던 것 → nm.
+  사용자 TEM 영상(0.5526 nm/px, GMS 태그): Gaussian σ2 → Default → Fill Holes → Watershed → ROI → ≥ 100 nm²·Circ 0.5–1·edge 제외 → 433 개, ECD 23.7 ± 4.7 nm (D50 23.3). 시험 ui_pa_guard 9 · test_img 103 · ui_drop 38 · ui_touch 72.
 - **10-19 탭 막대 정리 — 한 줄 · 짧은 이름 · More ▾, EM Metadata 를 EM Image 안으로**(modules/nav/nav_fit.js·css, inject_all.py):
   데스크톱 탭 막대가 820–1280 px 에서 두 줄로 꺾이던 것 → 늘 한 줄: 전체 이름 → 안 들어가면 짧은 이름(휴대폰과 같은 data-short) → 그래도 넘치면 뒤쪽 탭을 More ▾ 메뉴로(지금 탭은 남김, Esc·밖 클릭으로 닫힘, 폭이 바뀌면 다시 맞춤). 휴대폰 아래 막대는 9 칸.
   EM Metadata 탭 없앰 → EM Image 위 Image · Metadata 전환(보기 키 meta 그대로, 영상 없는 파일은 바로 Metadata, 탭 막대는 EM Image 표시). 출처 줄 링크 'Set in Lattice FFT' → 'Set in Diffraction'.

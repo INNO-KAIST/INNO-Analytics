@@ -1,11 +1,11 @@
 /* ============================================================
    INNO Analytics — 광학 현미경 형식 읽기 (IMG_IO 에 덧붙임)
    · Nikon ND2 (NIS-Elements, 형식 v2.x·v3.x): chunk map, CLx Lite Variant(이진)·CLxVariant(XML) 메타데이터,
-     비압축·lossless(zlib) 프레임, 실험 loop(T·NETime·XY·Z) → 위치별 영상, 채널 이름·색, 보정(µm/px), z step.
+     비압축·lossless(zlib) 프레임, 실험 loop(T·NETime·XY·Z) → 위치별 이미지, 채널 이름·색, 보정(µm/px), z step.
      해석 규칙은 Python `nd2` 패키지(T. Lambert, BSD-3) 의 modern reader 를 따랐다 — 시험도 그 패키지가 읽은 배열과 대조.
      v1.0(JPEG 2000 로 저장한 NIS-Elements 3 이전 형식)은 읽지 않는다.
    · Zeiss CZI (ZISRAW): subblock directory, Gray8/16/32f/Bgr24/48/96f, 비압축·zstd0·zstd1(HiLoByteUnpack)·JPG,
-     pyramid 층 0 만, mosaic tile 합성(M 순서, 뒤 tile 이 위 — libCZI 와 같음), scene 별 영상, Scaling·채널 이름·색.
+     pyramid 층 0 만, mosaic tile 합성(M 순서, 뒤 tile 이 위 — libCZI 와 같음), scene 별 이미지, Scaling·채널 이름·색.
      JPEG XR 압축(slide scanner 의 손실 압축)은 읽지 않는다.
    ============================================================ */
 (function(){
@@ -227,9 +227,9 @@ async function readCZI(name,u8,ctx){
   const DIMS=[...new Set(L0.flatMap(e=>Object.keys(e.dims)))].filter(d=>!["X","Y","M"].includes(d));
   const vals={}; for(const d of DIMS){ vals[d]=[...new Set(L0.map(e=>val(e,d)))].sort((a,b)=>a-b); }
   const n=d=>vals[d]?vals[d].length:1; const idx=(e,d)=>vals[d]?vals[d].indexOf(val(e,d)):0;
-  const extra=DIMS.filter(d=>!["C","Z","T","S"].includes(d)&&n(d)>1); // H·R·I·V·B 등 → 따로 영상
+  const extra=DIMS.filter(d=>!["C","Z","T","S"].includes(d)&&n(d)>1); // H·R·I·V·B 등 → 따로 이미지
   const nc=n("C"), nz=n("Z"), nt=n("T"), ns=n("S");
-  // 채널마다 화소 형식: RGB(Bgr*) 채널 = 채널마다 따로 RGB 영상, 회색 채널 = 하나의 다채널 영상 (밝은 시야 RGB + 형광 회색이 섞인 파일)
+  // 채널마다 화소 형식: RGB(Bgr*) 채널 = 채널마다 따로 RGB 이미지, 회색 채널 = 하나의 다채널 이미지 (밝은 시야 RGB + 형광 회색이 섞인 파일)
   const chPt=[...Array(nc)].map(()=>new Set()); for(const e of L0) chPt[idx(e,"C")].add(e.pt);
   const isRgbPt=t=>CZI_PT[t][1]>=3, isFPt=t=>[2,8,12,13].includes(t);
   const chKind=chPt.map(S=>{ const L=[...S]; if(!L.length) return {rgb:false,bit:8}; const rgb=L.some(isRgbPt); if(rgb&&!L.every(isRgbPt)) throw new Error("CZI: 한 채널 안에 RGB 와 회색 subblock 이 섞여 있습니다"); return {rgb,bit:L.some(isFPt)?32:Math.max(...L.map(t=>CZI_PT[t][0]))}; });
@@ -240,7 +240,7 @@ async function readCZI(name,u8,ctx){
   if(grayC.length&&rgbC.length) warn.push(`CZI: RGB 채널(${rgbC.length})과 회색 채널(${grayC.length})이 섞여 있어 따로 엽니다`);
   if(pts.includes(13)) warn.push("CZI: Gray64(double) 를 32-bit float 로 읽었습니다(유효숫자 약 7 자리)");
   if(pts.includes(12)) warn.push("CZI: Gray32(정수) 를 32-bit float 로 읽었습니다(2²⁴ 넘는 값은 반올림)");
-  // 영상 묶음 = scene × extra
+  // 이미지 묶음 = scene × extra
   const groups=new Map(); for(const e of L0){ const key=[idx(e,"S"),...extra.map(d=>idx(e,d))].join(","); if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(e); }
   const cal=meta.sc.X?calOpt(meta.sc.X,meta.sc.Y||meta.sc.X,"CZI Scaling (Distance X·Y)"):null; const zStep=meta.sc.Z?meta.sc.Z*1e6:0;
   info.push(["Dimensions",`${DIMS.filter(d=>n(d)>1).map(d=>d+n(d)).join(" ")}${L0.some(e=>e.dims.M)?` M${new Set(L0.map(e=>e.dims.M?e.dims.M.start:0)).size}`:""}`]);
@@ -250,7 +250,7 @@ async function readCZI(name,u8,ctx){
   const bbox=list=>{ let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity; for(const e of list){ x0=Math.min(x0,e.dims.X.start); y0=Math.min(y0,e.dims.Y.start); x1=Math.max(x1,e.dims.X.start+e.dims.X.size); y1=Math.max(y1,e.dims.Y.start+e.dims.Y.size); } return {x0,y0,W:x1-x0,H:y1-y0}; };
   const planesPer=grayC.length+3*rgbC.length; const posBytes=keys.map(k=>{ const b=bbox(groups.get(k)); return b.W*b.H*4*planesPer*nz*nt; });
   const all=k=>[...Array(k).keys()]; let sel={p:all(keys.length),z:all(nz),t:all(nt)};
-  const keyName=k=>{ const q=k.split(",").map(Number); return [ns>1?`S${q[0]+1}`:"",...extra.map((d,i)=>`${d}${q[1+i]+1}`)].filter(Boolean).join(" ")||"영상"; };
+  const keyName=k=>{ const q=k.split(",").map(Number); return [ns>1?`S${q[0]+1}`:"",...extra.map((d,i)=>`${d}${q[1+i]+1}`)].filter(Boolean).join(" ")||"이미지"; };
   if(ctx&&ctx.choose){ const b0=bbox(groups.get(keys[0]));
     const r=await ctx.choose({kind:"czi",name,positions:keys.length,posNames:keys.map(keyName),posBytes,nz,nt,nc,w:b0.W,h:b0.H,bytesPerPlane:b0.W*b0.H*4,planesPer}); if(!r) return {images:[],warn:[],cancel:true}; sel=Object.assign(sel,r); }
   const pick=sel.p.map(i=>keys[i]); const zMap=new Map(sel.z.map((z,i)=>[z,i])), tMap=new Map(sel.t.map((t,i)=>[t,i])); const nzo=sel.z.length, nto=sel.t.length;
@@ -274,7 +274,7 @@ async function readCZI(name,u8,ctx){
       if(chKind[c].bit===8) images.push({...common,name:nm,bit:8,rgb:true,nc:3,planes:P});
       else images.push({...common,name:nm,bit:chKind[c].bit,rgb:false,nc:3,planes:P,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
   }
-  if(images.length) images[0].metaText=xml.length>200000?xml.slice(0,200000)+"…":xml; // 원문은 첫 영상에만 (저장 공간)
+  if(images.length) images[0].metaText=xml.length>200000?xml.slice(0,200000)+"…":xml; // 원문은 첫 이미지에만 (저장 공간)
   return {images,warn};
 }
 IO.readCZI=readCZI;

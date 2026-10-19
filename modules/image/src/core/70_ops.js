@@ -38,12 +38,12 @@ IC.math=function(p,op,val){
       case "add": r=v+iv; break; case "mul": r=jr(v*val); break; case "set": r=iv; break;
       case "min": r=v<val?iv:v; break; case "max": r=v>val?iv:v; break;
       case "and": r=v&iv; break; case "or": r=v|iv; break; case "xor": r=v^iv; break;
-      case "abs": r=v; break; case "reciprocal": throw new Error("Reciprocal 은 32-bit 영상에서만 (ImageJ 와 같음)");
+      case "abs": r=v; break; case "reciprocal": throw new Error("Reciprocal 은 32-bit 이미지에서만 (ImageJ 와 같음)");
       case "gamma": r=bit===8?jr(Math.exp(Math.log(v/255)*val)*255):((range<=0||v===mn)?v:jr(Math.exp(val*Math.log((v-mn)/range))*range+mn)); break;
       case "log": r=bit===8?(v===0?0:jr(Math.log(v)*SC)):(v<=0?0:jr(Math.log(v)*(mx/Math.log(mx)))); break;
       case "exp": r=bit===8?jr(Math.exp(v/SC)):jr(Math.exp(v*(Math.log(mx)/mx))); break;
       case "sqr": r=v*v; break; case "sqrt": r=jr(Math.sqrt(v)); break;
-      case "nan": throw new Error("NaN Background 는 32-bit 영상에서만");
+      case "nan": throw new Error("NaN Background 는 32-bit 이미지에서만");
       default: throw new Error("Math 연산: "+op); }
     if(!(r>=0)) r=0; if(r>M) r=M; out[i]=r; }
   return {w:p.w,h:p.h,bit,data:out};
@@ -53,7 +53,7 @@ IC.math=function(p,op,val){
    op: add sub mul div and or xor min max average difference copy transparent-zero
    float=true 면 32-bit 결과 */
 IC.calc=function(a,b,op,float){
-  if(a.w!==b.w||a.h!==b.h) throw new Error("두 영상의 크기가 같아야 합니다");
+  if(a.w!==b.w||a.h!==b.h) throw new Error("두 이미지의 크기가 같아야 합니다");
   const n=a.data.length, out=new Float32Array(n), bit=float?32:a.bit;
   for(let i=0;i<n;i++){ const x=a.data[i], y=b.data[i]; let r;
     switch(op){ case "add": r=x+y; break; case "sub": r=x-y; break; case "mul": r=x*y; break; case "div": r=(float||bit===32)?x/y:(y===0?IC.maxOf(bit):Math.trunc(x/y)); break; // 32-bit 은 언제나 실수 나눗셈 (0/0 = NaN, x/0 = ±∞)
@@ -80,7 +80,7 @@ IC.saturatedRange=function(p,saturated,mask){
 };
 IC.enhanceContrast=function(p,o){
   o=o||{}; const rr=IC.saturatedRange(p,o.saturated!=null?+o.saturated:0.35,o.mask);
-  if(!rr) return o.normalize?{plane:{w:p.w,h:p.h,bit:p.bit,data:Float32Array.from(p.data)},unchanged:true}:{range:null,unchanged:true}; // 일정한 영상·saturated 과다 → 그대로
+  if(!rr) return o.normalize?{plane:{w:p.w,h:p.h,bit:p.bit,data:Float32Array.from(p.data)},unchanged:true}:{range:null,unchanged:true}; // 일정한 이미지·saturated 과다 → 그대로
   const [mn,mx]=rr;
   if(!o.normalize) return {range:[mn,mx]};
   const d=p.data, out=new Float32Array(d.length);
@@ -90,7 +90,7 @@ IC.enhanceContrast=function(p,o){
   return {plane:{w:p.w,h:p.h,bit:p.bit,data:out}};
 };
 IC.equalize=function(p,classic){
-  if(p.bit===32) throw new Error("32-bit 영상은 Equalize 하지 않습니다 (ImageJ 와 같음)");
+  if(p.bit===32) throw new Error("32-bit 이미지는 Equalize 하지 않습니다 (ImageJ 와 같음)");
   const max=p.bit===8?255:65535, range=max; const hist=new Float64Array(max+1); for(const v of p.data) hist[v|0]++;
   const wv=i=>{ const h=hist[i]; return (h<2||classic)?h:Math.sqrt(h); };
   let sum=wv(0); for(let i=1;i<max;i++) sum+=2*wv(i); sum+=wv(max); const scale=range/sum;
@@ -126,7 +126,7 @@ IC.resize=function(p,W,H,o){
   else { for(let y=0;y<H;y++) for(let x=0;x<W;x++) out[y*W+x]=IC.bilinear(p,(x+0.5)*sx,(y+0.5)*sy); }
   return {w:W,h:H,bit:p.bit,data:IC.roundTo(out,p.bit)};
 };
-/* 영상 이동 (정수·소수): 쌍선형, 밖 = 0 */
+/* 이미지 이동 (정수·소수): 쌍선형, 밖 = 0 */
 IC.translate=function(p,dx,dy){ const W=p.w,H=p.h,out=new Float32Array(W*H); for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const xs=x-dx, ys=y-dy; if(xs<0||ys<0||xs>W-1||ys>H-1){ out[y*W+x]=0; continue; } out[y*W+x]=IC.bilinear(p,xs+0.5,ys+0.5); } return {w:W,h:H,bit:p.bit,data:IC.roundTo(out,p.bit)}; };
 
 /* ---------- Z Project (ij/plugin/ZProjector) ----------
@@ -146,7 +146,7 @@ IC.zProject=function(planes,method){
 /* ---------- 위상 상관 이동 추정 (translation) ----------
    Hann 창, 교차 전력 스펙트럼 정규화, 정수 극대 + 3 점 포물선 보간(부화소). 반환 {dx,dy,peak} = b 를 a 에 맞추는 이동 */
 IC.phaseCorr=function(a,b){
-  for(const q of [a,b]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("정렬: 영상에 NaN·무한대 화소가 있습니다 — Process ▸ Math ▸ NaN Background 등을 되돌리거나 값으로 바꾼 뒤 정렬하세요"); } }
+  for(const q of [a,b]){ const d=q.data; for(let i=0;i<d.length;i++){ const v=d[i]; if(v!==v||v===Infinity||v===-Infinity) throw new Error("정렬: 이미지에 NaN·무한대 화소가 있습니다 — Process ▸ Math ▸ NaN Background 등을 되돌리거나 값으로 바꾼 뒤 정렬하세요"); } }
   const W=a.w,H=a.h, S=IC.nextPow2(Math.max(W,H));
   let ma=0,mb=0; for(let i=0;i<W*H;i++){ ma+=a.data[i]; mb+=b.data[i]; } ma/=W*H; mb/=W*H;
   const hann=(t,n)=>t<=-0.5||t>=n-0.5?0:0.5-0.5*Math.cos(2*Math.PI*(t+0.5)/n);
@@ -205,8 +205,8 @@ IC.orientation=function(p,o){
   IC.gaussianFloat(jxx,W,H,sigma,sigma,0.0002); IC.gaussianFloat(jyy,W,H,sigma,sigma,0.0002); IC.gaussianFloat(jxy,W,H,sigma,sigma,0.0002);
   const th=new Float32Array(N), coh=new Float32Array(N), en=new Float32Array(N); const hist=new Float64Array(180); let emax=0;
   for(let i=0;i<N;i++){ const a=jxx[i], b=jyy[i], c=jxy[i]; const tr=a+b, df=Math.sqrt((a-b)*(a-b)+4*c*c); const l1=(tr+df)/2, l2=(tr-df)/2;
-    // 영상 y 축이 아래로 향하므로 수학 좌표로 바꿔 반시계 + 로: 결 방향(기울기에 수직)
-    // 기울기 방향 φ = ½·atan2(2Jxy, Jxx−Jyy) (영상 좌표, y 아래). 결 방향 = φ+90°, 화면 반시계 + 로 바꾸면 −(φ+90°)
+    // 이미지 y 축이 아래로 향하므로 수학 좌표로 바꿔 반시계 + 로: 결 방향(기울기에 수직)
+    // 기울기 방향 φ = ½·atan2(2Jxy, Jxx−Jyy) (이미지 좌표, y 아래). 결 방향 = φ+90°, 화면 반시계 + 로 바꾸면 −(φ+90°)
     let t=-(0.5*Math.atan2(2*c,a-b)*180/Math.PI+90);
     if(t>90) t-=180; if(t<=-90) t+=180;
     th[i]=t; coh[i]=tr>1e-12?(l1-l2)/tr:0; en[i]=tr; if(tr>emax) emax=tr; }
@@ -214,7 +214,7 @@ IC.orientation=function(p,o){
   for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; let k=Math.floor(th[i]+90); if(k>=180) k=179; if(k<0) k=0; hist[k]+=coh[i]*en[i]; }
   // 주 방향: 선택한 화소의 텐서 합(구간 나눔 없이), order parameter = 이중각 평균 길이
   let A=0,B=0,Cc=0,sc=0,ss=0,sw=0; for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; A+=jxx[i]; B+=jyy[i]; Cc+=jxy[i]; const w=coh[i]*en[i], t=th[i]*Math.PI/180; sc+=w*Math.cos(2*t); ss+=w*Math.sin(2*t); sw+=w; }
-  let dom=-(0.5*Math.atan2(2*Cc,A-B)*180/Math.PI+90); if(dom>90) dom-=180; if(dom<=-90) dom+=180; if(!(A+B>0)||!(emax>0)) dom=NaN; /* 일정한 영상: 방향 없음 */ const R=sw?Math.hypot(sc,ss)/sw:0;
+  let dom=-(0.5*Math.atan2(2*Cc,A-B)*180/Math.PI+90); if(dom>90) dom-=180; if(dom<=-90) dom+=180; if(!(A+B>0)||!(emax>0)) dom=NaN; /* 일정한 이미지: 방향 없음 */ const R=sw?Math.hypot(sc,ss)/sw:0;
   let ct=0,cw=0; for(let i=0;i<N;i++){ if(en[i]<minE) continue; ct+=coh[i]*en[i]; cw+=en[i]; }
   return {theta:th,coherency:coh,energy:en,hist,dominant:dom,orderParam:R,meanCoherency:cw?ct/cw:0};
 };

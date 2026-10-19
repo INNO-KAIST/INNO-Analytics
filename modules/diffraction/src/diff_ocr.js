@@ -2,7 +2,7 @@
    INNO Analytics — Diffraction: 스케일바 이름표 OCR ("5 1/nm", "500 nm", "0.5 1/Å", "2 nm⁻¹" …). DOM 없음, 의존성 없음, Worker·Node 공용.
    API: DIFF_OCR.readScaleLabel(img,w,h,bar,opt) → {text,value,unit,valueInvNm,recip,conf,chars,box,H} | null
         DIFF_OCR.readAuto(img,w,h,hintBar,opt) — 힌트 막대(DIFF_PATTERN.scaleBar) + findBars 후보 중 conf 최고 (결과에 bar)
-        DIFF_OCR.findBars / findBar — 밝은·어두운·속 빈·흐린 막대 (흰 상자 안 검은 막대, 반전 영상)
+        DIFF_OCR.findBars / findBar — 밝은·어두운·속 빈·흐린 막대 (흰 상자 안 검은 막대, 반전 이미지)
    · 영역: 막대 둘레(위·아래 150 px, 좌우 420 px)만 → 2048² 에서 수십 ms 안
    · 이진화: 막대 값 = 잉크, 막대 둘레 중앙값 = 바탕(양 극성), 32 px 칸 백분위 바탕으로 국소 보정 → s 지도. 문턱 0.5·0.35·0.65 세 번
    · 분할: 8-연결 성분 → 위에 얹힌 작은 성분 합치기(Å 고리) → 줄 묶기 → 넓은 성분 쪼개기·붙은 조각 합치기·띠 밖 얼룩 자르기 후보
@@ -1723,7 +1723,7 @@ function inkMap(img,w,h,bar,opt){
   let rmin=Infinity, rmax=-Infinity; for(let i=0;i<R.length;i++){ const v=R[i]; if(v===v){ if(v<rmin) rmin=v; if(v>rmax) rmax=v; } }
   if(!(rmax>rmin)) return null;
   // 극성: 기본은 막대 상자 쪽(밝은 막대 = 밝은 글자). opt.polarity 로 반대 극성을 시험할 수 있다 — GMS 기본 이름표는
-  // 흰 속 빈 막대 옆에 '검은 글자 + 흰 그림자'(글자 몸통 = 영상 최솟값)라 막대와 글자 극성이 반대다
+  // 흰 속 빈 막대 옆에 '검은 글자 + 흰 그림자'(글자 몸통 = 이미지 최솟값)라 막대와 글자 극성이 반대다
   const bright0=(hi-bgN)>=(bgN-lo); const bright=opt.polarity==="dark"?false:opt.polarity==="bright"?true:bright0; const flipped=bright!==bright0;
   // 반대 극성의 잉크 = 영역의 0.3 % · 99.7 % 백분위 (한 점짜리 hot/dead 화소·포화 회절점에 끌리지 않게)
   let qLo=rmin, qHi=rmax; if(flipped){ const stp=Math.max(1,Math.floor(R.length/60000)); const smp=new Float32Array(Math.ceil(R.length/stp)); let ns=0; for(let i=0;i<R.length;i+=stp){ const v=R[i]; if(v===v) smp[ns++]=v; } qLo=pct(smp,ns,0.003); qHi=pct(smp.subarray(0,ns),ns,0.997); }
@@ -1927,13 +1927,13 @@ function finish(cands,ctx,opt){ if(!cands.length) return null;
   return res; }
 
 let FB=null;
-/* 막대 찾기 보조 — 밝은/어두운 막대 모두 (흰 상자 안 검은 막대, 반전 영상, 흐린 JPEG). 후보를 길이 순으로 */
+/* 막대 찾기 보조 — 밝은/어두운 막대 모두 (흰 상자 안 검은 막대, 반전 이미지, 흐린 JPEG). 후보를 길이 순으로 */
 OCR.findBars=function(img,w,h,opt){ opt=opt||{}; try{ if(!img||!(img.length>=w*h)) return [];
   let mn=Infinity, mx=-Infinity; for(let i=0;i<w*h;i++){ const v=img[i]; if(v===v){ if(v<mn) mn=v; if(v>mx) mx=v; } } if(!(mx>mn)) return [];
   const rg=mx-mn, out=[]; if(!FB||FB.n<w*h) FB={n:w*h,lab:new Int32Array(w*h),st:new Int32Array(w*h),M:new Uint8Array(w*h)}; // 큰 버퍼는 다시 씀
   const lab=FB.lab.subarray(0,w*h), st=FB.st, M=FB.M;
   for(const [bright,f,minFill] of [[true,0.97,0.85],[false,0.03,0.85],[true,0.75,0.75],[false,0.25,0.75]]){ const th=mn+f*rg;
-    let ns=0; for(let i=0;i<w*h;i++){ const v=img[i]; const k=(bright?v>=th:v<=th)?1:0; M[i]=k; ns+=k; } if(ns>0.4*w*h||ns<20) continue; // 바탕 쪽 극성(영상 대부분)은 막대가 아님
+    let ns=0; for(let i=0;i<w*h;i++){ const v=img[i]; const k=(bright?v>=th:v<=th)?1:0; M[i]=k; ns+=k; } if(ns>0.4*w*h||ns<20) continue; // 바탕 쪽 극성(이미지 대부분)은 막대가 아님
     lab.fill(-1); let id=0;
     for(let i0=0;i0<w*h;i0++){ if(!M[i0]||lab[i0]>=0) continue; let sp=0; st[sp++]=i0; lab[i0]=id; let x0=w,x1=0,y0=h,y1=0,n=0;
       while(sp){ const p=st[--sp]; n++; const x=p%w, y=(p-x)/w; if(x<x0) x0=x; if(x>x1) x1=x; if(y<y0) y0=y; if(y>y1) y1=y;
