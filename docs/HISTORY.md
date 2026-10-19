@@ -5,6 +5,9 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-19 겹친 입자 나누기(Split by size) · 배율에 맞춘 흐림 — 원클릭이 씀**(modules/image/SPEC.md §6j):
+  보고 ① 겹쳐 붙은 입자 여러 개를 하나로 셈 ② ×86000 에서 지지막 결을 입자로 셈. → Split by size: 홑입자 넓이 A0 로 덩어리를 LoG 중심(세기)·EDM 씨앗 + k-means 로 나눔(Binary 메뉴에도). Auto particle mask: 1 차로 입자 크기를 재고 σ = r/6(2–12 px)로 다시 흐림, Size 최솟값은 홑입자 넓이 ¼(잡음 점 수에 끌리지 않음).
+  사용자 x17000: 519 개, 합쳐진 덩어리 0 (Watershed 만이면 21), ECD 22.4 ± 2.5 nm(홑입자만 23.4 — 나눈 입자는 경계선만큼 작게). x86000: 59 개, 잡음 0. 시험 test_autopart 6(겹친 묶음 172/175 · 고배율 상관 잡음 35/35 · 저배율 305/305), ui_pa_guard 12, test_img 103, ui_drop 38, ui_touch 72.
 - **10-19 원클릭 Analyze particles (auto) · 권장값을 기본값으로 · '영상' → '이미지'**(modules/image/SPEC.md §6i):
   Analyze 패널 맨 위 [Analyze particles (auto)]: 원본 그대로 두고 사본에서 Gaussian σ 2 → Threshold Default(극성 자동) → Fill Holes → Watershed → 축척 막대·글자 자동 제외(눈금 없으면 막대 글자로 정함) → Size ≥ 성분 넓이 중앙값 ¼ · Circularity 0.5–1 · edge 제외 · 세기는 원본 → Size distribution 탭. 손으로 하는 Analyze 는 아래 '고급'.
   기본값: Circularity 0.5–1, Exclude on edges, Dark background 꺼짐(저장된 상태도 한 번 바꿈). 화면·안내·사용 가이드의 '영상' → '이미지'(조사 맞춤).

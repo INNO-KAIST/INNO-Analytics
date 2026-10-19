@@ -253,7 +253,13 @@ op("colorThreshold",{label:"Color Threshold",group:"thr",kind:"plane",hidden:tru
     if(P.newImage) L.push('rename("Mask of "+ct_a);'); else L.push("ct_m=getImageID(); selectImage(ct_id); close(); selectImage(ct_m); rename(ct_a);");
     return L.join("\n"); },
   help:"ImageJ Image ▸ Adjust ▸ Color Threshold 와 같은 색 변환(HSB·RGB·Lab·YUV)과 pass/stop 규칙."});
-const BIN=[["erode","Erode"],["dilate","Dilate"],["open","Open"],["close","Close-"],["fill","Fill Holes"],["outline","Outline"],["skeleton","Skeletonize"],["watershed","Watershed"],["edm","Distance Map"],["uep","Ultimate Points"],["voronoiX","—"]].slice(0,10);
+const BIN=[["erode","Erode"],["dilate","Dilate"],["open","Open"],["close","Close-"],["fill","Fill Holes"],["outline","Outline"],["skeleton","Skeletonize"],["watershed","Watershed"],["edm","Distance Map"],["uep","Ultimate Points"],["splitsize","Split by size (touching particles)"]];
+/* 원클릭 입자 마스크 (core/55_autopart.js): 배율에 맞춘 흐림 → 문턱(극성 자동) → Fill Holes → Watershed → Split by size. 이 이미지를 마스크로 바꿈 */
+op("autoparticles",{label:"Auto particle mask",group:"bin",hidden:true,params:[],
+  run:async(im,P)=>{ if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ 8-bit"); const r=await call("autoParticles",[curPlaneOf(im),{}]); im._autoInfo=r.info;
+    const i=r.info; setPlanes(im,[r.mask.data],{bit:8,nc:1,c:0,composite:false,nz:1,nt:1},"Auto particle mask",{op:"autoparticles",params:clean(P),label:`Auto particle mask (σ ${i.sigma.toFixed(1)} px, ${i.dark?"bright":"dark"} particles, ${i.split} clumps split)`}); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; return r.info; },
+  ij:()=>`// Auto particle mask: Gaussian Blur (σ = 입자 반지름/6) → setAutoThreshold("Default") → Convert to Mask → Fill Holes → Watershed → (크기 기준 나누기: ImageJ 에 없음)`,
+  help:"입자 크기에 맞춰 흐림 세기를 정하고(배율이 높으면 지지막 결·잡음까지 지움), 붙거나 겹친 같은 크기 입자를 크기·LoG 중심으로 나눕니다."});
 op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","erode",{type:"sel",opts:BIN}),R("iterations","Iterations",1,{type:"int",min:1}),R("count","Count",1,{type:"int",min:1,max:8}),R("edm32","Distance Map as new 32-bit image",false,{type:"bool"}),stackParam],
   run:async(im,P)=>{ const f=P.fn; const all=!!P.stack||!isStack(im); const ix=all?planesOf(im).map((_,k)=>k):[pIndex(im,0,im.z,im.t)];
     if(f==="edm"&&P.edm32){ const r=await call("distanceMap",[curPlaneOf(im),"32-bit"]); const n=addImage({name:"EDM of "+im.name,w:im.w,h:im.h,bit:32,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"binary",params:clean(P),label:"Distance Map (32-bit)"},im); return n; }
@@ -261,7 +267,7 @@ op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","
     for(const k of ix){ const p={w:im.w,h:im.h,bit:8,data:P2[k]}; let r;
       if(f==="erode"||f==="dilate"||f==="open"||f==="close") r=await call("binaryMorph",[p,f,{iterations:+P.iterations,count:+P.count}]);
       else if(f==="fill") r=await call("fillHoles",[p]); else if(f==="outline") r=await call("outline",[p]); else if(f==="skeleton") r=await call("skeletonize",[p]);
-      else if(f==="watershed") r=await call("watershed",[p]); else if(f==="edm") r=await call("distanceMap",[p,"8-bit"]); else if(f==="uep") r=await call("ultimatePoints",[p]);
+      else if(f==="watershed") r=await call("watershed",[p]); else if(f==="edm") r=await call("distanceMap",[p,"8-bit"]); else if(f==="uep") r=await call("ultimatePoints",[p]); else if(f==="splitsize") r=await call("splitBySize",[p,{}]);
       P2[k]=r.data; }
     setPlanes(im,P2,{keepDisplay:f!=="edm"&&f!=="uep"},lab,{op:"binary",params:clean(P),label:lab+((f==="erode"||f==="dilate"||f==="open"||f==="close")?` (×${P.iterations}, count ${P.count})`:"")});
     if(f==="edm"||f==="uep"){ im.kind=""; } },

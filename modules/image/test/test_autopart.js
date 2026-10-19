@@ -1,0 +1,31 @@
+// Auto particle mask 시험 (node test/test_autopart.js) — 2026-10-19 사용자 보고 두 가지를 정답 있는 합성으로:
+//  ① 겹친 덩어리(중심 거리 1.3–1.9 R, 2·3·4 개 묶음)를 하나로 셈  ② 고배율(입자 R 60 px)에서 지지막 결(상관 잡음)을 입자로 셈
+"use strict";
+const IC=require("./load_core.js");
+let pass=0, fail=0; const ok=(c,m,d)=>{ c?pass++:fail++; console.log((c?"  ✓ ":"  ✗ ")+m+(d!=null?" — "+d:"")); };
+function rng(seed){ let s=seed>>>0; return ()=>((s=(s*1664525+1013904223)>>>0)/4294967296); }
+function gauss(r){ return ()=>{ const u=r()||1e-9, v=r(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }; }
+function scene(W,H,R,seed,{clusters,singles,noise,corr}){ const r=rng(seed), g=gauss(r); const C=[]; const img=new Float32Array(W*H).fill(175);
+  const free=(x,y,rr)=>x>rr+20&&y>rr+20&&x<W-rr-20&&y<H-rr-20&&C.every(c=>(c[0]-x)**2+(c[1]-y)**2>(2*R+8)**2);
+  for(const k of clusters){ for(let tries=0;tries<500;tries++){ const x=r()*W, y=r()*H; if(!free(x,y,3*R)) continue; const grp=[[x,y]];
+      while(grp.length<k){ const b=grp[Math.floor(r()*grp.length)], a=r()*2*Math.PI, d=(1.3+0.6*r())*R; const q=[b[0]+d*Math.cos(a),b[1]+d*Math.sin(a)]; if(grp.every(o=>(o[0]-q[0])**2+(o[1]-q[1])**2>(1.25*R)**2)) grp.push(q); }
+      C.push(...grp); break; } }
+  for(let n=0;n<singles;n++) for(let tries=0;tries<500;tries++){ const x=r()*W, y=r()*H; if(free(x,y,R)){ C.push([x,y]); break; } }
+  for(const [cx,cy] of C) for(let y=Math.max(0,Math.floor(cy-R-1));y<=Math.min(H-1,cy+R+1);y++) for(let x=Math.max(0,Math.floor(cx-R-1));x<=Math.min(W-1,cx+R+1);x++){ const d=Math.hypot(x+0.5-cx,y+0.5-cy); if(d<=R) img[y*W+x]-=60*Math.sqrt(1-(d/R)**2)+40; } // 두께 ∝ 현의 길이(겹치면 더 어두움)
+  // 잡음: 화소 잡음 + (선택) 상관 잡음 = 지지막 결 (σ corr px 로 흐린 잡음)
+  const nz=new Float32Array(W*H); for(let i=0;i<nz.length;i++) nz[i]=g(); let cz=null; if(corr){ const q=IC.gaussian({w:W,h:H,bit:32,data:Float32Array.from(nz.map(()=>g()))},{sigma:corr}); cz=(q.plane||q).data; let s=0; for(const v of cz) s+=v*v; const k=Math.sqrt(cz.length/s); for(let i=0;i<cz.length;i++) cz[i]*=k; }
+  for(let i=0;i<img.length;i++) img[i]=Math.max(0,Math.min(255,Math.round(img[i]+noise*nz[i]+(cz?noise*1.2*cz[i]:0))));
+  return {p:{w:W,h:H,bit:8,data:img},n:C.length}; }
+function count(p){ const r=IC.autoParticles(p); const bin=new Uint8Array(r.mask.data.length); for(let i=0;i<bin.length;i++) bin[i]=r.mask.data[i]>0?1:0;
+  const a=IC.analyzeParticles(bin,p.w,p.h,null,{pw:1,ph:1},{minSize:r.info.minPx,minCirc:0.5,excludeEdges:false}); const e=a.particles.map(q=>q.meas.ECD).sort((x,y)=>x-y); return {n:a.particles.length,info:r.info,e}; }
+console.log("== 1. 겹친 덩어리 (R 20 px, 잡음 σ 25)");
+{ const s=scene(1400,1400,20,3,{clusters:[2,2,2,2,3,3,3,3,4,4,4,4,2,3,4,5,5],singles:120,noise:25}); const t0=Date.now(); const c=count(s.p);
+  ok(Math.abs(c.n-s.n)<=Math.max(3,0.03*s.n),`개수 ${c.n} ↔ 정답 ${s.n} (± 3 %)`,`${Date.now()-t0} ms, 덩어리 ${c.info.split} 개 나눔`);
+  const big=c.e.filter(x=>x>1.4*2*20).length; ok(big===0,"지름 1.4 배 넘는 '합쳐진 입자' 없음",big); }
+console.log("== 2. 고배율 (R 60 px) + 지지막 결(상관 잡음 σ 3 px)");
+{ const s=scene(1600,1600,60,7,{clusters:[2,3,2],singles:28,noise:22,corr:3}); const t0=Date.now(); const c=count(s.p);
+  ok(Math.abs(c.n-s.n)<=2,`개수 ${c.n} ↔ 정답 ${s.n} (± 2)`,`${Date.now()-t0} ms, σ ${c.info.sigma.toFixed(1)} px`);
+  ok(c.e[0]>0.6*120,`가장 작은 입자 ECD ${c.e[0].toFixed(0)} px > 0.6 × 120 (잡음 조각 없음)`); ok(c.info.sigma>=6,"흐림이 입자 크기에 맞춰 커짐",c.info.sigma.toFixed(1)); }
+console.log("== 3. 저배율 (R 6 px) — 흐림이 너무 커서 입자를 지우지 않음");
+{ const s=scene(900,900,6,11,{clusters:[2,3],singles:300,noise:18}); const c=count(s.p); ok(Math.abs(c.n-s.n)<=Math.max(4,0.04*s.n),`개수 ${c.n} ↔ 정답 ${s.n} (± 4 %)`,`σ ${c.info.sigma.toFixed(1)}`); }
+console.log(`\n${pass} 통과, ${fail} 실패`); if(fail) process.exit(1);
