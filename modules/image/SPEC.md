@@ -272,6 +272,15 @@ TIFF spacing 단위(nm 보정에서 z step 1000 배) · CZI 의 RGB 채널 + 회
 - 시험 test/test_autopart.js 6: 겹친 2–5 개 묶음 17 + 홑 120 → 172/175, 합쳐진 것 0 · 고배율 R 60 + 상관 잡음 35/35, 잡음 조각 0 · 저배율 R 6 305/305.
 - 남은 한계: 겹침이 아주 큰(중심 거리 < 1.25 R) 쌍·세 겹 겹침은 가끔 한 덩어리 또는 작은 조각이 생김(작은 조각은 Size 최솟값에서 빠짐). 크기가 크게 다른 입자가 섞인 시료는 '같은 크기' 가정이 맞지 않음.
 
+## 6k. 겹친 입자·크기 이상치 제외, 직접 고른 입자 분포, pm → nm (2026-10-19)
+- **겹침 표시**(core/55_autopart.js overlapMask): Fill Holes 뒤·Watershed 앞 마스크의 8-연결 성분마다, 최종 마스크(Watershed + Split by size) 조각 중 minPx 이상인 것이 2 개 이상이면 그 성분 화소 = 1 → autoParticles 가 `ovl` 로 돌려줌. UI 는 AUTO_OVL(id → {ver,w,h,data}, S 밖 — 화소 크기라 저장하지 않음)에 두고, analyze 가 같은 판(ver)일 때만 입자 중심 화소로 pa.ovl(0/1) 을 만든다. 축척 막대 지우기는 ver 를 함께 올림. 마스크를 손으로 고치면(ver 바뀜) 겹침 표시는 없어짐.
+- **paStatus(pa)**: "" used · "ovl"(S.ui.pa.exOvl, 기본 켬) · "out" = 겹치지 않은 입자의 ln ECD 중앙값에서 > k·max(0.03, 1.4826·MAD) (S.ui.pa.outK, 기본 3, 0 = 끔; 5 개 미만이면 안 함). 설정을 바꾸면 카드·분포·덧그림이 바로 다시 계산.
+- **pa.pick**: Pick particles 켜면(S.ui.paPick) 이미지 누름 = 윤곽 안(여럿이면 가장 작은 상자) 또는 평균 반지름 안 가장 가까운 중심을 토글, ROI 를 그리지 않음. 터치는 탭으로.
+- **분포** S.ui.dist.use = used(기본) | all | picked, Pool all 과 함께 씀. Particles 표·CSV 에 Status·Picked, Summary 에 Used·Overlapping·Size outliers·ECD mean/SD (used).
+- **단위**: IO.niceUnit 은 pm 대신 Å(< 1e-11 m/px), calFromMeters 는 파일 단위가 pm 이면 niceUnit(→ nm), addImage·loadSaved 가 pm 눈금을 nm 로, 축척 막대 글자 1 nm 미만은 Å, Set Scale 단위 목록에서 pm 뺌.
+- 고침: loadSaved 의 S.ui.dist·scalebar·drop 병합이 앞 줄 주석에 묻혀 실행되지 않던 것(v1.12–1.13).
+- 시험: test_autopart 10(겹친 묶음 17 개 → 겹침 표시 52/55, 고배율 7/7, 겹침을 빼면 ECD SD 1.58 → 0.15 px) · ui_pa_guard 22(카드·분포 선택·Exclude 토글·k = 0·이미지 클릭 고르기·표 열) · test_img 107(단위 4).
+
 ## 7. 한계 (다음 단계)
 - vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 보조 파일(_00001…)을 함께 읽지 않는다. 선 주사·RGB OIR 은 실측 미검증. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
 - 3D 연산(3D skeletonize·필터), bilinear·비강체(elastic) 정합은 없다.

@@ -169,4 +169,4 @@ function onKey(e){
 }
 try{ document.addEventListener("keydown",onKey); document.addEventListener("keyup",e=>{ if(e.key===" ") SPACE=false; }); window.addEventListener("blur",()=>{ SPACE=false; }); }catch(e){}
 
-window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll,_msgs:()=>MSGS,_wand:wandAt};
+window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll,_msgs:()=>MSGS,_wand:wandAt,_toScr:(x,y)=>{ const im=cur(); return toScr(viewOf(im),x,y); }};

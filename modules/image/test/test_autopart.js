@@ -15,17 +15,25 @@ function scene(W,H,R,seed,{clusters,singles,noise,corr}){ const r=rng(seed), g=g
   // 잡음: 화소 잡음 + (선택) 상관 잡음 = 지지막 결 (σ corr px 로 흐린 잡음)
   const nz=new Float32Array(W*H); for(let i=0;i<nz.length;i++) nz[i]=g(); let cz=null; if(corr){ const q=IC.gaussian({w:W,h:H,bit:32,data:Float32Array.from(nz.map(()=>g()))},{sigma:corr}); cz=(q.plane||q).data; let s=0; for(const v of cz) s+=v*v; const k=Math.sqrt(cz.length/s); for(let i=0;i<cz.length;i++) cz[i]*=k; }
   for(let i=0;i<img.length;i++) img[i]=Math.max(0,Math.min(255,Math.round(img[i]+noise*nz[i]+(cz?noise*1.2*cz[i]:0))));
-  return {p:{w:W,h:H,bit:8,data:img},n:C.length}; }
+  return {p:{w:W,h:H,bit:8,data:img},n:C.length,nCl:C.length-singles}; }
 function count(p){ const r=IC.autoParticles(p); const bin=new Uint8Array(r.mask.data.length); for(let i=0;i<bin.length;i++) bin[i]=r.mask.data[i]>0?1:0;
-  const a=IC.analyzeParticles(bin,p.w,p.h,null,{pw:1,ph:1},{minSize:r.info.minPx,minCirc:0.5,excludeEdges:false}); const e=a.particles.map(q=>q.meas.ECD).sort((x,y)=>x-y); return {n:a.particles.length,info:r.info,e}; }
+  const a=IC.analyzeParticles(bin,p.w,p.h,null,{pw:1,ph:1},{minSize:r.info.minPx,minCirc:0.5,excludeEdges:false}); const e=a.particles.map(q=>q.meas.ECD).sort((x,y)=>x-y);
+  const ov=a.particles.map(q=>r.ovl[Math.floor(q.meas.Y)*p.w+Math.floor(q.meas.X)]?1:0); const eUsed=a.particles.filter((q,i)=>!ov[i]).map(q=>q.meas.ECD), eOv=a.particles.filter((q,i)=>ov[i]).map(q=>q.meas.ECD);
+  return {n:a.particles.length,info:r.info,e,nOv:ov.reduce((x,y)=>x+y,0),eUsed,eOv}; }
+const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
 console.log("== 1. 겹친 덩어리 (R 20 px, 잡음 σ 25)");
 { const s=scene(1400,1400,20,3,{clusters:[2,2,2,2,3,3,3,3,4,4,4,4,2,3,4,5,5],singles:120,noise:25}); const t0=Date.now(); const c=count(s.p);
   ok(Math.abs(c.n-s.n)<=Math.max(3,0.03*s.n),`개수 ${c.n} ↔ 정답 ${s.n} (± 3 %)`,`${Date.now()-t0} ms, 덩어리 ${c.info.split} 개 나눔`);
-  const big=c.e.filter(x=>x>1.4*2*20).length; ok(big===0,"지름 1.4 배 넘는 '합쳐진 입자' 없음",big); }
+  const big=c.e.filter(x=>x>1.4*2*20).length; ok(big===0,"지름 1.4 배 넘는 '합쳐진 입자' 없음",big);
+  ok(Math.abs(c.nOv-s.nCl)<=3,`겹친 입자 표시 ${c.nOv} ↔ 정답 ${s.nCl} (± 3) — 덩어리 ${c.info.ovlClumps} 개`);
+  ok(avg(c.eUsed)>avg(c.eOv),`겹침을 뺀 ECD 평균 ${avg(c.eUsed).toFixed(1)} px > 겹친 조각 평균 ${avg(c.eOv).toFixed(1)} px (조각은 작게 잼)`);
+  const sdv=a=>{ const m=avg(a); return Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1)); };
+  ok(sdv(c.eUsed)<sdv(c.e),`겹침을 빼면 ECD 퍼짐이 줄어듦 — SD ${sdv(c.eUsed).toFixed(2)} < 전체 ${sdv(c.e).toFixed(2)} px`); }
 console.log("== 2. 고배율 (R 60 px) + 지지막 결(상관 잡음 σ 3 px)");
 { const s=scene(1600,1600,60,7,{clusters:[2,3,2],singles:28,noise:22,corr:3}); const t0=Date.now(); const c=count(s.p);
   ok(Math.abs(c.n-s.n)<=2,`개수 ${c.n} ↔ 정답 ${s.n} (± 2)`,`${Date.now()-t0} ms, σ ${c.info.sigma.toFixed(1)} px`);
-  ok(c.e[0]>0.6*120,`가장 작은 입자 ECD ${c.e[0].toFixed(0)} px > 0.6 × 120 (잡음 조각 없음)`); ok(c.info.sigma>=6,"흐림이 입자 크기에 맞춰 커짐",c.info.sigma.toFixed(1)); }
+  ok(c.e[0]>0.6*120,`가장 작은 입자 ECD ${c.e[0].toFixed(0)} px > 0.6 × 120 (잡음 조각 없음)`); ok(c.info.sigma>=6,"흐림이 입자 크기에 맞춰 커짐",c.info.sigma.toFixed(1));
+  ok(Math.abs(c.nOv-s.nCl)<=1,`겹친 입자 표시 ${c.nOv} ↔ 정답 ${s.nCl}`); }
 console.log("== 3. 저배율 (R 6 px) — 흐림이 너무 커서 입자를 지우지 않음");
 { const s=scene(900,900,6,11,{clusters:[2,3],singles:300,noise:18}); const c=count(s.p); ok(Math.abs(c.n-s.n)<=Math.max(4,0.04*s.n),`개수 ${c.n} ↔ 정답 ${s.n} (± 4 %)`,`σ ${c.info.sigma.toFixed(1)}`); }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail) process.exit(1);

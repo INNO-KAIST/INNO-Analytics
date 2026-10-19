@@ -211,5 +211,8 @@ console.log("== 3 파일 읽기 (img_io) — tifffile·pypng·numpy·igor2 로 �
   { const s=IC.sizeSummary([-2,-1,0,1,2,3]); ok(s.n===6&&Math.abs(s.mean-0.5)<1e-12&&s.nPos===3,"크기 요약: 선형 통계는 모든 값, 로그정규는 양수만",JSON.stringify({n:s.n,mean:s.mean,nPos:s.nPos})); }
 }
 
+console.log("== 4 눈금 단위 — pm 은 쓰지 않음 (nm · Å)");
+{ const IO=require("../src/img_io.js"); const c1=IO.calFromMeters(5.526e-10,5.526e-10,"x","pm"); ok(c1.unit==="nm"&&Math.abs(c1.pw-0.5526)<1e-9,"파일이 pm 이라 해도 nm 으로",JSON.stringify(c1));
+  ok(IO.niceUnit(2e-11).unit==="nm","0.02 nm/px → nm"); ok(IO.niceUnit(5e-12).unit==="Å","0.005 nm/px → Å (pm 아님)"); ok(IO.calFromMeters(1e-10,1e-10,"x","Å").unit==="Å","파일이 Å 면 Å 그대로"); }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail){ console.log(fails.slice(0,80).join("\n")); process.exit(1); }
 })();

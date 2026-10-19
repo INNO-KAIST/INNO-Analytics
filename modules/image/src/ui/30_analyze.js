@@ -69,7 +69,11 @@ op("analyze",{label:"Analyze Particles",group:"meas",hidden:true,kind:"measure",
     const fieldA=im.w*im.h*a1;
     const sum={Image:im.name,Slice:isStack(im)?(im.nt>1?`z${im.z+1} t${im.t+1}`:`${im.z+1}`):"",Count:rows.length,"Total Area":tot,"Average Size":rows.length?tot/rows.length:NaN,"%Area":100*tot/fieldA,
       "ECD mean":mean(rows.map(x=>x.ECD)),"ECD SD":sd(rows.map(x=>x.ECD)),"Feret mean":mean(rows.map(x=>x.Feret)),"Circ. mean":mean(rows.map(x=>x["Circ."])),"Density (/area)":rows.length/fieldA,Unit:c.unit,Threshold:how};
-    S.particles[im.id]={params:clean(P),rows,polys,cent,meanArea:rows.length?mean(rows.map(x=>x.Area))/a1:25,summary:sum,sel:[],thr,redirect:red.name,unit:c.unit};
+    // 겹침 표시: 이 마스크가 Auto particle mask 그대로(판 번호 같음)면 입자 중심이 '나누기 전 한 덩어리에 조각 여럿' 안인지
+    const ao=AUTO_OVL.get(im.id); const ovl=ao&&ao.ver===im.ver&&ao.w===im.w&&ao.h===im.h?cent.map(q=>{ const x=Math.min(im.w-1,Math.max(0,Math.floor(q[0]))), y=Math.min(im.h-1,Math.max(0,Math.floor(q[1]))); return ao.data[y*im.w+x]?1:0; }):null;
+    S.particles[im.id]={params:clean(P),rows,polys,cent,meanArea:rows.length?mean(rows.map(x=>x.Area))/a1:25,summary:sum,sel:[],pick:[],ovl,thr,redirect:red.name,unit:c.unit};
+    { const st=paStatus(S.particles[im.id]); const used=rows.filter((x,i)=>!st[i]); sum.Used=used.length; sum.Overlapping=st.filter(x=>x==="ovl").length; sum["Size outliers"]=st.filter(x=>x==="out").length;
+      sum["ECD mean (used)"]=mean(used.map(x=>x.ECD)); sum["ECD SD (used)"]=sd(used.map(x=>x.ECD)); }
     S.summary.push(sum);
     if(P.addRoi){ const L=roiList(im); r.particles.slice(0,5000).forEach(q=>L.push({id:uid(),type:"traced",pts:q.poly.xs.map((x,k)=>[x,q.poly.ys[k]]),name:String(q.n)})); }
     // 기록: 세기 이미지가 이 이미지의 원본 쪽이면 상대 지정(__parent/__root)으로 — batch 에서 파일마다 자기 원본을 쓴다
@@ -124,6 +128,29 @@ op("zprofile",{label:"Plot Z-axis Profile",group:"meas",hidden:true,kind:"measur
    원본은 그대로 두고 사본에서: Gaussian σ 2 → Threshold Default(극성 자동: 선택 > 50 % 면 Dark background) → Fill Holes → Watershed
    → Size 최솟값 = 성분 넓이 중앙값의 1/4 (9 px 이상 성분 기준), Circularity 0.5–1, Exclude on edges, 원본의 영역 ROI 를 사본에, 세기는 원본에서(redirect)
    각 단계는 보통 연산이라 매크로에 그대로 기록되고 Undo 로 되돌릴 수 있다. */
+/* ===== 크기 분포에 넣을 입자 (2026-10-19) =====
+   ""   = 사용(used)
+   "ovl" = 겹쳐 붙은 입자 — Auto 의 Watershed·Split by size 가 한 덩어리를 나눈 조각. 찾고 세지만 크기는 믿기 어려워(가려짐·경계선) 분포에서 뺌
+   "out" = 크기 이상치 — 겹치지 않은 입자들의 ln(ECD) 중앙값에서 k × robust SD(1.4826·MAD, 최소 0.03) 넘게 벗어남 (k = Size outlier limit, 0 = 끔)
+   pa.pick = 사용자가 이미지에서 눌러 고른 입자 번호(0 부터) */
+function paStatus(pa){ const n=pa.rows.length, st=new Array(n).fill(""); const A=S.ui.pa;
+  if(pa.ovl&&A.exOvl!==false) pa.ovl.forEach((o,i)=>{ if(o) st[i]="ovl"; });
+  const k=+A.outK; if(k>0){ const L=[]; for(let i=0;i<n;i++){ const e=pa.rows[i].ECD; if(!st[i]&&e>0) L.push(Math.log(e)); }
+    if(L.length>=5){ const med=medianOf(L), s=Math.max(0.03,1.4826*medianOf(L.map(x=>Math.abs(x-med))));
+      for(let i=0;i<n;i++){ if(st[i]) continue; const e=pa.rows[i].ECD; if(!(e>0)||Math.abs(Math.log(e)-med)>k*s) st[i]="out"; } } }
+  return st; }
+function medianOf(a){ const v=a.slice().sort((x,y)=>x-y), m=v.length>>1; return v.length?(v.length%2?v[m]:(v[m-1]+v[m])/2):NaN; }
+/* 분포에 쓸 행: use = "used"(기본) | "all" | "picked" */
+function paRowsFor(pa,use){ if(use==="all") return pa.rows; if(use==="picked"){ const s=new Set(pa.pick||[]); return pa.rows.filter((r,i)=>s.has(i)); } const st=paStatus(pa); return pa.rows.filter((r,i)=>!st[i]); }
+/* 이미지에서 입자 고르기: 누른 점을 품은 윤곽(여럿이면 가장 작은 것) */
+function particleAt(pa,x,y){ let best=-1, ba=Infinity; pa.polys.forEach((pl,i)=>{ const [xs,ys]=pl; let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity; for(let k=0;k<xs.length;k++){ if(xs[k]<x0) x0=xs[k]; if(xs[k]>x1) x1=xs[k]; if(ys[k]<y0) y0=ys[k]; if(ys[k]>y1) y1=ys[k]; }
+    if(x<x0||x>x1||y<y0||y>y1) return; let inn=false; for(let a=0,b=xs.length-1;a<xs.length;b=a++){ if((ys[a]>y)!==(ys[b]>y)&&x<(xs[b]-xs[a])*(y-ys[a])/(ys[b]-ys[a])+xs[a]) inn=!inn; }
+    if(inn){ const ar=(x1-x0)*(y1-y0); if(ar<ba){ ba=ar; best=i; } } }); return best; }
+function pickToggle(im,x,y){ const pa=S.particles[im.id]; if(!pa) return false; let i=particleAt(pa,x,y);
+  if(i<0){ // 윤곽 사이 1 px 선이나 바로 옆을 눌렀으면 가장 가까운 중심(평균 반지름 안)
+    const r=Math.sqrt((pa.meanArea||25)/Math.PI); let bd=r*r; pa.cent.forEach((c,k)=>{ const d=(c[0]-x)**2+(c[1]-y)**2; if(d<bd){ bd=d; i=k; } }); }
+  if(i<0) return false; const s=new Set(pa.pick||[]); s.has(i)?s.delete(i):s.add(i); pa.pick=[...s].sort((a,b)=>a-b); save(); draw();
+  if(S.ui.bottom==="dist"||S.ui.bottom==="particles") drawBottom(); if(S.ui.panel==="analyze") renderPanel(); return true; }
 async function paAuto(){ const src=cur(); if(!src) return; if(src.rgb){ note("RGB 이미지는 먼저 Type ▸ 8-bit 로 바꾸세요","warn"); return; }
   const a=activeRoi(src); const roi=a&&AREA_T.has(a.type)?{id:uid(),type:a.type,pts:a.pts.map(p=>p.slice()),name:"area"}:null;
   const binSrc=IC.isBinary(curPlaneOf(src)); let w=src;
@@ -140,17 +167,17 @@ async function paAuto(){ const src=cur(); if(!src) return; if(src.rgb){ note("RG
         for(let y=B.y0;y<=B.y1;y++) for(let x=B.x0;x<=B.x1;x++){ const i0=y*W0+x; if(!(P0[i0]>0)||seen[i0]) continue; const comp=[i0], st=[i0]; seen[i0]=1; let sx=0,sy=0;
           while(st.length){ const i=st.pop(); const xx=i%W0, yy=(i-xx)/W0; sx+=xx; sy+=yy; for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const X=xx+dx, Y=yy+dy; if(X<0||Y<0||X>=W0||Y>=w.h) continue; const j=Y*W0+X; if(P0[j]>0&&!seen[j]){ seen[j]=1; st.push(j); comp.push(j); } } }
           const cx=sx/comp.length, cy=sy/comp.length; if(cx>=B.x0&&cx<=B.x1&&cy>=B.y0&&cy<=B.y1){ for(const k of comp) P0[k]=0; gone++; } } // 중심이 막대 둘레 안인 성분만 (걸친 입자는 남김)
-        if(gone){ w.ver++; markDirty(w.id); DISP.key=null; } sbTxt=` · 축척 막대 둘레 ${gone} 덩어리 뺌`;
+        if(gone){ w.ver++; markDirty(w.id); DISP.key=null; const ao=AUTO_OVL.get(w.id); if(ao) ao.ver=w.ver; } /* 막대만 지웠으니 겹침 표시는 그대로 유효 */ sbTxt=` · 축척 막대 둘레 ${gone} 덩어리 뺌`;
         if(!src.cal){ const r=DIFF_OCR.readAuto(sp.data,src.w,src.h,bar,{budget:2000}); const M={pm:1e-3,"Å":0.1,nm:1,"µm":1e3,um:1e3,mm:1e6};
-          if(r&&r.conf>=0.5&&!r.recip&&M[r.unit]){ const nm=r.value*M[r.unit]/len; const cal=nm>=100?{pw:nm/1e3,ph:nm/1e3,unit:"µm"}:{pw:nm,ph:nm,unit:"nm"}; cal.src=`축척 막대 '${r.text}' = ${len} px (Auto)`; setCal(src,cal,true); setCal(w,Object.assign({},cal),true); sbTxt+=` · 눈금 = 막대 '${r.text}' (${g4(cal.pw)} ${cal.unit}/px)`; } } } }catch(e){} }
+          if(r&&r.conf>=0.5&&!r.recip&&M[r.unit]){ const nm=r.value*M[r.unit]/len; const cal=nm>=100?{pw:nm/1e3,ph:nm/1e3,unit:"µm"}:{pw:nm,ph:nm,unit:"nm"}; cal.src=`축척 막대 '${r.text}' = ${len} px (Auto)`; setCal(src,cal,true); setCal(w,Object.assign({},cal),true); sbTxt+=` · 눈금 = 막대 '${r.text}' (${g4(cal.pw)} ${cal.unit}/px)`; } } } }catch(e){ console.warn("Auto: scale bar",e); } }
   if(roi){ roiList(w).push(roi); setActive(w,roi); }
   let minPx; if(info&&info.minPx>0) minPx=info.minPx; else { const {bin}=await binaryFor(w,{thr:null}); const ar=IC.componentAreas(bin,w.w,w.h).filter(x=>x>=9); if(!ar.length){ note("입자 후보가 없습니다 — Threshold 를 직접 맞추세요","warn"); return; }
     let tot=0; for(const a of ar) tot+=a; ar.sort((x,y)=>x-y); let cs=0, wm=ar[ar.length-1]; for(const a of ar){ cs+=a; if(cs>=tot/2){ wm=a; break; } } minPx=Math.max(9,Math.round(0.25*wm)); } // 이미 마스크면: 넓이 가중 중앙값(잡음 점에 끌리지 않음)
   const c=calOf(w), A=S.ui.pa;
   A.minSize=A.unitPx?minPx:+(minPx*c.pw*c.ph).toPrecision(3); A.maxSize=""; A.minCirc=0.5; A.maxCirc=1; A.exclude=true; A.holes=false; A.redirect=binSrc?"":"__parent";
   await runOp("analyze",Object.assign({},A,{thr:null}),w);
-  const pa=S.particles[w.id]; if(pa){ S.ui.dist.col="ECD"; S.ui.bottom="dist"; S.ui.bottomOpen=true; save(); drawBottom();
-    note(`Auto: ${pa.rows.length} 개 — ${info?`Gaussian σ ${info.sigma.toFixed(1)} px(입자 크기에 맞춤) · Default${info.dark?" (밝은 입자)":""} · Fill Holes · Watershed · 붙은 덩어리 ${info.split} 개 크기로 나눔`:"이진 이미지"} · Size ≥ ${g4(A.minSize)} ${A.unitPx?"px²":unitSq(w)} (홑입자 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
+  const pa=S.particles[w.id]; if(pa){ const st=paStatus(pa), nO=st.filter(x=>x==="ovl").length, nX=st.filter(x=>x==="out").length; S.ui.dist.col="ECD"; S.ui.dist.use="used"; S.ui.bottom="dist"; S.ui.bottomOpen=true; save(); drawBottom();
+    note(`Auto: ${pa.rows.length} 개 찾음 · 크기 분포에 ${pa.rows.length-nO-nX} 개 (겹친 입자 ${nO} · 크기 이상치 ${nX} 개 뺌 — Analyze 패널에서 바꿀 수 있음) — ${info?`Gaussian σ ${info.sigma.toFixed(1)} px(입자 크기에 맞춤) · Default${info.dark?" (밝은 입자)":""} · Fill Holes · Watershed · 붙은 덩어리 ${info.split} 개 크기로 나눔`:"이진 이미지"} · Size ≥ ${g4(A.minSize)} ${A.unitPx?"px²":unitSq(w)} (홑입자 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
 }
 
 /* ===== Analyze 패널 ===== */
@@ -234,16 +261,29 @@ function panelAnalyze(el,im){
   q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
   q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
-  q("#paAuto").onclick=()=>paAuto();
+  q("#paAuto").onclick=()=>paAuto(); wireParticleCard(el,im);
   q("#anToDrop").onclick=()=>{ const d=q("#anDrop"); if(d) d.scrollIntoView({behavior:"smooth",block:"start"}); };
   panelDrop(q("#anDrop"),im); // 접촉각·펜던트 드랍 (35_drop.js)
 }
-function particleCard(im){ const pa=S.particles[im.id]; const s=pa.summary; const ss=IC.sizeSummary(pa.rows.map(r=>r.ECD)); const u=pa.unit;
-  return `<div class="im-card"><div class="im-row"><b>${s.Count} particles</b><span class="xs muted">${esc(s.Threshold)}</span><span class="sp"></span><button class="btn xs" data-dist="1">Size distribution</button></div>
-  <div class="im-stats"><div><span>Area fraction</span><b>${fmt(s["%Area"],2)} %</b></div><div><span>Mean area</span><b>${g4(s["Average Size"])} ${esc(u==="px"?"px²":u+"²")}</b></div>
-  <div><span>ECD mean ± SD</span><b>${g4(ss.mean)} ± ${g4(ss.sd)} ${esc(u)}</b></div><div><span>ECD median (D50)</span><b>${g4(ss.median)} ${esc(u)}</b></div>
-  <div><span>Log-normal</span><b>x̄g ${g4(ss.gMean)}, σg ${g4(ss.gSD)}</b></div><div><span>Number density</span><b>${g4(s["Density (/area)"])} /${esc(u==="px"?"px²":u+"²")}</b></div></div>
-  ${s.Count<100?`<div class="xs muted">입자 수가 ${s.Count}개라 평균의 표준오차가 ${g4(ss.se)} ${esc(u)} 입니다 — 분포를 말하려면 여러 이미지를 모으세요 (Macro ▸ Batch).</div>`:""}</div>`; }
+function particleCard(im){ const pa=S.particles[im.id]; const s=pa.summary; const u=pa.unit; const A=S.ui.pa;
+  const st=paStatus(pa); const nO=st.filter(x=>x==="ovl").length, nX=st.filter(x=>x==="out").length; const used=pa.rows.filter((r,i)=>!st[i]); const nP=(pa.pick||[]).length;
+  const ss=IC.sizeSummary(used.map(r=>r.ECD)); const area=mean(used.map(r=>r.Area)); const u2=esc(u==="px"?"px²":u+"²");
+  return `<div class="im-card"><div class="im-row"><b>${s.Count} particles found</b><span class="xs muted">${esc(s.Threshold)}</span><span class="sp"></span><button class="btn xs" data-dist="1">Size distribution</button></div>
+  <div class="im-row xs"><span class="pa-k used"></span><b>${used.length} used</b>${pa.ovl?`<span class="pa-k ovl"></span>${nO} overlapping`:""}<span class="pa-k out"></span>${nX} size outliers${nP?`<span class="pa-k pick"></span>${nP} picked`:""}</div>
+  <div class="im-row"><label class="im-chk" title="Particles that Watershed / Split by size cut out of one touching clump: counted, but their size is unreliable (hidden overlap, cut line)"><input type="checkbox" id="pcOvl" ${A.exOvl!==false?"checked":""} ${pa.ovl?"":"disabled"}> Exclude overlapping</label>
+    <label class="im-f" title="Exclude particles whose ECD is more than k robust SD (1.4826·MAD of ln ECD) from the median of the non-overlapping ones. 0 = off"><span>Size outliers ±</span><input type="number" id="pcK" value="${esc(A.outK)}" min="0" step="0.5" style="width:4.5em"><span class="u">robust SD</span></label></div>
+  <div class="im-row"><button class="btn xs ${S.ui.paPick?"primary":""}" id="pcPick" title="Click particles on the image to pick or unpick them, then choose 'Picked' in Size distribution">${S.ui.paPick?"Picking… (click to finish)":"Pick particles"}</button>${nP?`<button class="btn xs" id="pcPickDist">Distribution of picked (${nP})</button><button class="btn xs" id="pcPickClr">Clear picks</button>`:""}</div>
+  <div class="im-stats"><div><span>Area fraction (all found)</span><b>${fmt(s["%Area"],2)} %</b></div><div><span>Mean area (used)</span><b>${g4(area)} ${u2}</b></div>
+  <div><span>ECD mean ± SD (used)</span><b>${g4(ss.mean)} ± ${g4(ss.sd)} ${esc(u)}</b></div><div><span>ECD median (D50)</span><b>${g4(ss.median)} ${esc(u)}</b></div>
+  <div><span>Log-normal</span><b>x̄g ${g4(ss.gMean)}, σg ${g4(ss.gSD)}</b></div><div><span>Number density (all found)</span><b>${g4(s["Density (/area)"])} /${u2}</b></div></div>
+  ${!pa.ovl?`<div class="xs muted">겹침 표시는 Analyze particles (auto) 로 만든 마스크에서만 있습니다.</div>`:""}
+  ${used.length<100?`<div class="xs muted">크기 분포에 쓰는 입자가 ${used.length}개라 평균의 표준오차가 ${g4(ss.se)} ${esc(u)} 입니다 — 분포를 말하려면 여러 이미지를 모으세요 (Macro ▸ Batch).</div>`:""}</div>`; }
+function wireParticleCard(el,im){ const q=s=>$q(el,s); if(!q("#pcPick")) return;
+  q("#pcOvl").onchange=e=>{ S.ui.pa.exOvl=e.target.checked; save(); renderPanel(); draw(); if(S.ui.bottom==="dist"||S.ui.bottom==="particles") drawBottom(); };
+  q("#pcK").onchange=e=>{ const v=+e.target.value; S.ui.pa.outK=v>0?v:0; save(); renderPanel(); draw(); if(S.ui.bottom==="dist"||S.ui.bottom==="particles") drawBottom(); };
+  q("#pcPick").onclick=()=>{ S.ui.paPick=!S.ui.paPick; save(); renderPanel(); draw(); if(S.ui.paPick) note("이미지에서 입자를 누르면 골라지고, 다시 누르면 빠집니다 (노란 칠). 다 고르면 버튼을 다시 누르세요","ok"); };
+  const pd=q("#pcPickDist"); if(pd) pd.onclick=()=>{ S.ui.dist.use="picked"; S.ui.dist.col="ECD"; S.ui.bottom="dist"; S.ui.bottomOpen=true; save(); drawBottom(); };
+  const pc=q("#pcPickClr"); if(pc) pc.onclick=()=>{ S.particles[im.id].pick=[]; if(S.ui.dist.use==="picked") S.ui.dist.use="used"; save(); renderPanel(); draw(); drawBottom(); }; }
 
 /* ===== Measure 패널 (ROI Manager · Set Measurements) ===== */
 function panelMeasure(el,im){
@@ -298,9 +338,11 @@ function bResults(B){ const extra=["Length","Class"].filter(k=>S.results.some(r=
   $q(B,"#rsCsv").onclick=()=>downloadText("Results.csv",csvOf(S.results,cols)); $q(B,"#rsCopy").onclick=()=>copyText(tsvOf(S.results,cols));
   $q(B,"#rsClr").onclick=()=>{ if(confirm2("rsclr","Results 를 비울까요? 한 번 더 누르면 비웁니다")){ S.results=[]; save(); drawBottom(); } }; }
 function bParticles(B){ const im=cur(); const pa=im&&S.particles[im.id]; if(!pa){ B.innerHTML=`<div class="xs muted im-empty">Analyze ▸ Analyze Particles 를 실행하면 입자별 측정값이 여기에 나옵니다.</div>`; return; }
-  const cols=[{k:"#"},...S.measure.cols.filter(k=>pa.rows.length&&pa.rows[0][k]!==undefined).map(k=>({k,u:colUnit(k,pa.unit)}))]; const sel=new Set(pa.sel||[]);
-  B.innerHTML=`<div class="im-row"><b>${esc(im.name)}</b><span class="xs muted">${pa.rows.length} particles · ${esc(pa.summary.Threshold)}${pa.redirect&&pa.redirect!==im.name?` · intensity from: ${esc(pa.redirect)}`:""}</span><span class="sp"></span><button class="btn xs" id="ptCsv">CSV</button><button class="btn xs" id="ptCopy" title="Copy as tab-separated text (paste into Excel or Origin)">Copy</button></div>${tableHTML(pa.rows,cols,{sel})}`;
-  $q(B,"#ptCsv").onclick=()=>downloadText(`${im.name}_particles.csv`,csvOf(pa.rows,cols)); $q(B,"#ptCopy").onclick=()=>copyText(tsvOf(pa.rows,cols));
+  const STN={"":"used",ovl:"overlapping",out:"size outlier"}; const stt=paStatus(pa), pk=new Set(pa.pick||[]);
+  const rowsX=pa.rows.map((r,i)=>Object.assign({},r,{Status:STN[stt[i]],Picked:pk.has(i)?"✓":""}));
+  const cols=[{k:"#"},{k:"Status"},{k:"Picked"},...S.measure.cols.filter(k=>pa.rows.length&&pa.rows[0][k]!==undefined).map(k=>({k,u:colUnit(k,pa.unit)}))]; const sel=new Set(pa.sel||[]);
+  B.innerHTML=`<div class="im-row"><b>${esc(im.name)}</b><span class="xs muted">${pa.rows.length} particles · ${esc(pa.summary.Threshold)}${pa.redirect&&pa.redirect!==im.name?` · intensity from: ${esc(pa.redirect)}`:""}</span><span class="sp"></span><button class="btn xs" id="ptCsv">CSV</button><button class="btn xs" id="ptCopy" title="Copy as tab-separated text (paste into Excel or Origin)">Copy</button></div>${tableHTML(rowsX,cols,{sel})}`;
+  $q(B,"#ptCsv").onclick=()=>downloadText(`${im.name}_particles.csv`,csvOf(rowsX,cols)); $q(B,"#ptCopy").onclick=()=>copyText(tsvOf(rowsX,cols));
   $a(B,"tbody tr").forEach(tr=>tr.onclick=e=>{ const i=+tr.dataset.i; if(e.shiftKey||e.ctrlKey||e.metaKey){ const s=new Set(pa.sel); s.has(i)?s.delete(i):s.add(i); pa.sel=[...s]; } else pa.sel=[i];
     const c=pa.cent[i]; const v=viewOf(im); const {W,H}=canvasSize(); if(c){ v.x=c[0]-W/v.zoom/2; v.y=c[1]-H/v.zoom/2; } draw(); $a(B,"tbody tr").forEach(t=>t.classList.toggle("sel",pa.sel.includes(+t.dataset.i))); }); }
 function bSkeleton(B){ const T=S.skelTrees, Bb=S.skelBranches; const units=[...new Set(T.map(r=>r.Unit))]; const one=units.length===1?units[0]:null;
@@ -318,17 +360,20 @@ function bDist(B){
   const im=cur(); const pa=im&&S.particles[im.id]; const D=S.ui.dist;
   const pool=S.ui.dist.pool==="all"?Object.values(S.particles).filter(p=>p.unit===(pa?pa.unit:"")):(pa?[pa]:[]);
   if(!pool.length){ B.innerHTML=`<div class="xs muted im-empty">입자 분석 결과가 없습니다.</div>`; return; }
-  const col=D.col; const vals=[].concat(...pool.map(p=>p.rows.map(r=>r[col]))).filter(v=>v!=null&&isFinite(v)); const u=pa?((col==="Area")?(pa.unit==="px"?"px²":pa.unit+"²"):(LENCOL.has(col)?pa.unit:"")):"";
+  const use=D.use==="all"||D.use==="picked"?D.use:"used";
+  const nAll=pool.reduce((a,p)=>a+p.rows.length,0), nUsed=pool.reduce((a,p)=>a+paRowsFor(p,"used").length,0), nPick=pool.reduce((a,p)=>a+(p.pick||[]).length,0);
+  const col=D.col; const vals=[].concat(...pool.map(p=>paRowsFor(p,use).map(r=>r[col]))).filter(v=>v!=null&&isFinite(v)); const u=pa?((col==="Area")?(pa.unit==="px"?"px²":pa.unit+"²"):(LENCOL.has(col)?pa.unit:"")):"";
   const ss=IC.sizeSummary(vals);
   const bins=IC.binsFD(D.log?vals.filter(v=>v>0).map(Math.log10):vals,D.bins||0);
   B.innerHTML=`<div class="im-row"><label class="im-f"><span>Variable</span><select class="im-sel" id="dsCol">${ALLCOLS.filter(([k])=>pa&&pa.rows[0]&&pa.rows[0][k]!==undefined).map(([k,l])=>`<option value="${esc(k)}" ${k===col?"selected":""}>${esc(l)}</option>`).join("")}</select></label>
     <label class="im-f"><span>Bins</span><input type="number" id="dsBins" value="${D.bins||""}" placeholder="FD" min="3" step="1"></label><label class="im-chk"><input type="checkbox" id="dsLog" ${D.log?"checked":""}> log x</label>
+    <label class="im-f" title="Used = found minus overlapping and size outliers (set in the Analyze panel). Picked = particles you clicked on the image"><span>Particles</span><select class="im-sel" id="dsUse"><option value="used" ${use==="used"?"selected":""}>Used (${nUsed})</option><option value="all" ${use==="all"?"selected":""}>All found (${nAll})</option><option value="picked" ${use==="picked"?"selected":""} ${nPick?"":"disabled"}>Picked (${nPick})</option></select></label>
     <label class="im-chk"><input type="checkbox" id="dsPool" ${D.pool==="all"?"checked":""}> Pool all open images (${Object.keys(S.particles).length})</label><span class="sp"></span><button class="btn xs" id="dsCsv">CSV</button><button class="btn xs" id="dsSvg">SVG</button></div>
   <div class="im-dist">${distSVG(vals,bins,ss,{log:D.log,xl:`${col}${u?" ("+u+")":""}`})}<table class="im-kv sm">${[["N",ss.n,""],["Mean ± SD",`${g4(ss.mean)} ± ${g4(ss.sd)}`,u],["SE of mean",g4(ss.se),u],["CV",fmt(ss.cv*100,1)+" %",""],["Median (D50)",g4(ss.median),u],["D10 / D90 (number-based)",`${g4(ss.d10)} / ${g4(ss.d90)}`,u],["Span (D90−D10)/D50",fmt(ss.span,3),""],["Min – Max",`${g4(ss.min)} – ${g4(ss.max)}`,u],
     ["Log-normal x̄g (geometric mean)",g4(ss.gMean),u],["Log-normal σg (dimensionless)",g4(ss.gSD),""],["Log-normal mode",g4(ss.lnMode),u],["μ, σ of ln",`${fmt(ss.lnMu,4)}, ${fmt(ss.lnSigma,4)}`,""]].map(([k,v,uu])=>`<tr><td>${k}</td><td>${esc(v)}${uu?" "+esc(uu):""}</td></tr>`).join("")}</table></div>
-  <div class="xs muted">Log-normal 매개변수는 ln(값)의 표본 평균·표준편차(n−1)로 구한 값${ss.nPos<ss.n?` — 0 이하 값 ${ss.n-ss.nPos}개는 로그정규에서 뺐습니다`:""}. 곡선 = 같은 N 과 칸 폭으로 맞춘 확률밀도. D10·D50·D90 은 입자 개수 기준(부피 기준 아님). 입자 수가 적으면(< 100) 분포 모양 판단을 삼가세요.</div>`;
+  <div class="xs muted">${use==="used"?`겹친 입자·크기 이상치를 뺀 ${nUsed} / ${nAll} 개`:use==="picked"?`이미지에서 고른 ${nPick} 개`:`찾은 입자 전부 ${nAll} 개`}. Log-normal 매개변수는 ln(값)의 표본 평균·표준편차(n−1)로 구한 값${ss.nPos<ss.n?` — 0 이하 값 ${ss.n-ss.nPos}개는 로그정규에서 뺐습니다`:""}. 곡선 = 같은 N 과 칸 폭으로 맞춘 확률밀도. D10·D50·D90 은 입자 개수 기준(부피 기준 아님). 입자 수가 적으면(< 100) 분포 모양 판단을 삼가세요.</div>`;
   const q=s=>$q(B,s); q("#dsCol").onchange=e=>{ D.col=e.target.value; save(); drawBottom(); }; q("#dsBins").onchange=e=>{ D.bins=+e.target.value||0; save(); drawBottom(); }; q("#dsLog").onchange=e=>{ D.log=e.target.checked; save(); drawBottom(); };
-  q("#dsPool").onchange=e=>{ D.pool=e.target.checked?"all":""; save(); drawBottom(); };
+  q("#dsPool").onchange=e=>{ D.pool=e.target.checked?"all":""; save(); drawBottom(); }; q("#dsUse").onchange=e=>{ D.use=e.target.value; save(); drawBottom(); };
   q("#dsCsv").onclick=()=>downloadText(`distribution_${col}.csv`,"bin_lo,bin_hi,count\n"+bins.counts.map((c,i)=>{ const a=bins.lo+i*bins.w, b=a+bins.w; return (D.log?Math.pow(10,a):a)+","+(D.log?Math.pow(10,b):b)+","+c; }).join("\n"));
   q("#dsSvg").onclick=()=>{ const s=$q(B,".im-dist svg"); downloadText(`distribution_${col}.svg`,s.outerHTML,"image/svg+xml"); };
 }

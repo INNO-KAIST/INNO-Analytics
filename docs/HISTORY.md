@@ -5,6 +5,11 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-19 겹친 입자·크기 이상치는 찾되 크기 분포에서 뺌 · 이미지에서 눌러 고른 입자만 분포 · pm → nm/Å**(modules/image/SPEC.md §6k):
+  요청 ① 겹쳐 있는 입자는 찾기만 하고 분포에서 제외 ② 크기가 너무 다른 입자도 제외 ③ 손으로 고른 입자만의 분포 ④ pm 대신 nm·Å.
+  Auto particle mask 가 Watershed 전 덩어리 하나에서 조각이 2 개 이상 나온 곳을 '겹침'으로 표시 → 기본으로 분포에서 뺌(Exclude overlapping). 크기 이상치 = 겹치지 않은 입자의 ln ECD 중앙값 ± 3 robust SD(1.4826·MAD) 밖(0 = 끔). Pick particles: 이미지 클릭으로 고르기·빼기 → Distribution 의 Particles = Used · All found · Picked. 표·CSV Status·Picked 열, Summary Used 열, 윤곽 색(사용 하늘색·겹침 주황 점선·이상치 자홍 점선·고름 노랑).
+  단위: pm 을 쓰지 않음 — 파일이 pm 이어도 nm, 0.01 nm/px 미만만 Å, 축척 막대 1 nm 미만 Å, 저장된 pm 눈금도 nm 로. 고침: 저장 상태 불러오기에서 dist·scalebar·drop 기본값 병합이 주석에 묻혀 있던 것.
+  시험 test_autopart 10(겹침 표시 52/55 · 7/7, 겹침 빼면 ECD SD 1.58 → 0.15 px) · ui_pa_guard 22 · test_img 107 · ui_drop 38 · ui_touch 72 · ui_shell 18.
 - **10-19 겹친 입자 나누기(Split by size) · 배율에 맞춘 흐림 — 원클릭이 씀**(modules/image/SPEC.md §6j):
   보고 ① 겹쳐 붙은 입자 여러 개를 하나로 셈 ② ×86000 에서 지지막 결을 입자로 셈. → Split by size: 홑입자 넓이 A0 로 덩어리를 LoG 중심(세기)·EDM 씨앗 + k-means 로 나눔(Binary 메뉴에도). Auto particle mask: 1 차로 입자 크기를 재고 σ = r/6(2–12 px)로 다시 흐림, Size 최솟값은 홑입자 넓이 ¼(잡음 점 수에 끌리지 않음).
   사용자 x17000: 519 개, 합쳐진 덩어리 0 (Watershed 만이면 21), ECD 22.4 ± 2.5 nm(홑입자만 23.4 — 나눈 입자는 경계선만큼 작게). x86000: 59 개, 잡음 0. 시험 test_autopart 6(겹친 묶음 172/175 · 고배율 상관 잡음 35/35 · 저배율 305/305), ui_pa_guard 12, test_img 103, ui_drop 38, ui_touch 72.

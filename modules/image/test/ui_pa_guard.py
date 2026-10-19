@@ -86,6 +86,36 @@ with sync_playwright() as p:
     pg.wait_for_function('IMG_UI._state().images.length>%d && !IMG_UI._busy() && IMG_UI._state().particles[IMG_UI._cur().id]' % nimg, timeout=120000); pg.wait_for_timeout(500)
     r = pg.evaluate('(()=>{const im=IMG_UI._cur(); const p=IMG_UI._state().particles[im.id]; return {n:p.rows.length,bottom:IMG_UI._state().ui.bottom,msg:IMG_UI._msgs()[0].m}})()')
     chk(abs(r['n'] - truth) <= max(4, 0.02 * truth) and '축척 막대' in r['msg'] and r['bottom'] == 'dist', f'ROI 없이 Auto: 축척 막대 스스로 뺌 · 정답 {truth} 근처 · Size distribution 열림', r)
+    # ⑦ 겹친 입자·크기 이상치는 찾되 분포에서 뺌 · 이미지에서 눌러 고른 입자만 분포
+    pg.evaluate("(()=>{const S=IMG_UI._state(); S.ui.panel='analyze'; IMG_UI.rerender();})()"); pg.wait_for_selector('#pcPick')
+    r = pg.evaluate('(()=>{const im=IMG_UI._cur(); const p=IMG_UI._state().particles[im.id]; return {n:p.rows.length,ovl:p.ovl?p.ovl.reduce((a,b)=>a+b,0):-1,card:document.querySelector("#imPanel .im-card").innerText}})()')
+    chk(r['ovl'] > 0 and 'overlapping' in r['card'] and 'used' in r['card'], f"겹친 입자 표시 {r['ovl']} 개 · 패널에 used/overlapping", r['card'][:120])
+    opts = pg.evaluate('[...document.querySelectorAll("#dsUse option")].map(o=>o.textContent)')
+    nused = pg.evaluate('(()=>{const p=IMG_UI._state().particles[IMG_UI._cur().id]; return p.rows.length})()')
+    chk(len(opts) == 3 and opts[0].startswith('Used') and f'All found ({nused})' in opts[1], '분포: Used · All found · Picked 선택', opts)
+    nU = int(opts[0].split('(')[1].rstrip(')')); chk(nU <= nused - r['ovl'], f'Used = 찾은 {nused} − 겹침 {r["ovl"]} − 이상치 → {nU}')
+    pg.click('#pcOvl'); pg.wait_for_timeout(300); o2 = pg.evaluate('document.querySelector("#dsUse option").textContent'); chk(int(o2.split('(')[1].rstrip(')')) > nU, 'Exclude overlapping 끄면 Used 늘어남', o2)
+    pg.click('#pcOvl'); pg.wait_for_timeout(300)
+    pg.fill('#pcK', '0'); pg.dispatch_event('#pcK', 'change'); pg.wait_for_timeout(300); o3 = pg.evaluate('document.querySelector("#dsUse option").textContent')
+    chk(int(o3.split('(')[1].rstrip(')')) == nused - r['ovl'], 'Size outliers 0 = 끔 → Used = 찾은 − 겹침', o3)
+    pg.fill('#pcK', '3'); pg.dispatch_event('#pcK', 'change'); pg.wait_for_timeout(300)
+    # 고르기: 처음 세 입자 중심을 화면에서 누름
+    pg.click('#pcPick'); pg.wait_for_timeout(200)
+    cents = pg.evaluate('IMG_UI._state().particles[IMG_UI._cur().id].cent.slice(0,40).map(c=>IMG_UI._toScr(c[0],c[1]))')
+    box = pg.locator('#imOverlay').bounding_box(); clicked = 0
+    for sx, sy in cents:
+        if 5 < sx < box['width'] - 5 and 5 < sy < box['height'] - 5 and clicked < 3:
+            pg.mouse.click(box['x'] + sx, box['y'] + sy); pg.wait_for_timeout(150); clicked += 1
+    pk = pg.evaluate('IMG_UI._state().particles[IMG_UI._cur().id].pick.length')
+    chk(clicked == 3 and pk == 3, f'Pick: 이미지에서 3 개 누름 → {pk} 개 골라짐')
+    pg.mouse.click(box['x'] + cents[0][0], box['y'] + cents[0][1]) if 5 < cents[0][0] < box['width'] - 5 and 5 < cents[0][1] < box['height'] - 5 else None
+    pg.wait_for_timeout(150); pk2 = pg.evaluate('IMG_UI._state().particles[IMG_UI._cur().id].pick.length'); chk(pk2 == 2, '다시 누르면 빠짐', pk2)
+    nroi = pg.evaluate('(IMG_UI._state().rois[IMG_UI._cur().id]||[]).length'); chk(nroi <= 1, '고르는 동안 ROI 를 그리지 않음', nroi)
+    pg.click('#pcPick'); pg.wait_for_timeout(200); pg.click('#pcPickDist'); pg.wait_for_timeout(600)
+    txt = pg.inner_text('#imBottom'); chk(pg.evaluate('document.querySelector("#dsUse").value') == 'picked' and '고른 2 개' in txt, 'Distribution of picked → 고른 2 개만', txt[:200])
+    pg.evaluate("(()=>{const S=IMG_UI._state(); S.ui.bottom='particles'; IMG_UI.rerender();})()"); pg.wait_for_timeout(800)
+    th = pg.evaluate('[...document.querySelectorAll("#imBottom thead th")].map(t=>t.textContent).slice(0,3)'); chk(th[:3] == ['#', 'Status', 'Picked'], 'Particles 표에 Status · Picked 열', th)
+    pg.screenshot(path=os.path.join(out, 'pa_pick.png'))
     b.close()
 chk(not errs, '페이지 오류 0', errs[:3])
 print(f'\n{sum(ok)}/{len(ok)} 통과'); sys.exit(0 if all(ok) else 1)

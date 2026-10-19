@@ -178,3 +178,9 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 .imx .im-mini td{text-align:right;padding:2px 4px;border-top:1px solid var(--line)}
 .imx .im-mini td:first-child,.imx .im-mini th:first-child{text-align:left}
 .imx .im-det{margin:6px 0}.imx .im-det summary{cursor:pointer;color:var(--muted)}
+/* 입자 상태 범례 (Analyze 패널 · 2026-10-19) */
+.imx .pa-k{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 3px 0 8px;vertical-align:-1px;border:1.5px solid}
+.imx .pa-k.used{border-color:#00b8e6;background:rgba(0,200,255,.28)}
+.imx .pa-k.ovl{border-color:#ff8c3c;border-style:dashed}
+.imx .pa-k.out{border-color:#ff4fd8;border-style:dashed}
+.imx .pa-k.pick{border-color:#e6bf00;background:rgba(255,220,0,.5)}

@@ -18,10 +18,11 @@ function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[]
   macro:{rec:true,steps:[]},
   ui:{panel:"adjust",tool:"rect",bottom:"results",bottomOpen:true,proc:"gaussian",views:{},thr:{method:"Default",dark:false,manual:false,lower:0,upper:255,show:true},
       cthr:{space:"HSB",min:[0,0,0],max:[255,255,255],pass:[true,true,true],method:"Default",dark:false},
-      pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0.5,maxCirc:1,exclude:true,_d1019:1,holes:false,redirect:"",show:"outlines",addRoi:false},
-      dist:{col:"ECD",bins:0,log:false},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
+      pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0.5,maxCirc:1,exclude:true,_d1019:1,holes:false,redirect:"",show:"outlines",addRoi:false,exOvl:true,outK:3},
+      dist:{col:"ECD",bins:0,log:false,use:"used"},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
 let S=defState(); const PX=new Map(); let ROOT=null, LOADED=false;
 const UNDO=new Map(); // id → [{planes, meta}]
+const AUTO_OVL=new Map(); // id → {ver, w, h, data(Uint8Array)} — Auto particle mask 의 겹친 덩어리 표시 (화소 크기라 S 에 넣지 않음)
 const cur=()=>S.images.find(i=>i.id===S.sel)||null;
 const byId=id=>S.images.find(i=>i.id===id)||null;
 const planesOf=im=>PX.get(im.id)||[];
@@ -29,6 +30,7 @@ const pIndex=(im,c,z,t)=>c+im.nc*(z+im.nz*t);
 function planeAt(im,c,z,t){ const P=planesOf(im); const k=pIndex(im,c==null?im.c:c,z==null?im.z:z,t==null?im.t:t); return {w:im.w,h:im.h,bit:im.rgb?8:im.bit,data:P[k]}; }
 const curPlane=()=>{ const im=cur(); return im?planeAt(im):null; };
 const isStack=im=>im&&(im.nz*im.nt>1);
+const noPm=c=>c&&c.unit==="pm"&&c.pw>0?Object.assign({},c,{pw:c.pw/1e3,ph:(c.ph||c.pw)/1e3,unit:"nm"}):(c||null); // 파일이 pm 이라 해도 nm 으로 (사용자 요청 10-19)
 const calOf=im=>im&&im.cal&&im.cal.pw>0?im.cal:{pw:1,ph:1,unit:"px"};
 const unitSq=im=>{ const u=calOf(im).unit; return u==="px"?"px²":u+"²"; };
 
@@ -51,7 +53,9 @@ try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); 
 async function loadSaved(){
   const st=await dbGet("state"); if(!st||st.v!==1) return;
   const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{});
-  if(!((st.ui||{}).pa||{})._d1019){ S.ui.pa._d1019=1; if(!(+S.ui.pa.minCirc>0)) S.ui.pa.minCirc=0.5; S.ui.pa.exclude=true; S.ui.thr.dark=false; } // 10-19 권장값으로 한 번 바꿈(사용자 요청) — 그 뒤 바꾼 값은 그대로 S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
+  if(!((st.ui||{}).pa||{})._d1019){ S.ui.pa._d1019=1; if(!(+S.ui.pa.minCirc>0)) S.ui.pa.minCirc=0.5; S.ui.pa.exclude=true; S.ui.thr.dark=false; } // 10-19 권장값으로 한 번 바꿈(사용자 요청) — 그 뒤 바꾼 값은 그대로
+  S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
+  for(const im of S.images||[]) if(im.cal&&im.cal.unit==="pm"){ im.cal.pw/=1e3; im.cal.ph/=1e3; im.cal.unit="nm"; } // pm 눈금 → nm (사용자 요청 10-19)
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
   const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
     if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
@@ -108,7 +112,7 @@ function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.cl
 /* ---------------- 이미지 추가·삭제·되돌리기 ---------------- */
 function addImage(d,o){
   o=o||{}; const id=uid(); const nc=d.nc||1;
-  const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:d.cal||null,calCandidates:d.calCandidates||[],info:d.info||[],warn:d.warn||[],
+  const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
     desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||[],created:new Date().toISOString(),
     file:o.file||d.file||d.name,src:o.src||"file",valueUnit:d.valueUnit||"",siScale:d.siScale>0?d.siScale:null,siUnit:d.siUnit||"",ver:1,kind:o.kind||"",fft:o.fft||null,
     chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0};

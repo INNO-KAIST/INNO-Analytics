@@ -125,11 +125,13 @@ function drawThreshold(im,ox,v){
   ox.save(); ox.imageSmoothingEnabled=false; const [x0,y0]=toScr(v,0,0); ox.drawImage(OVL.thr,x0,y0,im.w*v.zoom,im.h*v.zoom); ox.restore();
 }
 function drawParticles(im,ox,v){
-  const pa=S.particles[im.id]; if(!pa||!pa.polys||S.ui.pa.show==="none") return; const sel=new Set(pa.sel||[]);
+  const pa=S.particles[im.id]; if(!pa||!pa.polys||S.ui.pa.show==="none"&&!S.ui.paPick) return; const sel=new Set(pa.sel||[]), pk=new Set(pa.pick||[]); const st=paStatus(pa);
   ox.save(); ox.lineWidth=1.2; ox.font="600 11px DM Sans, system-ui, sans-serif"; ox.textAlign="center"; ox.textBaseline="middle";
   pa.polys.forEach((pl,i)=>{ const [xs,ys]=pl; ox.beginPath(); for(let k=0;k<xs.length;k++){ const [sx,sy]=toScr(v,xs[k],ys[k]); if(k) ox.lineTo(sx,sy); else ox.moveTo(sx,sy); } ox.closePath();
-    const s=sel.has(i); if(S.ui.pa.show==="masks"||s){ ox.fillStyle=s?"rgba(255,200,0,.45)":"rgba(0,200,255,.28)"; ox.fill(); }
-    ox.strokeStyle=s?"#ffc800":"#00d0ff"; ox.stroke(); });
+    // 색: 사용 = 하늘색, 겹침 = 주황 점선, 크기 이상치 = 자홍 점선, 고른 입자 = 노랑 칠, 표에서 고른 행 = 노랑
+    const s=sel.has(i), p=pk.has(i), x=st[i]; if(S.ui.pa.show==="masks"||s||p){ ox.fillStyle=p?"rgba(255,220,0,.5)":s?"rgba(255,200,0,.45)":x?"rgba(255,140,60,.22)":"rgba(0,200,255,.28)"; ox.fill(); }
+    ox.setLineDash(x&&!p?[4,3]:[]); ox.lineWidth=p?2:1.2; ox.strokeStyle=p||s?"#ffd400":x==="ovl"?"#ff8c3c":x==="out"?"#ff4fd8":"#00d0ff"; ox.stroke(); });
+  ox.setLineDash([]);
   if(v.zoom*Math.sqrt(pa.meanArea||25)>12&&S.ui.pa.show!=="masks"){ pa.cent.forEach((c,i)=>{ const [sx,sy]=toScr(v,c[0],c[1]); ox.lineWidth=3; ox.strokeStyle="rgba(0,0,0,.65)"; ox.strokeText(String(i+1),sx,sy); ox.fillStyle="#fff"; ox.fillText(String(i+1),sx,sy); }); }
   ox.restore();
 }
@@ -140,7 +142,7 @@ function scaleBarSpec(im,viewW){ const c=calOf(im); if(!im.cal) return null; con
   return {L,px:L/c.pw,unit:c.unit,user:S.ui.scalebar.len>0&&L===+S.ui.scalebar.len}; }
 /* 눈금 막대 글자: 값이 1–1000 이 되는 단위로 (0.02 µm → 20 nm, 2000 nm → 2 µm, Å → nm) */
 function sbLabel(L,u){ const M={pm:1e-12,"Å":1e-10,nm:1e-9,"µm":1e-6,um:1e-6,mm:1e-3,cm:1e-2,m:1}; if(!(u in M)) return `${g4(L)} ${u}`; const m=L*M[u];
-  for(const [nu,k] of [["m",1],["mm",1e-3],["µm",1e-6],["nm",1e-9],["pm",1e-12]]) if(m>=k*0.9999||nu==="pm") return `${g4(m/k)} ${nu}`; return `${g4(L)} ${u}`; }
+  for(const [nu,k] of [["m",1],["mm",1e-3],["µm",1e-6],["nm",1e-9],["Å",1e-10]]) if(m>=k*0.9999||nu==="Å") return `${g4(m/k)} ${nu}`; return `${g4(L)} ${u}`; }
 /* 화면·내보내기 공용: 보이는 이미지 영역 안에 두고, 글자·막대 굵기는 그 영역 크기에 비례 */
 function drawScaleBar(im,ox,v,W,H){
   if(!S.ui.scalebar.on||!im.cal) return;
@@ -207,6 +209,7 @@ function onDown(e){
   try{ $q(ROOT,"#imOverlay").setPointerCapture(e.pointerId); }catch(er){}
   if(e.button===1||SPACE||tool==="hand"){ DRAG={mode:"pan",sx,sy,vx:v.x,vy:v.y}; return; }
   if(tool==="zoom"){ zoomStep(im,e.altKey?-1:1,sx,sy); return; }
+  if(S.ui.paPick&&S.particles[im.id]){ pickToggle(im,ix,iy); return; } // 입자 고르기 중: 누른 입자를 고르거나 뺌 (ROI 를 그리지 않음)
   const a=activeRoi(im);
   if(a&&tool!=="point"&&tool!=="wand"&&(tool!=="poly"||!(DRAG&&DRAG.mode==="poly"))){ const h=hitHandle(im,a,sx,sy,touch?14:5); if(h>=0){ DRAG={mode:"handle",h,orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; }
     if(insideRoi(im,a,ix,iy)&&!(e.shiftKey)){ DRAG={mode:"move",orig:JSON.parse(JSON.stringify(a.pts)),ix,iy}; return; } }
@@ -256,6 +259,7 @@ function onWheel(e){ const im=cur(); if(!im) return; e.preventDefault(); const [
    두 손가락 = 확대(핀치 중심 고정)·이동 — 어느 도구든. 한 손가락 = 그리기 도구(rect·oval·poly·free·line·angle·scale)면 그대로 그리기,
    Hand 면 이동, Point·Wand·Zoom 은 탭 한 번이 클릭 한 번(끌면 이동). 탭 = 그 화소 값(상태 줄), 길게 누르기 = 값 읽기(따라 움직임),
    두 번 탭 = 화면에 맞춤. Point 도구에서 길게 누르기 = 가까운 점 지우기(데스크톱의 Alt+클릭). */
+const pickOn=()=>{ const im=cur(); return !!(S.ui.paPick&&im&&S.particles[im.id]); };
 const TAP_TOOLS=new Set(["point","wand","zoom"]), PASS_DT=new Set(["rect","oval","line","free","scale"]);
 let TSNAP=null;
 function touchSnap(im){ const a=activeRoi(im); TSNAP={id:im.id,a,pts:a?JSON.parse(JSON.stringify(a.pts)):null,cls:a&&a.cls?a.cls.slice():null,drag:DRAG?JSON.parse(JSON.stringify(DRAG)):null}; }
@@ -268,13 +272,13 @@ function bindTouch(ov){
   const fake=(p,alt)=>({clientX:p.clientX,clientY:p.clientY,button:0,pointerId:-1,pointerType:"touch",shiftKey:false,altKey:!!alt,ctrlKey:false,metaKey:false,_tap:true});
   const showVal=p=>{ const q=at(p); if(!q) return; HOVER=[q.ix,q.iy]; drawStatus(); };
   ov._touch=INNO_TOUCH.attach(ov,{
-    oneFinger:()=>{ const t=S.ui.tool; return !cur()||t==="hand"||TAP_TOOLS.has(t)?"pan":"pass"; },
+    oneFinger:()=>{ const t=S.ui.tool; return !cur()||t==="hand"||TAP_TOOLS.has(t)||pickOn()?"pan":"pass"; },
     getView:()=>{ const im=cur(); return im?Object.assign({id:im.id},viewOf(im)):null; },
     setView:(v0,g)=>{ const im=cur(); if(!im||!v0||v0.id!==im.id) return; const n=INNO_TOUCH.affine(v0,g,{min:1/72,max:64}); const v=viewOf(im); v.zoom=n.zoom; v.x=n.x; v.y=n.y; draw(); },
     onPassCancel:touchRestore,
-    onTap:p=>{ LASTPT="touch"; if(TAP_TOOLS.has(S.ui.tool)) onDown(fake(p)); showVal(p); },
+    onTap:p=>{ LASTPT="touch"; if(TAP_TOOLS.has(S.ui.tool)||pickOn()) onDown(fake(p)); showVal(p); },
     onDoubleTap:(p,info)=>{ const im=cur(); if(!im) return; if(info&&info.pass&&!PASS_DT.has(S.ui.tool)) return; fitView(im); draw(); },
-    doubleTap:()=>!TAP_TOOLS.has(S.ui.tool),
+    doubleTap:()=>!TAP_TOOLS.has(S.ui.tool)&&!pickOn(),
     doubleTapInPass:true,
     onLongPress:p=>{ LASTPT="touch"; const im=cur(); const a=im&&activeRoi(im);
       if(S.ui.tool==="point"&&a&&a.type==="point"){ const v=viewOf(im); if(a.pts.some(q=>{ const [x,y]=toScr(v,q[0],q[1]); return Math.hypot(x-p.x,y-p.y)<16; })){ onDown(fake(p,true)); return; } }
