@@ -149,11 +149,21 @@ function parseDopants(str){
     let q=null;
     if(m[4]) q=(m[3]?+m[3]:1)*(m[4]==="+"?1:-1);
     else if(m[5]) q=(+m[6])*(m[5]==="+"?1:-1);
-    let conc=null, pre=m[1]?m[1].trim():"", post=m[7]||"";
-    if(pre){ const v=parseFloat(pre); conc=/%/.test(pre)?v:(v<=1?v*100:v); }
-    else if(post){ const v=parseFloat(post); conc=m[8]?v:(v<=1?v*100:v); }
-    out.push({el,q,conc});
+    let conc=null, pre=m[1]?m[1].trim():"", post=m[7]||"", raw=null, pct=false;
+    if(pre){ raw=parseFloat(pre); pct=/%/.test(pre); }
+    else if(post){ raw=parseFloat(post); pct=!!m[8]; }
+    if(raw!=null) conc=pct?raw:(raw<=1?raw*100:raw);
+    out.push({el,q,conc,_raw:raw,_pct:pct});
   }
+  /* 한 식 안에서 % 없는 숫자는 한 가지로 읽는다: 모두 ≤1 이면 분율(×100), 하나라도 >1 이거나 % 가 붙은 값이 있으면 모두 %.
+     (예: "Yb1.5,Er0.02" 를 1.5 % 와 2 % 로 섞어 읽지 않는다 → 1.5 %, 0.02 %) */
+  const bare=out.filter(d=>d._raw!=null&&!d._pct);
+  if(bare.length&&(bare.some(d=>d._raw>1)||out.some(d=>d._pct))){
+    const chg=bare.filter(d=>d._raw<=1&&d._raw>0);
+    bare.forEach(d=>d.conc=d._raw);
+    if(chg.length) warn.push(`분율·% 혼용 — % 없는 숫자를 모두 % 로 읽음 (${chg.map(d=>d.el+" "+d._raw+" %").join(", ")}). 분율이면 모두 ≤1 로, %면 % 를 붙이세요`);
+  }
+  out.forEach(d=>{ delete d._raw; delete d._pct; });
   return {dopants:out,warn};
 }
 
@@ -227,6 +237,10 @@ function parseLayer(L,li,warn){
   const sites=Object.keys(siteSum).map(Number);
   if(dopStr){ const d=parseDopants(dopStr); d.warn.forEach(w=>warn.push(w)); d.dopants.forEach(x=>dopants.push(Object.assign({fromHost:false},x))); }
   const anion=Object.keys(comp).find(e=>e in ANIONS)||null;
+  /* 농도 범위 점검 */
+  dopants.forEach(dp=>{ if(dp.fromHost||dp.conc==null) return;
+    if(!(dp.conc>0)) warn.push(`${tag} ${dp.el}: 농도 ${dp.conc} % — 0 이하`);
+    else if(dp.conc>100) warn.push(`${tag} ${dp.el}: 농도 ${+dp.conc.toFixed(3)} % — 100 % 초과`); });
   dopants.forEach(dp=>{
     if(dp.q!=null){ dp.qSrc="입력"; return; }
     const ox=OX[dp.el]||[VAL[dp.el]||3];
@@ -241,6 +255,9 @@ function parseLayer(L,li,warn){
     if(div && dp.el!=="Eu" && ox.includes(3)) dp.note=(dp.note?dp.note+". ":"")+"3가 이온이 2가 자리에 들어가 전하 보상 결함이 생김 → 자리 대칭·준위 분열이 LaF₃ 와 다를 수 있음";
     dp.q=ox.includes(3)?3:ox[0]; dp.qSrc="기본";
   });
+  /* 같은 자리(같은 원자가)에 들어가는 도펀트 합 */
+  const sumQ={}; dopants.forEach(dp=>{ if(dp.fromHost||!(dp.conc>0)||dp.conc>100) return; const k=dp.q==null?3:dp.q; (sumQ[k]=sumQ[k]||[]).push(dp); });
+  Object.values(sumQ).forEach(L=>{ const t=L.reduce((a,d)=>a+d.conc,0); if(L.length>1&&t>100+1e-9) warn.push(`${tag} 같은 자리 도펀트 합 ${+t.toFixed(3)} % (${L.map(d=>d.el).join("+")}) — 100 % 초과`); });
   return {index:li,role,tag,phase,hostRaw:hostStr,comp,hostKey,hostInfo,anion,sites,dopants};
 }
 

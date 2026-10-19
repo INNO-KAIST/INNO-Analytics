@@ -27,6 +27,16 @@ function overlapMask(pre,post,W,H,minPx){ const A=label(pre,W,H); const pb=new U
   const ovl=new Uint8Array(W*H); let clumps=0; for(let a=0;a<cnt.length;a++) if(cnt[a]>=2) clumps++;
   for(let i=0;i<W*H;i++){ const a=A.lab[i]; if(a>=0&&cnt[a]>=2) ovl[i]=1; } return {ovl,clumps}; }
 IC.overlapMask=overlapMask;
+/* Find Maxima (auto) — 입자 중심(2026-10-19). 날 이미지에 prominence 10 이면 TEM 잡음 점 수십만 개가 극대가 된다.
+   흐린 사본의 세기 극대만으로는 맞닿은 쌍이 하나로 합쳐져(합성 421 개 중 391) Auto particle mask(배율 맞춤 흐림 → 문턱 → Watershed → Split by size)의
+   조각마다 무게중심 하나 — Analyze particles (auto) 와 같은 개수. 원자 열처럼 '세기 극대'가 필요한 경우는 Find(직접)를 쓴다.
+   반환 {points:[[x,y]], info:{light, r, sigma, minPx}} */
+IC.findMaximaAuto=function(p,o){ o=o||{}; const a=IC.autoParticles(p,o); const W=p.w, H=p.h, d=a.mask.data, N=W*H; const lab=new Int32Array(N).fill(-1), st=new Int32Array(N); const pts=[];
+  for(let i0=0;i0<N;i0++){ if(!(d[i0]>0)||lab[i0]>=0) continue; let sp=0, n=0, sx=0, sy=0; st[sp++]=i0; lab[i0]=1;
+    while(sp){ const i=st[--sp]; n++; const x=i%W, y=(i-x)/W; sx+=x; sy+=y; for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(d[j]>0&&lab[j]<0){ lab[j]=1; st[sp++]=j; } } } }
+    if(n>=a.info.minPx) pts.push([Math.min(W-1,Math.round(sx/n)),Math.min(H-1,Math.round(sy/n))]); }
+  return {points:pts,info:{light:!a.info.dark,r:a.info.r0,sigma:a.info.sigma,minPx:a.info.minPx}};
+};
 IC.autoParticles=function(p,o){ o=o||{}; const W=p.w, H=p.h;
   // ① 극성·대략 크기
   const g1=IC.gaussian(p,{sigma:2}); const gp1=g1.plane||g1; const t=IC.autoThreshold(gp1,"Default",false); let n=0; for(let i=0;i<gp1.data.length;i++){ const v=gp1.data[i]; if(v>=t.lower&&v<=t.upper) n++; }

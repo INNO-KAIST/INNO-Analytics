@@ -49,6 +49,7 @@ op("analyze",{label:"Analyze Particles",group:"meas",hidden:true,kind:"measure",
     const {bin,how,thr,roi:paRoi}=await binaryFor(im,P); let red=im;
     const rootOf=x=>{ let r=x; while(r.parent&&byId(r.parent)) r=byId(r.parent); return r; };
     if(P.redirect==="__parent") red=byId(im.parent)||im; else if(P.redirect==="__root") red=rootOf(im); else if(P.redirect) red=byId(P.redirect)||S.images.find(x=>x.name===P.redirectName)||im;
+    else if(!REPLAY&&IC.isBinary(curPlaneOf(im))){ const par=byId(im.parent); if(par&&!par.rgb&&par.w===im.w&&par.h===im.h&&!IC.isBinary(planeAt(par,par.c,0,0))) red=par; } // 마스크(Convert to Mask 사본)면 세기는 원본에서 — 마스크에서 재면 Mean 이 모두 255
     if(red.w!==im.w||red.h!==im.h) throw new Error("측정용(redirect) 이미지의 크기가 다릅니다");
     const inten=red===im&&IC.isBinary(curPlaneOf(im))?curPlaneOf(im):(red.rgb?curPlaneOf(red):planeAt(red,red.c,im.z<red.nz?im.z:0,im.t<red.nt?im.t:0));
     const c=calOf(im), a1=c.pw*c.ph; const toPx=v=>v===""||v==null||!isFinite(+v)?null:(P.unitPx?+v:+v/a1);
@@ -56,6 +57,7 @@ op("analyze",{label:"Analyze Particles",group:"meas",hidden:true,kind:"measure",
     if(paRoi&&paRoi.type==="rect"){ const b=roiBounds(paRoi); o.bounds={x0:Math.max(0,Math.round(b.x)),y0:Math.max(0,Math.round(b.y)),x1:Math.min(im.w,Math.round(b.x+b.w)),y1:Math.min(im.h,Math.round(b.y+b.h))}; } // Exclude on edges = 사각형 ROI 테두리에 닿은 것도
     // 보호 장치: 선택 화소 비율(극성 반대 의심) · 입자 상한(잡음 → 수만 개를 재다 멈추는 것)
     let fg=0; for(let i=0;i<bin.length;i++) fg+=bin[i]; const frac=fg/bin.length;
+    if(frac>0.97) throw new Error(`문턱 안 화소가 이미지의 ${(100*frac).toFixed(0)} % 라 이미지 전체가 입자 하나가 됩니다 — 아직 Threshold 를 정하지 않았거나 범위가 0–최대 입니다. 이 이미지에는 [Analyze particles (auto)] 를 쓰거나, Threshold 패널에서 입자만 빨갛게 고른 뒤 다시 Analyze 하세요`);
     const maxN=+P.maxCount>0?Math.round(+P.maxCount):PA_MAX_DEFAULT; o.maxCount=maxN;
     setProg("Analyze Particles…",0.1);
     const r=await call("analyzeParticles",[bin,im.w,im.h,inten,{pw:c.pw,ph:c.ph},o],f=>setProg("Analyze Particles…",f)); hideProg();
@@ -90,17 +92,39 @@ const ijq=s=>String(s).replace(/\\/g,"\\\\").replace(/"/g,'\\"'); // ImageJ 매�
 const mean=a=>{ const v=a.filter(x=>x!=null&&isFinite(x)); return v.length?v.reduce((s,x)=>s+x,0)/v.length:NaN; };
 const sd=a=>{ const v=a.filter(x=>x!=null&&isFinite(x)); if(v.length<2) return NaN; const m=mean(v); return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/(v.length-1)); };
 
+/* ---------- 이미지에 박힌 축척 막대·글자 자리 (Analyze particles auto · Find Maxima auto · Orientation 이 함께 씀) ----------
+   가장자리 근처의 수평 막대(Diffraction 이름표 읽기 DIFF_OCR.findBars)를 찾아 막대 둘레(위·아래 0.6 × 길이, 옆 0.15 × 길이) 상자. 없으면 null */
+function scaleBarBox(im){ try{ if(!window.DIFF_OCR||im.rgb) return null; const sp=curPlaneOf(im); const bars=DIFF_OCR.findBars(sp.data,im.w,im.h,{max:3});
+    const bar=bars.find(b=>{ const cy=(b.y0+b.y1)/2, cx=(b.x0+b.x1)/2; return (cy<0.2*im.h||cy>0.8*im.h||cx<0.2*im.w||cx>0.8*im.w)&&b.lenPx>=20; }); if(!bar) return null;
+    const len=bar.x1-bar.x0+1, ext=Math.round(0.6*len), px=Math.round(0.15*len); return {bar,len,x0:Math.max(0,bar.x0-px),x1:Math.min(im.w-1,bar.x1+px),y0:Math.max(0,bar.y0-ext),y1:Math.min(im.h-1,bar.y1+ext)}; }catch(e){ return null; } }
+/* 통계에서 뺄 화소: 영역 ROI 밖 + 축척 막대 상자 (1 = 뺌). 둘 다 없으면 null */
+function excludeMask(im,useBar){ const a=activeRoi(im); const area=a&&AREA_T.has(a.type)?roiGeom(im,a):null; const box=useBar&&!area?scaleBarBox(im):null; if(!area&&!box) return {mask:null,box:null,area:false};
+  const N=im.w*im.h, m=new Uint8Array(N); if(area){ m.fill(1); const R=area.rect; for(let y=0;y<R.h;y++) for(let x=0;x<R.w;x++){ const X=x+R.x, Y=y+R.y; if(X<0||Y<0||X>=im.w||Y>=im.h) continue; if(!area.mask||area.mask[y*R.w+x]) m[Y*im.w+X]=0; } }
+  if(box) for(let y=box.y0;y<=box.y1;y++) for(let x=box.x0;x<=box.x1;x++) m[y*im.w+x]=1; return {mask:m,box,area:!!area}; }
 /* ---------- Find Maxima ---------- */
+const FM_MAX=5000; // 이보다 많으면 점을 만들지 않고 멈춤 (잡음 극대 수십만 개 → 화면 멈춤)
 op("findMaxima",{label:"Find Maxima",group:"meas",hidden:true,kind:"measure",params:[R("prominence","Prominence >",10,{min:0,step:"any"}),R("light","Light background",false,{type:"bool"}),R("exclude","Exclude edge maxima",false,{type:"bool"}),R("strict","Strict",false,{type:"bool"}),
   R("output","Output","points",{type:"sel",opts:[["points","Point Selection + Count"],["single","Single Points"],["within","Maxima Within Tolerance"],["segmented","Segmented Particles"]]})],
   run:async(im,P)=>{ const p=curPlaneOf(im); const o={output:P.output,light:!!P.light,excludeEdges:!!P.exclude,strict:!!P.strict};
-    if(P.output==="points"){ const r=await call("findMaxima",[p,+P.prominence,o]); const pts=r.points.map(([x,y])=>[x+0.5,y+0.5]); setActive(im,{id:uid(),type:"point",pts,cls:pts.map(()=>0),name:"maxima"});
+    if(P.output==="points"){ const r=await call("findMaxima",[p,+P.prominence,o]);
+      if(r.points.length>FM_MAX){ let bright=0; { const t=IC.autoThreshold(p,"Default",false); let n=0; for(let i=0;i<p.data.length;i++){ const v=p.data[i]; if(v>=t.lower&&v<=t.upper) n++; } bright=n/p.data.length<0.5; }
+        throw new Error(`극대가 ${r.points.length.toLocaleString()} 개로 ${FM_MAX.toLocaleString()} 개를 넘어 점을 만들지 않았습니다 — 잡음 하나하나가 극대로 잡혔습니다. ${bright&&!P.light?"바탕이 밝고 입자가 어두운 이미지(TEM 명시야)면 'Light background' 를 켜세요. ":""}입자 중심을 세려면 [Find (auto)] (극성·입자 크기·잡음에 맞춰 자동), 직접 하려면 Process ▸ Gaussian Blur(σ ≈ 입자 반지름의 ½) 뒤 prominence 를 입자–바탕 밝기 차의 ⅓ 쯤으로`); }
+      const pts=r.points.map(([x,y])=>[x+0.5,y+0.5]); setActive(im,{id:uid(),type:"point",pts,cls:pts.map(()=>0),name:"maxima"});
       S.summary.push({Image:im.name,Slice:isStack(im)?(im.nt>1?`z${im.z+1} t${im.t+1}`:`${im.z+1}`):"",Count:pts.length,"Total Area":"","Average Size":"","%Area":"",Threshold:`Find Maxima prominence>${P.prominence}${P.light?" light":""}`,Unit:calOf(im).unit,"Density (/area)":pts.length/(im.w*im.h*calOf(im).pw*calOf(im).ph)});
       record({op:"findMaxima",params:clean(P),label:`Find Maxima (${pts.length})`},im); note(`극대 ${pts.length}개 (prominence > ${P.prominence})`,"ok"); S.ui.bottom="summary"; S.ui.bottomOpen=true; return; }
     const r=await call("findMaximaImage",[p,+P.prominence,o]); const nm={single:"Maxima",within:"Maxima",segmented:"Segmented"}[P.output];
     const n=addImage({name:`${im.name} ${nm}`,w:im.w,h:im.h,bit:8,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record({op:"findMaxima",params:clean(P),label:`Find Maxima → ${nm}`},im); return n; },
   ij:P=>`run("Find Maxima...", "prominence=${P.prominence}${P.strict?" strict":""}${P.exclude?" exclude":""}${P.light?" light":""} output=${{points:"[Point Selection]",single:"[Single Points]",within:"[Maxima Within Tolerance]",segmented:"[Segmented Particles]"}[P.output]}");`,
   help:"MaximumFinder 이식: 더 높은 극대로 이어지는 능선보다 prominence 이상 솟은 점만. 원자 열·나노입자 세기·점 계수에."});
+op("findMaximaAuto",{label:"Find Maxima (auto)",group:"meas",hidden:true,kind:"measure",params:[],
+  run:async(im)=>{ if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ 8-bit"); const r=await call("findMaximaAuto",[curPlaneOf(im),{}]); const ex=excludeMask(im,true);
+    let pts=r.points.filter(([x,y])=>!ex.mask||!ex.mask[y*im.w+x]).map(([x,y])=>[x+0.5,y+0.5]); const cut=r.points.length-pts.length;
+    setActive(im,{id:uid(),type:"point",pts,cls:pts.map(()=>0),name:"maxima"}); const i=r.info, c=calOf(im);
+    S.summary.push({Image:im.name,Slice:isStack(im)?(im.nt>1?`z${im.z+1} t${im.t+1}`:`${im.z+1}`):"",Count:pts.length,"Total Area":"","Average Size":"","%Area":"",Threshold:`Find (auto): particle centres, blur σ ${i.sigma.toFixed(1)} px${i.light?", dark particles":""}`,Unit:c.unit,"Density (/area)":pts.length/(im.w*im.h*c.pw*c.ph)});
+    record({op:"findMaximaAuto",params:{},label:`Find Maxima auto (${pts.length})`},im); S.ui.bottom="summary"; S.ui.bottomOpen=true;
+    note(`입자 중심 ${pts.length}개 — ${i.light?"어두운 입자":"밝은 입자"} · 반지름 ≈ ${g4(i.r)} px${cut?` · 축척 막대·ROI 밖 ${cut}개 뺌`:ex.area?" · ROI 안":""}`,"ok"); } ,
+  ij:()=>`// Find (auto): 앱 전용 — Analyze particles (auto) 의 마스크 조각마다 무게중심`,
+  help:"입자 중심을 자동으로: Analyze particles (auto) 와 같은 마스크(배율 맞춤 흐림·극성 자동·붙은 입자 나눔)의 조각마다 중심 한 점. 축척 막대·글자 자동 제외, 영역 ROI 가 있으면 그 안만. 원자 열 같은 세기 극대는 Find."});
 /* ---------- Radial profile · Orientation · Z profile ---------- */
 op("radial",{label:"Radial Profile",group:"meas",hidden:true,kind:"measure",params:[R("rmax","Max radius (0 = auto)",0,{min:0,unit:"px"}),R("step","Bin width",1,{min:0.25,step:0.25,unit:"px"})],
   run:async(im,P)=>{ const a=activeRoi(im); let cx=im.w/2, cy=im.h/2; let how="image center";
@@ -111,12 +135,12 @@ op("radial",{label:"Radial Profile",group:"meas",hidden:true,kind:"measure",para
     record({op:"radial",params:clean(P),label:"Radial Profile"},im); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); note(`Radial profile (${how}) — Plots 탭${recip?". x 축이 역공간이라 각 피크의 d = 1/r 를 함께 보입니다":""}`,"ok"); },
   ij:()=>`// Radial Profile (plugin): Analyze ▸ Radial Profile`,help:"방위 평균 세기. 회절(SAED/FFT) 고리의 반지름, 둥근 입자 단면 등. 중심 = 점 ROI · 타원/사각형 ROI 중심 · 없으면 이미지 중심."});
 op("orientation",{label:"Orientation",group:"meas",hidden:true,kind:"measure",params:[R("sigma","Local window σ",2,{min:0.5,step:0.5,unit:"px"}),R("minC","Minimum coherency",0.1,{min:0,max:1,step:0.05}),R("map","Create orientation color map",true,{type:"bool"})],
-  run:async(im,P)=>{ const r=await call("orientation",[curPlaneOf(im),{sigma:+P.sigma,minCoherency:+P.minC}]);
+  run:async(im,P)=>{ if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ 8-bit"); const ex=excludeMask(im,true); const r=await call("orientation",[curPlaneOf(im),{sigma:+P.sigma,minCoherency:+P.minC,mask:ex.mask}]);
     S.plots.push({id:uid(),kind:"xy",title:`Orientation — ${im.name}: dominant ${r.dominant===r.dominant?r.dominant.toFixed(1)+"°":"none"}, order ${r.orderParam.toFixed(3)}, coherency ${r.meanCoherency.toFixed(3)}`,xl:"angle (°, CCW from horizontal)",yl:"weighted count",series:[{name:"histogram",x:[...Array(180).keys()].map(k=>k-89.5),y:[...r.hist]}]});
-    if(P.map){ const N=im.w*im.h, R1=new Float32Array(N),G1=new Float32Array(N),B1=new Float32Array(N); let emax=0; for(let i=0;i<N;i++) if(r.energy[i]>emax) emax=r.energy[i];
-      for(let i=0;i<N;i++){ const h=((r.theta[i]+90)/180)%1; const [rr,gg,bb]=hsb(h); const s=r.coherency[i], b=Math.min(1,Math.sqrt(r.energy[i]/(emax||1))*1.5); R1[i]=Math.round(255*(1-s+s*rr/255)*b); G1[i]=Math.round(255*(1-s+s*gg/255)*b); B1[i]=Math.round(255*(1-s+s*bb/255)*b); }
+    if(P.map){ const N=im.w*im.h, R1=new Float32Array(N),G1=new Float32Array(N),B1=new Float32Array(N); const emax=r.emax||1; const mk=ex.mask;
+      for(let i=0;i<N;i++){ if(mk&&mk[i]){ R1[i]=G1[i]=B1[i]=40; continue; } /* 뺀 곳(축척 막대·ROI 밖)은 어두운 회색 */ const h=((r.theta[i]+90)/180)%1; const [rr,gg,bb]=hsb(h); const s=r.coherency[i], b=Math.min(1,Math.sqrt(r.energy[i]/(emax||1))*1.5); R1[i]=Math.round(255*(1-s+s*rr/255)*b); G1[i]=Math.round(255*(1-s+s*gg/255)*b); B1[i]=Math.round(255*(1-s+s*bb/255)*b); }
       var map=addImage({name:"Orientation of "+im.name,w:im.w,h:im.h,bit:8,rgb:true,planes:[R1,G1,B1],cal:im.cal},{parent:im.id,src:"derived"}); }
-    record({op:"orientation",params:clean(P),label:"Orientation"},im); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); note(r.dominant===r.dominant?`주 방향 ${r.dominant.toFixed(1)}° · order parameter ${r.orderParam.toFixed(3)} (0 무질서 – 1 완전 정렬)`:"방향이 없습니다 (일정한 이미지)","ok"); return P.map?map:undefined; }, // 색 지도가 다음 단계의 대상 (재생도 같게)
+    record({op:"orientation",params:clean(P),label:"Orientation"},im); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); note(r.dominant===r.dominant?`주 방향 ${r.dominant.toFixed(1)}° · order parameter ${r.orderParam.toFixed(3)} (0 무질서 – 1 완전 정렬)${r.orderParam<0.1?" — 거의 등방(방향성 없음): 입자·잡음 위주 이미지에서는 정상이며, 주 방향 값은 의미가 없습니다":""}${ex.box?" · 이미지의 축척 막대·글자 자리는 뺌":""}${ex.area?" · ROI 안만":""}${+P.sigma<3?" · 창 σ 가 작아 색 지도가 잡음처럼 보이면 σ 를 결 폭 정도(예 5–10 px)로 올리세요":""}`:"방향이 없습니다 (일정한 이미지)","ok"); return P.map?map:undefined; }, // 색 지도가 다음 단계의 대상 (재생도 같게)
   ij:()=>`// OrientationJ (plugin) Analysis/Distribution 과 같은 정의`,help:"OrientationJ 와 같은 구조 텐서 정의. 색 지도: 색상 = 방향, 채도 = coherency, 밝기 = energy. 나노선·섬유·결 방향 분석."});
 op("zprofile",{label:"Plot Z-axis Profile",group:"meas",hidden:true,kind:"measure",params:[],
   run:(im)=>{ if(!isStack(im)) throw new Error("스택이 아닙니다"); const a=activeRoi(im); const g=a&&AREA_T.has(a.type)?roiGeom(im,a):null; const ys=[];
@@ -159,25 +183,23 @@ async function paAuto(){ const src=cur(); if(!src) return; if(src.rgb){ note("RG
     info=await runOp("autoparticles",{},w); if(!info) return; Object.assign(S.ui.thr,{method:"Default",dark:!!info.dark,manual:false}); }
   // 축척 막대·글자: 영역 ROI 가 없으면 자동으로 찾아(Diffraction 의 이름표 읽기) 그 둘레에 닿는 성분을 마스크에서 지운다. 보정이 없으면 막대로 정한다
   let sbTxt="";
-  if(!roi&&window.DIFF_OCR&&!binSrc){ try{ const sp=curPlaneOf(src); const bars=DIFF_OCR.findBars(sp.data,src.w,src.h,{max:3});
-      const bar=bars.find(b=>{ const cy=(b.y0+b.y1)/2, cx=(b.x0+b.x1)/2; return (cy<0.2*src.h||cy>0.8*src.h||cx<0.2*src.w||cx>0.8*src.w)&&b.lenPx>=20; }); // 축척 막대는 가장자리 근처
-      if(bar){ const len=bar.x1-bar.x0+1, ext=Math.round(0.6*len), px=Math.round(0.15*len); // 글자는 막대 위·아래 어디든 (GMS 는 위)
-        const B={x0:Math.max(0,bar.x0-px),x1:Math.min(w.w-1,bar.x1+px),y0:Math.max(0,bar.y0-ext),y1:Math.min(w.h-1,bar.y1+ext)};
+  if(!roi&&window.DIFF_OCR&&!binSrc){ try{ const sp=curPlaneOf(src); const bb=scaleBarBox(src);
+      if(bb){ const bar=bb.bar, len=bb.len, B={x0:bb.x0,x1:bb.x1,y0:bb.y0,y1:bb.y1};
         const P0=planesOf(w)[0], W0=w.w, seen=new Uint8Array(P0.length); let gone=0;
         for(let y=B.y0;y<=B.y1;y++) for(let x=B.x0;x<=B.x1;x++){ const i0=y*W0+x; if(!(P0[i0]>0)||seen[i0]) continue; const comp=[i0], st=[i0]; seen[i0]=1; let sx=0,sy=0;
           while(st.length){ const i=st.pop(); const xx=i%W0, yy=(i-xx)/W0; sx+=xx; sy+=yy; for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const X=xx+dx, Y=yy+dy; if(X<0||Y<0||X>=W0||Y>=w.h) continue; const j=Y*W0+X; if(P0[j]>0&&!seen[j]){ seen[j]=1; st.push(j); comp.push(j); } } }
           const cx=sx/comp.length, cy=sy/comp.length; if(cx>=B.x0&&cx<=B.x1&&cy>=B.y0&&cy<=B.y1){ for(const k of comp) P0[k]=0; gone++; } } // 중심이 막대 둘레 안인 성분만 (걸친 입자는 남김)
         if(gone){ w.ver++; markDirty(w.id); DISP.key=null; const ao=AUTO_OVL.get(w.id); if(ao) ao.ver=w.ver; } /* 막대만 지웠으니 겹침 표시는 그대로 유효 */ sbTxt=` · 축척 막대 둘레 ${gone} 덩어리 뺌`;
         if(!src.cal){ const r=DIFF_OCR.readAuto(sp.data,src.w,src.h,bar,{budget:2000}); const M={pm:1e-3,"Å":0.1,nm:1,"µm":1e3,um:1e3,mm:1e6};
-          if(r&&r.conf>=0.5&&!r.recip&&M[r.unit]){ const nm=r.value*M[r.unit]/len; const cal=nm>=100?{pw:nm/1e3,ph:nm/1e3,unit:"µm"}:{pw:nm,ph:nm,unit:"nm"}; cal.src=`축척 막대 '${r.text}' = ${len} px (Auto)`; setCal(src,cal,true); setCal(w,Object.assign({},cal),true); sbTxt+=` · 눈금 = 막대 '${r.text}' (${g4(cal.pw)} ${cal.unit}/px)`; } } } }catch(e){ console.warn("Auto: scale bar",e); } }
+          if(r&&!r.recip&&M[r.unit]&&!(r.conf>=0.8&&(r.unitConf!=null?r.unitConf:r.conf)>=0.85)) sbTxt+=` · 막대 글자 '${r.text}' 을 확실히 읽지 못해 눈금은 정하지 않음 — Set Scale`; if(r&&r.conf>=0.8&&(r.unitConf!=null?r.unitConf:r.conf)>=0.85&&!r.recip&&M[r.unit]){ /* 글자·단위 둘 다 확실할 때만 (단위 오독 → 눈금 10–1000 배 틀림, 전수조사 10-19) */ const nm=r.value*M[r.unit]/len; const cal=nm>=100?{pw:nm/1e3,ph:nm/1e3,unit:"µm"}:{pw:nm,ph:nm,unit:"nm"}; cal.src=`축척 막대 '${r.text}' = ${len} px (Auto)`; setCal(src,cal,true); setCal(w,Object.assign({},cal),true); sbTxt+=` · 눈금 = 막대 '${r.text}' (${g4(cal.pw)} ${cal.unit}/px)`; } } } }catch(e){ console.warn("Auto: scale bar",e); } }
   if(roi){ roiList(w).push(roi); setActive(w,roi); }
   let minPx; if(info&&info.minPx>0) minPx=info.minPx; else { const {bin}=await binaryFor(w,{thr:null}); const ar=IC.componentAreas(bin,w.w,w.h).filter(x=>x>=9); if(!ar.length){ note("입자 후보가 없습니다 — Threshold 를 직접 맞추세요","warn"); return; }
     let tot=0; for(const a of ar) tot+=a; ar.sort((x,y)=>x-y); let cs=0, wm=ar[ar.length-1]; for(const a of ar){ cs+=a; if(cs>=tot/2){ wm=a; break; } } minPx=Math.max(9,Math.round(0.25*wm)); } // 이미 마스크면: 넓이 가중 중앙값(잡음 점에 끌리지 않음)
-  const c=calOf(w), A=S.ui.pa;
-  A.minSize=A.unitPx?minPx:+(minPx*c.pw*c.ph).toPrecision(3); A.maxSize=""; A.minCirc=0.5; A.maxCirc=1; A.exclude=true; A.holes=false; A.redirect=binSrc?"":"__parent";
-  await runOp("analyze",Object.assign({},A,{thr:null}),w);
+  // 손으로 하는 Analyze 설정(S.ui.pa)은 건드리지 않음 — Auto 값(이 이미지의 px)이 다음 이미지(다른 배율·눈금)에 남아 0 개가 되던 것 (전수조사 10-19)
+  const AP=Object.assign({},S.ui.pa,{minSize:minPx,unitPx:true,maxSize:"",minCirc:0.5,maxCirc:1,exclude:true,holes:false,redirect:binSrc?"":"__parent",thr:null});
+  await runOp("analyze",AP,w); const A=AP;
   const pa=S.particles[w.id]; if(pa){ const st=paStatus(pa), nO=st.filter(x=>x==="ovl").length, nX=st.filter(x=>x==="out").length; S.ui.dist.col="ECD"; S.ui.dist.use="used"; S.ui.bottom="dist"; S.ui.bottomOpen=true; save(); drawBottom();
-    note(`Auto: ${pa.rows.length} 개 찾음 · 크기 분포에 ${pa.rows.length-nO-nX} 개 (겹친 입자 ${nO} · 크기 이상치 ${nX} 개 뺌 — Analyze 패널에서 바꿀 수 있음) — ${info?`Gaussian σ ${info.sigma.toFixed(1)} px(입자 크기에 맞춤) · Default${info.dark?" (밝은 입자)":""} · Fill Holes · Watershed · 붙은 덩어리 ${info.split} 개 크기로 나눔`:"이진 이미지"} · Size ≥ ${g4(A.minSize)} ${A.unitPx?"px²":unitSq(w)} (홑입자 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
+    note(`Auto: ${pa.rows.length}개 찾음 · 크기 분포 ${pa.rows.length-nO-nX}개 (겹침 ${nO} · 크기 이상치 ${nX} 제외) — 제외 기준은 Analyze 패널에서 바꿀 수 있음 · ${info?`Gaussian σ ${info.sigma.toFixed(1)} px(입자 크기에 맞춤) · Default${info.dark?" (밝은 입자)":""} · Fill Holes · Watershed · 붙은 덩어리 ${info.split} 개 크기로 나눔`:"이진 이미지"} · Size ≥ ${w.cal?g4(minPx*calOf(w).pw*calOf(w).ph)+" "+unitSq(w):minPx+" px²"} (홑입자 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
 }
 
 /* ===== Analyze 패널 ===== */
@@ -187,6 +209,9 @@ op("skeleton",{label:"Analyze Skeleton (2D/3D)",group:"analyze",kind:"analyze",h
   R("prune","Prune cycle method","none",{type:"sel",opts:SK_PRUNE}),R("orig","Original image (intensity)","",{type:"img",showIf:P=>/intensity/.test(P.prune||"")}),R("pruneEnds","Prune ends",false,{type:"bool"}),R("lsp","Longest shortest path",true,{type:"bool"}),R("tagged","Tagged skeleton image",true,{type:"bool"}),R("lspImg","Longest shortest path image",false,{type:"bool"})],
   run:async(im,P)=>{ if(im.rgb) throw new Error("이진(0/255) 이미지에서 — RGB 는 Color Threshold 로 mask 를 만든 뒤");
     const d=im.nz, w=im.w, h=im.h, P0=planesOf(im); const data=new Uint8Array(w*h*d); let nonBin=0;
+    // 굵은 마스크(골격 아님)를 그대로 넣으면 수만 개 '가지'가 나와 수십 초 — 2×2 가 꽉 찬 곳이 많으면 2D 는 먼저 Skeletonize (전수조사 10-19)
+    let autoSk=false; if(!P.skel&&d===1&&im.bit===8){ const pl0=P0[pIndex(im,im.c,0,im.t)]; let fg=0, blk=0; for(let y=0;y<h-1;y++) for(let x=0;x<w-1;x++){ const i=y*w+x; if(pl0[i]>0){ fg++; if(pl0[i+1]>0&&pl0[i+w]>0&&pl0[i+w+1]>0) blk++; } }
+      if(fg&&blk>0.05*fg){ if(!IC.isBinary({w,h,bit:8,data:pl0})) throw new Error("골격(1 px 선) 이진 이미지에서 — Threshold ▸ Convert to Mask 뒤 Binary ▸ Skeletonize"); P=Object.assign({},P,{skel:true}); autoSk=true; } }
     for(let z=0;z<d;z++){ let pl=P0[pIndex(im,im.c,z,im.t)];
       if(P.skel){ if(d>1) throw new Error("3D 스택의 Skeletonize 는 없습니다 (Fiji Skeletonize3D) — 이미 골격인 스택에서 쓰거나, 장마다 2D 로는 Binary ▸ Skeletonize");
         if(im.bit!==8||!IC.isBinary({w,h,bit:im.bit,data:pl})) throw new Error("Skeletonize 는 이진(0/255) 8-bit 이미지에서 — Threshold ▸ Convert to Mask 먼저"); pl=(await call("skeletonize",[{w,h,bit:8,data:pl}])).data; }
@@ -221,7 +246,7 @@ op("skeleton",{label:"Analyze Skeleton (2D/3D)",group:"analyze",kind:"analyze",h
     if(P.lspImg&&r.lspImage){ const pl=[]; for(let z=0;z<d;z++) pl.push(Float32Array.from(r.lspImage.subarray(z*w*h,(z+1)*w*h)));
       const o2=addImage({name:"Longest shortest paths of "+im.name,w,h,bit:8,nc:1,nz:d,nt:1,planes:pl,cal:im.cal,zStep:im.zStep,info:[["Value","골격 255 · 가장 긴 최단 경로의 줄기 96"]]},{parent:im.id,src:"derived"}); o2.disp[0].lut="Fire"; o2.disp[0].min=0; o2.disp[0].max=255; if(!out) out=o2; }
     record({op:"skeleton",params:{...clean(P),origName},label:`Analyze Skeleton (${r.trees.length} 골격, 가지 ${tb}${prune!=="none"||P.pruneEnds?" · pruned":""})`},im);
-    S.ui.bottom="skeleton"; S.ui.bottomOpen=true; save(); note(`골격 ${r.trees.length} · 가지 ${tb} · 접점 ${tj}${d>1?` (3D, z 간격 ${g4(pd)} ${u})`:""}`,"ok");
+    S.ui.bottom="skeleton"; S.ui.bottomOpen=true; save(); note(`골격 ${r.trees.length} · 가지 ${tb} · 접점 ${tj}${d>1?` (3D, z 간격 ${g4(pd)} ${u})`:""}${autoSk?" — 굵은 마스크라 먼저 Skeletonize 했습니다(1 px 선이 아닌 마스크를 그대로 재면 가지 수만 개)":""}`,"ok");
     (r.warn||[]).concat(later).forEach(x=>note(x,"warn")); /* 경고는 ok 뒤에 — 묻히지 않게 */
     return undefined; },
   ij:P=>{ const pr=P.prune||"none", dup=P.skel||pr!=="none"||P.pruneEnds; // Skeletonize·가지치기는 Fiji 에서 입력을 바꿈 → 사본에서 (앱은 원본을 바꾸지 않음)
@@ -244,7 +269,7 @@ function panelAnalyze(el,im){
   <div class="im-row"><span class="xs muted">Circularity = 4π·Area/Perimeter² · ECD = 2√(Area/π)</span><span class="sp"></span><button class="btn sm" id="paRun">Analyze</button></div>
   ${S.particles[im.id]?particleCard(im):""}
   <hr class="im-hr"><div class="im-h">Find Maxima <span class="muted xs">점 세기 · 원자 열</span></div>
-  <div id="fmForm">${formHTML(OPS.findMaxima,im)}</div><div class="im-row"><button class="btn sm" id="fmPrev">Preview points</button><span class="sp"></span><button class="btn primary sm" id="fmRun">Find</button></div>
+  <div id="fmForm">${formHTML(OPS.findMaxima,im)}</div><div class="im-row"><button class="btn sm" id="fmPrev">Preview points</button><span class="sp"></span><button class="btn sm" id="fmRun">Find</button><button class="btn primary sm" id="fmAuto" title="One point per particle centre, set from the image itself (polarity, particle size, touching particles split) — same mask as Analyze particles (auto). Excludes the burned-in scale bar; with an area ROI only inside. For atom columns use Find.">Find (auto)</button></div>
   <hr class="im-hr"><div class="im-h">Tools</div>
   <div class="im-tool"><b>Radial Profile</b><span class="xs muted">중심 = 점·타원 ROI</span><div id="rpForm">${formHTML(OPS.radial,im)}</div><button class="btn sm" id="rpRun">Plot</button></div>
   <div class="im-tool"><b>Orientation</b><span class="xs muted">구조 텐서 (OrientationJ 정의)</span><div id="orForm">${formHTML(OPS.orientation,im)}</div><button class="btn sm" id="orRun">Analyze</button></div>
@@ -258,7 +283,7 @@ function panelAnalyze(el,im){
   q("#paRed").onchange=e=>{ A.redirect=e.target.value; up(); }; q("#paShow").onchange=e=>{ A.show=e.target.value; up(); draw(); };
   q("#paRun").onclick=()=>runOp("analyze",Object.assign({},A,{thr:bin?null:Object.assign({},S.ui.thr)}));
   bindForm(q("#fmForm"),OPS.findMaxima,re=>{ if(re) renderPanel(); }); bindForm(q("#rpForm"),OPS.radial,()=>{}); bindForm(q("#orForm"),OPS.orientation,()=>{}); bindForm(q("#skForm"),OPS.skeleton,re=>{ if(re) renderPanel(); }); q("#skRun").onclick=()=>runOp("skeleton");
-  q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
+  q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmAuto").onclick=()=>runOp("findMaximaAuto",{}); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
   q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
   q("#paAuto").onclick=()=>paAuto(); wireParticleCard(el,im);
@@ -326,7 +351,7 @@ function drawBottom(){
 const TBL_MAX=3000; // 화면 표는 앞 3000 줄만 그린다(수만 줄이면 브라우저가 멈춤) — CSV·Copy 는 전부
 function tableHTML(rows,cols,o){ o=o||{}; if(!rows.length) return `<div class="xs muted im-empty">${o.empty||"표가 비었습니다"}</div>`;
   const all=rows.length; if(all>TBL_MAX) rows=rows.slice(0,TBL_MAX);
-  return `${all>TBL_MAX?`<div class="xs muted">${all.toLocaleString()} 줄 중 앞 ${TBL_MAX.toLocaleString()} 줄만 보입니다 — CSV·Copy 에는 모두 들어갑니다</div>`:""}<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }
+  return `${all>TBL_MAX?`<div class="xs muted keep">${all.toLocaleString()} 줄 중 앞 ${TBL_MAX.toLocaleString()} 줄만 보입니다 — CSV·Copy 에는 모두 들어갑니다</div>`:""}<div class="im-tbl"><table><thead><tr>${cols.map(c=>`<th>${esc(c.label||c.k)}${c.u?`<span class="u">${esc(c.u)}</span>`:""}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}" class="${o.sel&&o.sel.has(i)?"sel":""}">${cols.map(c=>{ const v=r[c.k]; return `<td>${typeof v==="number"?g4(v):esc(v==null?"":v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }
 const csvQ=v=>{ const s=v==null?"":String(v); return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
 function csvOf(rows,cols){ return cols.map(c=>csvQ((c.label||c.k)+(c.u?` (${c.u})`:""))).join(",")+"\n"+rows.map(r=>cols.map(c=>csvQ(r[c.k])).join(",")).join("\n"); }
 // 복사(Excel·Origin 붙여 넣기): 탭 구분, 값 안의 탭·줄바꿈은 공백 (쉼표는 그대로)
@@ -349,10 +374,12 @@ function bSkeleton(B){ const T=S.skelTrees, Bb=S.skelBranches; const units=[...n
   const tc=["Image","Slice","Skeleton","# Branches","# Junctions","# End-point voxels","# Junction voxels","# Slab voxels","Average Branch Length","# Triple points","# Quadruple points","Maximum Branch Length","Longest Shortest Path","spx","spy","spz"].filter(k=>T.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k,u:one&&/Length|Path|^sp/.test(k)?one:""})).concat(one?[]:[{k:"Unit"}]);
   const bc=["Image","Slice","Skeleton ID","Branch length","V1 x","V1 y","V1 z","V2 x","V2 y","V2 z","Euclidean distance","running average length"].filter(k=>Bb.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k,u:one&&/length|distance|^V/.test(k)?one:""})).concat(one?[]:[{k:"Unit"}]);
   B.innerHTML=`<div class="im-row"><button class="btn xs" id="skCsv" ${T.length?"":"disabled"}>Skeleton CSV</button><button class="btn xs" id="skBcsv" ${Bb.length?"":"disabled"}>Branch CSV</button><button class="btn xs" id="skClr" ${T.length?"":"disabled"}>Clear</button><span class="xs muted">열 이름 = Fiji Analyze Skeleton 의 Results · Branch information (Image·Slice·Unit 열은 앱에서 더함)</span></div>
-    ${tableHTML(T,tc,{empty:"Analyze ▸ Analyze Skeleton 결과가 쌓입니다 (골격마다 한 줄)."})}${Bb.length?`<div class="im-h" style="margin-top:8px">Branch information <span class="muted xs">${Bb.length} branches</span></div>${tableHTML(Bb.slice(0,2000),bc)}${Bb.length>2000?`<div class="xs muted">처음 2000 줄만 — 전부는 CSV</div>`:""}`:""}`;
+    ${tableHTML(T,tc,{empty:"Analyze ▸ Analyze Skeleton 결과가 쌓입니다 (골격마다 한 줄)."})}${Bb.length?`<div class="im-h" style="margin-top:8px">Branch information <span class="muted xs">${Bb.length} branches</span></div>${tableHTML(Bb.slice(0,2000),bc)}${Bb.length>2000?`<div class="xs muted keep">처음 2000 줄만 — 전부는 CSV</div>`:""}`:""}`;
   $q(B,"#skCsv").onclick=()=>downloadText("Skeleton.csv",csvOf(T,tc)); $q(B,"#skBcsv").onclick=()=>downloadText("Branch information.csv",csvOf(Bb,bc));
   $q(B,"#skClr").onclick=()=>{ if(confirm2("skclr","Skeleton 표를 비울까요? 한 번 더")){ S.skelTrees=[]; S.skelBranches=[]; save(); drawBottom(); } }; }
-function bSummary(B){ const cols=["Image","Slice","Count","Total Area","Average Size","%Area","ECD mean","ECD SD","Feret mean","Circ. mean","Density (/area)","Unit","Threshold"].filter(k=>S.summary.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k}));
+function bSummary(B){ const us=[...new Set(S.summary.map(r=>r.Unit).filter(Boolean))], u1=us.length===1?us[0]:null; const sq=u=>u==="px"?"px²":u+"²";
+  const UC={"Total Area":u=>sq(u),"Average Size":u=>sq(u),"ECD mean":u=>u,"ECD SD":u=>u,"Feret mean":u=>u,"ECD mean (used)":u=>u,"ECD SD (used)":u=>u,"Density (/area)":u=>"/"+sq(u)};
+  const cols=["Image","Slice","Count","Used","Overlapping","Size outliers","Total Area","Average Size","%Area","ECD mean","ECD SD","ECD mean (used)","ECD SD (used)","Feret mean","Circ. mean","Density (/area)","Unit","Threshold"].filter(k=>S.summary.some(r=>r[k]!==undefined&&r[k]!=="")).map(k=>({k,u:u1&&UC[k]?UC[k](u1):""}));
   B.innerHTML=`<div class="im-row"><button class="btn xs" id="smCsv" ${S.summary.length?"":"disabled"}>CSV</button><button class="btn xs" id="smClr" ${S.summary.length?"":"disabled"}>Clear</button><span class="xs muted">이미지(장)마다 한 줄 — batch 결과도 여기에</span></div>${tableHTML(S.summary,cols,{empty:"Analyze Particles · Find Maxima 요약이 쌓입니다."})}`;
   $q(B,"#smCsv").onclick=()=>downloadText("Summary.csv",csvOf(S.summary,cols)); $q(B,"#smClr").onclick=()=>{ if(confirm2("smclr","Summary 를 비울까요? 한 번 더")){ S.summary=[]; save(); drawBottom(); } }; }
 /* 크기 분포 */

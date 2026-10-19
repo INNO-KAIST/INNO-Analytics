@@ -36,4 +36,9 @@ console.log("== 2. 고배율 (R 60 px) + 지지막 결(상관 잡음 σ 3 px)");
   ok(Math.abs(c.nOv-s.nCl)<=1,`겹친 입자 표시 ${c.nOv} ↔ 정답 ${s.nCl}`); }
 console.log("== 3. 저배율 (R 6 px) — 흐림이 너무 커서 입자를 지우지 않음");
 { const s=scene(900,900,6,11,{clusters:[2,3],singles:300,noise:18}); const c=count(s.p); ok(Math.abs(c.n-s.n)<=Math.max(4,0.04*s.n),`개수 ${c.n} ↔ 정답 ${s.n} (± 4 %)`,`σ ${c.info.sigma.toFixed(1)}`); }
+console.log("== 4. Find (auto) — 날 이미지 prominence 10 이면 잡음 극대 수만 개 → 자동은 입자 조각마다 중심 하나");
+for(const [R,seed,cfg,tol] of [[20,3,{clusters:[2,2,3,3,4],singles:120,noise:25},0.03],[60,7,{clusters:[2,3,2],singles:28,noise:22,corr:3},0.03],[6,11,{clusters:[2,3],singles:300,noise:18},0.04]]){
+  const W=R>=60?1600:R>=20?1400:900; const sc=scene(W,W,R,seed,cfg); const raw=IC.findMaxima(sc.p,10,{}).points.length; const t0=Date.now(); const r=IC.findMaximaAuto(sc.p);
+  ok(Math.abs(r.points.length-sc.n)<=Math.max(3,tol*sc.n),`R ${R}: 자동 ${r.points.length} ↔ 정답 ${sc.n} (날 이미지 prominence 10: ${raw})`,`${Date.now()-t0} ms, light ${r.info.light}, σ ${r.info.sigma.toFixed(1)}`);
+  ok(r.info.light===true,"밝은 바탕·어두운 입자 → Light background 자동"); }
 console.log(`\n${pass} 통과, ${fail} 실패`); if(fail) process.exit(1);

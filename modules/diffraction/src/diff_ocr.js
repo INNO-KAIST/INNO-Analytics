@@ -1922,7 +1922,9 @@ function finish(cands,ctx,opt){ if(!cands.length) return null;
     return {ch,x0:g.x0+ox,y0:g.y0+oy,x1:g.x1+ox,y1:g.y1+oy,score:+Math.max(0,Math.min(1,1-own/0.4)).toFixed(3)}; });
   const box={x0:Math.min(...chars.map(c=>c.x0)),y0:Math.min(...chars.map(c=>c.y0)),x1:Math.max(...chars.map(c=>c.x1)),y1:Math.max(...chars.map(c=>c.y1))};
   const valueInvNm=best.recip?+(best.value*best.f).toPrecision(12):null;
-  const res={text:best.numStr+" "+best.unitRead,value:best.value,unit:best.unit,valueInvNm,recip:best.recip,conf,chars,box,H:best.line.H};
+  // 단위 확신: 단위 글자 중 가장 나쁜 맞춤 점수 (1/nm ↔ 1/Å 처럼 10 배가 갈리는 자리). 0.5 미만이면 단위 확신을 0.5 로 낮춘다 — UI 는 unitConf < 0.9 이면 값을 쓰기 전에 확인을 묻는다
+  const nn=best.numStr.length; let uS=1; for(let i=nn;i<chars.length;i++) uS=Math.min(uS,chars[i].score); const unitConf=Math.min(conf,uS<0.5?0.5:1);
+  const res={text:best.numStr+" "+best.unitRead,value:best.value,unit:best.unit,valueInvNm,recip:best.recip,conf,unitScore:+uS.toFixed(3),unitConf,chars,box,H:best.line.H};
   if(opt.debug) res.debug={worst:Math.max(...chars.map(c=>(1-c.score)*0.4)),resid,margin,mean:best.mean,gp,dmargin:best.dmargin,tot:best.tot,drop:best.drop,ux:best.ux,prior:best.prior,N:best.N,dist:best.dist,th:best.line.th,alt:alt?{text:alt.numStr+" "+alt.unitRead,tot:alt.tot}:null};
   return res; }
 
@@ -1970,6 +1972,11 @@ OCR.readAuto=function(img,w,h,hint,opt){ opt=opt||{}; let best=null, bestS=-1; c
   tryBar(hint,true); if(best&&best.conf>=0.5) return best; // 힌트 막대로 읽혔으면 그대로 (UI 가 conf 로 확인을 묻는다)
   const t0=Date.now(); for(const b of OCR.findBars(img,w,h,{max:5})){ if(Date.now()-t0>(opt.budget||2500)&&best) break; tryBar(b,false); if(best&&bestS>=0.9) break; } // 전체 시간 상한(휴대폰)
   return best; };
+/* 이름표 결과를 보정에 바로 쓸지 (UI 가 씀): 값·단위 모두 확실(conf ≥ 0.9, unitConf ≥ 0.9)할 때만 auto.
+   0.3 ≤ conf < 0.9 이면 쓰지 않고 두 해석(읽은 단위 그대로 / 1/nm ↔ 1/Å 바꿈)을 고르게 한다. 그 밖(실공간 단위·conf < 0.3)은 null */
+OCR.labelUse=function(lb){ if(!lb||!lb.recip||!(lb.valueInvNm>0)) return null; const uc=lb.unitConf!=null?lb.unitConf:lb.conf;
+  const v=+(+lb.valueInvNm).toPrecision(6); if(lb.conf>=0.9&&uc>=0.9) return {auto:true,value:v};
+  if(lb.conf>=0.3){ const alt=+(lb.unit==="1/Å"?lb.value:lb.value*10).toPrecision(6); return {auto:false,opts:[v,alt]}; } return null; };
 OCR.units=UNITS.map(u=>u.s); OCR._int={inkMap,components,stackMerge,lines,decodeLine,classCost,prep}; OCR._W=W; OCR._CAL=CAL; OCR._tpl=()=>tpl();
 if(typeof module!=="undefined"&&module.exports) module.exports=OCR;
 G.DIFF_OCR=OCR;

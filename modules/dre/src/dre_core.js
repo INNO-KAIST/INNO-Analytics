@@ -192,8 +192,9 @@ function steady(M,c,x,phi,n0,opt){
     /* pseudo-time: y − dt·f(y) = y_prev */
     path="transient";
     let y=Float64Array.from(res.stalled?xr:res.y); if(!valid(y)) y=Float64Array.from(xr);
-    let dt=opt.dt0||(1/rmax), T=0;
-    for(let step=0; step<600; step++){
+    let dt=opt.dt0||(1/rmax), T=0; const maxSteps=opt.maxSteps||600, dl=Math.min(opt.deadline||Infinity,opt.maxMs?Date.now()+opt.maxMs:Infinity)<Infinity?Math.min(opt.deadline||Infinity,opt.maxMs?Date.now()+opt.maxMs:Infinity):0;
+    for(let step=0; step<maxSteps; step++){
+      if(dl&&(step&7)===7&&Date.now()>dl) break;   /* 화면용 계산: 점 하나·스윕 전체 시간 상한 */
       /* implicit Euler 한 단계: Newton */
       let z=Float64Array.from(y), okStep=false;
       for(let it=0;it<25;it++){
@@ -210,23 +211,29 @@ function steady(M,c,x,phi,n0,opt){
       if(dt>1e3*(opt.tmax||10)){ const nr=newton(y,40); if(nr.ok){ res=nr; break; } }
       if(step%20===19){ const nr=newton(y,20); if(nr.ok){ res=nr; break; } }
     }
-    if(!res.ok){ const nr=newton(y,60); res=nr; }
+    if(!res.ok){ const nr=newton(y,dl&&Date.now()>dl?8:60); res=nr; }
   }
   fullFromRed(M,res.y,n);
   return {n,ok:!!res.ok,res:res.r,path};
 }
 function initGround(M){ const n=new Float64Array(M.N); M.ground.forEach(g=>n[g]=1); return n; }
 
-/* 파워 스윕: dir=+1 up, −1 down(up 끝 해에서 시작). I [W/cm²] */
-function sweep(M,env,I,dir,nm){
+/* 파워 스윕: dir=+1 up, −1 down(up 끝 해에서 시작). I [W/cm²]
+   opt(화면용 상한, 피팅은 쓰지 않음): maxFails — 수렴 실패가 이만큼 쌓이면 스윕 중단(남은 점 n=null, aborted),
+   deadline — Date.now() 기준 끝 시각(넘으면 실패로 보고 중단), stOpt — steady 옵션(maxSteps 등). */
+function sweep(M,env,I,dir,nm,opt){
+  opt=opt||{};
   const c=coeffs(M,env), x=molFrac(M,env), Eph=photonEnergyJ(nm);
   const order=[...I.keys()].sort((a,b)=>I[a]-I[b]); if(dir<0) order.reverse();
-  const out=new Array(I.length); let n=null, fails=0;
-  if(dir<0){ /* 가장 높은 파워에서 먼저 upper branch로 */ const top=I[order[0]]; const hi=steady(M,c,x,top/Eph,null); n=hi.n; }
+  const out=new Array(I.length).fill(null); let n=null, fails=0, aborted=false; const failIdx=[];
+  const maxF=opt.maxFails||Infinity, dl=opt.deadline||0, so=Object.assign({},opt.stOpt||{},dl?{deadline:dl}:{});
+  if(dir<0){ /* 가장 높은 파워에서 먼저 upper branch로 */ const top=I[order[0]]; const hi=steady(M,c,x,top/Eph,null,so); n=hi.n; }
   for(const k of order){
-    const r=steady(M,c,x,I[k]/Eph,n); out[k]=r.n; n=r.n; if(!r.ok) fails++;
+    if(dl&&Date.now()>dl){ aborted=true; break; }
+    const r=steady(M,c,x,I[k]/Eph,n,so); out[k]=r.n; n=r.n; if(!r.ok){ fails++; failIdx.push(k); if(fails>=maxF){ aborted=true; break; } }
   }
-  return {n:out,fails};
+  const done=out.filter(v=>v).length;
+  return {n:out,fails,failIdx,aborted,done};
 }
 
 /* ---------------- 감도 (IFT) ----------------
@@ -339,13 +346,22 @@ function decayTime(M,env,I,nm,chIdx){
    beam: "peak" (단일입자·peak intensity) | "gauss" (가우시안 빔 공간 적분: ∫₀^{I0} y(I) dI/I, Lee 2021) */
 function logGrid(a,b,perDec){ const n=Math.max(2,Math.ceil(Math.log10(b/a)*perDec)+1); const o=[]; for(let i=0;i<n;i++) o.push(a*Math.pow(b/a,i/(n-1))); return o; }
 function observe(M,env,I,dir,nm,chIdx,opt){
+  const r=observeMulti(M,env,I,dir,nm,[chIdx],opt);
+  const o={y:r.Y[0],dy:r.dY[0],fails:r.fails}; if((opt||{}).beam!=="gauss") o.n=r.n; return o;
+}
+/* 여러 채널을 스윕 한 번으로 (화면 시뮬레이션: 채널마다 스윕을 되풀이하지 않는다).
+   반환 Y[채널][점], dY, n(I 위치의 population, 못 구한 점은 null), fails, aborted, done/total(스윕 격자) */
+const cv=(M,ch,n)=>n?channelValue(M,ch,n):NaN;
+function observeMulti(M,env,I,dir,nm,chList,opt){
   opt=opt||{}; const beam=opt.beam||"peak"; const P=opt.pnames||null;
-  const ch=M.channels[chIdx];
+  const swOpt={maxFails:opt.maxFails,deadline:opt.deadline,stOpt:opt.stOpt};
   if(beam==="peak"){
-    const sw=sweep(M,env,I,dir,nm); const y=sw.n.map(n=>channelValue(M,ch,n));
-    let dy=null;
-    if(P){ dy=sw.n.map((n,k)=>{ const S=sensitivity(M,env,n,I[k]/photonEnergyJ(nm),P); if(!S) return null; const o=new Float64Array(P.length); for(const [i,w] of ch.terms) for(let j=0;j<P.length;j++) o[j]+=w*S[i*P.length+j]; return o; }); }
-    return {y,dy,fails:sw.fails,n:sw.n};
+    const sw=sweep(M,env,I,dir,nm,swOpt);
+    const Y=[], dY=[];
+    let Sk=null; if(P) Sk=sw.n.map((n,k)=>n?sensitivity(M,env,n,I[k]/photonEnergyJ(nm),P):null);
+    chList.forEach(chIdx=>{ const ch=M.channels[chIdx]; Y.push(sw.n.map(n=>cv(M,ch,n)));
+      dY.push(P?Sk.map(S=>{ if(!S) return null; const o=new Float64Array(P.length); for(const [i,w] of ch.terms) for(let j=0;j<P.length;j++) o[j]+=w*S[i*P.length+j]; return o; }):null); });
+    return {Y,dY,fails:sw.fails,n:sw.n,aborted:sw.aborted,done:sw.done,total:I.length,failIdx:sw.failIdx};
   }
   /* gauss: ∫₀^{I0} y(I) d ln I (Lee 2021 의 공간 적분과 같은 양).
      구간마다 거듭제곱 법칙 y ∝ I^s 로 적분하고, 격자 간격 h 와 2h 의 결과로 Richardson 외삽(오차 ∝ h²) —
@@ -353,10 +369,17 @@ function observe(M,env,I,dir,nm,chIdx,opt){
   const Imin=Math.min(...I), Imax=Math.max(...I);
   let Gf=logGrid(Imin*1e-3,Imax,opt.perDec||80); if(Gf.length%2===0) Gf=logGrid(Imin*1e-3,Imax*1.0000001,(opt.perDec||80)+0.37);
   const all=[...new Set(Gf.concat(I))].sort((p,q)=>p-q);
-  const sw=sweep(M,env,all,dir,nm);
+  const sw=sweep(M,env,all,dir,nm,swOpt);
+  const Sall=P?all.map((g,k)=>sw.n[k]?sensitivity(M,env,sw.n[k],g/photonEnergyJ(nm),P):null):null;
+  const idx=new Map(); all.forEach((g,k)=>idx.set(g,k));
+  const Y=[], dY=[];
+  chList.forEach(chIdx=>{ const r=gaussInt(M,M.channels[chIdx],I,Gf,all,sw.n,Sall,P); Y.push(r.y); dY.push(r.dy); });
+  return {Y,dY,fails:sw.fails,n:I.map(v=>sw.n[idx.get(v)]),aborted:sw.aborted,done:sw.done,total:all.length,failIdx:sw.failIdx};
+}
+function gaussInt(M,ch,I,Gf,all,nAll,Sall,P){
   const val=new Map(), sen=new Map();
-  all.forEach((g,k)=>{ val.set(g,channelValue(M,ch,sw.n[k]));
-    if(P){ const S=sensitivity(M,env,sw.n[k],g/photonEnergyJ(nm),P); const o=new Float64Array(P.length); if(S) for(const [i,w] of ch.terms) for(let j=0;j<P.length;j++) o[j]+=w*S[i*P.length+j]; sen.set(g,o); } });
+  all.forEach((g,k)=>{ val.set(g,cv(M,ch,nAll[k]));
+    if(P){ const S=Sall[k]; const o=new Float64Array(P.length); if(S) for(const [i,w] of ch.terms) for(let j=0;j<P.length;j++) o[j]+=w*S[i*P.length+j]; sen.set(g,o); } });
   const seg=(ya,yb,L)=>{
     if(!(ya>0)||!(yb>0)) return [0.5*(ya+yb)*L,0.5*L,0.5*L];
     const lr=Math.log(yb/ya);
@@ -377,7 +400,7 @@ function observe(M,env,I,dir,nm,chIdx,opt){
   const fine=integ(Gf), coarse=integ(Gf.filter((_,k)=>k%2===0));
   const y=fine.map((f,i)=>f[0]+(f[0]-coarse[i][0])/3);
   const dy=P?fine.map((f,i)=>{ const o=new Float64Array(P.length); for(let j=0;j<P.length;j++) o[j]=f[1][j]+(f[1][j]-coarse[i][1][j])/3; return o; }):null;
-  return {y,dy,fails:sw.fails};
+  return {y,dy};
 }
 
 /* ---------------- 피팅 문제 ----------------
@@ -884,7 +907,7 @@ function derivedIntervals(B,best,prof,thr,opt){
     return Object.assign({},q,{lo:vs.length?Math.min(...vs):null,hi:vs.length?Math.max(...vs):null,n:vs.length}); });
 }
 
-const API={compileExpr,compile:m=>prep(compile(m)),coeffs,molFrac,steady,sweep,sensitivity,integrate,riseTime,decayTime,observe,
+const API={compileExpr,compile:m=>prep(compile(m)),coeffs,molFrac,steady,sweep,sensitivity,integrate,riseTime,decayTime,observe,observeMulti,
   buildProblem,residuals,lm,multistart,profile,fim,eigSym,aicc,dofInfo,slopes,logGrid,photonEnergyJ,templateLee,templateTm,envFor,chi2,thetaFromParams,mulberry,lhs,channelValue,adequacy,insight,slice2D,procRates,derived,derivedIntervals};
 root.DRE_CORE=API;
 if(typeof module!=="undefined") module.exports=API;

@@ -24,6 +24,8 @@ function drawMsg(){ const el=ROOT&&$q(ROOT,"#xpsMsg"); if(!el) return; if(!MSGS.
 const f=(v,d)=>v==null||!isFinite(v)?"—":(+v).toFixed(d==null?2:d);
 const g=(v,d)=>{ if(v==null||!isFinite(v)) return "—"; const a=Math.abs(v); if(a!==0&&(a<1e-3||a>=1e6)) return v.toExponential((d||3)-1); return (+v.toPrecision(d||4)).toLocaleString("en-US",{maximumFractionDigits:6}); };
 const pm=(v,s,d)=>v==null||!isFinite(v)?"—":`${f(v,d)}${s!=null&&isFinite(s)?` <span class="muted xs">± ${f(s,d)}</span>`:""}`;
+/* 결과 표: σ 가 null = 고정(또는 고정된 것에 연결)된 값 → '± —' (0.000 이 아니라) */
+const pmF=(v,s,d,fixed)=>v==null||!isFinite(v)?"—":fixed?`${f(v,d)} <span class="muted xs" title="Fixed (or linked to a fixed value) — no statistical uncertainty">± —</span>`:pm(v,s,d);
 const SLOTS=8;
 const ACCEPT=".vgd,.vms,.npl,.xls,.xlsx,.txt,.csv,.dat,.xy,.avg,.json";
 const ORB_J={s:null,p:["3/2","1/2"],d:["5/2","3/2"],f:["7/2","5/2"]};
@@ -47,7 +49,7 @@ function revive(o){ return JSON.parse(JSON.stringify(o),(k,v)=>v&&typeof v==="ob
 const cur=()=>S.specs.find(s=>s.uid===S.sel)||null;
 const byUid=u=>S.specs.find(s=>s.uid===u)||null;
 function pr(sp){ sp=sp||cur(); if(!sp) return null; let p=S.proc[sp.uid]; if(!p){ p=S.proc[sp.uid]=defProc(sp); } return p; }
-function defProc(sp){ const sv=sp.reg&&sp.reg.kind==="survey"; return {lo:sp.be[0],hi:sp.be[sp.n-1],bg:{type:sv?"none":"smart",n:5,C:1643,D:0,u3:false,c0:null,k:null,s:0,cons:{s:{mode:"fixed"}}},comps:[],cons:{},result:null,hist:[],models:[],ver:0}; }
+function defProc(sp){ const sv=sp.reg&&sp.reg.kind==="survey", bs=!!(sp.meta&&sp.meta.bgSub); return {lo:sp.be[0],hi:sp.be[sp.n-1],weight:bs?"const":"poisson",bg:{type:sv||bs?"none":"smart",n:5,C:1643,D:0,u3:false,c0:null,k:null,s:0,cons:{s:{mode:"fixed"}}},comps:[],cons:{},result:null,hist:[],models:[],ver:0}; }
 const NOSMP="(시료 이름 없음)";   /* 시료 키(상태) — 바꾸지 않음. 화면 표시는 NOSMP_L */
 const NOSMP_L="(no sample name)";
 const FMTN=t=>t==="텍스트"?"Text":t;   /* 형식 이름의 화면 표시 (저장값은 그대로) */
@@ -67,7 +69,7 @@ function touch(p){ p.ver=(p.ver||0)+1; if(p.result) p.result.stale=true; save();
    ============================================================ */
 async function loadFiles(list){
   const arr=[...list]; if(!arr.length) return;
-  let nNew=0, nDup=0; const errs=[], warns=[];
+  let nNew=0, nDup=0; const errs=[], warns=[], axq=[];
   // 이미 열린 같은 스펙트럼(같은 시료·영역·파일·형식·점 수·첫 BE·첫 세기)은 다시 넣지 않는다
   const sig=s=>[SK(s),s.region,s.file,s.format,s.n,(+s.be[0]).toFixed(4),(+s.y[0]).toPrecision(8)].join("|");
   const have=new Set(S.specs.map(sig)); const isDup=s=>{ const k=sig(s); if(have.has(k)) return true; have.add(k); return false; };
@@ -76,7 +78,9 @@ async function loadFiles(list){
       const u8=new Uint8Array(await file.arrayBuffer());
       if(/\.json$/i.test(file.name)){ importProject(new TextDecoder().decode(u8)); continue; }
       const r=await IO.readFile(file.name,u8,{});
-      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++; if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
+      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++;
+        const ac=axisCheck(sp); if(ac){ sp.warn.push(ac.msg); if(ac.fits&&isText(sp)) axq.push(sp); }
+        if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
       if(r.tables&&r.tables.length) r.tables.forEach(t=>{ if(/peak/i.test(t.name)&&t.rows.length>1) warns.push(file.name+": Avantage '"+t.name+"' 표가 있습니다(Info 탭)"); });
     }catch(e){ errs.push(file.name+": "+(e.message||e)); }
   }
@@ -85,6 +89,27 @@ async function loadFiles(list){
   if(nNew) note(`스펙트럼 ${nNew}개를 읽었습니다`+(nDup?` (이미 열린 ${nDup}개는 건너뜀)`:"")+(warns.length?` — 확인할 점 ${warns.length}건(Info 탭)`:""),"ok");
   else if(nDup) note(`이미 열려 있는 스펙트럼입니다 (${nDup}개) — 새로 넣지 않았습니다`);
   errs.forEach(e=>note(e,"warn"));
+  axq.forEach(sp=>{ const ac=axisCheck(sp); if(ac) note(`${sp.name}: ${ac.msg}`,"warn",{label:`Read as ${ac.other}`,fn:()=>applyAxis(sp,ac.other,sp.hv)}); });
+}
+const isText=sp=>sp&&sp.format==="텍스트";
+/* 축 점검: 이름에서 읽은 원소·궤도의 라이브러리 BE 가 자료 범위(±8 eV: 대전 이동 여유)에 없으면 경고. 반대 축(KE↔BE)으로 읽으면 들어오는지(fits)도 */
+function axisCheck(sp){
+  const r=sp&&sp.reg||{}; if(r.kind!=="region"||!r.el||!r.orb) return null;
+  const lv=((LIB().core||{})[r.el]||{}).lv||{}; const bes=Object.entries(lv).filter(([k])=>k.startsWith(r.orb)).map(([,v])=>v); if(!bes.length) return null;
+  const M=8, lo=sp.be[0], hi=sp.be[sp.n-1], inR=(a,b)=>bes.some(v=>v>=a-M&&v<=b+M);
+  if(inR(lo,hi)) return null;
+  const ax=(sp.meta&&sp.meta.axis)||"BE", other=ax==="KE"?"BE":"KE", fits=inR(sp.hv-hi,sp.hv-lo);
+  const lib=`${r.el} ${r.orb} ${bes.map(v=>f(v,1)).join("/")} eV`;
+  return {other,fits,msg:fits?`BE ${f(lo,0)}–${f(hi,0)} eV 에 ${lib}(라이브러리)가 없습니다 — ${other} 축 자료로 보입니다`:`BE ${f(lo,0)}–${f(hi,0)} eV 에 ${lib}(라이브러리)가 없습니다 — 원소·궤도·축을 확인하세요`};
+}
+/* 텍스트 자료의 축(BE/KE)·hν 를 바꿔 다시 읽기 — BE 가 통째로 바뀌므로 이 스펙트럼의 피팅·보기·survey 판별은 처음부터 */
+function applyAxis(sp,axis,hv){
+  if(!sp||!byUid(sp.uid)) return;
+  let ch=false; try{ ch=IO.reaxis(sp,axis,hv); }catch(e){ note("축을 바꾸지 못했습니다: "+(e.message||e),"warn"); return; }
+  if(!ch){ note("바뀐 것이 없습니다"); return; }
+  sp.warn=(sp.warn||[]).filter(w=>!/라이브러리\)가 없습니다/.test(w)); const ac=axisCheck(sp); if(ac) sp.warn.push(ac.msg);
+  S.proc[sp.uid]=defProc(sp); delete PV[sp.uid]; delete S.ui.survey[sp.uid]; save(); rerender();
+  note(`${sp.name}: ${axis} 축, hν ${f(sp.hv,2)} eV 로 다시 읽었습니다 (BE ${f(sp.be[0],1)}–${f(sp.be[sp.n-1],1)} eV)${ac?" — "+ac.msg:""}`,ac?"warn":"ok");
 }
 
 /* ============================================================
@@ -109,7 +134,7 @@ function curModel(sp,p){
   }
   const env=Float64Array.from(B,(b,i)=>b+P[i]);
   let v=null; if(p.result&&!p.result.stale&&p.result.v&&p.result.v.length===n) v=p.result.v;
-  if(!v){ const ys=C.smoothQ(E,y,C.smoothHW(E)); const c=sp.c||1; v=Array.from(ys,t=>Math.max(t,1e-9)/c); }
+  if(!v){ if(p.weight==="const") v=Array.from(C.constVar(y)); else { const ys=C.smoothQ(E,y,C.smoothHW(E)); const c=sp.c||1; v=Array.from(ys,t=>Math.max(t,1e-9)/c); } }
   const phi=p.result&&!p.result.stale&&p.result.stats?p.result.stats.chi2nu:null;
   const resid=Float64Array.from(y,(t,i)=>(t-env[i])/Math.sqrt(v[i]*(phi||1)));
   return {E,y,B,parts,env,resid,i0:R.i0,n};
@@ -127,13 +152,16 @@ function plotView(sp){
 function niceTicks(a,b,n){ const span=b-a; if(!(span>0)) return [a]; const st0=span/(n||6); const p=Math.pow(10,Math.floor(Math.log10(st0))); const m=st0/p; const st=(m<1.5?1:m<3?2:m<7?5:10)*p; const out=[]; for(let t=Math.ceil(a/st)*st;t<=b+1e-9*st;t+=st) out.push(+t.toFixed(10)); return out; }
 function fmtTick(v){ const a=Math.abs(v); if(a>=1e5) return (v/1000).toFixed(0)+"k"; if(a>=1e4) return (v/1000).toFixed(a>=1e5?0:1)+"k"; return String(+v.toPrecision(6)); }
 let GEO=null;
+/* 좁은 화면(휴대폰): viewBox(920 폭)가 줄어 글자가 4–5 px 가 되므로 글자 배율을 키우고(화면에서 ≈ 8–9 px) 눈금 수·아래 여백을 맞춘다 */
+function fontScale(host){ const w=(host&&host.clientWidth)||PW; return w>=700?1:Math.max(1,Math.min(2.2,+(0.75*PW/w).toFixed(2))); }
 function drawPlot(){
   const host=ROOT&&$q(ROOT,"#xpsPlot"); if(!host) return;
   const sp=cur();
   if(!sp){ host.innerHTML=`<div class="xps-empty">Drop files here or click <b>Open files</b>.<br><span class="sm">VGD (Avantage raw) · VAMAS (.vms) · Avantage export (.xls/.xlsx) · .avg · 2-column text (.txt/.csv)</span></div>`; return; }
   if(S.ui.overlay.length>1){ drawOverlay(host); return; }
   const p=pr(sp), sh=shOf(sp), v=plotView(sp), M=curModel(sp,p);
-  const W=PW, H=PH+RH, pw=W-ML-MR, ph=PH-MT-MB;
+  const fs=fontScale(host), mb=Math.round(MB*fs);
+  const W=PW, H=PH+RH, pw=W-ML-MR, ph=PH-MT-mb;
   // 보이는 x 범위의 데이터로 y 범위
   let ylo=Infinity, yhi=-Infinity;
   for(let i=0;i<sp.n;i++){ const x=sp.be[i]+sh; if(x<v.x0||x>v.x1) continue; ylo=Math.min(ylo,sp.y[i]); yhi=Math.max(yhi,sp.y[i]); }
@@ -143,14 +171,14 @@ function drawPlot(){
   if(v.y0!=null&&!v.auto){ y0=v.y0; y1=v.y1; }
   const X=be=>ML+(v.x1-be)/(v.x1-v.x0)*pw, Y=t=>MT+(y1-t)/(y1-y0)*ph;
   GEO={X,Y,v,y0,y1,pw,ph,sh,sp,p,M,inv:px=>v.x1-(px-ML)/pw*(v.x1-v.x0),invY:py=>y1-(py-MT)/ph*(y1-y0)};
-  const o=[`<svg class="xps-svg" id="xpsSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(sp.region)} spectrum">`];
+  const o=[`<svg class="xps-svg" id="xpsSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(sp.region)} spectrum" style="--xfs:${fs}">`];
   o.push(`<defs><clipPath id="xpsClip"><rect x="${ML}" y="${MT}" width="${pw}" height="${ph}"/></clipPath><clipPath id="xpsClipR"><rect x="${ML}" y="${PH}" width="${pw}" height="${RH-22}"/></clipPath></defs>`);
   // 격자·축
-  const xt=niceTicks(v.x0,v.x1,8), yt=niceTicks(y0,y1,5);
+  const xt=niceTicks(v.x0,v.x1,fs>1.3?5:8), yt=niceTicks(y0,y1,fs>1.3?4:5);
   xt.forEach(t=>o.push(`<line class="gd" x1="${X(t)}" x2="${X(t)}" y1="${MT}" y2="${MT+ph}"/>`));
   yt.forEach(t=>o.push(`<line class="gd" x1="${ML}" x2="${ML+pw}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${ML-6}" y="${Y(t)+4}" text-anchor="end">${fmtTick(t)}</text>`));
   o.push(`<rect class="ax" x="${ML}" y="${MT}" width="${pw}" height="${ph}" fill="none"/>`);
-  o.push(`<text class="al" x="${14}" y="${MT+ph/2}" transform="rotate(-90 14 ${MT+ph/2})" text-anchor="middle">${sp.c?"CPS":"Intensity (CPS)"}</text>`);
+  if(fs<=1.3) o.push(`<text class="al" x="${14}" y="${MT+ph/2}" transform="rotate(-90 14 ${MT+ph/2})" text-anchor="middle">${sp.c?"CPS":"Intensity (CPS)"}</text>`);   // 좁은 화면: 큰 눈금 글자와 겹쳐 뺌
   o.push(`<g clip-path="url(#xpsClip)">`);
   // 영역 밖 가림
   const rl=p.lo+sh, rh=p.hi+sh;
@@ -181,14 +209,14 @@ function drawPlot(){
   // 영역 손잡이
   [["lo",rl],["hi",rh]].forEach(([k,xv])=>{ if(xv<v.x0||xv>v.x1) return; const x=X(xv); o.push(`<line class="hdl" x1="${x}" x2="${x}" y1="${MT}" y2="${MT+ph}"/><line class="hdlhit" data-hdl="${k}" x1="${x}" x2="${x}" y1="${MT}" y2="${MT+ph}"/>`); });
   // x 축 글자
-  xt.forEach(t=>o.push(`<text x="${X(t)}" y="${MT+ph+15}" text-anchor="middle">${fmtTick(t)}</text>`));
-  o.push(`<text class="al" x="${ML+pw/2}" y="${MT+ph+30}" text-anchor="middle">Binding energy (eV)${sh?` — charge-corrected (${sh>0?"+":""}${f(sh,2)} eV)`:""}</text>`);
+  xt.forEach(t=>o.push(`<text x="${X(t)}" y="${MT+ph+4+Math.round(11*fs)}" text-anchor="middle">${fmtTick(t)}</text>`));
+  o.push(`<text class="al" x="${ML+pw/2}" y="${MT+ph+mb-4}" text-anchor="middle">Binding energy (eV)${sh?` — charge-corrected (${sh>0?"+":""}${f(sh,2)} eV)`:""}</text>`);
   // 잔차
   if(M&&p.comps.length){
     const r=M.resid; let rmax=0; for(let i=0;i<M.n;i++){ const x=M.E[i]+sh; if(x>=v.x0&&x<=v.x1) rmax=Math.max(rmax,Math.abs(r[i])); } rmax=Math.max(3,Math.min(rmax*1.1,50));
     const r0=PH+4, rh2=RH-26, RY=t=>r0+rh2/2-t/rmax*rh2/2;
     o.push(`<rect class="ax" x="${ML}" y="${r0}" width="${pw}" height="${rh2}" fill="none"/><line class="rz" x1="${ML}" x2="${ML+pw}" y1="${RY(2)}" y2="${RY(2)}"/><line class="rz" x1="${ML}" x2="${ML+pw}" y1="${RY(-2)}" y2="${RY(-2)}"/><line class="gd" x1="${ML}" x2="${ML+pw}" y1="${RY(0)}" y2="${RY(0)}"/>`);
-    o.push(`<text x="${ML-6}" y="${RY(2)+4}" text-anchor="end">+2</text><text x="${ML-6}" y="${RY(-2)+4}" text-anchor="end">−2</text><text class="al" x="${14}" y="${r0+rh2/2}" transform="rotate(-90 14 ${r0+rh2/2})" text-anchor="middle" style="font-size:10.5px">Residual/σ</text>`);
+    o.push(`<text x="${ML-6}" y="${RY(2)+4}" text-anchor="end">+2</text><text x="${ML-6}" y="${RY(-2)+4}" text-anchor="end">−2</text>${fs<=1.3?`<text class="al" x="${14}" y="${r0+rh2/2}" transform="rotate(-90 14 ${r0+rh2/2})" text-anchor="middle" style="font-size:10.5px">Residual/σ</text>`:""}`);
     let d=""; for(let i=0;i<M.n;i++){ const x=X(M.E[i]+sh); if(x<ML||x>ML+pw) continue; d+=(d?"L":"M")+x.toFixed(1)+","+RY(Math.max(-rmax,Math.min(rmax,r[i]))).toFixed(1); }
     o.push(`<path d="${d}" fill="none" stroke="var(--dat)" stroke-width="1" clip-path="url(#xpsClipR)"/>`);
   }
@@ -214,17 +242,18 @@ function refLines(sp){
 function drawOverlay(host){
   const list=S.ui.overlay.map(byUid).filter(Boolean); if(!list.length){ host.innerHTML=""; return; }
   let x0=Infinity,x1=-Infinity; list.forEach(sp=>{ const sh=shOf(sp); x0=Math.min(x0,sp.be[0]+sh); x1=Math.max(x1,sp.be[sp.n-1]+sh); });
-  const W=PW, H=PH, pw=W-ML-MR, ph=PH-MT-MB; const norm=S.ui.ovNorm, off=+S.ui.ovOffset||0;
+  const fs=fontScale(host), mb=Math.round(MB*fs);
+  const W=PW, H=PH, pw=W-ML-MR, ph=PH-MT-mb; const norm=S.ui.ovNorm, off=+S.ui.ovOffset||0;
   const series=list.map((sp,k)=>{ const sh=shOf(sp); let a=Array.from(sp.y); let mn=Math.min(...a), mx=Math.max(...a);
     if(norm==="max") a=a.map(v=>(v-mn)/(mx-mn||1)); else if(norm==="area"){ let s=0; for(let i=1;i<sp.n;i++) s+=0.5*(a[i]+a[i-1]-2*mn)*(sp.be[i]-sp.be[i-1]); a=a.map(v=>(v-mn)/(s||1)); }
     return {sp,x:Array.from(sp.be,b=>b+sh),y:a.map(v=>v+k*off*(norm==="none"?mx:1))}; });
   let y0=Infinity,y1=-Infinity; series.forEach(s=>s.y.forEach(v=>{ y0=Math.min(y0,v); y1=Math.max(y1,v); })); const pad=(y1-y0)*0.05||1; y0-=pad; y1+=pad;
   const X=be=>ML+(x1-be)/(x1-x0)*pw, Y=t=>MT+(y1-t)/(y1-y0)*ph;
-  const o=[`<svg class="xps-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Overlay">`];
-  niceTicks(x0,x1,8).forEach(t=>o.push(`<line class="gd" x1="${X(t)}" x2="${X(t)}" y1="${MT}" y2="${MT+ph}"/><text x="${X(t)}" y="${MT+ph+15}" text-anchor="middle">${fmtTick(t)}</text>`));
+  const o=[`<svg class="xps-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Overlay" style="--xfs:${fs}">`];
+  niceTicks(x0,x1,fs>1.3?5:8).forEach(t=>o.push(`<line class="gd" x1="${X(t)}" x2="${X(t)}" y1="${MT}" y2="${MT+ph}"/><text x="${X(t)}" y="${MT+ph+4+Math.round(11*fs)}" text-anchor="middle">${fmtTick(t)}</text>`));
   o.push(`<rect class="ax" x="${ML}" y="${MT}" width="${pw}" height="${ph}" fill="none"/>`);
   series.forEach((s,k)=>{ let d=""; s.x.forEach((x,i)=>d+=(i?"L":"M")+X(x).toFixed(1)+","+Y(s.y[i]).toFixed(1)); o.push(`<path d="${d}" fill="none" stroke="var(--s${(k%SLOTS)+1})" stroke-width="1.6"/>`); });
-  o.push(`<text class="al" x="${ML+pw/2}" y="${MT+ph+30}" text-anchor="middle">Binding energy (eV, per-sample charge correction applied)</text></svg>`);
+  o.push(`<text class="al" x="${ML+pw/2}" y="${MT+ph+mb-4}" text-anchor="middle">Binding energy (eV, per-sample charge correction applied)</text></svg>`);
   host.innerHTML=o.join("")+`<div class="xps-legend">${series.map((s,k)=>`<span><i style="background:var(--s${(k%SLOTS)+1})"></i><span title="${esc(SK(s.sp))}">${esc(smpDisp(SK(s.sp)).name)}</span> · ${esc(s.sp.region)}</span>`).join("")}</div>`;
 }
 
@@ -329,8 +358,9 @@ function multBanner(sp){ const r=sp.reg||{}; const mu=r.el&&C.multipletInfo(r.el
 function soInfo(el,orb){ const d=C.doubletInfo(LIB(),el,orb); if(!d) return null; return d; }
 function soNote(so){ if(!so) return ""; const a=so.alt||{}; const both=a.avantage!=null&&a.booklet!=null;
   return `Δ ${so.dE!=null?so.dE+" eV":"—"} (${so.src}${both?`; Booklet ${a.booklet} eV`:""}) · 넓이 비 ${f(so.r,3)} — ${so.dE==null?"직접 넣으세요":so.resolvable?"분해되는 doublet 이라 Δ 를 데이터로 정함(±범위 안)":"분해되지 않는 doublet 이라 Δ 고정"+(both&&so.spread>0.1?` — 두 출처가 ${f(so.spread,2)} eV 다름: 문헌값을 확인하세요`:"")}`; }
-async function autoSuggest(){
-  const sp=cur(), p=pr(sp); const R=region(sp,p); if(!R) return;
+/* spArg: 대상 스펙트럼(없으면 지금 보는 것) — 계산 중 다른 스펙트럼으로 옮겨도 그 스펙트럼에 적용 */
+async function autoSuggest(spArg){
+  const sp=spArg&&spArg.uid?spArg:cur(); if(!sp) return; const p=pr(sp); const R=region(sp,p); if(!R) return;
   if(RUN){ note("이미 계산 중입니다","warn"); return; }
   const r=sp.reg||{};
   if(!r.el) note("이 스펙트럼의 원소·궤도를 모릅니다(파일 이름에서 못 읽음) — Info 탭에서 지정하면 doublet·감도계수를 씁니다","warn");
@@ -343,9 +373,10 @@ async function autoSuggest(){
   const soTxt=s.mult?" — 다중항 준위라 doublet 대신 넓은 성분으로 모양만 맞췄습니다(성분 하나하나는 화학 상태가 아님, 정량은 넓이 합)":s.info&&s.info.dE&&p.comps.some(c=>c.doublet)?" — "+soNote(s.info):"";
   // 2 단계: 잔차 보강(덜 설명된 봉우리 추가 · 넓이 0 으로 간 성분 덜기) — 판단은 피팅 안 Shirley + 기울기 배경, z≥4 · ΔBIC≥10
   let prob; try{ prob=probOf(sp,p); }catch(e){ note(`성분 ${p.comps.length}개를 제안했습니다${soTxt}. 출발점일 뿐이니 확인하세요`); return; }
-  setProg("자동 제안: 잔차 보강 중…",0.3);
+  setProg("자동 제안: 잔차 보강 중…",0.3); const ver=p.ver;
   try{
     const [o]=await pool([{cmd:"auto",prob,opt:{}}]); hideProg(); if(!o) throw new Error("결과 없음");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ note(`자동 제안: 계산 중에 ${sp.region} 성분이 바뀌어 잔차 보강 결과를 버렸습니다`,"warn"); return; }
     const ch=o.added||o.removed||(o.relaxed&&o.relaxed.length);
     if(ch){
       const keep=new Map(p.comps.map(c=>[c.id,c]));
@@ -403,16 +434,16 @@ function pool(jobs,onDone){
       feed(w); });
   });
 }
-function probOf(sp,p){ const P=C.makeProblem(sp,{lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}); if(p.bg.type==="active"){ /* c0,k: 현재 값이 없으면 엔진이 초기화 */ } return P; }
+function probOf(sp,p){ const P=C.makeProblem(sp,{lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons,weight:p.weight}); if(p.bg.type==="active"){ /* c0,k: 현재 값이 없으면 엔진이 초기화 */ } return P; }
 function setProg(txt,frac){ const el=ROOT&&$q(ROOT,"#xpsProg"); if(!el) return; el.hidden=false; $q(el,".t").textContent=txt; $q(el,".bar i").style.width=Math.round(100*Math.min(1,frac))+"%"; }
 function hideProg(){ const el=ROOT&&$q(ROOT,"#xpsProg"); if(el) el.hidden=true; }
-async function runFit(kind){
-  const sp=cur(), p=pr(sp); if(!sp) return;
+async function runFit(kind,spArg){
+  const sp=spArg&&spArg.uid?spArg:cur(); if(!sp) return; const p=pr(sp);
   if(!p.comps.length){ note("성분이 없습니다 — 'Auto suggest' 또는 그래프에서 '+ Add component'","warn"); return; }
   if(RUN){ note("이미 계산 중입니다","warn"); return; }
   let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn"); return; }
-  pushHist(p,kind==="multi"?"다중 시작 피팅":"피팅");
-  const t0=performance.now();
+  pushHist(p,kind==="multi"?"다중 시작 피팅":"피팅"); const hEnt=p.hist[p.hist.length-1];
+  const t0=performance.now(); const ver=p.ver;   // 계산 중 사용자가 성분·영역을 바꾸면 결과를 덮어쓰지 않는다
   try{
     const N=kind==="multi"?Math.max(2,+S.ui.starts||24):1;
     const starts=C.startPoints(prob,N,(+S.ui.seed||1));
@@ -426,6 +457,8 @@ async function runFit(kind){
     const [fin]=await pool([{cmd:"final",prob,opt:{}}]);
     const near=chis.filter(x=>x-best.chi2<1).length;
     fin.multi=N>1?{N,chis,near,frac:near/N}:null;
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
+    fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
@@ -599,34 +632,45 @@ function shiftFromSel(sp){
   if(!c){ note("먼저 기준으로 쓸 성분을 그래프나 성분 목록에서 선택하세요","warn"); return; }
   const sm=smpOf(sp); const tg=sm.target!=null?sm.target:284.8; const r=fitted(sp);
   const ref=r&&r.comps.find(x=>x.id===c.id)?{uid:sp.uid,compId:c.id,be:c.be,name:c.name||"",file:sp.file||"",target:tg}:null;
+  // C 1s 의 성분을 명시적으로 고른 것이면 기준 성분으로 기억 — 'Recalibrate' 가 같은 성분을 쓰게
+  if(isC1s(sp)&&ref){ sm.refUid=sp.uid; sm.refComp=c.id; }
   setShift(sp,tg-c.be,ref,`${sp.region} '${c.name||"Component"}' ${f(c.be,2)} → ${tg} eV${r?"":" (피팅 전 값)"}`);
-  note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — ${sm.refNote}`,"ok");
+  const w=isC1s(sp)&&r?refWarn(r.comps,c):"";
+  note(`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — ${sm.refNote}${w}`,w?"warn":"ok");
 }
-/* C 1s 로 맞추기: 기준 C 1s 가 피팅돼 있지 않으면 자동 제안 → 피팅을 먼저 하고(그 스펙트럼을 잠시 보여 줌), 기준 성분을 기준 BE 로 */
+/* 기준 성분이 '가장 낮은 BE 의 주 C 1s 성분'(autoRefComp)이 아니면 한 줄 경고 */
+function refWarn(comps,c){ const a=autoRefComp(comps); if(!a||a.id===c.id) return "";
+  return ` · 주의: 기준이 가장 낮은 BE 의 주 C 성분(‘${a.name||"Component"}’ ${f(a.be,2)} eV, 측정)이 아닙니다`; }
+/* C 1s 로 맞추기: 기준 C 1s 가 피팅돼 있지 않으면 그 스펙트럼을 (화면을 옮기지 않고) 자동 제안 → 피팅한 뒤, 기준 성분을 기준 BE 로.
+   기준 성분 = Reference 에서 고른 것(sm.refComp) 또는 자동(autoRefComp). 그래프에서 클릭해 둔 성분은 쓰지 않는다 —
+   선택 성분을 쓰려면 Reference ▸ 'Use selected component' (명시적). */
 async function calibrateC1s(sp){
   if(RUN){ note("이미 계산 중입니다","warn"); return; }
   const k=SK(sp), sm=smpOf(sp), cands=chgCands(k);
   const s=cands.find(x=>x.uid===sm.refUid)||cands[0];
   if(!s){ note("이 시료에 C 1s 스펙트럼이 없습니다 — 같은 측정의 C 1s 파일을 함께 열거나, Reference 에서 다른 기준·Δ 를 쓰세요","warn"); S.ui.chgOpen=true; drawChg(); return; }
-  const back=S.sel; let didFit=false;
+  let didFit=false;
   if(!fitted(s)){
-    S.sel=s.uid; S.ui.selComp=null; rerender();
-    if(!pr(s).comps.length) await autoSuggest();
-    if(!pr(s).comps.length){ note("C 1s 에서 봉우리를 찾지 못해 맞추지 못했습니다 — Δ 를 직접 넣으세요","warn"); return; }
-    await runFit("one"); didFit=true;
+    setProg(`C 1s 자동 피팅 중 (${s.file||s.name})…`,0.05);
+    if(!pr(s).comps.length) await autoSuggest(s);
+    if(!pr(s).comps.length){ hideProg(); note("C 1s 에서 봉우리를 찾지 못해 맞추지 못했습니다 — Δ 를 직접 넣으세요","warn"); return; }
+    await runFit("one",s); didFit=true;
     if(!fitted(s)){ note("C 1s 피팅이 끝나지 않아 대전 보정을 하지 못했습니다","warn"); return; }
   }
-  const r=fitted(s); const pick=S.sel===s.uid&&S.ui.selComp&&r.comps.find(x=>x.id===S.ui.selComp); // C 1s 화면에서 성분을 골라 두었으면 그것
-  const c=pick||(sm.refComp&&r.comps.find(x=>x.id===sm.refComp))||autoRefComp(r.comps);
+  const r=fitted(s);
+  const chosen=sm.refComp?r.comps.find(x=>x.id===sm.refComp):null;
+  const lostChoice=!!(sm.refComp&&!chosen);
+  const c=chosen||autoRefComp(r.comps);
   if(!c){ note("C 1s 피팅에 C 성분이 없습니다 — Reference 에서 성분을 고르세요","warn"); S.ui.chgOpen=true; drawChg(); return; }
+  if(lostChoice) sm.refComp=null;
   const tg=sm.target!=null?sm.target:284.8;
-  if(pick) sm.refComp=pick.id;
-  const how=pick?"선택한":sm.refComp&&c.id===sm.refComp?"고른":"가장 낮은 BE";
-  if(didFit&&back&&back!==s.uid) S.sel=back;
+  const how=chosen?"고른":"가장 낮은 BE";
   const nm=c.name&&c.name!=="C 1s"?`‘${c.name}’ `:"";
   setShift(s,tg-c.be,{uid:s.uid,compId:c.id,be:c.be,name:c.name||"",file:s.file||"",target:tg},`C 1s ${nm}${f(c.be,2)} → ${f(tg,2)} eV · ${s.file||s.name} · ${how} 성분`);
-  const msg=`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — 시료 ${smpDisp(k).name} 의 모든 스펙트럼에 적용`+(didFit?` · C 1s 를 자동 제안 → 피팅해서 맞췄습니다 (성분 ${r.comps.length}, χ²ν ${f(r.stats.chi2nu,2)})`:"");
-  note(msg,"ok",didFit&&back!==s.uid?{label:"Show C 1s fit",fn:()=>{ S.sel=s.uid; S.ui.selComp=null; save(); rerender(); }}:null);
+  const w=chosen?refWarn(r.comps,c):"";
+  const msg=`대전 보정 Δ = ${sm.shift>0?"+":""}${f(sm.shift,2)} eV — 기준 ${c.name||"C 1s 성분"} ${f(c.be,2)} eV(측정) → ${f(tg,2)} eV, 시료 ${smpDisp(k).name} 전체`
+    +(didFit?` · C 1s 를 자동 제안 → 피팅 (성분 ${r.comps.length}, χ²ν ${f(r.stats.chi2nu,2)})`:"")+(lostChoice?" · 고른 기준 성분이 없어져 자동으로 골랐습니다":"")+w;
+  note(msg,w||lostChoice?"warn":"ok",S.sel!==s.uid?{label:"Show C 1s fit",fn:()=>{ S.sel=s.uid; S.ui.selComp=null; save(); rerender(); }}:null);
 }
 /* 시료 이름 바꾸기(같은 이름이 있으면 합침) · 스펙트럼 하나를 다른 시료로 옮기기 */
 function renameSample(oldK,newName){
@@ -684,8 +728,9 @@ function panelFit(el,sp){
    <hr class="xps-hr">
    <div class="xps-h">Fit</div>
    <div class="xps-row"><button class="btn primary sm" id="xpsFit" title="Least-squares fit of the current components (LM + 2-pass IRLS weighting)">Fit</button><button class="btn sm" id="xpsMulti" title="Start from many points spread evenly within the bounds of the nonlinear parameters → keep the lowest χ²">Multi-start</button><span class="xps-f"><input type="number" class="w56" id="xpsStarts" min="2" max="400" value="${S.ui.starts||24}"> runs</span>
+     <select class="xps-sel" id="xpsW" title="Weighting — Poisson: variance ∝ intensity (raw counts). Constant: equal weight for every point (background-subtracted or processed data)"><option value="poisson" ${p.weight!=="const"?"selected":""}>Poisson weight</option><option value="const" ${p.weight==="const"?"selected":""}>Constant weight</option></select>
      <button class="btn sm" id="xpsMC" title="Re-add noise to the best model and refit → 95 % confidence intervals (uncertainty for reporting)">Monte Carlo uncertainty</button><span class="xps-f"><input type="number" class="w56" id="xpsMCN" min="20" max="5000" value="${S.ui.mcN||200}"> runs</span></div>
-   ${r?fitStrip(r,sp):`<div class="muted xs">Weighting: ${sp.c?`Poisson (${esc(sp.cSrc)})`:"quasi-Poisson (척도는 잔차에서 추정)"} · LM + 2-pass IRLS</div>`}
+   ${r?fitStrip(r,sp):`<div class="muted xs">Weighting: ${p.weight==="const"?"constant (척도는 잔차에서 추정)":sp.c?`Poisson (${esc(sp.cSrc)})`:"quasi-Poisson (척도는 잔차에서 추정)"} · LM${p.weight==="const"?"":" + 2-pass IRLS"}</div>`}
    <div class="xps-row" style="margin-top:6px"><button class="btn xs" id="xpsSnap" ${r&&!r.stale?"":"disabled"} title="Save this fit to the model-comparison list">Save to model comparison</button><span class="muted xs">저장한 모형은 Results 탭에서 AICc·BIC 로 비교</span></div>`;
   // 영역
   const lo=$q(el,"#xpsLo"), hi=$q(el,"#xpsHi");
@@ -698,12 +743,13 @@ function panelFit(el,sp){
   const tu=$q(el,"#xpsTgU"); if(tu) tu.onchange=()=>{ bg.u3=tu.value==="u3"; if(bg.u3&&!bg.D){ bg.C=551; bg.D=436; } if(!bg.u3){ bg.C=1643; bg.D=0; } touch(p); rerender(); };
   const tc=$q(el,"#xpsTgC"), td=$q(el,"#xpsTgD"); if(tc) tc.onchange=()=>{ bg.C=+tc.value; touch(p); drawPlot(); }; if(td) td.onchange=()=>{ bg.D=+td.value; touch(p); drawPlot(); };
   const bs=$q(el,"#xpsBgS"); if(bs) bs.onchange=()=>{ bg.cons=bg.cons||{}; bg.cons.s={mode:bs.checked?"free":"fixed"}; if(!bs.checked) bg.s=0; touch(p); };
-  $q(el,"#xpsAuto").onclick=autoSuggest;
+  $q(el,"#xpsAuto").onclick=()=>autoSuggest(sp);
+  $q(el,"#xpsW").onchange=e=>{ pushHist(p,"가중"); p.weight=e.target.value; touch(p); renderPanel(); drawPlot(); };
   const tpc=$q(el,"#xpsTplC"); if(tpc) tpc.onclick=templateC1s;
   $q(el,"#xpsTplS").onclick=saveTpl; $q(el,"#xpsTplL").onchange=e=>{ if(e.target.value!=="") loadTpl(+e.target.value); };
   $q(el,"#xpsUndo").onclick=undo;
-  $q(el,"#xpsFit").onclick=()=>runFit("one");
-  $q(el,"#xpsMulti").onclick=()=>runFit("multi");
+  $q(el,"#xpsFit").onclick=()=>runFit("one",sp);
+  $q(el,"#xpsMulti").onclick=()=>runFit("multi",sp);
   $q(el,"#xpsMC").onclick=runMC;
   $q(el,"#xpsStarts").onchange=e=>{ S.ui.starts=Math.max(2,Math.min(400,+e.target.value||24)); save(); };
   $q(el,"#xpsMCN").onchange=e=>{ S.ui.mcN=Math.max(20,Math.min(5000,+e.target.value||200)); save(); };
@@ -741,7 +787,7 @@ function fitStrip(r,sp){
     `<div class="${Math.abs(st.rho1)>0.3?"warn":""}" title="Neighbour correlation of the normalized residuals">Residual ρ₁<b>${f(st.rho1,2)}</b></div>`,
     `<div class="${Math.abs(st.runsZ)>3?"warn":""}" title="Runs-test z of the residual signs (|z|>3 = structured residual)">runs z<b>${f(st.runsZ,1)}</b></div>`,
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
-    `<div class="${r.conv?"ok":"warn"}">${r.conv?"Converged":"Not converged"}<b>${r.iter} iter</b></div>`];
+    `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
   if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="Fraction of starts reaching the minimum (Δχ²<1)">Same minimum<b>${r.multi.near}/${r.multi.N}</b></div>`);
   let w="";
   // 피팅 뒤 모형을 바꿨으면(stale) 위 숫자와 경고는 이전 모형의 것 — 경고는 숨기고 다시 피팅하라고만 한다
@@ -815,11 +861,20 @@ function snapshotModel(sp,p){ const r=p.result; if(!r||r.stale) return; p.models
 /* 템플릿 (브라우저에 저장) */
 const TKEY="innoanalytics_xps_tpl_v1";
 function tplList(){ try{ return JSON.parse(localStorage.getItem(TKEY)||"[]"); }catch(e){ return []; } }
+/* 템플릿은 대전 보정된 BE 로 저장(bev:2): 성분 BE 와 'free' BE 한계를 함께 +Δ, 불러올 때 함께 −Δ (C.shiftModelBE) → 저장·불러오기는 어떤 Δ 에서도 항등.
+   bev 가 없는 옛 템플릿은 한계만 측정 BE 로 저장돼 있어(결함) 한계를 불러온 성분 중심으로 다시 둔다(폭 유지). */
 function saveTpl(){ const sp=cur(), p=pr(sp); if(!p.comps.length){ note("저장할 성분이 없습니다","warn"); return; } const L=tplList(); const nm=`${sp.region} · ${p.comps.length} comp. · ${new Date().toISOString().slice(0,10)}`; const sh=shOf(sp);
-  L.push({name:nm,region:sp.region,comps:p.comps.map(c=>Object.assign(C.clone(c),{be:c.be+sh})),cons:C.clone(p.cons),bg:C.clone(p.bg)}); try{ localStorage.setItem(TKEY,JSON.stringify(L.slice(-40))); }catch(e){} renderPanel(); note("템플릿 저장: "+nm+" (BE 는 대전 보정 값으로 저장)","ok"); }
-function loadTpl(i){ const t=tplList()[i]; if(!t) return; const sp=cur(), p=pr(sp), sh=shOf(sp); pushHist(p,"템플릿"); p.comps=t.comps.map(c=>Object.assign(C.clone(c),{be:c.be-sh})); p.cons=C.clone(t.cons); p.bg=Object.assign(p.bg,{type:t.bg.type,n:t.bg.n,C:t.bg.C,D:t.bg.D,u3:t.bg.u3}); // 보정된 BE 기준 → 이 시료의 측정 BE 로
-  const cs=p.cons; Object.values(cs).forEach(o=>{ if(o.be&&o.be.mode==="free"){ if(o.be.lo!=null) o.be.lo-=sh-0; if(o.be.hi!=null) o.be.hi-=sh-0; } });
-  touch(p); rerender(); note("템플릿을 불러왔습니다 — 넓이는 피팅 때 다시 맞춰집니다"); }
+  const m=C.shiftModelBE(p.comps,p.cons,+sh);
+  L.push({name:nm,region:sp.region,bev:2,comps:m.comps,cons:m.cons,bg:C.clone(p.bg),weight:p.weight||"poisson"}); try{ localStorage.setItem(TKEY,JSON.stringify(L.slice(-40))); }catch(e){} renderPanel(); note("템플릿 저장: "+nm+" (BE 는 대전 보정 값으로 저장)","ok"); }
+function tplApply(t,sh){
+  if(t.bev===2) return C.shiftModelBE(t.comps,t.cons,-sh);
+  const m=C.shiftModelBE(t.comps,{},-sh); m.cons=C.clone(t.cons||{}); let moved=0;
+  Object.entries(m.cons).forEach(([id,o])=>{ const b=o&&o.be, c=m.comps.find(x=>x.id===id); if(!b||!c||b.mode==="link"||b.lo==null||b.hi==null||!isFinite(b.lo)||!isFinite(b.hi)) return;
+    const w0=c.be-(b.lo+b.hi)/2; if(Math.abs(w0)<1e-9) return; b.lo+=w0; b.hi+=w0; moved++; });
+  m.legacy=moved; return m; }
+function loadTpl(i){ const t=tplList()[i]; if(!t) return; const sp=cur(), p=pr(sp), sh=shOf(sp); pushHist(p,"템플릿");
+  const m=tplApply(t,sh); p.comps=m.comps; p.cons=m.cons; p.bg=Object.assign(p.bg,{type:t.bg.type,n:t.bg.n,C:t.bg.C,D:t.bg.D,u3:t.bg.u3}); if(t.weight) p.weight=t.weight;
+  touch(p); rerender(); note("템플릿을 불러왔습니다 — 넓이는 피팅 때 다시 맞춰집니다"+(m.legacy?` (옛 형식: BE 범위 ${m.legacy}개를 성분 중심으로 다시 맞춤)`:"")); }
 
 /* ============================================================
    결과 패널
@@ -832,8 +887,8 @@ function panelResult(el,sp){
   r.comps.forEach((c,i)=>{ const s=r.summ[i]||{sig:{}}; const m=mc?mc[i]:null; const col=colorOf(p.comps[i]||c);
     const lg=c.shape==="GLS"||c.shape==="GLP"||c.shape==="GLT"?`${Math.round(100*c.m)} %`:c.shape==="V"?`G ${f(c.wG,2)}/L ${f(c.wL,2)}`:c.shape==="DS"?`α ${f(c.alpha,3)}`:c.shape==="LA"?`α ${f(c.alpha,2)} β ${f(c.beta,2)}`:"";
     const nm1=c.name||("#"+(i+1));
-    const be=s.be+sh, sb=m?m.be.sd:s.sig.be;
-    rows.push(`<tr><td><i class="sw" style="background:${col}"></i>${esc(nm1)}${c.doublet?` <span class="muted xs">(pair sum)</span>`:""}</td><td class="num">${pm(be,sb,2)}</td><td class="num">${pm(s.fwhm,m?m.fwhm.sd:s.sig.fwhm,2)}</td><td class="num">${g(s.height,4)}</td><td class="num">${pm(s.area,m?m.area.sd:s.sig.area,0)}</td><td class="num">${pm(s.areaPct,m?m.areaPct.sd:s.sig.areaPct,1)}</td><td>${esc(c.shape)} ${lg}</td></tr>`);
+    const be=s.be+sh, sb=m?m.be.sd:s.sig.be; const fx=k=>s.sig&&s.sig[k]===null;
+    rows.push(`<tr><td><i class="sw" style="background:${col}"></i>${esc(nm1)}${c.doublet?` <span class="muted xs">(pair sum)</span>`:""}</td><td class="num">${pmF(be,sb,2,fx("be"))}</td><td class="num">${pmF(s.fwhm,m?m.fwhm.sd:s.sig.fwhm,2,fx("fwhm"))}</td><td class="num">${g(s.height,4)}</td><td class="num">${pmF(s.area,m?m.area.sd:s.sig.area,0,fx("area"))}</td><td class="num">${pm(s.areaPct,m?m.areaPct.sd:s.sig.areaPct,1)}</td><td>${esc(c.shape)} ${lg}</td></tr>`);
     if(c.doublet){ const j=(c.line||sp.reg.orb||"").slice(-1); const J=ORB_J[j]||["",""]; const base=nm1.replace(/(1\/2|3\/2|5\/2|7\/2)$/,"");
       rows.push(`<tr class="sub"><td style="padding-left:18px">${esc(base.includes(J[0])?base:base+J[0])}</td><td class="num">${f(be,2)}</td><td class="num">${f(s.fwhm,2)}</td><td class="num"></td><td class="num">${f(s.area1,0)}</td><td></td><td class="muted xs">major</td></tr>`);
       rows.push(`<tr class="sub"><td style="padding-left:18px">${esc((base.includes(J[0])?base.replace(J[0],J[1]):base+J[1]))}</td><td class="num">${f(s.be2+sh,2)}</td><td class="num">${f(s.fwhm*c.doublet.q,2)}</td><td class="num"></td><td class="num">${f(s.area2,0)}</td><td></td><td class="muted xs">Δ ${f(c.doublet.dE,2)}, ratio ${f(c.doublet.r,3)}</td></tr>`); }
@@ -850,9 +905,9 @@ function panelResult(el,sp){
    <div class="strip">
      <div>N · p<b>${st.N} · ${st.p}</b></div><div>χ²<b>${g(st.chi2,5)}</b></div><div>χ²ν (φ)<b>${f(st.chi2nu,3)}</b></div><div>R²<b>${st.R2!=null?f(st.R2,5):"—"}</b></div>
      <div>Residual RMS/σ<b>${f(st.rmsNorm,3)}</b></div><div>Durbin–Watson<b>${f(st.DW,2)}</b></div><div>ρ₁<b>${f(st.rho1,3)}</b></div><div>runs z<b>${f(st.runsZ,2)}</b></div>
-     <div>AICc<b>${f(st.AICc,2)}</b></div><div>BIC<b>${f(st.BIC,2)}</b></div><div>Iterations · time<b>${r.iter} · ${r.ms} ms</b></div>${r.multi?`<div>Multi-start<b>${r.multi.near}/${r.multi.N}</b></div>`:""}
+     <div>AICc<b>${f(st.AICc,2)}</b></div><div>BIC<b>${f(st.BIC,2)}</b></div><div>Iterations · time<b>${(r.iter0||0)+r.iter} · ${r.ms} ms</b></div>${r.multi?`<div>Multi-start<b>${r.multi.near}/${r.multi.N}</b></div>`:""}
    </div>
-   <div class="muted xs">Weighting: ${sp.c?`Poisson, 1 CPS = ${g(sp.c,4)} count (${esc(sp.cSrc)})`:"quasi-Poisson (척도 φ 는 잔차에서 추정)"}. ${sp.c?`φ≈1 이면 잡음이 Poisson 과 일치. 지금 φ=${f(st.chi2nu,2)}.`:""}</div>
+   <div class="muted xs">Weighting: ${p.weight==="const"?"constant (모든 점 같은 무게, 척도 φ 는 잔차에서 추정)":sp.c?`Poisson, 1 CPS = ${g(sp.c,4)} count (${esc(sp.cSrc)})`:"quasi-Poisson (척도 φ 는 잔차에서 추정)"}. ${sp.c&&p.weight!=="const"?`φ≈1 이면 잡음이 Poisson 과 일치. 지금 φ=${f(st.chi2nu,2)}.`:""}</div>
    ${sensHTML(sp,p)}
    ${corrHTML(r,p)}
    ${modelsHTML(p)}
@@ -883,7 +938,7 @@ function sensVarList(sp,p){ const o=sensOpts(); const wide=p.hi-p.lo>=30;
 async function runSens(sp,p){
   if(RUN){ note("이미 계산 중입니다","warn"); return; }
   const r=p.result; if(!r||r.stale){ note("먼저 피팅하세요 (수정 뒤에는 다시 피팅)","warn"); return; }
-  const variants=sensVarList(sp,p); const model={lo:p.lo,hi:p.hi,bg:C.clone(p.bg),comps:C.clone(r.comps),cons:C.clone(p.cons)};
+  const variants=sensVarList(sp,p); const model={lo:p.lo,hi:p.hi,bg:C.clone(p.bg),comps:C.clone(r.comps),cons:C.clone(p.cons),weight:p.weight};
   const spec={be:sp.be,y:sp.y,c:sp.c||null};
   const K=Math.min(nWorkers(),variants.length); const chunks=[...Array(K)].map(()=>[]); variants.forEach((v,i)=>chunks[i%K].push(Object.assign({},v,{idx:i})));
   let dn=0; setProg(`모형 민감도 0/${K} 묶음 (변형 ${variants.length}개)`,0.02); const t0=performance.now(); const ver=p.ver;
@@ -974,8 +1029,16 @@ function lineChoices(el,orb){
   const tot=ks.filter(k=>k.length===2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]), sub=ks.filter(k=>k.length>2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]);
   const out=[]; if(orb) out.push(orb); tot.concat(sub).forEach(k=>{ if(!out.includes(k)) out.push(k); }); return out.length?out:[orb||""];
 }
+/* 한 원소의 '주선'(Scofield Al 이 가장 큰 궤도 합 — 예: Ba 3d, Co 2p) 과 그 subshell 라이브러리 BE */
+function mainLine(el){ const L=LIB(), t=(L.scofield||{}).al||{}, lv=((L.core||{})[el]||{}).lv||{};
+  const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")&&k.length-el.length-1===2).map(k=>k.slice(el.length+1)).filter(o=>Object.keys(lv).some(q=>q.startsWith(o)));
+  if(!ks.length) return null; ks.sort((a,b)=>t[el+" "+b]-t[el+" "+a]); const o=ks[0];
+  return {orb:o,key:el+" "+o,bes:Object.entries(lv).filter(([q])=>q.startsWith(o)).map(([q,v])=>({sub:q,be:v}))}; }
+/* 같은 원소의 여러 선(예: Co 2p·Co 3p) 중 '센 선' 순위 값: 행의 선 이름으로 Scofield Al */
+function lineStrength(el,line){ const t=((LIB().scofield||{}).al)||{}; const v=t[el+" "+line]; if(v!=null) return v;
+  const o=(line||"").replace(/(1\/2|3\/2|5\/2|7\/2)$/,""); return t[el+" "+o]!=null?t[el+" "+o]:0; }
 function quantRows(sample){
-  const rows=[];
+  const rows=[]; const skipped=[];
   sampleSpecs(sample).filter(s=>s.reg&&s.reg.kind==="region").forEach(sp=>{
     const p=pr(sp); const r=p.result&&!p.result.stale?p.result:null; const sh=shOf(sp);
     // 원소별 묶음
@@ -988,17 +1051,33 @@ function quantRows(sample){
       if(r&&els[e]){ const idx=els[e]; area=idx.reduce((s,i)=>s+r.summ[i].area,0); BE=idx.reduce((s,i)=>s+r.summ[i].be*r.summ[i].area,0)/(area||1);
         if(r.mc&&r.mc.summ&&idx.length===r.comps.length&&r.mc.areaSum) sArea=r.mc.areaSum.sd; else if(idx.length===r.comps.length&&r.sumSig) sArea=r.sumSig.all; else sArea=Math.sqrt(idx.reduce((s,i)=>s+Math.pow(r.summ[i].sig.area||0,2),0));
         src=`Fit, ${idx.length} comp.`; }
-      else { const R=region(sp,p); if(R&&R.E.length>8){ const E=Float64Array.from(R.E), y=Float64Array.from(R.y); const B=C.bgStatic(E,y,p.bg.type==="active"?{type:"shirley",n:p.bg.n}:p.bg)||C.bgShirley(E,y,5,false); const Q=C.cumtrapz(E,Float64Array.from(y,(v,i)=>v-B[i])); area=Q[Q.length-1]; let w=0,ws=0; for(let i=0;i<E.length;i++){ const t=Math.max(0,y[i]-B[i]); w+=t*E[i]; ws+=t; } BE=ws>0?w/ws:(E[0]+E[E.length-1])/2; src="Region integral (above background)"; } }
+      else { const R=region(sp,p); if(!R||R.E.length<=8){ skipped.push({sp,el:e,n:R?R.E.length:0}); return; } if(R&&R.E.length>8){ const E=Float64Array.from(R.E), y=Float64Array.from(R.y); const B=C.bgStatic(E,y,p.bg.type==="active"?{type:"shirley",n:p.bg.n}:p.bg)||C.bgShirley(E,y,5,false); const Q=C.cumtrapz(E,Float64Array.from(y,(v,i)=>v-B[i])); area=Q[Q.length-1]; let w=0,ws=0; for(let i=0;i<E.length;i++){ const t=Math.max(0,y[i]-B[i]); w+=t*E[i]; ws+=t; } BE=ws>0?w/ws:(E[0]+E[E.length-1])/2; src="Region integral (above background)"; } }
       if(area==null) return;
       const cl=r&&els[e]?(r.comps[els[e][0]].line||""):"";
       const line=ov.line||(e===sp.reg.el?sp.reg.orb:(cl?cl.replace(/(1\/2|3\/2|5\/2|7\/2)$/,""):""));
       const lk=rsfLookup(e,line||"",S.quant.lib,sp.hv);
       const S_=ov.rsf!=null?+ov.rsf:(lk?lk.v:null);
       const tf=tfFor(sp);
-      rows.push({id,sp,el:e,line,area,sArea,BE,src,S:S_,Ssrc:ov.rsf!=null?"Manual":(lk?lk.src:"None"),hv:sp.hv,PE:sp.meta&&sp.meta.passEnergy,tf,inc:ov.inc!==false,sh});
+      rows.push({id,sp,el:e,line,area,sArea,BE,src,S:S_,Ssrc:ov.rsf!=null?"Manual":(lk?lk.src:"None"),hv:sp.hv,PE:sp.meta&&sp.meta.passEnergy,tf,incSet:ov.inc,sh});
     });
   });
+  // 기본 포함: 원소마다 가장 센 선(Scofield) 하나만 — 같은 원소의 다른 선(Co 2p 와 Co 3p)이 둘 다 Σ 에 들어가지 않게. 사용자가 체크한 것은 그대로
+  const best={}; rows.forEach(r=>{ const v=lineStrength(r.el,r.line); if(!best[r.el]||v>best[r.el].v) best[r.el]={v,id:r.id}; });
+  rows.forEach(r=>{ r.weaker=best[r.el].id!==r.id; r.inc=r.incSet!=null?r.incSet!==false:!r.weaker; });
+  rows.skipped=skipped;
   return rows;
+}
+/* 창 안에 다른 원소의 주선: 포함된 원소 + 이 시료 survey 에서 채택한 원소의 주선 BE(라이브러리, 원소 상태)가 행의 피팅 창(보정 BE) 안이면 경고.
+   예: Co 2p 창(775–810 eV) 안의 Ba 3d5/2 780 eV — 넓이에 Ba 가 섞인다 */
+function interferences(sample,rows){
+  const els=new Set(rows.filter(r=>r.inc).map(r=>r.el));
+  sampleSpecs(sample).forEach(s=>{ const st=S.ui.survey[s.uid]; if(st&&st.acc) Object.keys(st.acc).forEach(e=>{ if(st.acc[e]) els.add(e); }); });
+  const out=[], seen=new Set();
+  rows.filter(r=>r.inc).forEach(r=>{ const p=pr(r.sp), lo=p.lo+r.sh, hi=p.hi+r.sh;
+    els.forEach(e=>{ if(e===r.el) return; const m=mainLine(e); if(!m) return; const hit=m.bes.filter(b=>b.be>=lo&&b.be<=hi); if(!hit.length) return;
+      const k=r.id+"|"+e; if(seen.has(k)) return; seen.add(k);
+      out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 주선(${hit.map(b=>f(b.be,1)).join(", ")} eV) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); });
+  return out;
 }
 function tfFor(sp){
   const q=S.quant.tf; const own=sp.meta&&sp.meta.tf;
@@ -1018,6 +1097,9 @@ function panelQuant(el,sp){
   const noTF=used.some(r=>!r.tf||r.tf.model==="none");
   const peMix=new Set(used.map(r=>r.PE).filter(v=>v!=null)).size>1;
   const dup=Object.entries(used.reduce((m,r)=>{ m[r.el]=(m[r.el]||0)+1; return m; },{})).filter(([k,v])=>v>1).map(([k])=>k);
+  const nds=used.filter(r=>{ const q=qi.get(r.id); return q&&q.nd; }).map(r=>r.el+" "+(r.line||""));
+  const intf=interferences(smpK,rows);
+  const skipped=rows.skipped||[];
   const noSrc=[...new Set(rows.filter(r=>!srcOf(r.hv)).map(r=>f(r.hv,1)))];
   const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>c.shape==="DS"&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
   const im=S.quant.imfp, tq=S.quant.tf;
@@ -1027,17 +1109,22 @@ function panelQuant(el,sp){
    <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">From file (VGD/avg), else none</option><option value="power">(PE/KE)^x</option><option value="none">None</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}</div>
    <div class="xps-row"><span class="xps-f">IMFP <select class="xps-sel" id="xqIm"><option value="power">KE^n</option><option value="tpp2m">TPP-2M (enter material)</option><option value="none">None</option></select></span>${im.model==="power"?`<span class="xps-f">n <input type="number" class="w56" step="0.05" id="xqImn" value="${im.n}"></span>`:""}
      ${im.model==="tpp2m"?`<span class="xps-f" title="Density (g/cm³)">ρ <input type="number" class="w56" step="0.1" id="xqR" value="${im.mat.rho}"></span><span class="xps-f" title="Valence electrons per molecule (or atom)">Nv <input type="number" class="w56" id="xqNv" value="${im.mat.Nv}"></span><span class="xps-f" title="Molar mass (g/mol)">M <input type="number" class="w64" id="xqM" value="${im.mat.M}"></span><span class="xps-f" title="Band gap (eV)">Eg <input type="number" class="w56" step="0.1" id="xqEg" value="${im.mat.Eg}"></span>`:""}</div>
-   <div class="tw" style="margin-top:6px"><table class="xps-tbl"><thead><tr><th></th><th>Element · line</th><th class="num">BE</th><th class="num">Area</th><th class="num">RSF (S)</th><th class="num">T</th><th class="num">λ</th><th class="num">at %</th></tr></thead><tbody>
-   ${rows.map(r=>{ const q=qi.get(r.id); return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}</div></td>
+   <div class="tw" style="margin-top:6px"><table class="xps-tbl xq-tbl"><thead><tr><th></th><th>Element · line</th><th class="num">at %</th><th class="num">BE</th><th class="num">Area</th><th class="num">RSF (S)</th><th class="num">T</th><th class="num">λ</th></tr></thead><tbody>
+   ${rows.map(r=>{ const q=qi.get(r.id); const atC=`<td class="num xq-at">${q&&q.nd?`<span class="badge wr" title="Area ≤ 0 or below 2σ — not detected; excluded from the sum">n.d.</span>`:`<b>${q?f(q.at,2):"—"}</b>${q&&q.sAt?`<div class="muted xs">± ${f(q.sAt,2)}</div>`:""}`}</td>`;
+     return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
      <td class="num">${f(r.BE+r.sh,2)}</td><td class="num">${g(r.area,5)}${r.sArea?`<div class="muted xs">± ${g(r.sArea,3)}</div>`:""}</td>
      <td class="num"><input type="number" class="w56" step="any" data-qrsf="${esc(r.id)}" value="${r.S!=null?+(+r.S).toPrecision(5):""}" placeholder="?"><div class="muted xs">${esc(r.Ssrc)}</div></td>
-     <td class="num">${q?g(q.T,4):"—"}</td><td class="num">${q?g(q.L,4):"—"}</td><td class="num"><b>${q?f(q.at,2):"—"}</b>${q&&q.sAt?`<div class="muted xs">± ${f(q.sAt,2)}</div>`:""}</td></tr>`; }).join("")||`<tr><td colspan="8" class="muted">No region spectra in this sample.</td></tr>`}
+     <td class="num">${q?g(q.T,4):"—"}</td><td class="num">${q?g(q.L,4):"—"}</td></tr>`; }).join("")}
+   ${skipped.map(k=>`<tr><td></td><td colspan="7"><b>${esc(k.el||"?")}</b> <span class="muted xs">${esc(k.sp.region)}</span> <span class="badge wr" title="The fit range has ${k.n} data points (≥ 9 needed). Widen it in Peak Fit">Fit range too narrow</span></td></tr>`).join("")}
+   ${!rows.length&&!skipped.length?`<tr><td colspan="8" class="muted">No region spectra in this sample.</td></tr>`:""}
    </tbody></table></div>
    <div class="muted xs" style="margin-top:6px;line-height:1.55">at% = (A/(S·T·λ)) / Σ. A: 배경 위 넓이(피팅이 있으면 성분 합, 원소별 — 성분 카드의 'Element'·'Quantify' 표시로 나눔). σ 는 넓이 불확도만 전파(감도계수·T·λ 의 계통 오차 제외).</div>
    ${noTF?`<div class="note warn" style="margin-top:6px">Transmission 보정이 없는 행이 있습니다 (txt/xls/VAMAS 에는 장비 함수가 없음). 같은 장비의 VGD 를 하나 열어 'Use VGD transmission as default' 를 누르거나 (PE/KE)^x 를 고르세요. Avantage 결과와 비교할 땐 같은 보정을 써야 합니다.</div>`:""}
    ${anyVgdTF?`<div class="xps-row"><button class="btn xs" id="xqProf" title="Also apply the transmission coefficients read from VGD to the other files (txt/xls)">Use VGD transmission as default</button>${S.quant.tfProfile?`<span class="badge inf">Transmission saved (PE ${esc(S.quant.tfProfile.pe)})</span>`:""}</div><div class="muted xs">VGD 의 transmission 계수 해석 ln T = Σaₖ(ln(KE/PE))ᵏ 은 계수 값의 거동(높은 KE/PE 에서 T∝(KE/PE)^≈−0.9)으로 추정한 것입니다 — Avantage 의 같은 데이터 at% 와 한 번 대조해 확인하세요.</div>`:""}
    ${peMix?`<div class="note warn" style="margin-top:6px">pass energy 가 다른 영역이 섞여 있습니다 — transmission 보정 없이는 비교할 수 없습니다.</div>`:""}
    ${dup.length?`<div class="note warn" style="margin-top:6px">같은 원소가 여러 행: ${esc(dup.join(", "))} — 한 원소당 한 선만 체크하세요(예: Co 2p 와 Co 3p 중 하나).</div>`:""}
+   ${nds.length?`<div class="note warn" style="margin-top:6px">검출 안 됨(넓이 ≤ 0 또는 2σ 미만): ${esc(nds.join(", "))} — Σ 에서 뺐습니다.</div>`:""}
+   ${intf.map(t=>`<div class="note warn" style="margin-top:6px">${esc(t)}</div>`).join("")}
    ${noSrc.length?`<div class="note warn" style="margin-top:6px">광원 hν = ${esc(noSrc.join(", "))} eV 에 대한 감도계수 표가 없습니다(Scofield 표는 Al Kα·Mg Kα 만). 감도계수를 직접 넣으세요.</div>`:""}
    ${dsIn?`<div class="note warn" style="margin-top:6px">DS(Doniach–Šunjić) 성분이 있습니다(${esc(dsIn)}): DS 넓이는 피팅 창 안의 적분이라 창 폭에 따라 달라집니다. 같은 창 규칙으로 잰 시료끼리만 at% 를 비교하세요.</div>`:""}
    <div class="muted xs" style="margin-top:4px">ALTHERMO1 은 Scofield 대비 선마다 다르지만(5–95 % 범위 −26…+49 %) KE 와 상관이 없다(log 기울기 0.01) — T·λ 가 들어 있지 않은 값이므로 T·λ 보정을 함께 적용한다.</div>
@@ -1066,7 +1153,7 @@ function stoichHTML(sp,used,Q){
   if(fs){ try{ fm=C.parseFormula(fs,IO.SYMS); }catch(e){ err=e.message; } }
   if(fm&&used.length){
     // 핵심 계산과 같은 걸러내기(넓이 정규화 값이 유한하고 양수인 행만, 같은 원소는 첫 행) — 화면과 계산이 다른 행을 쓰지 않게
-    const rows=used.map((r,i)=>({el:r.el,nrm:Q[i].nrm,sNrm:Q[i].sNrm,KE:Q[i].KE,L:Q[i].L,line:r.line})).filter(r=>isFinite(r.nrm)&&r.nrm>0);
+    const rows=used.map((r,i)=>({el:r.el,nrm:Q[i].nrm,sNrm:Q[i].sNrm,KE:Q[i].KE,L:Q[i].L,line:r.line,nd:Q[i].nd})).filter(r=>!r.nd&&isFinite(r.nrm)&&r.nrm>0);
     const rowOf=e=>rows.find(r=>r.el===e);
     const inF=Object.keys(fm).filter(e=>rowOf(e));
     const refDef=inF.slice().sort((a,b)=>ZOF(b)-ZOF(a))[0]; const R=C.stoichCompare(rows,fm,sm.stRef&&inF.includes(sm.stRef)?sm.stRef:refDef); const ref=R.ref;
@@ -1105,6 +1192,7 @@ function bindStoich(el,sp){ const sm=smpOf(sp); const inp=$q(el,"#xstF"); if(!in
 function AUG(){ if(!S.auger||typeof S.auger!=="object") S.auger={entries:[],refs:[]}; S.auger.entries=S.auger.entries||[]; S.auger.refs=S.auger.refs||[]; return S.auger; }
 const augId=()=>"a"+Math.random().toString(36).slice(2,8);
 function augSide(s,side){
+  if(!side.uid) return {err:"스펙트럼을 고르세요"};
   const sp=byUid(side.uid); if(!sp) return {err:"스펙트럼이 목록에 없습니다"};
   if(side.comp){ const r=fitted(sp); if(!r) return {err:`${sp.region}: 피팅 결과가 없거나 수정 뒤 다시 피팅하지 않았습니다`};
     const i=r.comps.findIndex(c=>c.id===side.comp); if(i<0) return {err:`${sp.region}: 고른 성분이 없어졌습니다 — 다시 고르세요`};
@@ -1117,11 +1205,18 @@ function augSide(s,side){
 function augWin(elx,s){ const al=(LIB().auger||[]).filter(a=>a.el===elx).sort((a,b)=>b.rsf-a.rsf)[0]; if(!al||!s.hv) return null;
   const be=s.hv-al.ke-((S.samples[SK(s)]||{}).shift||0); return [+(be-6).toFixed(1),+(be+6).toFixed(1)]; }
 function augCalc(e){
-  const P=augSide(e,e.p), A=augSide(e,e.a); if(P.err||A.err) return {err:P.err||A.err};
+  const P=augSide(e,e.p), A=augSide(e,e.a); if(P.err||A.err) return {err:(P.err?"Photoelectron line: "+P.err:"Auger line: "+A.err)};
+  // 쓸 수 없는 짝: Auger 쪽이 광전자 영역 스펙트럼 / 광전자 쪽이 Auger 영역 / survey 가 아닌 같은 스펙트럼 / 두 위치가 같음(α′ = hν 가 됨)
+  const kA=A.sp.reg&&A.sp.reg.kind, kP=P.sp.reg&&P.sp.reg.kind;
+  if(kA==="region"&&A.sp.reg.el) return {err:`Auger line 쪽이 광전자 영역 스펙트럼(${A.sp.region})입니다 — Auger 영역(예: ${e.el} KLL) 또는 survey 를 고르세요`};
+  if(kP==="auger") return {err:`Photoelectron line 쪽이 Auger 영역 스펙트럼(${P.sp.region})입니다`};
+  if(P.sp.uid===A.sp.uid&&kA!=="survey") return {err:"두 선이 같은 스펙트럼입니다 — 광전자 영역과 Auger 영역(또는 survey 의 다른 구간)을 고르세요"};
+  if(Math.abs(P.be-A.be)<1) return {err:`두 위치가 같습니다(${f(P.be,2)} / ${f(A.be,2)} eV) — 같은 봉우리를 두 번 고르면 α′ = hν 가 됩니다. 구간을 고치세요`};
   const hv=A.sp.hv; const res=C.augerParam(P.be,A.be,hv,P.s,A.s);
   const sh=shOf(P.sp);     // 대전 보정은 광전자선 스펙트럼이 속한 시료의 것
   const warn=[]; if(SK(P.sp)!==SK(A.sp)) warn.push(`두 스펙트럼이 다른 시료입니다(${smpDisp(SK(P.sp)).name} / ${smpDisp(SK(A.sp)).name}) — α′ 는 같은 측정의 두 선이어야 대전이 지워집니다`); if(/기본값/.test(A.sp.hvSrc||"")) warn.push(`Auger 스펙트럼의 hν 가 파일에 없어 ${A.sp.hv} eV 로 둠 — 실제 광원 에너지와 다르면 α′ 가 그만큼 틀림`);
   if(P.sp.hv&&A.sp.hv&&Math.abs(P.sp.hv-A.sp.hv)>0.05) warn.push(`두 스펙트럼의 hν 가 다름(${P.sp.hv} / ${A.sp.hv}) — 같은 측정인지 확인`);
+  if(A.sp.reg&&A.sp.reg.kind==="region"&&!A.sp.reg.el) warn.push(`Auger 스펙트럼(${A.sp.region})의 종류를 모릅니다 — Auger 영역이 맞는지 확인`);
   return {alpha:res.alpha,s:res.s,beP:P.be,keA:res.keA,beC:P.be+sh,keC:res.keA-sh,howP:P.how,howA:A.how,P,A,warn};
 }
 /* 자동 짝짓기: 이 시료의 Auger 영역 스펙트럼(파일 이름 'Na KLL' 등)마다 같은 원소의 광전자 영역 스펙트럼을 찾는다 */
@@ -1139,7 +1234,7 @@ function panelAuger(el,sp){
   const nAug=specs.filter(s=>s.reg&&s.reg.kind==="auger").length;
   // 고른 것이 없어졌으면 '— 없어짐 —' 을 선택된 자리표시로 둔다(아니면 첫 항목이 선택된 것처럼 보이고, 하나뿐이면 change 가 일어나지 않아 바꿀 수 없음)
   const GONE="__gone";
-  const specOpt=sel=>(specs.some(s=>s.uid===sel)?"":`<option value="${GONE}" selected>— 없어짐: 다시 고르세요 —</option>`)+specs.map(s=>`<option value="${s.uid}" ${s.uid===sel?"selected":""}>${esc(s.region)} · ${esc(FMTN(s.format).replace("Avantage ",""))}</option>`).join("");
+  const specOpt=sel=>(specs.some(s=>s.uid===sel)?"":`<option value="${GONE}" selected>${sel?"— 없어짐: 다시 고르세요 —":"— Select —"}</option>`)+specs.map(s=>`<option value="${s.uid}" ${s.uid===sel?"selected":""}>${esc(s.region)} · ${esc(FMTN(s.format).replace("Avantage ",""))}</option>`).join("");
   const compOpt=(uid,sel)=>{ const s=byUid(uid); const r=s&&fitted(s); const has=!sel||(r&&r.comps.some(c=>c.id===sel));
     return (has?"":`<option value="${GONE}" selected>— 고른 성분 없어짐 —</option>`)+`<option value="" ${!sel?"selected":""}>Maximum (range)</option>`+(r?r.comps.map(c=>`<option value="${c.id}" ${c.id===sel?"selected":""}>Component ${esc(c.name||"Component")} · ${f(c.be,2)}</option>`).join(""):""); };
   const sideHTML=(e,side,key,lab)=>{ const s=byUid(side.uid); return `<div class="r"><span class="k">${lab}</span><select class="xps-sel" data-ax="${e.id}|${key}|uid">${specOpt(side.uid)}</select><select class="xps-sel" data-ax="${e.id}|${key}|comp">${compOpt(side.uid,side.comp)}</select>${side.comp?"":`<span class="xps-f">Range <input type="number" step="0.1" class="w64" data-ax="${e.id}|${key}|lo" value="${side.lo!=null?side.lo:(s?f(s.be[0],1):"")}"> – <input type="number" step="0.1" class="w64" data-ax="${e.id}|${key}|hi" value="${side.hi!=null?side.hi:(s?f(s.be[s.n-1],1):"")}"> eV <span class="muted xs">(measured BE)</span></span>`}</div>`; };
@@ -1173,10 +1268,14 @@ function panelAuger(el,sp){
   $a(el,"[data-axdel]").forEach(b=>b.onclick=()=>{ A.entries=A.entries.filter(x=>x.id!==b.dataset.axdel); save(); renderPanel(); });
   $a(el,"[data-ardel]").forEach(b=>b.onclick=()=>{ A.refs=A.refs.filter(x=>x.id!==b.dataset.ardel); save(); renderPanel(); });
   const au=$q(el,"#xaAuto"); if(au) au.onclick=()=>{ const n=augAutoPair(k); save(); renderPanel(); note(n?`Auger 항목 ${n}개를 만들었습니다`:"새로 짝지을 것이 없습니다 (이미 있거나, 같은 원소의 광전자 영역이 없음)",n?"ok":""); };
-  const ad=$q(el,"#xaAdd"); if(ad) ad.onclick=()=>{ const s0=specs.find(s=>s.reg&&s.reg.kind==="region")||specs[0]; const sa=specs.find(s=>s.reg&&(s.reg.kind==="auger"||s.reg.kind==="survey"))||specs[0];
-    const elx=(s0.reg&&s0.reg.el)||""; let lo=null,hi=null;
-    if(sa.reg&&sa.reg.kind==="survey"&&elx){ const w=augWin(elx,sa); if(w){ lo=w[0]; hi=w[1]; } }
-    A.entries.push({id:augId(),sample:k,el:elx||"?",p:{uid:s0.uid,comp:"",lo:null,hi:null},a:{uid:sa.uid,comp:"",lo,hi}}); save(); renderPanel(); };
+  // 직접 추가: 광전자 쪽 = 지금 보는 광전자 영역(아니면 첫 광전자 영역), Auger 쪽 = 같은 원소 Auger 영역 → 다른 Auger 영역 → survey. 없으면 비워 두고 고르게 한다(광전자 영역으로 채우지 않음)
+  const ad=$q(el,"#xaAdd"); if(ad) ad.onclick=()=>{ const isP=s=>s.reg&&s.reg.kind==="region"; const s0=isP(sp)?sp:specs.find(isP)||null;
+    const elx=(s0&&s0.reg&&s0.reg.el)||"";
+    const sa=specs.find(s=>s.reg&&s.reg.kind==="auger"&&s.reg.el===elx)||specs.find(s=>s.reg&&s.reg.kind==="auger")||specs.find(s=>s.reg&&s.reg.kind==="survey")||null;
+    let lo=null,hi=null;
+    if(sa&&sa.reg.kind==="survey"&&elx){ const w=augWin(elx,sa); if(w){ lo=w[0]; hi=w[1]; } }
+    A.entries.push({id:augId(),sample:k,el:elx||"?",p:{uid:s0?s0.uid:"",comp:"",lo:null,hi:null},a:{uid:sa?sa.uid:"",comp:"",lo,hi}}); save(); renderPanel();
+    if(!sa) note("이 시료에 Auger 영역·survey 스펙트럼이 없습니다 — Auger line 에서 스펙트럼을 고르세요","warn"); };
   const xe=$q(el,"#xaEl"); if(xe) xe.onchange=()=>{ A.plotEl=xe.value; save(); renderPanel(); };
   $q(el,"#xrAdd").onclick=()=>{ const raw=$q(el,"#xrEl").value.trim(); const e=IO.SYMS.find(s=>s.toLowerCase()===raw.toLowerCase()); const be=+$q(el,"#xrBE").value, ke=+$q(el,"#xrKE").value;
     if(!e){ note("원소 기호를 확인하세요","warn"); return; } if(!(be>0&&ke>0)){ note("BE 와 KE 를 넣으세요","warn"); return; }
@@ -1211,7 +1310,7 @@ function wagnerSVG(elx){
    서베이 패널
    ============================================================ */
 function panelSurvey(el,sp){
-  const isSv=sp.reg&&sp.reg.kind==="survey"; const st=S.ui.survey[sp.uid]||(S.ui.survey[sp.uid]={snr:4,tol:2,cands:null,acc:{}});
+  const isSv=sp.reg&&sp.reg.kind==="survey"; const st=S.ui.survey[sp.uid]||(S.ui.survey[sp.uid]={snr:4,tol:2,cands:null,acc:{}}); if(!(st.snr>0)) st.snr=4; if(!(st.tol>0)) st.tol=2;
   const L=LIB(); const libOK=L.core&&Object.keys(L.core).length>0;
   el.innerHTML=`
    <div class="xps-h">Element Identification ${isSv?"":`<span class="badge wr">Not a survey spectrum</span>`}</div>
@@ -1219,8 +1318,9 @@ function panelSurvey(el,sp){
    <div class="xps-row"><span class="xps-f">SNR ≥ <input type="number" class="w56" id="xsSnr" value="${st.snr}"></span><span class="xps-f">Tolerance ± <input type="number" class="w56" step="0.1" id="xsTol" value="${st.tol}"> eV</span><button class="btn sm primary" id="xsRun">Find peaks &amp; identify</button></div>
    <div class="muted xs">대전 보정(Δ)을 적용한 BE 로 라이브러리(Avantage 원소표 위치 — 없으면 X-ray Data Booklet, Scofield 단면적 가중, Auger KE)와 대조합니다. 가장 큰 미설명 봉우리부터 차례로, 그 봉우리를 ‘센 선’으로 설명하면서 다른 선들도 같은 화학 이동 δ(−4…+6 eV)로 맞는 원소를 채택합니다. 합성 survey 150 개 시험: 검출 가능한 원소 97.2 % 채택, 없는 원소 오채택 0.05 개/스펙트럼 — 후보일 뿐이니 영역 스펙트럼으로 확인하세요. 방사성 원소·H·He 는 기본 제외.</div>
    <div id="xsOut">${st.cands?surveyHTML(sp,st):""}</div>`;
-  $q(el,"#xsSnr").onchange=e=>{ st.snr=+e.target.value||6; };
-  $q(el,"#xsTol").onchange=e=>{ st.tol=+e.target.value||2; };
+  // 비우거나 잘못 넣으면 기본값(SNR 4 · ±2 eV)으로 — 화면도 그 값으로 되돌림. 상태와 함께 저장
+  $q(el,"#xsSnr").onchange=e=>{ const v=+e.target.value; st.snr=e.target.value!==""&&v>0?v:4; e.target.value=st.snr; save(); };
+  $q(el,"#xsTol").onchange=e=>{ const v=+e.target.value; st.tol=e.target.value!==""&&v>0?v:2; e.target.value=st.tol; save(); };
   $q(el,"#xsRun").onclick=()=>{ const pk=C.findPeaks(sp.be,sp.y,{width:Math.max(1.2,sp.step*2),snr:st.snr,merge:Math.max(1.2,sp.step*1.5)}); st.peaks=pk; st.cands=C.identify(pk,LIB(),{hv:sp.hv,shift:shOf(sp),tol:st.tol,E:sp.be,y:sp.y,width:Math.max(1.2,sp.step*2)});
     st.acc={}; st.cands.slice(0,12).forEach(c=>{ if(C.acceptDefault(c)) st.acc[c.el]=true; }); updMarks(sp,st); save(); renderPanel(); drawPlot(); };
   bindSurvey(el,sp,st);
@@ -1271,7 +1371,11 @@ function panelInfo(el,sp){
   const smpEd=`<div class="xps-h">Sample Grouping</div>
     <div class="xps-row"><span class="xps-f">Sample of this spectrum <input type="text" class="xps-in w120" id="xiSmp" list="xiSmpL" value="${esc(sp.sample||"")}" placeholder="${NOSMP_L}" style="width:220px"></span><datalist id="xiSmpL">${[...new Set(S.specs.map(SK))].map(k=>`<option value="${esc(k)}">`).join("")}</datalist><button class="btn xs" id="xiSmpOk">Move</button></div>
     <div class="muted xs">대전 보정 Δ 는 시료마다 하나입니다. 자동 묶음이 틀렸으면(예: C 1s 가 다른 묶음에 들어감) 같은 시료 이름으로 옮기세요. 목록의 ✎ 로 묶음 전체 이름을 바꿀 수도 있습니다.</div>`;
-  el.innerHTML=regEd+smpEd+`<div class="xps-h">File · Source</div><div class="tw"><table class="xps-tbl">
+  const ax=(m.axis)||"BE", ac=axisCheck(sp);
+  const axEd=isText(sp)?`<div class="xps-h">Energy Axis</div>
+    <div class="xps-row"><span class="xps-f" title="How the first column of the text file is read">Column 1 <select class="xps-sel" id="xiAx"><option value="BE" ${ax==="BE"?"selected":""}>Binding energy</option><option value="KE" ${ax==="KE"?"selected":""}>Kinetic energy</option></select></span><span class="xps-f" title="X-ray energy — used for KE ↔ BE and for quantification">hν <input type="number" step="0.01" class="w64" id="xiHv" value="${+(+sp.hv).toFixed(2)}"> eV</span><button class="btn xs" id="xiAxOk" title="Re-read the file with this axis and hν (fit of this spectrum is reset)">Re-read</button></div>
+    ${ac?`<div class="note warn" style="margin-top:4px">${esc(ac.msg)}${ac.fits?` <button class="btn xs" id="xiAxS">Read as ${ac.other}</button>`:""}</div>`:""}`:(ac?`<div class="note warn" style="margin-top:6px">${esc(ac.msg)}</div>`:"");
+  el.innerHTML=regEd+smpEd+axEd+`<div class="xps-h">File · Source</div><div class="tw"><table class="xps-tbl">
     ${kv("File",esc(sp.file))}${kv("Format",esc(FMTN(sp.format)))}${kv("Region",esc(sp.region))}${kv("Sample",`<span title="${esc(SK(sp))}">${esc(smpDisp(SK(sp)).name)}</span> <span class="muted xs">${esc(smpDisp(SK(sp)).ctx)}</span>`)}
     ${kv("Points · step",`${sp.n} · ${f(sp.step,4)} eV`)}${kv("BE range",`${f(sp.be[0],2)} – ${f(sp.be[sp.n-1],2)} eV (measured)`)}
     ${kv("X-ray energy (hν)",`${f(sp.hv,2)} eV <span class="muted xs">${esc(sp.hvSrc)}</span>`)}
@@ -1287,8 +1391,10 @@ function panelInfo(el,sp){
     <div class="xps-h">Library Sources</div><div class="muted xs" style="line-height:1.6">${Object.entries((L.meta&&L.meta.sources)||{}).map(([k,v])=>`<b>${esc(k)}</b>: ${esc(v)}`).join("<br>")||"—"}</div>
     <div class="xps-h">Shortcuts</div><div class="muted xs" style="line-height:1.6">그래프: 휠 = 확대/축소 · 끌기 = 구간 확대 · 두 번 누르기 = 전체 · 점선 손잡이 = 피팅 영역 · 색 동그라미 끌기 = 성분 위치·높이 · 성분 면적 누르기 = 선택</div>`;
   const xm=$q(el,"#xiSmpOk"); if(xm) xm.onclick=()=>moveSpec(sp,$q(el,"#xiSmp").value);
+  const xa=$q(el,"#xiAxOk"); if(xa) xa.onclick=()=>{ const hv=+$q(el,"#xiHv").value; if(!(hv>100)){ note("hν 를 확인하세요 (eV)","warn"); return; } applyAxis(sp,$q(el,"#xiAx").value,hv); };
+  const xas=$q(el,"#xiAxS"); if(xas&&ac) xas.onclick=()=>applyAxis(sp,ac.other,sp.hv);
   const xs=$q(el,"#xiSet"); if(xs) xs.onclick=()=>{ const raw=$q(el,"#xiEl").value.trim(); const e=IO.SYMS.find(s=>s.toLowerCase()===raw.toLowerCase()); if(!e){ note("원소 기호를 확인하세요 (예: Fe, Co, Ta)","warn"); return; } const o=$q(el,"#xiOrb").value; if(!(LIB().core[e]||{lv:{}}).lv||!Object.keys((LIB().core[e]||{}).lv||{}).some(k=>k.startsWith(o))) note(e+" 에는 라이브러리에 "+o+" 준위가 없습니다 — 그래도 지정합니다","warn");
-    sp.reg={kind:"region",el:e,orb:o,j:null,label:e+" "+o,manual:true}; sp.region=sp.reg.label; save(); rerender(); note("원소·궤도를 "+sp.reg.label+" 로 지정했습니다","ok"); };
+    sp.reg={kind:"region",el:e,orb:o,j:null,label:e+" "+o,manual:true}; sp.region=sp.reg.label; sp.warn=(sp.warn||[]).filter(w=>!/라이브러리\)가 없습니다/.test(w)); save(); rerender(); note("원소·궤도를 "+sp.reg.label+" 로 지정했습니다","ok"); };
 }
 
 /* ============================================================
@@ -1304,11 +1410,11 @@ function exportCurves(sp){ const p=pr(sp), M=curModel(sp,p), sh=shOf(sp); if(!M)
   download(safe(sp.sample+"_"+sp.region)+"_curves.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 function exportPeaks(sp){ const k=SK(sp); const lines=["sample,region,component,shape,BE_corr_eV,sBE,FWHM_eV,sFWHM,height_CPS,area_CPSeV,sArea,area_pct,sArea_pct,doublet_dE,doublet_ratio,chi2nu,uncertainty"];
   sampleSpecs(k).forEach(s=>{ const p=pr(s), r=p.result; if(!r) return; const sh=shOf(s); const mc=r.mc&&r.mc.summ;
-    r.comps.forEach((c,i)=>{ const q=r.summ[i], m=mc?mc[i]:null; lines.push([s.sample,s.region,c.name,c.shape,(q.be+sh).toFixed(3),(m?m.be.sd:q.sig.be).toFixed(3),f(q.fwhm,3),f(m?m.fwhm.sd:q.sig.fwhm,3),g(q.height,6),q.area.toFixed(2),(m?m.area.sd:q.sig.area).toFixed(2),f(q.areaPct,2),f(m?m.areaPct.sd:q.sig.areaPct,2),c.doublet?c.doublet.dE:"",c.doublet?c.doublet.r:"",f(r.stats.chi2nu,4),m?"MonteCarlo":"covariance"].map(csvE).join(",")); }); });
+    r.comps.forEach((c,i)=>{ const q=r.summ[i], m=mc?mc[i]:null; lines.push([s.sample,s.region,c.name,c.shape,(q.be+sh).toFixed(3),q.sig.be===null?"":f(m?m.be.sd:q.sig.be,3),f(q.fwhm,3),q.sig.fwhm===null?"":f(m?m.fwhm.sd:q.sig.fwhm,3),g(q.height,6),q.area.toFixed(2),q.sig.area===null?"":f(m?m.area.sd:q.sig.area,2),f(q.areaPct,2),f(m?m.areaPct.sd:q.sig.areaPct,2),c.doublet?c.doublet.dE:"",c.doublet?c.doublet.r:"",f(r.stats.chi2nu,4),m?"MonteCarlo":"covariance"].map(csvE).join(",")); }); });
   { const sm=S.samples[k]||{}; lines.push(`# charge shift ${sm.shift||0} eV · reference: ${sm.refNote||(sm.shift?"manual":"not charge-corrected (BE as measured)")}`); }
   download(safe(k)+"_peaks.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 function exportQuant(k,rows,qi){ const lines=["sample,element,line,region,BE_corr_eV,area,sArea,S,S_source,T,lambda,at_pct,s_at_pct,included"];
-  rows.forEach(r=>{ const q=qi.get(r.id); lines.push([k,r.el,r.line,r.sp.region,(r.BE+r.sh).toFixed(2),r.area,r.sArea||"",r.S,r.Ssrc,q?q.T:"",q?q.L:"",q?q.at.toFixed(3):"",q&&q.sAt?q.sAt.toFixed(3):"",r.inc].map(csvE).join(",")); });
+  rows.forEach(r=>{ const q=qi.get(r.id); lines.push([k,r.el,r.line,r.sp.region,(r.BE+r.sh).toFixed(2),r.area,r.sArea||"",r.S,r.Ssrc,q?q.T:"",q?q.L:"",q&&q.at!=null?q.at.toFixed(3):(q&&q.nd?"n.d.":""),q&&q.sAt?q.sAt.toFixed(3):"",r.inc].map(csvE).join(",")); });
   lines.push(`# S: ${S.quant.lib}; T: ${S.quant.tf.model}; IMFP: ${JSON.stringify(S.quant.imfp)}`);
   { const sm=S.samples[k]||{}; lines.push(`# charge shift ${sm.shift||0} eV · reference: ${sm.refNote||(sm.shift?"manual":"not charge-corrected (BE as measured)")}`); }
   download(safe(k)+"_quant.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
@@ -1331,5 +1437,5 @@ function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니�
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
 function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
-window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO};
+window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO};
 })();

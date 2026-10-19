@@ -368,10 +368,13 @@ function renderPrompt(){
   const T={et:["① Donor initial level (excited state)","② Donor final level (same ion, lower)","③ Acceptor initial level (other or same column)","④ Acceptor final level (upper) — colored outline = resonance grade"],
            ph:["① Absorption initial level","② Absorption final level (same ion, upper)"],
            em:["① Initial level","② Final level (same ion, lower)"]}[PICK.kind];
-  el.innerHTML=`<span class="step">${T[Math.min(n,T.length-1)]}</span>${n?'<button class="btn sm" id="edUndo">Undo step</button>':""}<span class="muted">Esc = restart</span>`;
+  /* 터치 기기에는 Esc 가 없다 → 처음부터 버튼 */
+  el.innerHTML=`<span class="step">${T[Math.min(n,T.length-1)]}</span>${n?'<button class="btn sm" id="edUndo">Undo step</button>':""}${isTouch()?(n>1?'<button class="btn sm" id="edRestart">Restart</button>':""):'<span class="muted">Esc = restart</span>'}`;
   const u=$q(el,"#edUndo"); if(u) u.onclick=()=>{ PICK.steps.pop(); rerender(); };
+  const r=$q(el,"#edRestart"); if(r) r.onclick=()=>{ PICK.steps=[]; rerender(); };
 }
 
+function isTouch(){ try{ return !!(window.matchMedia&&matchMedia("(pointer: coarse)").matches); }catch(e){ return false; } }
 /* ---------------- SVG 도식 ---------------- */
 const GEO={top:58,bot:34,axisL:66,strip:12,colMin:150,colMax:400,lab:58};
 function drawSVG(){
@@ -486,7 +489,10 @@ function drawColumn(m,i,x0,cw,y,P,picked,M){
   /* 위로 넘친 경우 되밀기 */
   let lim=GEO.top-8; for(let k=labs.length-1;k>=0;k--){ if(labs[k].ty<lim){ labs[k].ty=lim; } lim=labs[k].ty+minGap; }
   const labOf=new Map(labs.map(a=>[a.l.id,a]));
-  vis.forEach(l=>{
+  /* 터치: 보이지 않는 선택 영역을 이웃 준위와 겹치지 않는 만큼(최대 24 px) 키운다 */
+  const touch=isTouch(), ys=vis.map(l=>y(l.E));
+  const roomOf=i=>{ let g=Infinity; ys.forEach((v,j)=>{ if(j!==i) g=Math.min(g,Math.abs(v-ys[i])); }); return g; };
+  vis.forEach((l,li)=>{
     const yy=y(l.E), k=m.c.uid+"|"+l.id;
     const cand=picked&&picked.cands.has(k), chosen=picked&&picked.chosen.has(k), dim=picked&&!cand&&!chosen;
     const g=picked&&picked.grade[k];
@@ -514,7 +520,8 @@ function drawColumn(m,i,x0,cw,y,P,picked,M){
       o.push(`<text x="${tx}" y="${ty}" font-size="11" fill="${l.regime==="mpr"?P.muted:P.ink}">${svgTerm(l.t)}</text>`);
     }
     /* 선택·툴팁 영역 */
-    const hh=Math.max(8,Math.min(16,(l.kind==="band"?(y(l.lo)-y(Math.min(l.hi,M.Emax))):0)+8));
+    let hh=Math.max(8,Math.min(16,(l.kind==="band"?(y(l.lo)-y(Math.min(l.hi,M.Emax))):0)+8));
+    if(touch) hh=Math.max(hh,Math.min(24,roomOf(li)));
     const focusable = picked ? cand : (L?true:false);
     o.push(`<rect class="lvhit tipable" data-tip="lv" data-c="${m.c.uid}" data-id="${esc(l.id)}" x="${bx0-2}" y="${yy-hh/2}" width="${bx1-bx0+4+(L?44:0)}" height="${hh}" fill="transparent" ${focusable?'tabindex="0" role="button"':''} aria-label="${esc(C.ionLabel(m.c.ion)+" "+C.termText(l.t)+" "+Math.round(l.E)+" cm-1")}"/>`);
     o.push(`</g>`);
@@ -886,7 +893,7 @@ function runSug(){
   const M=MODEL; SUGSIG=sugSig(); SUG=C.suggestET(M.cols.map(m=>m.c),M.cols.map(m=>m.lv),M.cx,{Emax:M.Emax,limit:80,maxGrade:2});
 }
 /* ---------- 이온 간 상호작용 (서로 다른 이온이 2종 이상일 때) ---------- */
-let INT_SEL=null, INT_MAXN=6;
+let INT_SEL=null, INT_MAXN=6, INT_PAIR=null;
 function renderInter(){
   const el=$q(ROOT,"#edIntCard"); if(!el) return; const M=MODEL;
   const ions=[...new Set(M.cols.map(m=>m.c.ion))]; if(ions.length<2){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false;
@@ -894,8 +901,16 @@ function renderInter(){
   const hw=M.cx.hw, T=M.cx.T||295; const keep=all.filter(x=>x.N==null||x.N<=INT_MAXN);
   /* 방향별 행렬: 행 = donor 출발 준위, 열 = acceptor 출발 준위, 칸 = δ 가 가장 작은 조합 */
   const dirs={}; keep.forEach(x=>{ const k=x.di+">"+x.ai; (dirs[k]=dirs[k]||[]).push(x); });
+  /* 이온이 셋 이상이면 쌍마다 행렬이 늘어 카드가 끝없이 길어진다 → 이온 쌍 하나만 (양방향) 보이고 고르게 한다 */
+  const pk=k=>{ const [a,b]=k.split(">").map(Number); return Math.min(a,b)+"-"+Math.max(a,b); };
+  const pairs={}; Object.entries(dirs).forEach(([k,L])=>{ const q=pk(k); const o=pairs[q]=pairs[q]||{key:q,n:0,good:0}; o.n+=L.length; o.good+=L.filter(x=>x.c.grade<=2).length; });
+  const plist=Object.values(pairs).sort((a,b)=>b.good-a.good||b.n-a.n);
+  if(plist.length>1){ if(!INT_PAIR||!pairs[INT_PAIR]) INT_PAIR=plist[0].key; } else INT_PAIR=null;
+  if(INT_PAIR&&INT_SEL&&pk(INT_SEL.split("|")[0])!==INT_PAIR) INT_SEL=null;
+  const pairName=q=>{ const [a,b]=q.split("-").map(Number); return `${C.ionLabel(M.cols[a].c.ion)} ⇄ ${C.ionLabel(M.cols[b].c.ion)}`; };
+  const pairSel=plist.length>1?`<div class="row" style="gap:6px;margin-bottom:6px"><label class="ed-f">Ion pair <select class="ed-sel" id="edIntPair" title="${plist.length} ion pairs — one shown at a time (count = combinations within the phonon limit)">${plist.map(q=>`<option value="${q.key}" ${q.key===INT_PAIR?"selected":""}>${esc(pairName(q.key))} (${q.n})</option>`).join("")}</select></label></div>`:"";
   const cell=x=>`<span class="gr g${x.c.grade}">${x.N!=null?(x.c.delta?`N ${fmt(x.N,1)}`:"Resonant"):esc(gradeName(x.c))}</span>${x.c.endo?`<span class="muted"> ↑${x.boltz.toExponential(0)}</span>`:""}`;
-  const mats=Object.entries(dirs).map(([k,L])=>{ const [di,ai]=k.split(">").map(Number); const md=M.cols[di], ma=M.cols[ai];
+  const mats=Object.entries(dirs).filter(([k])=>!INT_PAIR||pk(k)===INT_PAIR).map(([k,L])=>{ const [di,ai]=k.split(">").map(Number); const md=M.cols[di], ma=M.cols[ai];
     const rows=[...new Map(L.map(x=>[x.Di.id,x.Di])).values()].sort((a,b)=>b.E-a.E), cols=[...new Map(L.map(x=>[x.Ai.id,x.Ai])).values()].sort((a,b)=>a.E-b.E);
     const best=(r,c)=>L.filter(x=>x.Di.id===r.id&&x.Ai.id===c.id)[0];
     return `<div class="ed-int-dir"><div class="h"><b>${esc(C.ionLabel(md.c.ion))}</b> → <b>${esc(C.ionLabel(ma.c.ion))}</b> <span class="muted">donor 여기 준위(행)가 acceptor 준위(열)를 올린다${L.some(x=>x.c.type==="BET")?" · back transfer 포함":""}</span></div>
@@ -910,7 +925,7 @@ function renderInter(){
   const accC=(()=>{ const m=M.cols.find(q=>q.c.ion!==M.cols[0].c.ion); const v=m&&(m.c.conc||[]).find(q=>q!=null); return v!=null?v:""; })();
   const nre=/Lu/.test(S.host&&S.host.name||"")?1.42e22:/Y/.test(S.host&&S.host.name||"")?1.37e22:"";
   el.innerHTML=`<h3>Inter-ion Interactions <span class="hint">between different ions · required phonons ≤ <select class="ed-sel" id="edIntN">${[2,4,6,8].map(n=>`<option ${n===INT_MAXN?"selected":""}>${n}</option>`).join("")}</select></span></h3>
-    ${mats||`<div class="muted">포논 ${INT_MAXN}개 안쪽의 조합이 없습니다.</div>`}
+    ${pairSel}${mats||`<div class="muted">포논 ${INT_MAXN}개 안쪽의 조합이 없습니다.</div>`}
     <div class="muted" style="margin:6px 0 4px">칸 = 그 두 준위 사이에서 에너지가 가장 잘 맞는 조합. N = Stark 창 간격 δ / ħω${hw?` (ħω ${fmt(hw)} cm⁻¹)`:""}, ↑ = endothermic(포논 흡수)의 detailed balance 인자. 칸을 누르면 아래에 모든 조합이 나온다.</div>
     <div class="ed-sug"><div class="muted" style="margin-bottom:4px">${cap}${INT_SEL?` <button class="btn xs" id="edIntClr">Show all</button>`:""}</div>${items||'<div class="muted">None</div>'}</div>
     <details class="ed-src" style="margin-top:8px"><summary>Absolute transfer probability (Förster)</summary>
@@ -925,6 +940,7 @@ function renderInter(){
       <div class="muted" style="margin-top:4px">식: R₀⁶ = C<sub>DA</sub>·τ<sub>D</sub>, c₀ = 3/(2π<sup>3/2</sup>R₀³), γ = (√π/2)·N<sub>A</sub>/c₀, η = √π γ e<sup>γ²</sup> erfc γ — dipole–dipole, acceptor 무작위 분포, donor 간 이동 없음 (Förster 1949; Inokuti & Hirayama 1965). Yb³⁺ 처럼 donor 간 energy migration 이 빠르면 이 값은 <b>하한</b>이다.</div>
     </details>`;
   $q(el,"#edIntN").onchange=e=>{ INT_MAXN=+e.target.value; INT_SEL=null; renderInter(); };
+  const ps=$q(el,"#edIntPair"); if(ps) ps.onchange=e=>{ INT_PAIR=e.target.value; INT_SEL=null; renderInter(); };
   el.querySelectorAll("button[data-int]").forEach(b=>b.onclick=()=>{ INT_SEL=INT_SEL===b.dataset.int?null:b.dataset.int; renderInter(); });
   const clr=$q(el,"#edIntClr"); if(clr) clr.onclick=()=>{ INT_SEL=null; renderInter(); };
   el.querySelectorAll("button[data-intadd]").forEach(b=>b.onclick=()=>{ const x=all[+b.dataset.intadd]; const md=M.cols[x.di], ma=M.cols[x.ai];
@@ -967,9 +983,10 @@ function svgString(){
   cl.setAttribute("font-family","DM Sans, Noto Sans KR, Arial, sans-serif");
   return '<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(cl);
 }
-function exportSVG(){ const s=svgString(); if(s) download(fileBase()+".svg",new Blob([s],{type:"image/svg+xml"})); }
+const nothing=()=>{ note("Nothing to export — add ions first","warn"); };
+function exportSVG(){ const s=svgString(); if(!s) return nothing(); download(fileBase()+".svg",new Blob([s],{type:"image/svg+xml"})); }
 function exportPNG(){
-  const s=svgString(); if(!s) return; const svg=$q(ROOT,"#edSvg"); const W=+svg.getAttribute("width"), H=+svg.getAttribute("height");
+  const s=svgString(); if(!s) return nothing(); const svg=$q(ROOT,"#edSvg"); const W=+svg.getAttribute("width"), H=+svg.getAttribute("height");
   const img=new Image(); const url=URL.createObjectURL(new Blob([s],{type:"image/svg+xml"}));
   img.onload=()=>{ const k=3, cv=document.createElement("canvas"); cv.width=W*k; cv.height=H*k; const g=cv.getContext("2d"); g.scale(k,k); g.drawImage(img,0,0); URL.revokeObjectURL(url);
     cv.toBlob(b=>download(fileBase()+".png",b),"image/png"); };
@@ -977,17 +994,20 @@ function exportPNG(){
   img.src=url;
 }
 function exportCSV(){
-  const rows=[["#","type","auto_type","donor_ion","donor_from","donor_to","acceptor_ion","acceptor_from","acceptor_to","donor_E_cm1","acceptor_E_cm1","dE_cm1","delta_cm1","n_phonon","grade","endothermic","laser_nm","transition_nm","note"]];
-  MODEL.procs.forEach(p=>{
-    if(p.broken) return;
-    if(p.kind==="ET") rows.push([p.n,p.type,p.auto,p.md.c.ion,p.Df.t,p.Dt.t,p.ma.c.ion,p.Af.t,p.At.t,Math.round(p.c.dw.E),Math.round(p.c.aw.E),Math.round(p.c.dE),Math.round(p.c.delta),p.c.nPh==null?"":p.c.nPh.toFixed(2),C.GRADE_EN[p.c.grade]+(p.c.edge?" (Stark edge)":""),p.c.endo?"yes":"no","","",p.p.note||""]);
-    else if(p.kind==="PH") rows.push([p.n,p.type,p.type,p.m.c.ion,p.F.t,p.T.t,"","","",p.c?Math.round(C.nm2cm(p.nm)):"",p.c?Math.round(p.c.w.E):"",p.c?Math.round(p.c.dE):"",p.c?Math.round(p.c.delta):"",p.c&&p.c.nPh!=null?p.c.nPh.toFixed(2):"",p.c?C.GRADE_EN[p.c.grade]:"no laser",p.c&&p.c.endo?"yes":"no",p.nm||"",p.need?p.need.toFixed(1):"",p.p.note||""]);
-    else rows.push([p.n,p.kind,p.kind,p.m.c.ion,p.F.t,p.T.t,"","","",Math.round(p.F.E-p.T.E),"","","","","","","",p.nm.toFixed(1),p.p.note||""]);
+  if(!MODEL||!MODEL.cols.length) return nothing();
+  const live=MODEL.procs.filter(p=>!p.broken); if(!live.length){ note("Nothing to export — no processes drawn","warn"); return; }
+  /* donor_/acceptor_E 는 에너지 전달(ET)에만. 광흡수는 laser_cm1(광원)·transition_cm1(맞춘 전이), MPR·RAD 는 transition_cm1(무게중심 차)·gap_cm1(Stark 가장자리 간격) */
+  const rows=[["#","type","auto_type","donor_ion","donor_from","donor_to","acceptor_ion","acceptor_from","acceptor_to","donor_E_cm1","acceptor_E_cm1","laser_cm1","transition_cm1","gap_cm1","dE_cm1","delta_cm1","n_phonon","grade","endothermic","laser_nm","transition_nm","note"]];
+  const r0=v=>v==null||!isFinite(v)?"":Math.round(v);
+  live.forEach(p=>{
+    if(p.kind==="ET") rows.push([p.n,p.type,p.auto,p.md.c.ion,p.Df.t,p.Dt.t,p.ma.c.ion,p.Af.t,p.At.t,r0(p.c.dw.E),r0(p.c.aw.E),"","","",r0(p.c.dE),r0(p.c.delta),p.c.nPh==null?"":p.c.nPh.toFixed(2),C.GRADE_EN[p.c.grade]+(p.c.edge?" (Stark edge)":""),p.c.endo?"yes":"no","","",p.p.note||""]);
+    else if(p.kind==="PH") rows.push([p.n,p.type,p.type,p.m.c.ion,p.F.t,p.T.t,"","","","","",p.nm?r0(C.nm2cm(p.nm)):"",p.c?r0(p.c.w.E):r0(p.T.E-p.F.E),"",p.c?r0(p.c.dE):"",p.c?r0(p.c.delta):"",p.c&&p.c.nPh!=null?p.c.nPh.toFixed(2):"",p.c?C.GRADE_EN[p.c.grade]:"no laser",p.c&&p.c.endo?"yes":"no",p.nm||"",p.need?p.need.toFixed(1):"",p.p.note||""]);
+    else rows.push([p.n,p.kind,p.kind,p.m.c.ion,p.F.t,p.T.t,"","","","","","",r0(p.F.E-p.T.E),r0(Math.max(0,p.F.lo-p.T.hi)),"","","","","","",p.nm.toFixed(1),p.p.note||""]);
   });
   const csv="﻿"+`# ${S.formula||""} | host ${S.host.name||""} hw=${S.host.w} cm-1 T=${S.host.T} K | levels: Carnall et al. JCP 90, 3443 (1989) LaF3 barycenters\n`+rows.map(r=>r.map(v=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\n");
   download(fileBase()+"_processes.csv",new Blob([csv],{type:"text/csv"}));
 }
-function exportJSON(){ const o=Object.assign({},S); delete o.sel; download(fileBase()+".json",new Blob([JSON.stringify(o,null,1)],{type:"application/json"})); }
+function exportJSON(){ if(!S.cols.length) return nothing(); const o=Object.assign({},S); delete o.sel; download(fileBase()+".json",new Blob([JSON.stringify(o,null,1)],{type:"application/json"})); }
 function importJSON(f){
   const r=new FileReader(); r.onload=()=>{ try{ const o=JSON.parse(r.result); if(!o||o.v!==1||!Array.isArray(o.cols)) throw new Error("형식이 다릅니다");
     o.cols=o.cols.filter(c=>C.IONS[c.ion]); S=Object.assign(DEF(),o,{mode:"view",sel:null}); PICK=null; save(); const f=$q(ROOT,"#edF"); if(f) f.value=S.formula; rerender(); note("도식을 불러왔습니다"); }
@@ -997,5 +1017,7 @@ function importJSON(f){
 /* 창 크기 변화 → 다시 그림 */
 let _rz=null; window.addEventListener("resize",()=>{ clearTimeout(_rz); _rz=setTimeout(()=>{ if(ROOT&&ROOT.isConnected&&MODEL) drawSVG(); },150); });
 
-window.ED_UI={render,rerender,_state:()=>S,_model:()=>MODEL,_applyFormula:(f)=>{applyFormula(f);rerender();},_loadPreset:loadPreset,PRESETS};
+/* DOM 없이 저장된 상태로 모델을 만든다 (탭을 열지 않은 상태에서 DRE 가져오기용) */
+function ensureModel(){ if(MODEL&&ROOT&&ROOT.isConnected) return MODEL; return buildModel(); }
+window.ED_UI={render,rerender,_state:()=>S,_model:()=>MODEL,_ensureModel:ensureModel,_applyFormula:(f)=>{applyFormula(f);rerender();},_loadPreset:loadPreset,PRESETS};
 })();

@@ -297,5 +297,57 @@ console.log("== 9 모형 민감도 (SPEC §11) — 분석 선택(배경·끝점�
   ok(w.inS/w.N<=0.3&&w.inE/w.N>=0.85,`기준 배경이 틀렸을 때(Smart, 참 = 피팅 안 Shirley + 기울기) 참 넓이 % 포함: 통계 ±2σ 만 ${w.inS}/${w.N} → 가능 범위 ${w.inE}/${w.N}`);
   ok(c.inS/c.N>=0.85&&c.inE/c.N>=0.85,`기준 배경이 맞을 때 참 넓이 % 포함: 통계 ±2σ ${c.inS}/${c.N} · 가능 범위 ${c.inE}/${c.N} (보수적이되 과하지 않음)`); }
 
+console.log("== 10 결함 수정 회귀 (10-19 감사): 템플릿 왕복 · 정량 n.d. · 쉼표 소수 · 배경 뺀 자료 · KE 축 · 일정 가중 · 고정 σ");
+{ // 10a 템플릿: 저장(+Δ) → 불러오기(−Δ) 가 어떤 Δ 에서도 항등 — 성분 BE 와 free BE 한계를 함께 옮김, link 간격은 그대로, 원본 불변
+  const R=C.rng(19); let worst=0; let origSame=true;
+  for(let t=0;t<50;t++){ const d=(R.u()-0.5)*20; const be0=280+R.u()*10;
+    const cs=[C.newComp("GLS",be0,{id:"a",area:5000}),C.newComp("GLS",be0+1.5,{id:"b",area:900})];
+    const cons={a:{be:{mode:"free",lo:be0-0.7,hi:be0+0.9}},b:{be:{mode:"link",ref:"a",k:1,b:1.5},F:{mode:"free",lo:0.5,hi:2}}};
+    const snap=JSON.stringify({cs,cons}); const sv=C.shiftModelBE(cs,cons,d), ld=C.shiftModelBE(sv.comps,sv.cons,-d);
+    origSame=origSame&&JSON.stringify({cs,cons})===snap;
+    worst=Math.max(worst,...ld.comps.map((c,i)=>Math.abs(c.be-cs[i].be)),Math.abs(ld.cons.a.be.lo-cons.a.be.lo),Math.abs(ld.cons.a.be.hi-cons.a.be.hi));
+    if(!(Math.abs(sv.cons.a.be.lo-(cons.a.be.lo+d))<1e-9&&sv.cons.b.be.b===1.5&&sv.cons.b.F.lo===0.5)) worst=Infinity; }
+  ok(worst<1e-9&&origSame,"템플릿 BE 이동: 저장 → 불러오기 왕복 = 항등 (Δ −10…+10 eV 50 경우; 한계도 같이 이동, link 간격·폭 한계 불변, 원본 불변)","최대 차 "+worst.toExponential(1));
+  // 같은 피팅을 Δ 로 저장·불러온 모형에서 다시 하면 χ²ν 가 같다 (예전: 한계가 Δ 만큼 어긋나 3.56 → 69)
+  const n=341, E=Float64Array.from({length:n},(_,i)=>279+i*0.05); const tr=[C.newComp("GLS",284.5,{F:1.1,m:0.3,area:9000,id:"a"}),C.newComp("GLS",286.1,{F:1.3,m:0.3,area:2500,id:"b"})];
+  const ctx={emin:E[0],emax:E[n-1]}; const P=new Float64Array(n); tr.forEach(c=>{ const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const G=C.rng(3); const y=Float64Array.from(P,(p,i)=>{ const m=(1500+p)*0.3; return Math.max(0,Math.round(m+Math.sqrt(m)*G.g()))/0.3; });
+  const cons={a:{be:{mode:"free",lo:284.1,hi:284.9}},b:{be:{mode:"free",lo:285.7,hi:286.5},m:{mode:"link",ref:"a",k:1,b:0}}};
+  const fit=(cs,cn)=>{ const pb={E,y,c:0.3,bg:{type:"smart",n:5},comps:C.clone(cs),cons:C.clone(cn)}; const r=C.fitOnce(pb,{}); return C.fitStats(pb,r).chi2nu; };
+  const d=0.32, sv=C.shiftModelBE(tr,cons,d), ld=C.shiftModelBE(sv.comps,sv.cons,-d); const c0=fit(tr,cons), c1=fit(ld.comps,ld.cons);
+  ok(Math.abs(c1-c0)<1e-9,"대전 보정 Δ 로 템플릿 저장 → 불러오기 → 다시 피팅: χ²ν 같음",`${c0.toFixed(4)} → ${c1.toFixed(4)}`); }
+{ // 10b 정량: 넓이 ≤ 0 · 2σ 미만은 n.d. — Σ 에서 빠지고 at% 가 음수가 되지 않음
+  const rows=[{el:"A",area:1000,sArea:10,S:1,BE:285,hv:1486.6,tf:{model:"none"}},{el:"B",area:-50,sArea:20,S:1,BE:530,hv:1486.6,tf:{model:"none"}},{el:"C",area:30,sArea:20,S:1,BE:700,hv:1486.6,tf:{model:"none"}},{el:"D",area:500,sArea:10,S:2,BE:100,hv:1486.6,tf:{model:"none"}}];
+  const Q=C.quantify(rows,{imfp:{model:"none"}}); const sum=Q.filter(q=>q.at!=null).reduce((s,q)=>s+q.at,0);
+  ok(Q[1].nd&&Q[2].nd&&!Q[0].nd&&Q[1].at==null&&Q[2].at==null&&Math.abs(sum-100)<1e-9&&Math.abs(Q[0].at-80)<1e-9&&Q.every(q=>q.at==null||q.at>=0),"정량: 음의 넓이·2σ 미만 넓이 = 검출 안 됨(n.d.), Σ 에서 빼고 나머지 합 100 %",Q.map(q=>q.nd?"nd":q.at.toFixed(1)).join(" / ")); }
+{ // 10c 텍스트 읽기: 쉼표 소수(세미콜론·탭), 모호한 쉼표 CSV 는 '쉼표 소수' 를 알려 줌, 점 소수 CSV 는 그대로
+  const mk=(sep,dec)=>{ let t="Binding Energy"+sep+"Counts\n"; for(let i=0;i<30;i++){ const a=(295-i*0.5).toFixed(2), b=(1000+30*Math.exp(-((295-i*0.5-288)**2))).toFixed(1); t+=(dec?a.replace(".",","):a)+sep+(dec?b.replace(".",","):b)+"\n"; } return t; };
+  const a=IO.textParse(mk(";",true),"C1s.csv")[0], b=IO.textParse(mk("\t",true),"C1s.txt")[0], c=IO.textParse(mk(",",false),"C1s.csv")[0];
+  let msg=""; try{ IO.textParse(mk(",",true),"C1s.csv"); }catch(e){ msg=e.message; }
+  ok(a.n===30&&Math.abs(a.be[0]-280.5)<1e-9&&Math.abs(a.be[29]-295)<1e-9&&a.meta.commaDecimal&&b.n===30&&Math.abs(b.y[29]-a.y[29])<1e-9&&c.n===30&&!c.meta.commaDecimal&&/comma decimals/.test(msg),
+    "텍스트: 쉼표 소수(;·탭 구분) 읽기, 점 소수 CSV 는 그대로, 쉼표로만 나뉜 쉼표 소수는 'comma decimals' 안내",msg.slice(0,60)); }
+{ // 10d 배경을 뺀 자료 감지(음수·0 근처 세기) — 실측 원자료(BCT txt 6 · K2312 VGD 5)는 감지하지 않음
+  const y=Float64Array.from({length:200},(_,i)=>800*Math.exp(-(((i-100)/12)**2))+(i%7-3)*4);
+  const d=D("data/bct600/"), k=D("data/k2312/"); let fp=[];
+  for(const r of ["C1s","O1s","Co2p","Co3p","Ta4f","Ba4d"]){ const s=(await IO.readFile("a.txt",new Uint8Array(fs.readFileSync(d+"_D.I._on_BCT__600_C_5h___"+r+".txt")))).spectra[0]; if(s.meta.bgSub) fp.push(r); }
+  for(const f of ["C1s_Scan.VGD","O1s_Scan.VGD","Ba4d_Scan.VGD","Co3p_Scan.VGD","Ta4d_Scan.VGD"]){ const s=(await IO.readFile(f,new Uint8Array(fs.readFileSync(k+f)))).spectra[0]; if(s.meta.bgSub) fp.push(f); }
+  ok(!!IO.bgSubtracted(y)&&!fp.length,"배경을 뺀 자료(음수 세기) 감지, 실측 원자료 11 개는 감지 안 함",fp.join(",")); }
+{ // 10e KE 축 다시 읽기: 머리줄 없는 KE 파일을 BE 로 읽은 뒤 reaxis(KE) = 처음부터 KE 로 읽은 것, 다시 BE 로 되돌리면 원래대로
+  let t=""; for(let i=0;i<60;i++){ const ke=1190+i*0.1; t+=ke.toFixed(2)+"\t"+(500+2000*Math.exp(-(((ke-1197)/0.6)**2))).toFixed(2)+"\n"; }
+  const asBE=IO.textParse(t,"C1s.txt")[0], asKE=IO.textParse(t,"C1s.txt",{axis:"KE",hv:1486.6})[0]; const be0=Float64Array.from(asBE.be);
+  IO.reaxis(asBE,"KE",1486.6); let e=0; for(let i=0;i<60;i++) e=Math.max(e,Math.abs(asBE.be[i]-asKE.be[i]),Math.abs(asBE.y[i]-asKE.y[i]));
+  IO.reaxis(asBE,"BE",1486.6); let e2=0; for(let i=0;i<60;i++) e2=Math.max(e2,Math.abs(asBE.be[i]-be0[i]));
+  ok(e<1e-9&&e2<1e-9&&asKE.meta.axis==="KE","KE 축 다시 읽기 = KE 로 읽기 (BE·세기 일치), BE 로 되돌리면 원래 축",`${e.toExponential(1)} / ${e2.toExponential(1)}`); }
+{ // 10f 일정 가중: 배경을 뺀 자료(배경 0 · 일정 잡음, 음수 포함)에서 넓이·위치 회복과 σ 의 적중
+  const R=C.rng(77); let inA=0, inB=0, N=60;
+  const n=241, E=Float64Array.from({length:n},(_,i)=>525+i*0.05); const tr=C.newComp("GLS",531,{F:1.4,m:0.3,area:3000,id:"a"}); const mu=C.compEval(tr,E,{emin:E[0],emax:E[n-1]});
+  for(let k=0;k<N;k++){ const y=Float64Array.from(mu,m=>m+40*R.g()); const pb={E,y,c:null,weight:"const",bg:{type:"none"},comps:[C.newComp("GLS",531.2,{F:1.2,m:0.3,area:2000,id:"a"})],cons:{}};
+    const r=C.fitOnce(pb,{}); const sm=C.compSummary(pb,r,C.covariance(pb,r)); if(Math.abs(pb.comps[0].area-3000)<1.96*sm[0].sig.area) inA++; if(Math.abs(pb.comps[0].be-531)<1.96*sm[0].sig.be) inB++; }
+  ok(inA/N>=0.85&&inB/N>=0.85,`일정 가중(Weighting Constant, 배경 None): 넓이·BE 95 % 구간 적중 (${N} 개, 음수 세기 포함)`,`넓이 ${inA}/${N}, BE ${inB}/${N}`); }
+{ // 10g 고정 BE 성분의 σ(BE) = null('—'), 피팅 반복 수: fitJob 이 시작점 피팅의 반복 수를 돌려줌
+  const n=201, E=Float64Array.from({length:n},(_,i)=>80+i*0.05); const tr=C.newComp("GLS",85,{F:1.2,area:4000,id:"a"}); const y=Float64Array.from(C.compEval(tr,E,{emin:80,emax:90}),v=>v+300);
+  const pb={E,y,c:1,bg:{type:"linear",n:5},comps:[C.newComp("GLS",85,{F:1.0,area:3000,id:"a"})],cons:{a:{be:{mode:"fixed"}}}};
+  const r=C.fitOnce(pb,{}); const sm=C.compSummary(pb,r,C.covariance(pb,r)); const j=C.fitJob({E,y,c:1,bg:{type:"linear",n:5},comps:[C.newComp("GLS",85.3,{F:1.0,area:3000,id:"a"})],cons:{}},[null],{});
+  ok(sm[0].sig.be===null&&sm[0].sig.area>0&&j.iter>0,"고정 BE 의 σ(BE) = null (표시 '—', 0.000 아님) · fitJob 반복 수 보고",`σ(BE) ${sm[0].sig.be}, iter ${j.iter}`); }
+
 console.log(`\n${pass} 통과 · ${fail} 실패`); if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }
 })().catch(e=>{ console.error(e); process.exit(2); });

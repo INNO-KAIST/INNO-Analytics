@@ -1,0 +1,2 @@
+.inno-tip{position:fixed;z-index:99999;display:none;max-width:min(420px,calc(100vw - 16px));padding:8px 10px;border-radius:8px;background:rgba(24,24,28,.96);color:#f2f2f5;font:12px/1.5 "DM Sans",system-ui,sans-serif;white-space:pre-line;box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:none}
+.inno-tip-moved{display:none!important}

@@ -9,7 +9,7 @@ HERE=os.path.dirname(os.path.abspath(__file__))
 ED=os.path.join(HERE,'energy_diagram','src'); DF=os.path.join(HERE,'diffraction','src'); TO=os.path.join(HERE,'touch','src'); DR=os.path.join(HERE,'dre','src'); IF=os.path.join(HERE,'interf','src'); XP=os.path.join(HERE,'xps','src'); IM=os.path.join(HERE,'image','src')
 inp,outp=sys.argv[1],sys.argv[2]
 s=open(inp,encoding='utf-8').read()
-s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH|DIFF|NAV):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
+s=re.sub(r'<!-- INNO-(ED|DRE|IF|XPS|IMG|TOUCH|DIFF|NAV|TIPS):BEGIN[^>]*-->.*?<!-- INNO-\1:END -->\n?','',s,flags=re.S)
 def R(desc,pat,rep,flags=0):
     global s
     n=len(re.findall(pat,s,flags))
@@ -79,6 +79,8 @@ tjs=rd(f'{TO}/inno_touch.js'); assert '</script' not in tjs.lower(), 'inno_touch
 head+='<!-- INNO-TOUCH:BEGIN css+js -->\n<style id="inno-touch-css">\n'+rd(f'{TO}/touch.css')+'</style>\n<script id="inno-touch-js">\n'+tjs+'</script>\n<!-- INNO-TOUCH:END -->\n'
 NV=os.path.join(HERE,'nav'); njs=rd(f'{NV}/nav_fit.js'); assert '</script' not in njs.lower()
 head+='<!-- INNO-NAV:BEGIN css+js -->\n<style id="inno-nav-css">\n'+rd(f'{NV}/nav_fit.css')+'</style>\n<script id="inno-nav-js">\n'+njs+'</script>\n<!-- INNO-NAV:END -->\n'
+tjs=rd(f'{NV}/tips.js'); assert '</script' not in tjs.lower()
+head+='<!-- INNO-TIPS:BEGIN css+js -->\n<style id="inno-tips-css">\n'+rd(f'{NV}/tips.css')+'</style>\n<script id="inno-tips-js">\n'+tjs+'</script>\n<!-- INNO-TIPS:END -->\n'
 i=s.index('</head>'); s=s[:i]+head+s[i:]
 edjs=''.join(rd(f'{ED}/{f}')+'\n' for f in ('ed_data.js','ed_core.js','ed_ui.js'))
 core=rd(f'{DR}/dre_core.js'); ui=rd(f'{DR}/dre_ui.js'); ifjs=rd(f'{IF}/interf_suggest.js')

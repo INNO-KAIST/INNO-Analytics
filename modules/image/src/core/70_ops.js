@@ -210,13 +210,16 @@ IC.orientation=function(p,o){
     let t=-(0.5*Math.atan2(2*c,a-b)*180/Math.PI+90);
     if(t>90) t-=180; if(t<=-90) t+=180;
     th[i]=t; coh[i]=tr>1e-12?(l1-l2)/tr:0; en[i]=tr; if(tr>emax) emax=tr; }
-  const minE=(o.minEnergy!=null?+o.minEnergy:0.01)*emax, minC=o.minCoherency!=null?+o.minCoherency:0;
-  for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; let k=Math.floor(th[i]+90); if(k>=180) k=179; if(k<0) k=0; hist[k]+=coh[i]*en[i]; }
+  const minC=o.minCoherency!=null?+o.minCoherency:0;
+  const mk=o.mask&&o.mask.length===N?o.mask:null; // mask[i] = 1 → 통계에서 뺌 (축척 막대·글자, ROI 밖)
+  if(mk){ emax=0; for(let i=0;i<N;i++) if(!mk[i]&&en[i]>emax) emax=en[i]; }
+  const minE2=(o.minEnergy!=null?+o.minEnergy:0.01)*emax;
+  for(let i=0;i<N;i++){ if(mk&&mk[i]||en[i]<minE2||coh[i]<minC) continue; let k=Math.floor(th[i]+90); if(k>=180) k=179; if(k<0) k=0; hist[k]+=coh[i]*en[i]; }
   // 주 방향: 선택한 화소의 텐서 합(구간 나눔 없이), order parameter = 이중각 평균 길이
-  let A=0,B=0,Cc=0,sc=0,ss=0,sw=0; for(let i=0;i<N;i++){ if(en[i]<minE||coh[i]<minC) continue; A+=jxx[i]; B+=jyy[i]; Cc+=jxy[i]; const w=coh[i]*en[i], t=th[i]*Math.PI/180; sc+=w*Math.cos(2*t); ss+=w*Math.sin(2*t); sw+=w; }
+  let A=0,B=0,Cc=0,sc=0,ss=0,sw=0; for(let i=0;i<N;i++){ if(mk&&mk[i]||en[i]<minE2||coh[i]<minC) continue; A+=jxx[i]; B+=jyy[i]; Cc+=jxy[i]; const w=coh[i]*en[i], t=th[i]*Math.PI/180; sc+=w*Math.cos(2*t); ss+=w*Math.sin(2*t); sw+=w; }
   let dom=-(0.5*Math.atan2(2*Cc,A-B)*180/Math.PI+90); if(dom>90) dom-=180; if(dom<=-90) dom+=180; if(!(A+B>0)||!(emax>0)) dom=NaN; /* 일정한 이미지: 방향 없음 */ const R=sw?Math.hypot(sc,ss)/sw:0;
-  let ct=0,cw=0; for(let i=0;i<N;i++){ if(en[i]<minE) continue; ct+=coh[i]*en[i]; cw+=en[i]; }
-  return {theta:th,coherency:coh,energy:en,hist,dominant:dom,orderParam:R,meanCoherency:cw?ct/cw:0};
+  let ct=0,cw=0; for(let i=0;i<N;i++){ if(mk&&mk[i]||en[i]<minE2) continue; ct+=coh[i]*en[i]; cw+=en[i]; }
+  return {theta:th,coherency:coh,energy:en,hist,dominant:dom,orderParam:R,meanCoherency:cw?ct/cw:0,emax};
 };
 
 })();

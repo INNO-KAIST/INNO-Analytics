@@ -281,6 +281,16 @@ TIFF spacing 단위(nm 보정에서 z step 1000 배) · CZI 의 RGB 채널 + 회
 - 고침: loadSaved 의 S.ui.dist·scalebar·drop 병합이 앞 줄 주석에 묻혀 실행되지 않던 것(v1.12–1.13).
 - 시험: test_autopart 10(겹친 묶음 17 개 → 겹침 표시 52/55, 고배율 7/7, 겹침을 빼면 ECD SD 1.58 → 0.15 px) · ui_pa_guard 22(카드·분포 선택·Exclude 토글·k = 0·이미지 클릭 고르기·표 열) · test_img 107(단위 4).
 
+## 6l. Find (auto) · Find Maxima 보호 · Orientation 축척 막대 제외 · 말풍선 설명 (2026-10-19)
+- **Find Maxima 보호**: Point Selection 출력에서 극대 > 5000(FM_MAX) 이면 점을 만들지 않고 멈춤 + 안내(밝은 바탕이면 Light background, Find (auto), 흐림 σ≈r/2·prominence≈대비 ⅓). 사용자 TEM 날 이미지 prominence 10 → 248,625 점으로 화면이 멈추던 것.
+- **Find (auto)**(core findMaximaAuto, op findMaximaAuto): Auto particle mask 조각마다 무게중심(minPx 이상). 흐린 세기 극대 방식은 맞닿은 쌍이 합쳐져 421 중 391 → 이 방식 417–421. 축척 막대 상자·영역 ROI 밖 점 제외. 원자 열 같은 세기 극대는 Find(직접).
+- **scaleBarBox(im) / excludeMask(im)**: 가장자리 근처 막대(DIFF_OCR.findBars) 둘레 상자(막대 길이 기준 위아래 0.6, 옆 0.15) — Analyze particles (auto)·Find (auto)·Orientation 이 함께 씀. 영역 ROI 가 있으면 ROI 밖 = 제외(막대 찾기는 하지 않음).
+- **Orientation**: core orientation 에 o.mask(1 = 통계 제외) — 히스토그램·주 방향·order parameter·coherency 에서 뺌, 색 지도에서는 어두운 회색(40). order < 0.1 이면 '거의 등방 — 주 방향 값 의미 없음' 안내. RGB 거부.
+- **Analyze 보호**: 문턱 안 화소 > 97 % 면 멈춤(이미지 전체 = 입자 1 개, 문턱 0–255).
+- **저장 상태**: pm 단위로 저장된 입자 결과·Summary·Results 를 nm 로(길이 ÷ 10³, 넓이 ÷ 10⁶, 밀도 × 10⁶).
+- **말풍선 설명**(modules/nav/tips.js, 앱 전체): 패널의 회색 설명 문장(.imx div.xs.muted·.im-help, 다른 탭 .hint·60 자 넘는 회색 문단)을 숨기고 바로 앞 요소의 data-tip 으로 — 마우스를 2 s 대면(손가락은 0.7 s 길게 누르면) 뜸. 값·출처·표 잘림 안내 등은 class keep. 긴 알림은 ' — ' 앞만 보이고 뒤는 말풍선.
+- 시험: test_autopart 16(Find (auto) 133/134 · 35/35 · 305/305, 날 이미지 prominence 10 은 5–16 만 점) · ui_pa_guard 28(Find 기본값 멈춤·Find (auto) 정답 ± 2 % · Orientation 막대 회색 · 0–255 Analyze 멈춤 · 설명 숨김·말풍선 2 s).
+
 ## 7. 한계 (다음 단계)
 - vsi, ND2 v1(JPEG 2000), CZI JPEG XR, JPEG 압축 TIFF 는 아직 읽지 않는다. OIR 보조 파일(_00001…)을 함께 읽지 않는다. 선 주사·RGB OIR 은 실측 미검증. AFM 힘 곡선(Force·VOLM·curve map)은 읽지 않는다.
 - 3D 연산(3D skeletonize·필터), bilinear·비강체(elastic) 정합은 없다.

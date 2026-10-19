@@ -5,6 +5,14 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-19 전수조사 v1.15 — 다섯 영역 점검·수정 · 설명 문장은 말풍선으로**:
+  Image Analysis: Find Maxima 잡음 극대 보호(> 5000 점이면 멈춤·안내) · Find (auto)(입자 중심, 합성 133/134·35/35·305/305) · Orientation 이 이미지에 박힌 축척 막대·글자 제외 · 문턱 0–255 Analyze 멈춤 · pm 저장 결과 → nm · Auto 가 손 설정(S.ui.pa)을 바꾸지 않음(다음 이미지 0 개 버그) · 마스크 Analyze 세기는 원본에서 · 굵은 마스크 Skeleton 은 먼저 Skeletonize · Subtract Background·Local 문턱·NaN Background 경고 · Summary 단위 · FFT/Bandpass 약 3–6 배, 순위 필터 약 2–4 배 빠름(이전과 같은 출력) · OCR 확실할 때만 자동 눈금.
+  XPS: 대전 보정 뒤 템플릿 저장·불러오기 BE 범위 밀림 · C 1s 기준 성분을 클릭한 성분으로 잡던 것 · 계산 중 편집 덮어쓰기 · Auger α′ 엉터리 · 정량 기본 강한 선만 + 창 안 다른 원소 경고 · KE 텍스트 다시 읽기 · 음수 at% → n.d. · 상수 가중치 · 휴대폰 at% 열.
+  EM Image·EDS: Velox SI 부분 영역 스캔 크기(ScanArea) · DM 썸네일·작은 이미지 · 파일 바꿔도 남던 스펙트럼 후보 · Elements 칸이 정량 묶음 · UltraX 등 맵 인식 · FEI/Zeiss/ImageJ TIFF 화소 크기 · File structure · 가짜 .emd 오류 · 1× 미만 확대 · 새로고침 시 탭 복원. (.bcf 맵은 아직 지원 안 함 — 표시함)
+  Diffraction: 링·결 무늬에서 Spots 순위 매기다 탭이 메모리 부족으로 죽던 것(치명) · 링 오판 · 막대 단위 1/nm↔1/Å 오독 시 확인 단추 · 눈금 ±15 % 창 · 'No credible match' · 파일마다 설정 초기화 · 8-bit 로그 SAED 판별 · 진행·Cancel · Camera length 보정.
+  DRE·Energy Diagram: 단면적 오타 시 탭 7–30 s 멈춤 → 0.7 s + 수렴 실패 표시 · 새로고침 뒤 가져오기 · λ·Range 검사 · 농도 > 100 % 경고 · 차트·표 화면 맞춤 · 이온 쌍 선택 · 내보내기.
+  화면: 패널 회색 설명은 숨기고 2 초 대면(휴대폰 길게 누르면) 말풍선(modules/nav/tips.js), 긴 알림은 앞부분만.
+  시험(통합 빌드): image 107·16·21·101·54·12·perf 2231 · diff 61·150·33·277·29·29·79·28 (ocr 시간 1 건 부하 탓) · dre 56·5·5·17 · ED 1404·12·10 · xps 153 · UI pa 28·audit_fix 8·drop 38·nav 25·touch 72·shell 18·xps·xps_fixes 25·diff 61·db·diff_fix 47·dre·dre_fix·cpu·insight·pool·ED ui2·ui3·int·sweep·interf if — 모두 통과.
 - **10-19 겹친 입자·크기 이상치는 찾되 크기 분포에서 뺌 · 이미지에서 눌러 고른 입자만 분포 · pm → nm/Å**(modules/image/SPEC.md §6k):
   요청 ① 겹쳐 있는 입자는 찾기만 하고 분포에서 제외 ② 크기가 너무 다른 입자도 제외 ③ 손으로 고른 입자만의 분포 ④ pm 대신 nm·Å.
   Auto particle mask 가 Watershed 전 덩어리 하나에서 조각이 2 개 이상 나온 곳을 '겹침'으로 표시 → 기본으로 분포에서 뺌(Exclude overlapping). 크기 이상치 = 겹치지 않은 입자의 ln ECD 중앙값 ± 3 robust SD(1.4826·MAD) 밖(0 = 끔). Pick particles: 이미지 클릭으로 고르기·빼기 → Distribution 의 Particles = Used · All found · Picked. 표·CSV Status·Picked 열, Summary Used 열, 윤곽 색(사용 하늘색·겹침 주황 점선·이상치 자홍 점선·고름 노랑).

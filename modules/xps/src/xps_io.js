@@ -498,12 +498,22 @@ function avgParse(text,fileName){
 /* ============================================================
    6) 텍스트 2~3열
    ============================================================ */
+/* 소수점이 쉼표인 표("284,50;1234,5" · "284,50<TAB>1234,5")인가: 공백·세미콜론으로 나눈 칸이 2 개 이상이고, 칸이 모두
+   쉼표 소수(점 없음)·정수이며 쉼표 소수가 하나 이상인 줄이 숫자 줄의 대부분. "1200,345" 처럼 칸이 하나뿐인 줄은 보통 CSV 라 제외. */
+function commaDecimal(lines){
+  const NUMC=/^[-+]?\d+(,\d+)?([eE][-+]?\d+)?$/; let yes=0, num=0;
+  for(const raw of lines){ const s=raw.trim(); if(!s||!/\d/.test(s)) continue; const parts=s.split(/[\s;]+/).filter(t=>t!=="");
+    if(parts.length<2||!parts.slice(0,2).every(t=>/^[-+]?[\d.,]+([eE][-+]?\d+)?$/.test(t))) continue; num++;
+    if(parts.every(t=>NUMC.test(t))&&parts.some(t=>t.includes(","))) yes++; }
+  return num>=5&&yes>=0.8*num;
+}
 function textParse(text,fileName,opt){
   opt=opt||{};
   const L=text.split(/\r?\n/); const rows=[]; let hdr=[];
+  const cd=commaDecimal(L);
   for(const raw of L){
     const s=raw.trim(); if(!s) continue;
-    const parts=s.split(/[\s,;]+/).filter(t=>t!=="");
+    const parts=cd?s.split(/[\s;]+/).filter(t=>t!=="").map(t=>t.replace(",",".")):s.split(/[\s,;]+/).filter(t=>t!=="");
     const nums=parts.map(Number);
     if(parts.length>=2&&nums.slice(0,2).every(isFinite)) rows.push(nums.filter(isFinite));
     else if(!rows.length) hdr.push(s);
@@ -514,17 +524,52 @@ function textParse(text,fileName,opt){
   const hv=opt.hv||1486.6;
   const x=rows.map(r=>r[0]), y=rows.map(r=>r[1]);
   const warn=[];
-  if(!/binding|kinetic|\bbe\b|\bke\b/.test(h)&&!opt.axis) warn.push("머리줄에 축 이름이 없어 결합에너지(BE)로 간주 — 운동에너지면 바꾸세요");
+  const axisGuess=!/binding|kinetic|\bbe\b|\bke\b/.test(h)&&!opt.axis;
+  if(axisGuess) warn.push("머리줄에 축 이름이 없어 결합에너지(BE)로 간주 — 운동에너지면 Info 탭에서 KE 로 바꾸세요");
+  if(cd) warn.push("소수점이 쉼표(comma decimals)인 표로 읽었습니다");
+  const bs=bgSubtracted(y); if(bs) warn.push(bs);
   const be=isKE?x.map(k=>hv-k):x;
   const base=String(fileName||"").replace(/^.*[\\/]/,"");
   const reg=parseRegionName(base.replace(/^\[.*?\]\s*/,""));
-  return [mkSpec({name:reg.label,region:reg.label,file:fileName,format:"텍스트",hv,hvSrc:"기본값(Al Kα 1486.6) — 텍스트에는 없음",be,y,sample:sampleFromName(base),meta:{header:hdr.slice(0,5),axis:isKE?"KE":"BE"},warn})];
+  try{
+    return [mkSpec({name:reg.label,region:reg.label,file:fileName,format:"텍스트",hv,hvSrc:opt.hv?"직접 입력":"기본값(Al Kα 1486.6) — 텍스트에는 없음",be,y,sample:sampleFromName(base),meta:{header:hdr.slice(0,5),axis:isKE?"KE":"BE",axisGuess,commaDecimal:cd,bgSub:!!bs},warn})];
+  }catch(e){
+    // 단조롭지 않은 축: 쉼표 소수를 쉼표 구분으로 잘못 나눈 경우가 흔하다 — 그 가능성을 알려 준다
+    if(/단조/.test(e.message)&&!cd&&/\d,\d/.test(text.slice(0,4000))) throw new Error(e.message+" — 소수점이 쉼표(comma decimals)인 파일이면 칸을 탭·세미콜론으로 나누어 저장하세요");
+    throw e;
+  }
+}
+/* 배경을 이미 뺀 자료인가: 음수 세기가 있거나(측정 CPS 는 음수가 될 수 없음), 10 % 넘는 점이 최댓값의 0.5 % 이하 */
+function bgSubtracted(y){
+  const n=y.length; if(n<8) return null; let mx=-Infinity, neg=0, low=0; for(const v of y) mx=Math.max(mx,v); if(!(mx>0)) return null;
+  for(const v of y){ if(v<0) neg++; if(v<=0.005*mx) low++; }
+  if(neg>0||low>0.1*n) return "음수·0 근처 세기 — 배경을 이미 뺀 자료로 보입니다. Background ‘None’ + Weighting ‘Constant’ 로 두었습니다";
+  return null;
+}
+/* 텍스트 자료의 축 해석을 바꾼다(다시 읽기와 같음): 지금 be 에서 파일의 x 를 되살리고 새 축(BE/KE)·hν 로 다시 계산.
+   sp 를 직접 바꾸고 true/false(바뀜) 를 돌려준다. */
+function reaxis(sp,axis,hv){
+  const old=(sp.meta&&sp.meta.axis)||"BE", hv0=sp.hv, hv1=hv>0?+hv:hv0, n=sp.n;
+  if(old===axis&&Math.abs(hv1-hv0)<1e-9) return false;
+  const x=Array.from(sp.be,b=>old==="KE"?hv0-b:b);
+  let be=x.map(v=>axis==="KE"?hv1-v:v), y=Array.from(sp.y), yr=sp.yRaw?Array.from(sp.yRaw):null, tf=sp.tfArr?Array.from(sp.tfArr):null;
+  if(n>1&&be[0]>be[n-1]){ be.reverse(); y.reverse(); if(yr) yr.reverse(); if(tf) tf.reverse(); }
+  sp.be=Float64Array.from(be); sp.y=Float64Array.from(y); if(yr) sp.yRaw=Float64Array.from(yr); if(tf) sp.tfArr=Float64Array.from(tf);
+  sp.step=n>1?(sp.be[n-1]-sp.be[0])/(n-1):0; sp.hv=hv1; if(Math.abs(hv1-hv0)>1e-9) sp.hvSrc="직접 입력";
+  sp.meta=Object.assign({},sp.meta||{},{axis,axisGuess:false});
+  sp.warn=(sp.warn||[]).filter(w=>!/머리줄에 축 이름/.test(w));
+  return true;
 }
 
 /* ============================================================
    진입점: 파일 이름 + 바이트 → {spectra, tables, warn}
    ============================================================ */
 async function readFile(name,u8,opt){
+  const r=await readFile0(name,u8,opt);
+  (r.spectra||[]).forEach(sp=>{ if(sp.meta&&!sp.meta.bgSub&&!(sp.reg&&sp.reg.kind==="survey")){ const w=bgSubtracted(sp.y); if(w){ sp.meta.bgSub=true; sp.warn.push(w); } } });
+  return r;
+}
+async function readFile0(name,u8,opt){
   const low=String(name).toLowerCase();
   const head=latin1(u8.subarray(0,Math.min(u8.length,200)));
   if(cfbIs(u8)){
@@ -540,6 +585,6 @@ async function readFile(name,u8,opt){
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);

@@ -22,13 +22,16 @@ const enL=s=>String(s==null?"":s).replace(/흡수 속도 /g,"Absorption rate ").
   .replace(/(\d)준위/g,"$1-level");
 
 /* ---------------- 상태 ---------------- */
+const NM_MIN=200, NM_MAX=3000, NM_TOL=3;
+/* 단면적 값이 맞춰진 파장(템플릿). ED 가져오기·사용자 JSON 은 없음 */
+function nmRef(){ if(S.nmRef) return S.nmRef; try{ if(S.template==="lee") return D.templateLee().nm; if(S.template==="tm5"||S.template==="tm6") return D.templateTm(S.template==="tm5"?5:6).nm; }catch(e){} return null; }
 function defState(){
   const T=D.templateLee();
   return {v:1,template:"lee",name:T.name,spec:T.spec,nm:T.nm,beam:"peak",params:T.params,samples:T.samples.map(s=>Object.assign({data:[]},s)),
     pu:"kW/cm²",simRange:[0.1,200],showDown:true,showSlope:true,tab:"param",fit:{starts:40,maxit:150,seed:1,profile:true,span:2,npts:13},result:null,modelNote:"Lee et al., Nature 589, 230 (2021) 공개 코드의 3준위 모델과 값"};
 }
 let S=load();
-function load(){ try{ const s=JSON.parse(localStorage.getItem(KEY)||"null"); if(s&&s.v===1&&s.spec) return Object.assign(defState(),s); }catch(e){} return defState(); }
+function load(){ try{ const s=JSON.parse(localStorage.getItem(KEY)||"null"); if(s&&s.v===1&&s.spec){ const o=Object.assign(defState(),s); if(!(o.nm>=NM_MIN&&o.nm<=NM_MAX)) o.nm=Math.min(NM_MAX,Math.max(NM_MIN,+o.nm||980)); return o; } }catch(e){} return defState(); }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){ /* 데이터가 크면 결과를 빼고 다시 */ try{ const o=Object.assign({},S,{result:null}); localStorage.setItem(KEY,JSON.stringify(o)); }catch(e2){} } }
 let ROOT=null, MODEL=null, WORKER=null, RUN=null, SIM=null;
 
@@ -52,8 +55,9 @@ function paramUse(){
 /* ---------------- Energy Diagram 에서 가져오기 ---------------- */
 function importFromED(){
   const E=window.ED_UI, C=window.ED_CORE;
-  if(!E||!E._model){ note("Energy Diagram 탭을 먼저 열어 도식을 만드세요","warn"); return; }
-  const st=E._state(); const M=E._model()||null;
+  if(!E||!E._state){ note("Energy Diagram 모듈이 없습니다","warn"); return; }
+  /* Energy 탭을 아직 열지 않았어도(새로 고침 직후) 저장된 상태로 모델을 만든다 */
+  const st=E._state(); let M=null; try{ M=E._ensureModel?E._ensureModel():(E._model&&E._model()); }catch(e){ M=null; }
   if(!M||!M.procs||!M.procs.length){ note("Energy Diagram 에 과정이 없습니다 — 광흡수·에너지 전달·이완을 먼저 그리세요","warn"); return; }
   const spId=ion=>ion.replace(/(\d)\+$/,"").replace(/[^A-Za-z]/g,"")+ion.replace(/\D/g,"");
   const sp={}; const levelsUsed={};
@@ -89,39 +93,53 @@ function importFromED(){
   (M.emis||[]).forEach(e=>{ const s=species.find(q=>q.ion===e.m.c.ion); if(!s||!s.levels.includes(e.up.id)) return;
     const id=`${Math.round(e.nm)} nm (${e.up.t})`; if(!channels.some(c=>c.id===id)) channels.push({id,terms:[[s.id,e.up.id,1]]}); });
   species.forEach(s=>s.levels.slice(1).forEach(l=>{ const id=`${s.id} ${l} population`; if(!channels.some(c=>c.terms[0][1]===l&&c.terms[0][0]===s.id)) channels.push({id,terms:[[s.id,l,1]]}); }));
-  const vars={}; species.forEach(s=>{ const col=st.cols.find(c=>c.ion===s.ion); const cc=col&&col.conc&&col.conc.find(v=>v!=null); vars[s.cvar]=cc!=null?cc:1; });
+  const vars={}, cDef=[]; species.forEach(s=>{ const col=st.cols.find(c=>c.ion===s.ion); const cc=col&&col.conc&&col.conc.find(v=>v!=null&&v>0); if(cc!=null) vars[s.cvar]=cc; else { vars[s.cvar]=1; cDef.push(s.id); } });
   S.spec={species:species.map(s=>({id:s.id,levels:s.levels,cvar:s.cvar})),procs,channels};
-  S.params=params; S.samples=[{id:"S1",vars,data:[]}]; S.nm=(st.lasers&&st.lasers[0])||980;
+  S.params=params; S.samples=[{id:"S1",vars,data:[]}]; S.nm=Math.min(NM_MAX,Math.max(NM_MIN,+(st.lasers&&st.lasers[0])||980));
   S.template="ed"; S.name="Model imported from Energy Diagram — "+(st.formula||species.map(s=>s.ion).join(", "));
   S.modelNote=`placeholder 값 ${Object.keys(params).length}개 — 문헌·측정값으로 바꾸기 전에는 형태만 참고하세요.`;
-  S.result=null; save(); rerender(); note("Energy Diagram 의 과정 "+procs.length+"개로 모델을 만들었습니다");
+  S.cDefault=cDef;
+  S.result=null; save(); rerender(); note("Energy Diagram 의 과정 "+procs.length+"개로 모델을 만들었습니다"+(cDef.length?` · ${cDef.join(", ")} c defaulted to 1 %`:""),cDef.length?"warn":undefined);
 }
 
 /* ---------------- 시뮬레이션 ---------------- */
+/* 화면 계산 상한: 방향마다 스윕 한 번(모든 채널을 같이 읽음). 점 하나 SIM_PT_MS, 스윕 하나 SIM_SWEEP_MS,
+   수렴 실패 SIM_MAX_FAILS 번이면 스윕을 멈춘다 — 엉뚱한 값(예: sG 1e-10 오타)에도 탭이 멈추지 않게. 피팅은 이 상한을 쓰지 않는다. */
+const SIM_PT_MS=60, SIM_SWEEP_MS=1500, SIM_MAX_FAILS=8;
 function simulate(){
   const M=compileModel(); if(M.err) return {err:M.err};
   const [a,b]=S.simRange; const f=PU[S.pu];
   const I=D.logGrid(a*f,b*f,40);
-  const out={I,up:[],dn:[],hyst:false,err:null};
+  const out={I,up:[],dn:[],hyst:false,err:null,conv:null};
   try{
     const env=envOf(0);
     const chIdx=M.channels.map((_,k)=>k);
-    chIdx.forEach(k=>{
-      const u=D.observe(M,env,I,1,S.nm,k,{beam:S.beam}); const d=D.observe(M,env,I,-1,S.nm,k,{beam:S.beam});
-      out.up.push(u.y); out.dn.push(d.y);
-      if(u.y.some((v,i)=>Math.abs(v/d.y[i]-1)>0.01)) out.hyst=true;
-    });
-    const sw=D.sweep(M,env,I,1,S.nm); out.pop=sw.n;
+    const o=()=>({beam:S.beam,maxFails:SIM_MAX_FAILS,deadline:Date.now()+SIM_SWEEP_MS,stOpt:{maxMs:SIM_PT_MS}});
+    const u=D.observeMulti(M,env,I,1,S.nm,chIdx,o()), d=D.observeMulti(M,env,I,-1,S.nm,chIdx,o());
+    out.up=u.Y; out.dn=d.Y; out.pop=u.n.map(n=>n||new Float64Array(M.N).fill(NaN));
+    out.hyst=u.Y.some((y,k)=>y.some((v,i)=>isFinite(v)&&isFinite(d.Y[k][i])&&Math.abs(v/d.Y[k][i]-1)>0.01));
+    out.conv={upFails:u.fails,dnFails:d.fails,aborted:u.aborted||d.aborted,total:u.total,
+      bad:Math.max(u.fails+(u.total-u.done),d.fails+(d.total-d.done))};
   }catch(e){ out.err=String(e.message||e); }
   return out;
+}
+/* 탐색 범위에서 10³배 넘게 벗어난 값 (오타 의심) */
+function farOut(){
+  return Object.entries(S.params).filter(([n,p])=>p.v>0&&p.lo>0&&p.hi>0&&(p.v<p.lo/1e3||p.v>p.hi*1e3)).map(([n])=>n);
 }
 
 /* ---------------- 그래프 (SVG) ---------------- */
 function palette(){ const cs=getComputedStyle(document.documentElement); const v=(n,f)=>(cs.getPropertyValue(n)||"").trim()||f; const d=document.documentElement.getAttribute("data-theme")==="dark";
   return {dark:d,ink:v("--ink","#243433"),ink2:v("--ink-2","#4a5a56"),muted:v("--muted","#62706b"),grid:v("--grid","#e4e8e2"),line:v("--border","#dde3dc"),bg:v("--surface","#fff"),accent:v("--accent","#7a3f6e"),
     ser:d?["#e39ad0","#7fc6e8","#f0b26a","#8fd19e","#c9a8f0","#f08c86"]:["#7a3f6e","#1f6fa3","#b4580f","#2a7141","#6a4bb0","#b23a3a"]}; }
+/* 그림 폭 = 그릴 자리의 실제 폭(좁은 화면에서 viewBox 를 줄여 글자가 작아지지 않게). o.cw 또는 CHART_CW(renderDiag 가 잠시 설정) */
+let CHART_CW=0;
+function chartWH(o){ let W=o.w||640, H=o.h||340; const cw=o.cw||CHART_CW;
+  if(o.fit&&cw>0){ const W2=Math.max(320,Math.round(cw)); H=Math.round(H*Math.min(1,Math.max(0.72,W2/W))); W=W2; }
+  else if(cw>0&&cw<W){ const W2=Math.max(280,Math.round(cw)); H=Math.round(H*Math.max(0.75,W2/W)); W=W2; }
+  return [W,H]; }
 function chart(o){
-  const P=palette(), W=o.w||640, H=o.h||340, m={l:62,r:16,t:14,b:42};
+  const P=palette(), [W,H]=chartWH(o), m={l:62,r:16,t:14,b:42};
   const pw=W-m.l-m.r, ph=H-m.t-m.b;
   const xs=[],ys=[]; o.series.forEach(s=>s.x.forEach((x,i)=>{ const y=s.y[i]; if(x>0||!o.xlog) if(isFinite(x)) xs.push(x); if(isFinite(y)&&(!o.ylog||y>0)) ys.push(y); }));
   if(!xs.length||!ys.length) return `<div class="dre-empty">No values to plot</div>`;
@@ -193,13 +211,20 @@ function render(root){
       Object.values(T.params).forEach(p=>{ if(/^(placeholder|자리표시)/.test(p.src||"")) p.placeholder=true; });
       S=Object.assign(defState(),{template:v,name:T.name,spec:T.spec,nm:T.nm,params:T.params,samples:T.samples.map(q=>Object.assign({data:[]},q)),pu:S.pu,simRange:[1,1e4],modelNote:T.note}); save(); rerender(); }
   else if(v==="ed"){ if(S.samples.some(s=>s.data.length)&&!confirm("데이터가 있는 현재 모델을 바꿉니다. 계속할까요?")) return; importFromED(); } };
-  $q(w,"#dreNm").onchange=e=>{ const v=+e.target.value; if(v>0){ S.nm=v; S.result=null; save(); rerender(); } };
+  $q(w,"#dreNm").onchange=e=>{ const raw=e.target.value.trim(), v=+raw;
+    if(raw===""||!isFinite(v)||v<=0){ note("λ: enter 200–3000 nm","warn"); e.target.value=S.nm; return; }
+    const c=Math.min(NM_MAX,Math.max(NM_MIN,v)); if(c!==v){ note(`λ limited to ${NM_MIN}–${NM_MAX} nm → ${c} nm`,"warn"); e.target.value=c; }
+    if(c===S.nm) return; S.nm=c; S.result=null; save(); rerender(); };
   $q(w,"#dreBeam").onchange=e=>{ S.beam=e.target.value; S.result=null; save(); rerender(); };
   $q(w,"#drePU").onchange=e=>{ const f=PU[S.pu]/PU[e.target.value]; S.simRange=S.simRange.map(v=>+(v*f).toPrecision(4)); S.pu=e.target.value; save(); rerender(); };
-  $q(w,"#dreR0").onchange=e=>{ const v=+e.target.value; if(v>0&&v<S.simRange[1]){ S.simRange[0]=v; save(); drawSim(); } };
-  $q(w,"#dreR1").onchange=e=>{ const v=+e.target.value; if(v>S.simRange[0]){ S.simRange[1]=v; save(); drawSim(); } };
-  $q(w,"#dreDown").onchange=e=>{ S.showDown=e.target.checked; save(); drawSim(); };
-  $q(w,"#dreSlope").onchange=e=>{ S.showSlope=e.target.checked; save(); drawSim(); };
+  const rng=(j,e)=>{ const raw=e.target.value.trim(), v=+raw; const ok=raw!==""&&isFinite(v)&&v>0&&(j===0?v<S.simRange[1]:v>S.simRange[0]);
+    if(!ok){ note("Range: enter positive numbers with min < max","warn"); e.target.value=S.simRange[j]; return; }
+    if(S.simRange[1-j]/v>1e8||v/S.simRange[1-j]>1e8){ note("Range: at most 8 decades","warn"); e.target.value=S.simRange[j]; return; }
+    S.simRange[j]=v; save(); drawSim(); };
+  $q(w,"#dreR0").onchange=e=>rng(0,e);
+  $q(w,"#dreR1").onchange=e=>rng(1,e);
+  $q(w,"#dreDown").onchange=e=>{ S.showDown=e.target.checked; save(); paintSim(); };
+  $q(w,"#dreSlope").onchange=e=>{ S.showSlope=e.target.checked; save(); paintSim(); };
   $q(w,"#dreUseFit").onchange=e=>{ S.useFit=e.target.checked; save(); drawSim(); };
   $q(w,"#dreTabs").onclick=e=>{ const b=e.target.closest("button[data-t]"); if(!b) return; S.tab=b.dataset.t; save(); renderPanel(); };
   $q(w,"#dreExport").onchange=e=>{ const v=e.target.value; e.target.value=""; if(v==="csv") exportSimCSV(); else if(v==="json") exportJSON(); else if(v==="import") $q(ROOT,"#dreImp").click(); };
@@ -214,15 +239,27 @@ function rerender(){
   $q(ROOT,"#dreR0").value=S.simRange[0]; $q(ROOT,"#dreR1").value=S.simRange[1]; $q(ROOT,"#drePU2").textContent=S.pu;
   $q(ROOT,"#dreDown").checked=!!S.showDown; $q(ROOT,"#dreSlope").checked=!!S.showSlope;
   const uf=$q(ROOT,"#dreUseFitL"); uf.hidden=!(S.result&&S.result.bestBySample); $q(ROOT,"#dreUseFit").checked=!!S.useFit;
+  rerenderTop();
+  drawSim(); renderPanel(); renderDiag();
+}
+function rerenderTop(){
+  if(!ROOT||!ROOT.isConnected||!MODEL) return;
   const ph=Object.values(S.params).filter(p=>p.placeholder).length;
   $q(ROOT,"#dreModelNote").innerHTML=(MODEL.err?`<div class="note danger">모델 오류: ${esc(MODEL.err)}</div>`:"")+
     (ph?`<div class="note warn">placeholder 값 ${ph}개 — 문헌·측정값으로 바꾸기 전의 곡선은 형태 참고용입니다.</div>`:"")+
-    (S.modelNote&&!ph?`<div class="note">${esc(S.modelNote)}</div>`:"");
-  drawSim(); renderPanel(); renderDiag();
+    (S.modelNote&&!ph?`<div class="note">${esc(S.modelNote)}</div>`:"")+
+    (()=>{ const L=S.template==="ed"&&S.cDefault?S.cDefault.filter(id=>S.samples.every(q=>!q.vars||q.vars["c_"+id]===1)):[]; return L.length?`<div class="note warn" id="dreCDef" title="No concentration in the Energy Diagram formula — set it under Samples &amp; data.">${esc(L.join(", "))}: c defaulted to 1 %</div>`:""; })()+
+    (()=>{ const r=nmRef(); return r&&Math.abs(S.nm-r)>NM_TOL?`<div class="note warn" id="dreNmNote" title="σ values belong to the template wavelength. Changing λ only rescales photon flux φ = I/hν; replace the cross-sections for a different excitation.">Cross-sections are for ${r} nm; only photon flux rescaled.</div>`:""; })();
 }
 function drawSim(){
   const el=$q(ROOT,"#dreChart"); if(!el) return;
-  SIM=simulate(); const msg=$q(ROOT,"#dreSimMsg"), hint=$q(ROOT,"#dreSimHint");
+  SIM=simulate(); paintSim();
+}
+/* 계산 없이 다시 그리기 (창 크기 변경) */
+function paintSim(){
+  const el=$q(ROOT,"#dreChart"); if(!el||!SIM) return;
+  const msg=$q(ROOT,"#dreSimMsg"), hint=$q(ROOT,"#dreSimHint");
+  const cw=el.clientWidth||680;
   if(SIM.err){ el.innerHTML=`<div class="note danger">${esc(SIM.err)}</div>`; $q(ROOT,"#dreSlopeChart").innerHTML=""; return; }
   const f=PU[S.pu], X=SIM.I.map(v=>v/f); const P=palette();
   const series=[];
@@ -237,12 +274,15 @@ function drawSim(){
     const kc=d.k==null?3:d.k;
     series.push({x:d.I.map(v=>v/f),y:d.y.map(v=>v/scale),points:true,line:false,label:`${smp.id} · ${d.label||d.ch}`,color:P.ser[k%6],hollow:d.y.map(v=>!(v>kc*(d.sbg||0)))});
   }));
-  el.innerHTML=chart({id:"s",xlog:true,ylog:true,series,xlabel:`excitation intensity (${S.pu}, ${S.beam==="peak"?"peak":"beam center"})`,ylabel:"Signal (normalized population)",label:"S-curve",w:680,h:360});
+  el.innerHTML=chart({id:"s",xlog:true,ylog:true,series,xlabel:`excitation intensity (${S.pu}, ${S.beam==="peak"?"peak":"beam center"})`,ylabel:"Signal (normalized population)",label:"S-curve",w:680,h:360,fit:true,cw});
   const sl=$q(ROOT,"#dreSlopeChart");
   if(S.showSlope){ const ss=MODEL.channels.map((c,k)=>({x:X,y:D.slopes(SIM.I,SIM.up[k]),label:"d ln y / d ln I — "+c.id,color:P.ser[k%6]}));
-    sl.innerHTML=chart({id:"sl",xlog:true,ylog:false,series:ss,xlabel:`excitation intensity (${S.pu})`,ylabel:"Slope s",label:"Slope",w:680,h:220,legend:false}); } else sl.innerHTML="";
-  const mx=MODEL.channels.map((c,k)=>{ const s=D.slopes(SIM.I,SIM.up[k]); let i=0; s.forEach((v,j)=>{ if(v>s[i]) i=j; }); return `${esc(c.id)}: s<sub>max</sub> ${s[i].toFixed(1)} @ ${sciTxt(X[i],3)} ${S.pu}`; });
-  hint.innerHTML=SIM.hyst?'<span class="badge warn">Hysteresis — up/down branches differ</span>':"";
+    sl.innerHTML=chart({id:"sl",xlog:true,ylog:false,series:ss,xlabel:`excitation intensity (${S.pu})`,ylabel:"Slope s",label:"Slope",w:680,h:220,legend:false,fit:true,cw}); } else sl.innerHTML="";
+  const mx=MODEL.channels.map((c,k)=>{ const s=D.slopes(SIM.I,SIM.up[k]); let i=-1; s.forEach((v,j)=>{ if(isFinite(v)&&(i<0||v>s[i])) i=j; }); return i<0?`${esc(c.id)}: s<sub>max</sub> —`:`${esc(c.id)}: s<sub>max</sub> ${s[i].toFixed(1)} @ ${sciTxt(X[i],3)} ${S.pu}`; });
+  const cv=SIM.conv, far=farOut();
+  hint.innerHTML=(SIM.hyst?'<span class="badge warn">Hysteresis — up/down branches differ</span> ':"")+
+    (cv&&cv.bad?`<span class="badge warn" id="dreConvBadge" title="${esc(`Up: ${cv.upFails} failed · down: ${cv.dnFails} failed${cv.aborted?" — sweep stopped early to keep the tab responsive; uncomputed points are not plotted":""}. Check parameter values (typo / units).`)}">Steady state did not converge at ${cv.bad}/${cv.total} points</span> `:"")+
+    (far.length?`<span class="badge warn" id="dreFarBadge" title="${esc(far.join(", ")+": value is >10³× outside its search range")}">${esc(far.slice(0,2).join(", "))}${far.length>2?" …":""} far outside range</span>`:"");
   msg.innerHTML=`<div class="muted" style="margin-top:4px">${mx.join(" · ")}</div>`;
 }
 function autoScale(d,sim,k){
@@ -263,13 +303,12 @@ function renderPanel(){
 function panelParams(el){
   const use=paramUse();
   const names=Object.keys(S.params).sort((a,b)=>(use[b]?1:0)-(use[a]?1:0));
-  el.innerHTML=`<div class="dre-tw"><table class="dre-tbl"><thead><tr><th>Name</th><th>Value</th><th>Unit</th><th title="Hold fixed in fit">Fixed</th><th title="시료마다 따로 피팅(농도 계열 전역 피팅에서 시료별 비복사 손실 등)">Per sample</th><th>Search range</th></tr></thead><tbody>`+
+  el.innerHTML=`<div class="dre-tw"><table class="dre-tbl dre-ptbl"><thead><tr><th>Name</th><th title="Value; below: search range (lower – upper)">Value · range</th><th>Unit</th><th title="Hold fixed in fit">Fixed</th><th title="시료마다 따로 피팅(농도 계열 전역 피팅에서 시료별 비복사 손실 등)">Per sample</th></tr></thead><tbody>`+
     names.map(n=>{ const p=S.params[n]; const u=use[n];
       return `<tr class="${p.placeholder?"ph":""}"><td><b>${esc(n)}</b>${u?"":' <span class="muted">(unused)</span>'}<div class="muted sm">${esc(p.src||"")}</div></td>
-        <td><input type="text" data-n="${esc(n)}" data-f="v" value="${sciTxt(p.v,5)}" aria-label="${esc(n)} value"></td><td class="muted">${esc(p.unit||"")}</td>
+        <td class="val"><input type="text" data-n="${esc(n)}" data-f="v" value="${sciTxt(p.v,5)}" aria-label="${esc(n)} value"><div class="rng" title="Search range (log-space multi-start box)"><input type="text" data-n="${esc(n)}" data-f="lo" value="${sciTxt(p.lo,3)}" aria-label="${esc(n)} lower bound">–<input type="text" data-n="${esc(n)}" data-f="hi" value="${sciTxt(p.hi,3)}" aria-label="${esc(n)} upper bound"></div></td><td class="muted">${esc(p.unit||"")}</td>
         <td><input type="checkbox" data-n="${esc(n)}" data-f="fixed" ${p.fixed?"checked":""} aria-label="${esc(n)} fixed"></td>
-        <td><input type="checkbox" data-n="${esc(n)}" data-f="per" ${p.per==="sample"?"checked":""} ${p.fixed?"disabled":""} aria-label="${esc(n)} per sample"></td>
-        <td class="rng"><input type="text" data-n="${esc(n)}" data-f="lo" value="${sciTxt(p.lo,3)}" aria-label="${esc(n)} lower bound">–<input type="text" data-n="${esc(n)}" data-f="hi" value="${sciTxt(p.hi,3)}" aria-label="${esc(n)} upper bound"></td></tr>`; }).join("")+
+        <td><input type="checkbox" data-n="${esc(n)}" data-f="per" ${p.per==="sample"?"checked":""} ${p.fixed?"disabled":""} aria-label="${esc(n)} per sample"></td></tr>`; }).join("")+
     `</tbody></table></div><div class="muted" style="margin-top:6px">값을 바꾸면 곡선이 바로 다시 그려집니다. 탐색 범위는 log 공간 multi-start box입니다.</div>`;
   el.querySelectorAll("input[data-n]").forEach(i=>i.onchange=()=>{
     const p=S.params[i.dataset.n]; const f=i.dataset.f;
@@ -327,7 +366,7 @@ function panelData(el){
    <div class="row"><button class="btn sm" id="dreParse">Parse</button><button class="btn sm" id="dreSynth" title="현재 매개변수로 참값을 아는 합성 데이터를 만든다 — 검증용">Generate synthetic data</button></div>
    <div id="dreMap"></div>`;
   el.querySelectorAll(".dre-sid").forEach(i=>i.onchange=()=>{ const v=i.value.trim(); if(v&&!S.samples.some((s,k)=>s.id===v&&k!==+i.dataset.si)){ S.samples[+i.dataset.si].id=v; save(); } else i.value=S.samples[+i.dataset.si].id; });
-  el.querySelectorAll("input[data-var]").forEach(i=>i.onchange=()=>{ const s=S.samples[+i.dataset.si]; s.vars=s.vars||{}; s.vars[i.dataset.var]=+i.value; S.result=null; save(); drawSim(); });
+  el.querySelectorAll("input[data-var]").forEach(i=>i.onchange=()=>{ const s=S.samples[+i.dataset.si]; s.vars=s.vars||{}; s.vars[i.dataset.var]=+i.value; S.result=null; save(); rerenderTop(); drawSim(); });
   el.querySelectorAll("button[data-cal]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.cal.split("|").map(Number); calUI(el,si,di); const m=$q(el,"#dreMap"); if(m&&m.scrollIntoView) m.scrollIntoView({block:"nearest"}); });
   el.querySelectorAll("button[data-fix]").forEach(b=>b.onclick=()=>{ const [si,di,act]=b.dataset.fix.split("|"); fixData(el,+si,+di,act); });
   el.querySelectorAll("button[data-del]").forEach(b=>b.onclick=()=>{ const [si,di]=b.dataset.del.split("|").map(Number); S.samples[si].data.splice(di,1); S.result=null; save(); rerender(); });
@@ -910,6 +949,11 @@ function adequacyHTML(A,src){
 }
 function renderDiag(){
   const el=$q(ROOT,"#dreDiag"); if(!el) return;
+  const wasHidden=el.hidden; el.hidden=false; const cw=Math.max(0,(el.clientWidth||0)-24); el.hidden=wasHidden;
+  CHART_CW=window.innerWidth>900?0:cw;   /* 넓은 화면은 원래 크기 그대로 */
+  try{ renderDiag0(el); } finally { CHART_CW=0; }
+}
+function renderDiag0(el){
   const R=S.result;
   if(!R){ if(S.adeqNow){ el.hidden=false; el.innerHTML=`<h3>Model adequacy <span class="hint">at current parameter values · before fit</span></h3>${adequacyHTML(S.adeqNow,"current parameters")}`; } else el.hidden=true; return; }
   el.hidden=false;
@@ -1067,6 +1111,7 @@ function exportSimCSV(){
 function exportJSON(){ download("DRE_model.json",new Blob([JSON.stringify(S,null,1)],{type:"application/json"})); }
 function importJSON(f){ const r=new FileReader(); r.onload=()=>{ try{ const o=JSON.parse(r.result); if(!o.spec||!o.params) throw new Error("형식이 다릅니다"); D.compile(o.spec); S=Object.assign(defState(),o); save(); rerender(); note("불러왔습니다"); }catch(e){ note("불러오기 실패: "+e.message,"warn"); } }; r.readAsText(f); }
 
-window.addEventListener("resize",()=>{ clearTimeout(window._dreRz); window._dreRz=setTimeout(()=>{ if(ROOT&&ROOT.isConnected) drawSim(); },200); });
+let LASTW=0;
+window.addEventListener("resize",()=>{ clearTimeout(window._dreRz); window._dreRz=setTimeout(()=>{ if(!(ROOT&&ROOT.isConnected)) return; const el=$q(ROOT,"#dreChart"); const w=el?el.clientWidth:0; if(w===LASTW) return; LASTW=w; paintSim(); renderDiag(); },200); });
 window.DRE_UI={render,rerender,_state:()=>S,_model:()=>MODEL,_sim:()=>SIM,_setState:o=>{ S=Object.assign(defState(),o); save(); rerender(); }};
 })();

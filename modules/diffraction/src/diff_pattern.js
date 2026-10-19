@@ -349,6 +349,26 @@ const ellR=(el,r,th)=>{ const k=el.a/el.b; const c=Math.cos(th-el.phi), s=Math.s
 DP.ringPointsEll=function(img,w,h,el,r,win,opt){ opt=opt||{}; const nRay=opt.nRay||360; const out=[]; const f=win/r;
   for(let k=0;k<nRay;k++){ const th=2*Math.PI*k/nRay; const rho=ellR(el,r,th); const P=DP.ringPoints(img,w,h,{x:el.cx,y:el.cy},Math.max(1,rho*(1-f)),rho*(1+f),{mask:opt.mask,nRay:1,th0:th}); if(P.length) out.push(P[0]); }
   return out; };
+/* 링(타원 el, 단축 r) 위 광선 중 이미지 안(가장자리 3 px 안쪽)이고 가리지 않은 것의 수 — 중심이 치우쳐 가장자리에 잘린 링은 360 개 중 일부만 보인다 */
+DP.raysInside=function(w,h,el,r,opt){ opt=opt||{}; const nRay=opt.nRay||360, M=opt.mask; let n=0;
+  for(let k=0;k<nRay;k++){ const th=2*Math.PI*k/nRay; const rho=ellR(el,r,th); const x=Math.round(el.cx+rho*Math.cos(th)), y=Math.round(el.cy+rho*Math.sin(th)); if(x<3||y<3||x>=w-3||y>=h-3) continue; if(M&&M[y*w+x]) continue; n++; }
+  return n; };
+/* 회절도다움 (교정 정보 없는 8-bit 표시 사본 등에서 FFT/SAED 고르기): 줄인 영상(≤ 160)의 순위값을 어떤 점 둘레 방위 평균으로 설명하는 비율 R² 의 최댓값,
+   그 점에서 안쪽(반지름 5–15 %)이 바깥(30–45 %)보다 밝은지. 회절도(링·확산 배경·직접빔 번짐)는 R² ≥ 0.1, HRTEM·잡음은 ≈ 0 */
+DP.saedLikeness=function(data,w,h){ if(!data||!(w>8)||!(h>8)) return null; const f=Math.max(1,Math.ceil(Math.max(w,h)/160)); const W=Math.floor(w/f), H=Math.floor(h/f); const n=W*H; const a=new Float32Array(n);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ let s=0; for(let j=0;j<f;j++){ const o=(y*f+j)*w+x*f; for(let i=0;i<f;i++){ const v=data[o+i]; s+=v===v?v:0; } } a[y*W+x]=s/(f*f); }
+  const idx=new Uint32Array(n); for(let i=0;i<n;i++) idx[i]=i; const srt=Array.from(idx).sort((p,q)=>a[p]-a[q]); const rk=new Float32Array(n); for(let i=0;i<n;){ let j=i; while(j+1<n&&a[srt[j+1]]===a[srt[i]]) j++; const v=(i+j)/2/(n-1); for(let k=i;k<=j;k++) rk[srt[k]]=v; i=j+1; } // 순위값(같은 값은 평균 순위) — 선형·로그 표시와 무관
+  let mean=0; for(let i=0;i<n;i++) mean+=rk[i]; mean/=n; let tot=0; for(let i=0;i<n;i++) tot+=(rk[i]-mean)**2; if(!(tot>0)) return {r2:0,decay:false,cx:w/2,cy:h/2};
+  const R=Math.ceil(Math.hypot(W,H))+1; const S=new Float64Array(R), N=new Float64Array(R);
+  const score=(cx,cy)=>{ S.fill(0); N.fill(0); for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const b=Math.round(Math.hypot(x-cx,y-cy)); S[b]+=rk[y*W+x]; N[b]++; }
+    let res=0; for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const b=Math.round(Math.hypot(x-cx,y-cy)); res+=(rk[y*W+x]-S[b]/N[b])**2; }
+    const D=Math.max(W,H); let iA=0,nA=0,oA=0,nO=0; for(let b=0;b<R;b++){ if(!N[b]) continue; const t=b/D; if(t>=0.05&&t<=0.15){ iA+=S[b]; nA+=N[b]; } else if(t>=0.3&&t<=0.45){ oA+=S[b]; nO+=N[b]; } }
+    return {r2:1-res/tot,decay:nA>0&&nO>0?iA/nA-oA/nO:0}; };
+  // 후보 중심: 가장 밝은 5×5 평균 자리 + 7×7 격자 (중심이 치우친 패턴)
+  let bx=W/2, by=H/2, bs=-Infinity; for(let y=2;y<H-2;y++) for(let x=2;x<W-2;x++){ let s=0; for(let j=-2;j<=2;j++) for(let i=-2;i<=2;i++) s+=a[(y+j)*W+x+i]; if(s>bs){ bs=s; bx=x; by=y; } }
+  const C=[[bx,by]]; for(let j=1;j<=7;j++) for(let i=1;i<=7;i++) C.push([W*i/8,H*j/8]);
+  let best=null; for(const [cx,cy] of C){ const q=score(cx,cy); if(!best||q.r2>best.r2) best=Object.assign(q,{cx:cx*f+(f-1)/2,cy:cy*f+(f-1)/2}); }
+  best.decay=best.decay>0.05; return best; };
 /* 튀는 점을 빼며 타원 맞춤: 타원에서의 반지름 차가 3 MAD(최소 0.5 px) 넘는 점 제거, 3 번 */
 DP.fitEllipseRobust=function(pts){ let P=pts, e=null; for(let it=0;it<4;it++){ if(P.length<6) return e; const f=DP.fitEllipse(P); if(!f) return e; e=Object.assign({n:P.length},f);
     const el={cx:f.cx,cy:f.cy,a:f.a/f.b,b:1,phi:f.phi}; const d=P.map(q=>{ const th=Math.atan2(q.y-f.cy,q.x-f.cx); return Math.hypot(q.x-f.cx,q.y-f.cy)-ellR(el,f.b,th); });
@@ -374,7 +394,7 @@ DP.analyzeRings=function(img,w,h,opt){ opt=opt||{}; const mask=opt.mask; const i
   // ② 센 링 4 개를 지금 타원 모양을 따라 좁은 창(±3 FWHM, ±3 %)으로 → 링마다 맞춤 → 점이 넉넉하고(≥ 50 %) 중심이 다른 링과 맞는 것만 평균 (반복 3 번)
   for(let it=0;it<(opt.iters||3);it++){ if(!pk.length) break;
     const strong=pk.filter(p=>!p.broad&&p.r>=rMinFit).sort((p,q)=>q.snr*Math.sqrt(q.r)-p.snr*Math.sqrt(p.r)).slice(0,opt.nRings||4); if(!strong.length) break; fits.length=0;
-    for(const p of strong){ const pts=DP.ringPointsEll(img,w,h,el,p.r,Math.max(3*p.fwhm,0.03*p.r),{mask,nRay}); const e=DP.fitEllipseRobust(pts); if(e) fits.push(Object.assign({r:p.r},e)); }
+    for(const p of strong){ const pts=DP.ringPointsEll(img,w,h,el,p.r,Math.max(3*p.fwhm,0.03*p.r),{mask,nRay}); const e=DP.fitEllipseRobust(pts); if(e) fits.push(Object.assign({r:p.r,nIn:DP.raysInside(w,h,el,p.r,{mask,nRay})},e)); }
     let good=fits.filter(f=>f.n>=0.5*nRay); if(!good.length) good=fits.slice().sort((a,b)=>b.n-a.n).slice(0,1); if(!good.length) break;
     const mx=good.map(f=>f.cx).sort((a,b)=>a-b)[good.length>>1], my=good.map(f=>f.cy).sort((a,b)=>a-b)[good.length>>1]; const near=good.filter(f=>Math.hypot(f.cx-mx,f.cy-my)<=3); if(near.length) good=near;
     let W=0,cx=0,cy=0,e2c=0,e2s=0; for(const f of good){ const wgt=f.n; W+=wgt; cx+=wgt*f.cx; cy+=wgt*f.cy; const ecc=f.a/f.b-1; e2c+=wgt*ecc*Math.cos(2*f.phi); e2s+=wgt*ecc*Math.sin(2*f.phi); }

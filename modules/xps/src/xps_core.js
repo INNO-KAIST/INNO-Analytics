@@ -410,6 +410,11 @@ function rng(seed){ let a=(seed>>>0)||1; const u=()=>{ a|=0; a=a+0x6D2B79F5|0; l
    7) 피팅 (SPEC §3)
    ============================================================ */
 /* SPEC 3.1: v = max(ŷ, v_min)/c, v_min = max(1/c, 1e-6·max ŷ) */
+/* 일정 가중(배경을 뺀 자료 등 세기가 0·음수 근처라 Poisson 분산 모형이 맞지 않을 때): v_i = 상수(2차 차분 잡음의 중앙값 추정).
+   절대 척도는 어차피 φ = χ²/(N−p) 로 다시 정해진다 (SPEC §3.1). */
+function constVar(y){ const n=y.length, q=[]; for(let i=1;i<n-1;i++){ const d=y[i]-(y[i-1]+y[i+1])/2; q.push(d*d/1.5); } q.sort((a,b)=>a-b);
+  let v=q.length?q[Math.floor(q.length/2)]/0.4549:1; if(!(v>0)){ let m=0; for(const t of y) m=Math.max(m,Math.abs(t)); v=Math.max(1e-12,(1e-3*m)**2); } return Float64Array.from(y,()=>v); }
+function dataVar(prob,ys){ return prob.weight==="const"?constVar(prob.y):varianceFrom(ys,prob.c); }
 function varianceFrom(yhat,c){ const cc=c>0?c:1; let m=0; for(const t of yhat) if(t>m) m=t; const vmin=Math.max(1/cc,1e-6*m); return Float64Array.from(yhat,v=>Math.max(v,vmin)/cc); }
 /* 넓이 초기값: 비선형 매개변수 고정, 가중 NNLS */
 function initAreas(prob,map,v){
@@ -493,10 +498,10 @@ function fitOnce(prob,opt){
   let map=buildMap(prob); applyLinks(prob,map);
   const E=prob.E, y=prob.y; let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const ys=smoothQ(E,y,smoothHW(E));
-  let v=varianceFrom(ys,prob.c);
+  let v=dataVar(prob,ys);
   if(opt.initAreas!==false){ initAreas(prob,map,v); if(prob.bg.type==="active"){ map=buildMap(prob); applyLinks(prob,map); } }   // k 상한 반영
   let r=lmFit(prob,map,v,opt); const chi2p1=r.chi2;
-  if(opt.irls!==false){ v=varianceFrom(r.mu,prob.c); r=lmFit(prob,map,v,opt); }
+  if(opt.irls!==false&&prob.weight!=="const"){ v=varianceFrom(r.mu,prob.c); r=lmFit(prob,map,v,opt); }
   r.v=v; r.map=map; r.chi2p1=chi2p1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
   return r;
 }
@@ -576,7 +581,7 @@ function fitStats(prob,res){
   const dof=Math.max(1,n-p);
   // 모형 비교용 χ²_d: 데이터만으로 정한 분산(평활 데이터) — 모형마다 같은 가중 (SPEC 3.5 v1.1)
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
-  const vd=varianceFrom(smoothQ(prob.E,y,smoothHW(prob.E)),prob.c); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
+  const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
   const AICc=n*Math.log(chi2d/n)+2*p+(n-p-1>0?2*p*(p+1)/(n-p-1):Infinity), BIC=n*Math.log(chi2d/n)+p*Math.log(n);
   return {N:n,p,dof,chi2,chi2d,chi2nu:chi2/dof,R2:ss>0?1-sr/ss:null,rmsNorm:Math.sqrt(chi2/n),DW:a0>0?dw/a0:null,rho1,ar1Inflate:rho1>0?Math.sqrt((1+rho1)/(1-Math.min(rho1,0.95))):1,runs,runsZ:zR,AICc,BIC,resid:r};
 }
@@ -610,7 +615,8 @@ function compSummary(prob,res,cov){
     const q=p0.slice(); q[j]=p0[j]+h; setVec(prob,map,q); const up=quantities(prob); q[j]=p0[j]-h; setVec(prob,map,q); const dn=quantities(prob); setVec(prob,map,p0);
     base.forEach((b,i)=>keys.forEach(k=>{ if(b[k]==null||up[i][k]==null||dn[i][k]==null) return; (grads[i][k]=grads[i][k]||new Float64Array(np))[j]=(up[i][k]-dn[i][k])/(2*h); }));
   }
-  base.forEach((b,i)=>{ b.sig={}; keys.forEach(k=>{ const g=grads[i][k]; if(!g){ if(b[k]!=null) b.sig[k]=0; return; } let s=0; for(let a=0;a<np;a++){ if(!g[a]) continue; for(let c=0;c<np;c++){ if(!g[c]) continue; const v=cov.C[a*np+c]; if(isFinite(v)) s+=g[a]*v*g[c]; } } b.sig[k]=Math.sqrt(Math.max(0,s)); }); });
+  // 어떤 자유 매개변수에도 의존하지 않는 값(고정·고정에 연결)은 σ = null (화면 '—')
+  base.forEach((b,i)=>{ b.sig={}; keys.forEach(k=>{ const g=grads[i][k]; if(!g||!g.some(x=>x!==0)){ if(b[k]!=null) b.sig[k]=null; return; } let s=0; for(let a=0;a<np;a++){ if(!g[a]) continue; for(let c=0;c<np;c++){ if(!g[c]) continue; const v=cov.C[a*np+c]; if(isFinite(v)) s+=g[a]*v*g[c]; } } b.sig[k]=Math.sqrt(Math.max(0,s)); }); });
   return base;
 }
 
@@ -670,14 +676,26 @@ function imfpValue(o,KE){
   return 1;
 }
 /* rows=[{label, el, area, sArea(σ), S, BE, hv, PE, tf}], opts={imfp} */
+/* 넓이 ≤ 0 이거나 2σ 미만(σ 를 알 때)이면 '검출 안 됨'(nd): at% 를 내지 않고 Σ 에서 뺀다 — 음의 넓이가 다른 원소의 at% 를 부풀리지 않게 (SPEC §4) */
 function quantify(rows,opts){
   opts=opts||{};
-  const out=rows.map(r=>{ const KE=r.hv-r.BE; const T=tfValue(r.tf,KE,r.PE); const L=imfpValue(opts.imfp,KE); const den=r.S*T*L; return Object.assign({},r,{KE,T,L,den,nrm:r.area/den,sNrm:r.sArea!=null?r.sArea/den:null}); });
-  const tot=out.reduce((s,r)=>s+(isFinite(r.nrm)?r.nrm:0),0);
-  out.forEach((r,i)=>{ r.at=100*r.nrm/tot;
+  const out=rows.map(r=>{ const KE=r.hv-r.BE; const T=tfValue(r.tf,KE,r.PE); const L=imfpValue(opts.imfp,KE); const den=r.S*T*L;
+    const nd=!(r.area>0)||(r.sArea!=null&&r.sArea>0&&r.area<2*r.sArea);
+    return Object.assign({},r,{KE,T,L,den,nrm:r.area/den,sNrm:r.sArea!=null?r.sArea/den:null,nd}); });
+  const use=r=>!r.nd&&isFinite(r.nrm);
+  const tot=out.reduce((s,r)=>s+(use(r)?r.nrm:0),0);
+  out.forEach((r,i)=>{ if(!use(r)||!(tot>0)){ r.at=null; r.sAt=null; return; } r.at=100*r.nrm/tot;
     // 델타: ∂at_i/∂n_j = 100(δij·tot − n_i)/tot²
-    let v=0; out.forEach((q,j)=>{ if(q.sNrm==null) return; const g=100*((i===j?tot:0)-r.nrm)/(tot*tot); v+=g*g*q.sNrm*q.sNrm; }); r.sAt=Math.sqrt(v); });
+    let v=0; out.forEach((q,j)=>{ if(!use(q)||q.sNrm==null) return; const g=100*((i===j?tot:0)-r.nrm)/(tot*tot); v+=g*g*q.sNrm*q.sNrm; }); r.sAt=Math.sqrt(v); });
   return out;
+}
+/* 템플릿·모형을 BE 축에서 d 만큼 옮김(성분 BE + 'free' BE 한계). link 의 b(간격)는 상대값이라 그대로. 원본은 건드리지 않고 복사본을 돌려준다.
+   저장(+Δ: 측정 → 보정 BE) 뒤 불러오기(−Δ)는 어떤 Δ 에서도 항등이어야 한다. */
+function shiftModelBE(comps,cons,d){
+  const cs=clone(comps||[]), ks=clone(cons||{}); d=+d||0;
+  cs.forEach(c=>{ c.be+=d; });
+  Object.values(ks).forEach(o=>{ const b=o&&o.be; if(b&&b.mode!=="link"){ if(b.lo!=null&&isFinite(b.lo)) b.lo+=d; if(b.hi!=null&&isFinite(b.hi)) b.hi+=d; } });
+  return {comps:cs,cons:ks};
 }
 
 /* ============================================================
@@ -1052,7 +1070,7 @@ function sensJob(spec,model,variants){
     try{
       // 지금 창 안에 있던 성분 중심이 변형 창에서 잘려 나가면 건너뜀(창 밖에 있던 성분 — 꼬리·가장자리 — 은 사용자 모형 그대로 둔다)
       if(model.comps.some(c=>c.be>=model.lo&&c.be<=model.hi&&(c.be<v.lo||c.be>v.hi))) return {i,ok:false,err:"성분 중심이 창 밖으로 잘림"};
-      const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons});
+      const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons,weight:model.weight});
       const r=fitOnce(P,{}); const st=fitStats(P,r); const tot=P.comps.reduce((s,c)=>s+c.area,0);
       return {i,ok:true,conv:r.conv,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
     }catch(e){ return {i,ok:false,err:String(e&&e.message||e)}; }
@@ -1085,7 +1103,7 @@ function sensSummary(variants,res){
 function sliceRegion(be,y,lo,hi){ const i0=be.findIndex(e=>e>=lo); let i1=-1; for(let i=be.length-1;i>=0;i--) if(be[i]<=hi){ i1=i; break; } if(i0<0||i1<i0) return null; return {E:be.slice(i0,i1+1),y:y.slice(i0,i1+1),i0,i1}; }
 function makeProblem(spec,st){
   const r=sliceRegion(spec.be,spec.y,st.lo,st.hi); if(!r||r.E.length<8) throw new Error("영역 안 데이터 점이 8개 미만입니다");
-  return {E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0};
+  return {E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":"poisson"};
 }
 function newComp(shape,be,o){
   o=o||{}; const c={id:o.id||("c"+Math.random().toString(36).slice(2,8)),name:o.name||"",shape,be,area:o.area||1,el:o.el||"",line:o.line||"",doublet:null,color:o.color||null};
@@ -1130,7 +1148,7 @@ function fitJob(prob,starts,opt){
   let best=null; const chis=[];
   (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,iter:best.r.iter};   // chi2 = 1차 χ² (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){
@@ -1149,6 +1167,6 @@ const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
+  tfValue,tpp2m,imfpValue,quantify,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);

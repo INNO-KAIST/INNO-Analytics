@@ -222,6 +222,8 @@ function setup(root){ const row=root.querySelector("#ifRun"); if(!row) return; c
     <label class="f">Accel. voltage [kV]<input type="number" id="ifKV" class="mono" style="width:80px" value="${P.ifKV||200}" min="30" max="300" step="10"></label>`;
   row.closest(".row").after(d); }
 function after(){ const out=document.getElementById("ifOut"); if(!out) return; const o=readOpts();
+  /* 본 앱 run() 이 입력을 거절했으면(FWHM 0·빈칸, 상한 ≤ 0) 그 알림을 그대로 둔다 */
+  if(out.querySelector("#ifBad")) return;
   const old=[...out.childNodes]; out.innerHTML="";
   if(!o.els.length){ old.forEach(n=>out.appendChild(n)); return; }
   let R=null; try{ R=compute(o); }catch(e){ console.error(e); }
@@ -229,7 +231,7 @@ function after(){ const out=document.getElementById("ifOut"); if(!out) return; c
     const b=document.getElementById("ifSugCsv"); if(b) b.onclick=()=>{ const rows=[["element","line","family","E_keV","rel_err","purity","S","B_int","B_bg","top_interferer","alt_line","alt_rel_err","mode"]];
       R.out.forEach(q=>{ const c=q.best; if(!c) return; rows.push([q.el,c.line.nm,c.line.fam,c.line.e,c.err.toFixed(4),c.purity.toFixed(4),c.S.toFixed(1),c.Bint.toFixed(1),c.Bbg.toFixed(1),c.top&&c.top.line?c.top.line.el+" "+c.top.line.nm:"",q.alt?q.alt.line.nm:"",q.alt?q.alt.err.toFixed(4):"",R.mode]); });
       downloadText(rows.map(r=>r.join(",")).join("\n"),"eds_line_recommendation.csv","text/csv"); }; }
-  if(o.els.length<2) return;             /* 원소 하나면 겹침 목록이 없다 */
+  if(o.els.length<2){ out.insertAdjacentHTML("beforeend",'<div class="muted" id="ifNeed2" style="margin:6px 2px">Overlaps need ≥ 2 elements.</div>'); return; }   /* 원소 하나면 겹침 목록이 없다 */
   const det=document.createElement("details"); det.className="card if-all";
   const h3=old.map(n=>n.querySelector&&n.querySelector("h3")).find(Boolean); const m=h3&&h3.textContent.match(/(?:겹침\s*(\d+)건|Overlaps\s*\((\d+)\))/);
   det.innerHTML=`<summary style="cursor:pointer;font-weight:600">All overlaps ${m?`(${m[1]||m[2]})`:"(none)"} <span class="muted" style="font-weight:400">— 모든 라인쌍의 ΔE/FWHM 판정</span></summary>`;

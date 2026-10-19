@@ -184,3 +184,4 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 .imx .pa-k.ovl{border-color:#ff8c3c;border-style:dashed}
 .imx .pa-k.out{border-color:#ff4fd8;border-style:dashed}
 .imx .pa-k.pick{border-color:#e6bf00;background:rgba(255,220,0,.5)}
+.imx .more{opacity:.55}

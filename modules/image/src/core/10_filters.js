@@ -145,24 +145,49 @@ function padded(p,kR){ // (w+2kR)×(h+2kR), 가장자리 복제
     for(let x=0;x<PW;x++){ const sx=Math.min(W-1,Math.max(0,x-kR)); out[o+x]=d[so+sx]; } }
   return {d:out,PW,PH};
 }
-/* van Herk / Gil-Werman 1D 이동 최소·최대 (창 반폭 r) — 길이 n 의 a 를 out 에 */
-function slideMinMax(a,off,n,r,out,isMax){
-  const w=2*r+1; if(r===0){ for(let i=0;i<n;i++) out[i]=a[off+i]; return; }
-  const g=new Float32Array(n), hh=new Float32Array(n);
-  for(let i=0;i<n;i++){ const v=a[off+i]; if(i%w===0) g[i]=v; else g[i]=isMax?Math.max(g[i-1],v):Math.min(g[i-1],v); }
-  for(let i=n-1;i>=0;i--){ const v=a[off+i]; if(i===n-1||(i+1)%w===0) hh[i]=v; else hh[i]=isMax?Math.max(hh[i+1],v):Math.min(hh[i+1],v); }
-  for(let i=r;i<n-r;i++){ const a1=hh[i-r], b1=g[i+r]; out[i]=isMax?(a1>b1?a1:b1):(a1<b1?a1:b1); }
+/* 1D 이동 최댓값·최솟값 (van Herk / Gil-Werman): dst[do+x] = max|min(a[off+x .. off+x+2d]), x<n. g·h 는 길이 ≥ n+2d 작업 버퍼 */
+function slideMax(a,off,n,d,dst,dOff,g,h){
+  if(d===0){ for(let x=0;x<n;x++) dst[dOff+x]=a[off+x]; return; }
+  const w=2*d+1, L=n+2*d;
+  for(let s=0;s<L;s+=w){ const e=s+w<L?s+w:L;
+    let m=a[off+s]; g[s]=m; for(let i=s+1;i<e;i++){ const v=a[off+i]; if(v>m) m=v; g[i]=m; }
+    m=a[off+e-1]; h[e-1]=m; for(let i=e-2;i>=s;i--){ const v=a[off+i]; if(v>m) m=v; h[i]=m; } }
+  for(let x=0,j=2*d;x<n;x++,j++){ const u=h[x], v=g[j]; dst[dOff+x]=u>v?u:v; }
 }
+function slideMin(a,off,n,d,dst,dOff,g,h){
+  if(d===0){ for(let x=0;x<n;x++) dst[dOff+x]=a[off+x]; return; }
+  const w=2*d+1, L=n+2*d;
+  for(let s=0;s<L;s+=w){ const e=s+w<L?s+w:L;
+    let m=a[off+s]; g[s]=m; for(let i=s+1;i<e;i++){ const v=a[off+i]; if(v<m) m=v; g[i]=m; }
+    m=a[off+e-1]; h[e-1]=m; for(let i=e-2;i>=s;i--){ const v=a[off+i]; if(v<m) m=v; h[i]=m; } }
+  for(let x=0,j=2*d;x<n;x++,j++){ const u=h[x], v=g[j]; dst[dOff+x]=u<v?u:v; }
+}
+/* 원형 커널 최댓값·최솟값 (ImageJ RankFilters 처럼 커널 = 줄 조각들).
+   패딩한 줄마다, 커널에 나오는 서로 다른 반폭 d 각각의 1D 이동 극값을 한 번만 구해 (2kR+1) 줄 고리 버퍼에 두고
+   출력 줄마다 (2kR+1) 개를 합친다 → 화소당 O(커널 줄 수), 옛 구현(출력 줄마다 모든 커널 줄을 다시 계산)의 결과와 같다 */
+IC._rankRingLimit=1<<25; // 고리 버퍼 최대 칸 수 (Float32) — 시험에서 0 으로 두면 버퍼 없는 경로
 function rankMinMax(p,radius,isMax){
   const {kR,dx}=IC.lineRadii(radius); const P=padded(p,kR);
-  { const d=P.d, fill=isMax?-Infinity:Infinity; for(let i=0;i<d.length;i++) if(d[i]!==d[i]) d[i]=fill; } /* NaN → 비교에서 빠지게 */ const W=p.w,H=p.h,PW=P.PW;
-  const out=new Float32Array(W*H); const tmp=new Float32Array(PW); const acc=new Float32Array(W);
-  for(let y=0;y<H;y++){
-    acc.fill(isMax?-Infinity:Infinity);
-    for(let k=-kR;k<=kR;k++){ const r=dx[k+kR]; slideMinMax(P.d,(y+kR+k)*PW,PW,r,tmp,isMax);
-      for(let x=0;x<W;x++){ const v=tmp[x+kR]; if(isMax?v>acc[x]:v<acc[x]) acc[x]=v; } }
-    out.set(acc,y*W);
-    if((y&63)===0) IC.progress(y/H);
+  { const d=P.d, fill=isMax?-Infinity:Infinity; for(let i=0;i<d.length;i++) if(d[i]!==d[i]) d[i]=fill; } /* NaN → 비교에서 빠지게 */
+  const W=p.w,H=p.h,PW=P.PW,KH=2*kR+1, pd=P.d, slide=isMax?slideMax:slideMin;
+  const ds=Array.from(new Set(dx)).sort((a,b)=>a-b), nd=ds.length, di=new Int32Array(KH); for(let k=0;k<KH;k++) di[k]=ds.indexOf(dx[k]);
+  const g=new Float32Array(PW), h=new Float32Array(PW), out=new Float32Array(W*H);
+  if(KH*nd*W<=IC._rankRingLimit){ // 고리 버퍼: 칸 s = 패딩 줄 py (py ≡ s mod KH) 의 반폭별 이동 극값
+    const R=new Float32Array(KH*nd*W);
+    const fill=py=>{ const slot=py%KH, src=py*PW; for(let j=0;j<nd;j++){ const d=ds[j]; slide(pd,src+kR-d,W,d,R,(slot*nd+j)*W,g,h); } };
+    for(let py=0;py<KH-1;py++) fill(py);
+    for(let y=0;y<H;y++){ fill(y+KH-1); const o=y*W;
+      { const s0=(((y+kR)%KH)*nd+di[kR])*W; for(let x=0;x<W;x++) out[o+x]=R[s0+x]; } // 가운데 줄
+      for(let k=0;k<kR;k++){ const s1=(((y+k)%KH)*nd+di[k])*W, s2=(((y+KH-1-k)%KH)*nd+di[KH-1-k])*W; // 위·아래 짝 줄 (같은 반폭)
+        if(isMax){ for(let x=0;x<W;x++){ const a=R[s1+x], b=R[s2+x], c=out[o+x], m=a>b?a:b; out[o+x]=m>c?m:c; } }
+        else { for(let x=0;x<W;x++){ const a=R[s1+x], b=R[s2+x], c=out[o+x], m=a<b?a:b; out[o+x]=m<c?m:c; } } }
+      if((y&63)===0) IC.progress(y/H); }
+  } else { // 아주 큰 커널: 버퍼 없이 출력 줄마다 계산
+    const tmp=new Float32Array(W);
+    for(let y=0;y<H;y++){ const o=y*W;
+      for(let k=0;k<KH;k++){ const d=dx[k]; slide(pd,(y+k)*PW+kR-d,W,d,k?tmp:out,k?0:o,g,h);
+        if(k){ if(isMax){ for(let x=0;x<W;x++) if(tmp[x]>out[o+x]) out[o+x]=tmp[x]; } else { for(let x=0;x<W;x++) if(tmp[x]<out[o+x]) out[o+x]=tmp[x]; } } }
+      if((y&15)===0) IC.progress(y/H); }
   }
   return out;
 }
@@ -183,28 +208,120 @@ function rankSums(p,radius){ // 평균·분산용 합 (double). 비유한값(NaN
   return {S1,S2,n};
 }
 function quickSelect(a,k,n){ let l=0,r=n-1; while(l<r){ const piv=a[(l+r)>>1]; let i=l,j=r; while(i<=j){ while(a[i]<piv) i++; while(a[j]>piv) j--; if(i<=j){ const t=a[i]; a[i]=a[j]; a[j]=t; i++; j--; } } if(j<k) l=i; if(k<i) r=j; } return a[k]; }
+function quickSelectI(a,k,n){ let l=0,r=n-1; while(l<r){ const piv=a[(l+r)>>1]; let i=l,j=r; while(i<=j){ while(a[i]<piv) i++; while(a[j]>piv) j--; if(i<=j){ const t=a[i]; a[i]=a[j]; a[j]=t; i++; j--; } } if(j<k) l=i; if(k<i) r=j; } return a[k]; }
+/* 값 → 조밀한 순위 (같은 값 = 같은 순위, ±∞ 포함, NaN = −1, −0 = +0). 반환 {rk, U, vals(순위→값)}.
+   float32 비트를 정렬 가능한 정수 열쇠로 바꿔 기수 정렬(11 비트 × 3) — Float64 정렬 + 이진 탐색보다 빠르다 */
+function denseRanks(d){
+  const N=d.length, f32=new Float32Array(1), u32=new Uint32Array(f32.buffer);
+  let ia=new Uint32Array(N), ib=new Uint32Array(N), ka=new Uint32Array(N), kb=new Uint32Array(N); const cnt=new Int32Array(2048); let nn=0;
+  for(let i=0;i<N;i++){ ia[i]=i; let v=d[i]; if(v!==v){ ka[i]=0xFFFFFFFF; continue; } if(v===0) v=0; f32[0]=v; const u=u32[0]; ka[i]=(u&0x80000000)?(~u>>>0):(u|0x80000000)>>>0; nn++; }
+  for(let sh=0;sh<33;sh+=11){ cnt.fill(0); for(let i=0;i<N;i++) cnt[(ka[i]>>>sh)&2047]++;
+    let s=0; for(let k=0;k<2048;k++){ const c=cnt[k]; cnt[k]=s; s+=c; }
+    for(let i=0;i<N;i++){ const kk=ka[i], j=cnt[(kk>>>sh)&2047]++; kb[j]=kk; ib[j]=ia[i]; }
+    let t=ia; ia=ib; ib=t; t=ka; ka=kb; kb=t; }
+  const rk=new Int32Array(N), vals=new Float32Array(Math.max(1,nn)); let U=0, prev=-1;
+  for(let j=0;j<N;j++){ const kk=ka[j], i=ia[j]; if(kk===0xFFFFFFFF&&d[i]!==d[i]){ rk[i]=-1; continue; }
+    if(U===0||kk!==prev){ let v=d[i]; if(v===0) v=0; vals[U++]=v; prev=kk; } rk[i]=U-1; }
+  return {rk,U,vals:vals.subarray(0,U)};
+}
+/* 3×3 중앙값 (반지름 1, Despeckle): 줄마다 세로 세 값을 한 번 정렬(lo·mid·hi)해 세 열이 함께 쓰고,
+   중앙값 = med3(max lo, med3 mid, min hi) — 9 개의 참 중앙값. NaN 이 든 창만 medianAt (ImageJ 규칙) */
+function median3x3(p,P,out){
+  const W=p.w,H=p.h,PW=P.PW,d=P.d, lo=new Float32Array(PW), mi=new Float32Array(PW), hi=new Float32Array(PW);
+  for(let y=0;y<H;y++){ const a0=y*PW, a1=a0+PW, a2=a1+PW, o=y*W;
+    for(let x=0;x<PW;x++){ const a=d[a0+x], b=d[a1+x], c=d[a2+x]; const l1=a<b?a:b, h1=a<b?b:a; lo[x]=l1<c?l1:c; const h2=l1<c?c:l1; mi[x]=h1<h2?h1:h2; hi[x]=h1<h2?h2:h1; }
+    for(let x=0;x<W;x++){
+      let L=lo[x]>lo[x+1]?lo[x]:lo[x+1]; L=L>lo[x+2]?L:lo[x+2];
+      let U=hi[x]<hi[x+1]?hi[x]:hi[x+1]; U=U<hi[x+2]?U:hi[x+2];
+      const q=mi[x], r=mi[x+1], s=mi[x+2], qr=q<r?q:r, QR=q<r?r:q, t=QR<s?QR:s, M=qr>t?qr:t;
+      const a=L<M?L:M, A=L<M?M:L, u=A<U?A:U; out[o+x]=a>u?a:u; }
+    if((y&127)===0) IC.progress(y/H); }
+  let anyNaN=false; for(let i=0;i<d.length;i++) if(d[i]!==d[i]){ anyNaN=true; break; }
+  if(anyNaN){ const L=IC.lineRadii(1), B=medBufs(L.n), mark=new Uint8Array(W*H);
+    for(let py=0;py<P.PH;py++) for(let px=0;px<PW;px++) if(d[py*PW+px]!==d[py*PW+px])
+      for(let y=Math.max(0,py-2);y<=Math.min(H-1,py);y++) for(let x=Math.max(0,px-2);x<=Math.min(W-1,px);x++) mark[y*W+x]=1;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(mark[y*W+x]) out[y*W+x]=medianAt(P,1,L.dx,x,y,B); }
+  return out;
+}
+/* 중앙값 (모든 형식): 값을 순위로 바꿔 이동 히스토그램(Huang) + 세 층 점유 비트맵.
+   순위: 8/16-bit 정수 영상은 값 그대로, 아니면 denseRanks. 비트맵 L0 비트 q = (C[q]>0), L1 비트 w = (L0[w]≠0), L2 비트 = (L1 낱말≠0).
+   더하고 뺄 때 분기 없이 비트를 고치고, 중앙값 순위 m 을 옮길 때 빈 칸을 건너뛰어 바로 다음·이전 값으로 간다.
+   서로 다른 값이 65536 개보다 많으면(32-bit) 히스토그램은 거친 순위 q>>sh 로 (캐시에 들어가게) 돌리고,
+   중앙값이 든 거친 칸 안에서 창의 값을 훑어 정확한 순위를 고른다.
+   NaN 없는 창은 개수 n 이 늘 홀수(원형 커널) → 중앙값이 하나로 정해져 화소마다 모아 고르는 medianAt 과 같은 값.
+   창에 NaN 이 있으면(짝수 개일 때 결과가 추정값에 따라 다름) 그 화소만 medianAt → ImageJ 와 같음. */
 function rankMedian(p,radius){
-  const {kR,dx,n}=IC.lineRadii(radius); const P=padded(p,kR); const W=p.w,H=p.h,PW=P.PW;
+  const {kR,dx,n}=IC.lineRadii(radius); const P=padded(p,kR); const W=p.w,H=p.h,PW=P.PW,PH=P.PH,d=P.d,NP=PW*PH;
   const out=new Float32Array(W*H), half=n>>1;
-  if(p.bit===8){ // 이동 히스토그램 (정수 0..255)
-    const hist=new Int32Array(256);
+  if(kR===1&&dx[0]===1&&dx[2]===1) return median3x3(p,P,out);
+  let rk, vals=null, U=0, intv=p.bit===8||p.bit===16;
+  if(intv) for(let i=0;i<NP;i++){ const v=d[i]; if(!(v>=0&&v<=65535&&v===Math.floor(v))){ intv=false; break; } if(v>=U) U=v+1; }
+  if(intv){ rk=new Int32Array(NP); for(let i=0;i<NP;i++) rk[i]=d[i]; }
+  else if(n<25){ const B=medBufs(n); for(let y=0;y<H;y++){ for(let x=0;x<W;x++) out[y*W+x]=medianAt(P,kR,dx,x,y,B); if((y&31)===0) IC.progress(y/H); } return out; } // 32-bit 작은 창: 화소마다 고르는 편(옛 경로)이 순위 매기기보다 빠르다
+  else { const R=denseRanks(d); rk=R.rk; U=R.U; vals=R.vals; }
+  if(!U){ out.fill(NaN); return out; }
+  let anyNaN=false; if(!intv) for(let i=0;i<NP;i++) if(rk[i]<0){ anyNaN=true; break; }
+  if(U<=1024&&!anyNaN){ // 값 종류가 적으면(8-bit 등) 비트맵 없이 칸을 하나씩 걸어도 충분
+    const C=new Int32Array(U+1), KH=2*kR+1, left=new Int32Array(KH), right=new Int32Array(KH);
     for(let y=0;y<H;y++){
-      hist.fill(0);
-      for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR; for(let xx=-r;xx<=r;xx++) hist[P.d[row+xx]]++; }
-      let m=0, below=0; // below = m 보다 작은 개수
-      const fix=()=>{ while(below+hist[m]<=half){ below+=hist[m]; m++; } while(below>half){ m--; below-=hist[m]; } };
-      fix(); out[y*W]=m;
-      for(let x=1;x<W;x++){
-        for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; const vo=P.d[row-r-1], vi=P.d[row+r];
-          hist[vo]--; if(vo<m) below--; hist[vi]++; if(vi<m) below++; }
-        fix(); out[y*W+x]=m;
-      }
-      if((y&63)===0) IC.progress(y/H);
-    }
+      for(let k=0;k<KH;k++){ const r=dx[k], row=(y+k)*PW+kR; left[k]=row-r-1; right[k]=row+r; for(let xx=-r;xx<=r;xx++) C[rk[row+xx]]++; }
+      let m=0, below=0;
+      for(let x=0;x<W;x++){
+        if(x>0) for(let k=0;k<KH;k++){ const qo=rk[left[k]+x], qi=rk[right[k]+x]; C[qo]--; C[qi]++; below+=((qi-m)>>>31)-((qo-m)>>>31); }
+        while(below+C[m]<=half){ below+=C[m]; m++; }
+        while(below>half){ m--; below-=C[m]; }
+        out[y*W+x]=vals?vals[m]:m; }
+      for(let k=0;k<KH;k++){ const r=dx[k], row=(y+k)*PW+kR+W-1; for(let xx=-r;xx<=r;xx++) C[rk[row+xx]]--; }
+      if((y&63)===0) IC.progress(y/H); }
     return out;
   }
-  if(n>=25) return rankMedianHist(p,P,kR,dx,n);
-  const B=medBufs(n); for(let y=0;y<H;y++){ for(let x=0;x<W;x++) out[y*W+x]=medianAt(P,kR,dx,x,y,B); if((y&31)===0) IC.progress(y/H); }
+  const fine=rk; let sh=0; while((U-1)>>sh>=65536) sh++;
+  if(sh){ const rc=new Int32Array(NP); for(let i=0;i<NP;i++){ const q=fine[i]; rc[i]=q<0?-1:q>>sh; } rk=rc; U=((U-1)>>sh)+1; }
+  const C=new Int32Array(U+1), n0=(U>>5)+2, n1=(n0>>5)+2, n2=(n1>>5)+2, L0=new Int32Array(n0), L1=new Int32Array(n1), L2=new Int32Array(n2);
+  const add=q=>{ C[q]++; const w=q>>5, w1=w>>5; L0[w]|=1<<(q&31); L1[w1]|=1<<(w&31); L2[w1>>5]|=1<<(w1&31); };
+  const rem=q=>{ const c=--C[q], w=q>>5, w1=w>>5;
+    const v0=L0[w]&~(((c-1)>>>31)<<(q&31)); L0[w]=v0;                       // c=0 이면 비트 지움
+    const v1=L1[w1]&~((((v0|-v0)>>>31)^1)<<(w&31)); L1[w1]=v1;              // 낱말이 비면 위 비트 지움
+    L2[w1>>5]&=~((((v1|-v1)>>>31)^1)<<(w1&31)); };
+  const nxt=q=>{ // q 이상에서 가장 작은 점유 순위 (있다고 보장될 때만 부름)
+    let w=q>>5, b=L0[w]&(-1<<(q&31));
+    if(b===0){ const q1=w+1; let w1=q1>>5, b1=L1[w1]&(-1<<(q1&31));
+      if(b1===0){ const q2=w1+1; let w2=q2>>5, b2=L2[w2]&(-1<<(q2&31)); while(b2===0){ w2++; b2=L2[w2]; } w1=(w2<<5)|(31-Math.clz32(b2&-b2)); b1=L1[w1]; }
+      w=(w1<<5)|(31-Math.clz32(b1&-b1)); b=L0[w]; }
+    return (w<<5)|(31-Math.clz32(b&-b)); };
+  const prv=q=>{ // q 이하에서 가장 큰 점유 순위 (있다고 보장될 때만 부름)
+    let w=q>>5, b=L0[w]&(-1>>>(31-(q&31)));
+    if(b===0){ const q1=w-1; let w1=q1>>5, b1=q1<0?0:L1[w1]&(-1>>>(31-(q1&31)));
+      if(b1===0){ const q2=w1-1; let w2=q2>>5, b2=q2<0?0:L2[w2]&(-1>>>(31-(q2&31))); while(b2===0){ w2--; b2=L2[w2]; } w1=(w2<<5)|(31-Math.clz32(b2)); b1=L1[w1]; }
+      w=(w1<<5)|(31-Math.clz32(b1)); b=L0[w]; }
+    return (w<<5)|(31-Math.clz32(b)); };
+  const MB=medBufs(n), KH=2*kR+1, left=new Int32Array(KH), right=new Int32Array(KH);
+  const OFF=new Int32Array(n), cand=new Int32Array(n); { let c=0; for(let k=0;k<KH;k++) for(let xx=-dx[k];xx<=dx[k];xx++) OFF[c++]=k*PW+xx; }
+  const refine=(base,mc,t)=>{ // 거친 칸 mc 의 값들 중 t 번째(0 부터)로 작은 고운 순위
+    let c=0; for(let i=0;i<n;i++){ const q=fine[base+OFF[i]]; if((q>>sh)===mc&&q>=0) cand[c++]=q; }
+    if(c>32) return quickSelectI(cand,t,c);
+    for(let i=1;i<c;i++){ const v=cand[i]; let j=i-1; while(j>=0&&cand[j]>v){ cand[j+1]=cand[j]; j--; } cand[j+1]=v; }
+    return cand[t]; };
+  for(let y=0;y<H;y++){
+    let nan=0;
+    for(let k=0;k<KH;k++){ const r=dx[k], row=(y+k)*PW+kR; left[k]=row-r-1; right[k]=row+r; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q<0) nan++; else add(q); } }
+    let m=0, below=0; // below = 순위 < m 인 값의 개수
+    for(let x=0;x<W;x++){
+      if(x>0){
+        if(anyNaN){ for(let k=0;k<KH;k++){ const qo=rk[left[k]+x], qi=rk[right[k]+x];
+            if(qo<0) nan--; else { rem(qo); below-=(qo-m)>>>31; }
+            if(qi<0) nan++; else { add(qi); below+=(qi-m)>>>31; } }
+          if(nan){ out[y*W+x]=medianAt(P,kR,dx,x,y,MB); continue; } }
+        else for(let k=0;k<KH;k++){ const qo=rk[left[k]+x], qi=rk[right[k]+x]; rem(qo); add(qi); below+=((qi-m)>>>31)-((qo-m)>>>31); }
+      } else if(nan){ out[y*W]=medianAt(P,kR,dx,0,y,MB); continue; }
+      while(below+C[m]<=half){ below+=C[m]; m=nxt(m+1); }
+      while(below>half){ m=prv(m-1); below-=C[m]; }
+      out[y*W+x]=sh?vals[refine(y*PW+kR+x,m,half-below)]:vals?vals[m]:m;
+    }
+    // 줄 끝: 마지막 창을 빼서 개수·비트맵을 0 으로
+    for(let k=0;k<KH;k++){ const r=dx[k], row=(y+k)*PW+kR+W-1; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q>=0) rem(q); } }
+    if((y&31)===0) IC.progress(y/H);
+  }
   return out;
 }
 const medBufs=n=>({buf:new Float64Array(n),ab:new Float64Array(n),bl:new Float64Array(n)});
@@ -216,45 +333,6 @@ function medianAt(P,kR,dx,x,y,B){ const PW=P.PW, d=P.d, buf=B.buf, ab=B.ab, bl=B
   const g=d[(y+kR)*PW+kR+x]; if(g!==g) return NaN;
   let m=0,na=0,nb=0; for(let i=0;i<c;i++){ const v=buf[i]; if(v!==v) continue; m++; if(v>g) ab[na++]=v; else if(v<g) bl[nb++]=v; }
   const half=m>>1; return !m?NaN:na>half?quickSelect(ab,na-half-1,na):nb>half?quickSelect(bl,half,nb):g; }
-/* 16/32-bit 중앙값, 큰 창 (n ≥ 25): 값을 순위(rank)로 바꿔 두 단계 이동 히스토그램 (Huang 방식, 거친 칸으로 건너뜀).
-   NaN 없는 창은 개수 n 이 늘 홀수(원형 커널) → 중앙값이 하나로 정해져 medianAt 과 같은 값.
-   창에 NaN 이 있으면(짝수 개일 때 결과가 추정값에 따라 다름) 그 화소만 medianAt → ImageJ 와 같음. */
-function rankMedianHist(p,P,kR,dx,n){
-  const W=p.w,H=p.h,PW=P.PW,PH=P.PH,d=P.d,NP=PW*PH; const out=new Float32Array(W*H);
-  // 순위: 16-bit 정수(0..65535)는 값 그대로, 아니면 정렬한 서로 다른 값의 번호 (같은 값 = 같은 순위, ±∞ 포함). NaN = −1
-  const rk=new Int32Array(NP); let vals=null, U; let int16=p.bit===16;
-  if(int16) for(let i=0;i<NP;i++){ const v=d[i]; if(!(v>=0&&v<=65535&&v===Math.floor(v))){ int16=false; break; } }
-  if(int16){ U=65536; for(let i=0;i<NP;i++) rk[i]=d[i]; }
-  else { const srt=new Float64Array(NP); let m=0; for(let i=0;i<NP;i++) if(d[i]===d[i]) srt[m++]=d[i];
-    const so=srt.subarray(0,m).sort(); U=0; for(let k=0;k<m;k++) if(!U||so[k]!==so[U-1]) so[U++]=so[k]; vals=so.subarray(0,U);
-    for(let i=0;i<NP;i++){ const v=d[i]; if(v!==v){ rk[i]=-1; continue; } let lo=0,hi=U-1; while(lo<hi){ const mid=(lo+hi)>>1; if(vals[mid]<v) lo=mid+1; else hi=mid; } rk[i]=lo; } }
-  if(!U){ out.fill(NaN); return out; }
-  // 세 단계 개수: L0 = 순위마다, L1 = 64 순위마다, L2 = 4096 순위마다 → 중앙값 순위 m 을 옮길 때 칸을 건너뜀
-  const L0=new Int32Array(U+4096), L1=new Int32Array((U>>6)+65), L2=new Int32Array((U>>12)+2); const half=n>>1; const MB=medBufs(n);
-  const put=(q,s)=>{ L0[q]+=s; L1[q>>6]+=s; L2[q>>12]+=s; };
-  for(let y=0;y<H;y++){
-    let nan=0;
-    for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q<0) nan++; else put(q,1); } }
-    let m=0, below=0; // below = 순위 < m 인 값의 개수
-    for(let x=0;x<W;x++){
-      if(x>0) for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+x; const qo=rk[row-r-1], qi=rk[row+r];
-        if(qo<0) nan--; else { put(qo,-1); if(qo<m) below--; }
-        if(qi<0) nan++; else { put(qi,1); if(qi<m) below++; } }
-      if(nan){ out[y*W+x]=medianAt(P,kR,dx,x,y,MB); continue; }
-      while(below+L0[m]<=half){ below+=L0[m]; m++;
-        if((m&63)===0) while(below+L1[m>>6]<=half){ below+=L1[m>>6]; m+=64; if((m&4095)===0) while(below+L2[m>>12]<=half){ below+=L2[m>>12]; m+=4096; } } }
-      while(below>half){
-        if((m&4095)===0&&below-L2[(m>>12)-1]>half){ m-=4096; below-=L2[m>>12]; continue; }
-        if((m&63)===0&&below-L1[(m>>6)-1]>half){ m-=64; below-=L1[m>>6]; continue; }
-        m--; below-=L0[m]; }
-      out[y*W+x]=int16?m:vals[m];
-    }
-    // 줄 끝: 마지막 창을 빼서 개수를 0 으로 (전체를 지우면 U 가 클 때 줄마다 U 번 — 느림)
-    for(let k=-kR;k<=kR;k++){ const r=dx[k+kR], row=(y+kR+k)*PW+kR+W-1; for(let xx=-r;xx<=r;xx++){ const q=rk[row+xx]; if(q>=0) put(q,-1); } }
-    if((y&31)===0) IC.progress(y/H);
-  }
-  return out;
-}
 IC._medianDirect=function(p,radius){ const {kR,dx}=IC.lineRadii(radius); const P=padded(p,kR), B=medBufs(IC.lineRadii(radius).n), out=new Float32Array(p.w*p.h);
   for(let y=0;y<p.h;y++) for(let x=0;x<p.w;x++) out[y*p.w+x]=medianAt(P,kR,dx,x,y,B); return out; }; // 시험용 기준 (화소마다 모아 고름)
 /* Remove Outliers — ImageJ RankFilters.filterLine(OUTLIERS) 의 순서 그대로 (float 연산):

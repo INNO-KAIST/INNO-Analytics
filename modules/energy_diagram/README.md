@@ -13,14 +13,14 @@ INNO Analytics 단일 HTML 에 'Energy Diagram' 탭을 주입하는 원본이다
 | `data/` | 준위 원자료와 출처. `README_levels.md` 에 출처·방법·빈칸이 정리되어 있다 |
 | `../inject_all.py` | 주입기 (Energy Diagram·DRE 공용, 멱등). `build/inject.py` 는 이것을 부른다 |
 | `build/gen_ts.py`, `dn_ligand_field.py` | Tanabe–Sugano 격자 생성 (정확한 dⁿ 대각화) |
-| `test/` | `test_core.js`(1,404 항목), `sweep.js`(27,266 점검), Playwright UI 시험 |
+| `test/` | `test_core.js`(1,404 항목), `test_formula_warn.js`(농도 점검), `sweep.js`(27,266 점검), Playwright UI 시험 |
 
 ## 다시 만들기
 
 ```bash
 python build/build_data.py                                   # data → src/ed_data.js
 python ../inject_all.py "../../INNO Analytics.html" "../../INNO Analytics.html"   # 제자리 주입(멱등)
-node test/test_core.js && node test/sweep.js
+node test/test_core.js && node test/test_formula_warn.js && node test/sweep.js
 ```
 
 UI 시험(`test/ui*.py`)은 파일 경로 `file:///home/claude/ed/out.html` 을 가리키므로, 쓰기 전에 그 줄을 실제 경로로 바꾼다.
@@ -34,3 +34,10 @@ UI 시험(`test/ui*.py`)은 파일 경로 `file:///home/claude/ed/out.html` 을 
 3. 탭 분기에 `window.ED_UI.render(root)` 추가
 4. energy 탭에서 파일 출처 줄을 숨기고, `#app.ed-on` 으로 파일 열을 숨김
 5. 휴대폰 하단 탭 격자 6칸 → 7칸 (아이콘 CSS 는 주입 블록에 있음)
+
+## 10-19 수정
+- 화학식 농도 점검: >100 %, ≤0 %, 같은 자리 도펀트 합 >100 % 경고. % 없는 숫자는 식 하나 안에서 한 가지로 읽는다(모두 ≤1 → 분율, 아니면 모두 %; 혼용이면 경고).
+- `ED_UI._ensureModel()` — DOM 없이 저장 상태로 모델을 만든다(DRE 'Import from Energy Diagram' 이 탭을 열지 않아도 동작).
+- Inter-ion 카드: 이온이 셋 이상이면 'Ion pair' 선택으로 한 쌍(양방향)만 보인다.
+- 내보내기: 빈 도식은 "Nothing to export" 알림. CSV 에 `laser_cm1`·`transition_cm1`·`gap_cm1` 열 추가(donor_/acceptor_E 는 ET 행에만).
+- 터치 기기: 준위 선택 영역을 이웃과 겹치지 않는 만큼(최대 24 px) 키움, 편집 안내의 'Esc = restart' 대신 Restart 버튼.

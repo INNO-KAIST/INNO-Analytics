@@ -5,7 +5,7 @@
 .dre .dre-sel{padding:5px 7px;border:1px solid var(--line2);border-radius:7px;font-size:12.5px;max-width:100%}
 .dre .dre-tog{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);cursor:pointer}
 .dre input[type=checkbox]{width:auto;margin:0}
-.dre .dre-main{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:14px;align-items:start}
+.dre .dre-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(450px,35%);gap:14px;align-items:start}
 @media (max-width:1180px){.dre .dre-main{grid-template-columns:minmax(0,1fr)}}
 .dre .dre-left,.dre .dre-right{min-width:0}
 .dre .dre-simctl{margin-bottom:6px}
@@ -16,7 +16,11 @@
 .dre table.dre-tbl td{padding:4px 5px;border-bottom:1px solid var(--line);vertical-align:top}
 .dre table.dre-tbl td.num,.dre table.dre-tbl th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .dre table.dre-tbl input[type=text]{width:92px;padding:3px 5px;border:1px solid var(--line2);border-radius:5px;font-size:12px;font-variant-numeric:tabular-nums}
-.dre table.dre-tbl td.rng input{width:64px}
+.dre table.dre-tbl td.val{white-space:nowrap}
+.dre table.dre-tbl td.val>input{width:110px}
+.dre table.dre-tbl .rng{display:flex;align-items:center;gap:3px;margin-top:3px;color:var(--muted);font-size:11px}
+.dre table.dre-tbl .rng input{width:68px;font-size:11.5px}
+.dre table.dre-tbl td .sm{overflow-wrap:anywhere}
 .dre table.dre-tbl tr.ph td{background:var(--warn-soft)}
 .dre .sm{font-size:11px}
 .dre .dre-smp{border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px}
@@ -53,3 +57,9 @@
 .dre .dre-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .dre .dre-adq table.dre-tbl td{font-size:12px}
 .dre .dre-hw{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink2)}
+/* 휴대폰: 부속 탭 막대는 줄바꿈 */
+.dre #dreTabs{flex-wrap:wrap;max-width:100%}
+@media (max-width:520px){.dre #dreTabs button{padding:5px 8px;font-size:12px}}
+.dre table.dre-ptbl td:first-child b{overflow-wrap:anywhere}
+.dre table.dre-ptbl td:first-child{min-width:92px}
+@media (max-width:520px){.dre table.dre-tbl td.val{white-space:normal}.dre table.dre-tbl td.val>input{width:96px}.dre table.dre-tbl .rng{flex-wrap:wrap}.dre table.dre-tbl .rng input{width:80px}}

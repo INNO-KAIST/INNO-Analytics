@@ -55,6 +55,10 @@ async function loadSaved(){
   const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{});
   if(!((st.ui||{}).pa||{})._d1019){ S.ui.pa._d1019=1; if(!(+S.ui.pa.minCirc>0)) S.ui.pa.minCirc=0.5; S.ui.pa.exclude=true; S.ui.thr.dark=false; } // 10-19 권장값으로 한 번 바꿈(사용자 요청) — 그 뒤 바꾼 값은 그대로
   S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
+  { const L=["X","Y","XM","YM","Perim.","BX","BY","Width","Height","Major","Minor","Feret","MinFeret","ECD","FeretX","FeretY"]; // pm 로 저장된 입자 결과 → nm (길이 ÷ 1000, 넓이 ÷ 10⁶)
+    const conv=r=>{ if(!r) return; for(const k of L) if(typeof r[k]==="number") r[k]/=1e3; for(const k of ["Area","Total Area","Average Size"]) if(typeof r[k]==="number") r[k]/=1e6; if(typeof r["Density (/area)"]==="number") r["Density (/area)"]*=1e6; for(const k of ["ECD mean","ECD SD","Feret mean","ECD mean (used)","ECD SD (used)"]) if(typeof r[k]==="number") r[k]/=1e3; if(r.Unit==="pm") r.Unit="nm"; };
+    for(const pa of Object.values(S.particles||{})) if(pa&&pa.unit==="pm"){ (pa.rows||[]).forEach(conv); conv(pa.summary); pa.unit="nm"; }
+    for(const r of S.summary||[]) if(r.Unit==="pm") conv(r); for(const r of S.results||[]) if(r.Unit==="pm") conv(r); }
   for(const im of S.images||[]) if(im.cal&&im.cal.unit==="pm"){ im.cal.pw/=1e3; im.cal.ph/=1e3; im.cal.unit="nm"; } // pm 눈금 → nm (사용자 요청 10-19)
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
   const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
@@ -68,8 +72,9 @@ async function loadSaved(){
 /* ---------------- 알림 줄 ---------------- */
 let MSGS=[];
 function note(m,k,act){ MSGS.unshift({m:String(m),k:k||"",act:act||null}); MSGS=MSGS.slice(0,8); drawMsg(); if(!ROOT||!$q(ROOT,"#imMsg")){ if(typeof toast==="function") toast(m,k==="warn"?"warn":k); } }
+/* 긴 알림: ' — ' 앞만 보이고 나머지(이유·권장)는 오래 대면 뜨는 말풍선 (사용자 요청 10-19) */
 function drawMsg(){ const el=ROOT&&$q(ROOT,"#imMsg"); if(!el) return; if(!MSGS.length){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false; const m=MSGS[0], old=MSGS.slice(1);
-  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="Close">×</button></div>${old.length?`<details class="old"><summary>Earlier notices ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span>${(()=>{ const k=m.m.indexOf(" — "); return k>0&&m.m.length>90?`<span class="tx" data-tip="${esc(m.m.slice(k+3))}">${esc(m.m.slice(0,k))} <span class="more">…</span></span>`:`<span class="tx">${esc(m.m)}</span>`; })()}${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="Close">×</button></div>${old.length?`<details class="old"><summary>Earlier notices ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
   $q(el,"#imMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); }; const b=$q(el,"#imMsgA"); if(b) b.onclick=()=>{ const f=m.act.fn; m.act=null; drawMsg(); f(); }; }
 const _cf={}; function confirm2(k,msg){ const n=Date.now(); if(_cf[k]&&n-_cf[k]<4000){ delete _cf[k]; return true; } _cf[k]=n; note(msg,"warn"); return false; }
 

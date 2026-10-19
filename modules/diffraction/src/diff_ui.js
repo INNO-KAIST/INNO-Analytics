@@ -15,12 +15,15 @@ const hklS=h=>h?h.map(v=>v<0?"<span class=\"ov\">"+(-v)+"</span>":String(v)).joi
 const hklT=h=>h?"("+h.join(" ")+")":"";
 const uvwS=z=>"["+z.map(v=>v<0?"<span class=\"ov\">"+(-v)+"</span>":String(v)).join("")+"]";
 const LS_KEY="inno.diff.v1";
-const P=(()=>{ let p={}; try{ p=JSON.parse(localStorage.getItem(LS_KEY)||"{}")||{}; }catch(e){ p={}; } return Object.assign({pattern:"auto",calSrc:"auto",kappaPct:100,tolPct:3,elements:"",ratioTol:5,elMode:"subset",layers:{pack:true,lab:true,local:true},maxIdx:5,radial:"auto",topN:0,showMask:true,showPred:true,distPct:1,rankCal:"auto",manual:{h1:"1 1 1",h2:"2 0 0"}},p); })();
+const P=(()=>{ let p={}; try{ p=JSON.parse(localStorage.getItem(LS_KEY)||"{}")||{}; }catch(e){ p={}; } return Object.assign({pattern:"auto",calSrc:"auto",kappaPct:100,tolPct:3,elements:"",ratioTol:5,elMode:"subset",layers:{pack:true,lab:true,local:true},maxIdx:5,radial:"auto",topN:0,showMask:true,showPred:true,distPct:1,rankCal:"auto",unit:"nm",manual:{h1:"1 1 1",h2:"2 0 0"}},p); })();
+/* 표시 단위: 1/nm·nm (기본) 또는 1/Å·Å — 내부 값은 언제나 1/nm·nm */
+const UA=()=>P.unit==="A", gU=g=>g==null?null:(UA()?g/10:g), dU=d=>d==null?null:(UA()?d*10:d), gL=()=>UA()?"1/Å":"1/nm", dL=()=>UA()?"Å":"nm";
 const save=()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(P)); }catch(e){} };
 /* 화면 상태 (파일마다 새로) */
 let S=null;
 const fresh=()=>({key:null,name:"",img:null,w:0,h:0,meta:{},res:null,type:null,busy:false,err:null,center:null,lat:0,spotsEdit:null,cands:null,sel:-1,rcands:null,rsel:-1,
-  view:null,tool:"view",disp:null,maskCv:null,gamma:"log",lohi:[0.5,99.95],barVal:null,barLen:null,manualScale:null,savedCal:null,mres:null,progress:""});
+  view:null,tool:"view",disp:null,maskCv:null,gamma:"log",lohi:[0.5,99.95],barVal:null,barLen:null,manualScale:null,savedCal:null,mres:null,progress:"",
+  barSug:null,barSure:false,barConfirmed:false,ringCenter:null,idSeq:0,idProg:0,idInfo:null,camL:null,camKV:null,camPx:null,camBin:null});
 
 /* ---------- 원본 이미지 ---------- */
 function tagsOf(im){ return (im&&im.md&&im.md.__dm)||{}; }
@@ -33,7 +36,10 @@ function metaOf(im,c){ const T=tagsOf(im); const g=k=>T[k]; const num=v=>{ const
   const camPx=num(g("Acquisition/Device/CCD/Pixel Size (um)"))||num(g("Acquisition/Frame/CCD/Pixel Size (um)")); const bin=num(g("Acquisition/Parameters/High Level/Binning"))||num(g("DataBar/Binning"))||1;
   const scope=g("Microscope Info/Microscope")||g("Microscope Info/Name")||"";
   const diffMode=/diff/i.test(String(opMode))||recip;
-  return {unit,recip,tagScale:scale,dmScale:im.dmScale,opMode:String(opMode),kV:kV?kV/1000:null,camLen:diffMode&&ind?ind:null,camPx,bin,scope:String(scope),diffMode,eightBit:c&&c.max<=255&&c.min>=0,rawMax:c&&c.max}; }
+  // 8-bit 표시 사본: 파일의 비트 깊이로 (TIFF BitsPerSample). 모르면 자료형이 8-bit 일 때만 — 세기가 낮은 16-bit 원본(최댓값 ≤ 255)을 8-bit 로 오인하지 않게
+  const bits=im&&im.tiffBits!=null?+im.tiffBits:null; const isDM=Object.keys(T).length>0; const d=c&&c.data;
+  const eightBit=bits!=null?bits===8:(!isDM&&!!d&&(d instanceof Uint8Array||d instanceof Uint8ClampedArray||d instanceof Int8Array));
+  return {unit,recip,tagScale:scale,dmScale:im.dmScale,opMode:String(opMode),kV:kV?kV/1000:null,camLen:diffMode&&ind?ind:null,camPx,bin,scope:String(scope),diffMode,eightBit,bits,rawMax:c&&c.max}; }
 /* 전자 파장 (nm), 상대론 보정 */
 const lambda=kV=>{ const V=kV*1e3; return 1.226426/Math.sqrt(V*(1+0.97848e-6*V)); };
 
@@ -44,11 +50,18 @@ function calib(){ const m=S.meta; let src=P.calSrc; let scale=null, ellip=1, phi
   else if(src==="bar"){ const L=S.barLen!=null?S.barLen:(S.res&&S.res.scaleBar&&S.res.scaleBar.lenPx); const v=S.barVal; scale=L>0&&v>0?v/L:null; label="Scale bar"; if(!scale) ok=false; }
   else if(src==="saved"){ const c=S.savedCal; if(c){ scale=c.scale; ellip=c.ellip||1; phi=c.phi||0; label="Saved: "+c.name; } else ok=false; }
   else if(src==="manual"){ scale=S.manualScale; label="Manual"; if(!(scale>0)) ok=false; }
+  else if(src==="camlen"){ scale=camScale(); label="Camera length"; if(!scale) ok=false; }
   else { label="None"; }
   if(scale) scale*=P.kappaPct/100;
   // 순위에 보정을 쓸지: 표준 시료로 만든 보정(Saved)·직접 넣은 값만 기본으로 믿는다. 파일 태그·스케일바는 카메라 길이 공칭값이라 수 % 틀리기 쉬움 → 보정 없이 순위, κ 만 표시
   const trusted=P.rankCal==="on"?true:P.rankCal==="off"?false:(src==="saved"||src==="manual");
-  return {src,scale:scale||null,ellip,phi,label,ok,err:P.tolPct/100,rank:!!(scale&&trusted)}; }
+  // 공칭 보정(파일 태그·스케일바·카메라 길이)은 순위에 쓰지 않아도 ±15 % 창(prior)으로는 쓴다 — 축척이 1.5 배 다른 후보가 1 위가 되지 않게.
+  // 스케일바 값을 OCR 이 단위까지 확실히(≥ 0.9) 읽었거나 사용자가 넣은/고른 값일 때만
+  const barOk=src!=="bar"||!S.barFromOCR||S.barSure||S.barConfirmed; const rank=!!(scale&&trusted);
+  return {src,scale:scale||null,ellip,phi,label,ok,err:P.tolPct/100,rank,prior:!!(scale&&!rank&&P.rankCal!=="off"&&(src==="tag"||src==="camlen"||(src==="bar"&&barOk)))}; }
+/* 카메라 길이 보정: 축척(1/nm/px) = 화소·binning / (λ·L). 값은 파일 태그(있으면) → 사용자 입력 */
+function camPar(){ const m=S.meta; const v=(a,b)=>a!=null&&a>0?a:(b!=null&&b>0?b:null); return {L:v(S.camL,m.camLen),kV:v(S.camKV,m.kV)||200,kVset:!!v(S.camKV,m.kV),px:v(S.camPx,m.camPx),bin:v(S.camBin,m.bin)||1}; }
+function camScale(){ const c=camPar(); return c.L&&c.px?c.px*c.bin*1e-3/(lambda(c.kV)*c.L):null; }
 /* 보정 찌그러짐이 있으면 격자 벡터를 고쳐 '찌그러짐 없는 px' 로 (평균 축척 유지) */
 function correctedFit(L,cal){ if(!L||!cal||!(cal.ellip>1.0001)) return L; const A=DI().affineFromParams(1,cal.ellip,cal.phi); const T=A.T; const ap=v=>[T[0][0]*v[0]+T[0][1]*v[1],T[1][0]*v[0]+T[1][1]*v[1]];
   const a=ap(L.R1), b=ap(L.R2), c=[a[0]+b[0],a[1]+b[1]]; const len=v=>Math.hypot(v[0],v[1]); const ang=(u,v)=>Math.acos(Math.max(-1,Math.min(1,(u[0]*v[0]+u[1]*v[1])/(len(u)*len(v)))))*180/Math.PI;
@@ -107,10 +120,14 @@ const curLat=()=>S.res&&S.res.spots&&S.res.spots.lattices[S.lat]||null;
 
 /* ---------- 분석 ---------- */
 async function analyze(){ if(!S.img||S.busy) return; const my=S; S.busy=true; S.err=null; S.cands=null; S.rcands=null; S.sel=-1; S.rsel=-1; S.progress="패턴을 읽는 중… (큰 이미지는 몇 초)"; paint();
-  try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:P.pattern,radial:P.radial,topN:P.topN,maxLattices:3,center:S.center}},[copy.buffer]);
+  try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:P.pattern,radial:P.radial,topN:P.topN,maxLattices:3,center:S.center,ringCenter:S.ringCenter||null}},[copy.buffer]);
     if(S!==my) return; // 분석 중 다른 파일로 바뀜 — 버림
     S.res=r; S.type=P.pattern==="auto"?r.type:P.pattern; S.spotsEdit=null; S.lat=0; S.maskCv=null; if(S.barLen==null&&r.scaleBar) S.barLen=r.scaleBar.lenPx;
-    const lb=r.scaleLabel; if(S.barVal==null&&lb&&lb.recip&&lb.valueInvNm>0&&lb.conf>=0.3){ /* conf < 0.3 은 그럴듯하지 않아 채우지 않는다(잡음·다른 덧글씨) */ S.barVal=+lb.valueInvNm.toPrecision(6); S.barFromOCR=true; } // 그림 속 이름표에서 읽은 값 (확인 가능)
+    const lb=r.scaleLabel; S.barSug=null;
+    // 그림 속 이름표: 값과 단위(1/nm ↔ 1/Å, 10 배)를 모두 확실히(conf·unitConf ≥ 0.9) 읽었을 때만 바로 쓴다.
+    // 0.3–0.9 는 채우지 않고 두 해석(읽은 단위 / 다른 단위)을 단추로 보여 사용자가 고르게 한다. < 0.3 은 무시 (잡음·다른 덧글씨)
+    const use=S.barVal==null&&window.DIFF_OCR&&DIFF_OCR.labelUse?DIFF_OCR.labelUse(lb):null;
+    if(use&&use.auto){ S.barVal=use.value; S.barFromOCR=true; S.barSure=true; } else if(use){ S.barSug={text:lb.text,conf:lb.conf,opts:use.opts}; }
     if(DW().mode==="main") say("Worker 를 쓸 수 없어 주 화면에서 계산했습니다","warn"); }
   catch(e){ if(S!==my) return; S.err=String(e.message||e); }
   if(S.res&&!S.err) S.idBusy=true; S.busy=false; S.progress=""; paint(); if(S.res&&!S.err) identify(); }
@@ -118,24 +135,37 @@ async function refit(){ if(!S.res||!S.res.spots) return; const my=S; const c=S.c
   try{ const list=(S.spotsEdit||S.res.spots.list); const sub=P.topN>0?list.slice().sort((a,b)=>b.I-a.I).slice(0,P.topN):list; const r=await DW().run("refit",{spots:sub,center:c,size:Math.max(S.w,S.h),w:S.w,h:S.h,hint:!!S.centerHint,radial:P.radial,max:3}); S.centerHint=false; if(S!==my) return;
     S.res.spots.lattices=r.lattices; S.res.spots.nUnindexed=r.nUnindexed; S.res.spots.center=Object.assign({},r.center||c,{source:S.center?"user":(c.source||"")}); if(S.center&&r.center) S.center={x:r.center.x,y:r.center.y}; S.lat=0; S.cands=null; S.sel=-1; }catch(e){ S.err=String(e.message||e); }
   S.idBusy=true; S.busy=false; paint(); identify(); }
-async function identify(){ if(!S.res) return; const my=S; S.idBusy=true; const recs=await records(); if(S!==my) return; if(!recs.length){ S.cands=[]; S.rcands=[]; S.idBusy=false; paint(); return; } const cal=calib(); paint();
-  try{ if(S.type==="spots"){ const L=curLat(); if(!L){ S.cands=[]; } else { const Lc=correctedFit(L,cal); const mk=S.res.mask?new Uint8Array(S.res.mask):null; const r=await DW().run("rankSpots",{fit:Lc,records:recs,opt:{scale:cal.rank?cal.scale:null,scaleErr:cal.err,distortion:P.distPct/100,maxIdx:P.maxIdx,gmax:Math.max(15,cal.scale?Lc.len[2]*cal.scale*1.5:15),w:S.w,h:S.h,mask:mk,posFit:{center:L.center,R1:L.R1,R2:L.R2},nVerify:80,dynamic:P.intModel!=="kin",kV:S.meta.kV||200}},mk?[mk.buffer]:[]);
-        if(S!==my) return; S.cands=r.cands.slice(0,40); S.badRecs=r.bad; S.sel=S.cands.length?0:-1; } }
-    else { const pk=S.res.rings.peaks; const gmax=cal.scale?Math.max(...pk.map(p=>p.r))*ringScale(cal)*1.05:20; const r=await DW().run("matchRings",{peaks:pk,records:recs,opt:{scale:cal.rank?ringScale(cal):null,scaleErr:cal.err},gShow:gmax});
-      if(S!==my) return; S.rcands=r.cands.slice(0,30); S.badRecs=r.bad; S.rsel=S.rcands.length?0:-1; } }
-  catch(e){ S.err=String(e.message||e); }
+async function identify(){ if(!S.res) return; const my=S; const seq=++S.idSeq; const live=()=>S===my&&seq===S.idSeq; S.idBusy=true; S.idInfo=null; S.idProg=0;
+  const recs=await records(); if(!live()) return; if(!recs.length){ S.cands=[]; S.rcands=[]; S.idBusy=false; paint(); return; } const cal=calib(); paint();
+  const onProgress=p=>{ if(!live()) return; S.idProg=p; const el=document.querySelector("#dfIdProg .bar i"); if(el) el.style.width=Math.round(p*100)+"%"; };
+  try{ if(S.type==="spots"){ const L=curLat(); if(!L){ S.cands=[]; S.idInfo={noLattice:true}; } else { const Lc=correctedFit(L,cal); const mk=S.res.mask?new Uint8Array(S.res.mask):null;
+        const r=await DW().run("rankSpots",{fit:Lc,records:recs,opt:{scale:cal.rank?cal.scale:null,scaleErr:cal.err,scalePrior:cal.prior?{scale:cal.scale,tol:0.15}:null,distortion:P.distPct/100,maxIdx:P.maxIdx,gmax:Math.min(25,Math.max(15,cal.scale?Lc.len[2]*cal.scale*1.5:15)),w:S.w,h:S.h,mask:mk,posFit:{center:L.center,R1:L.R1,R2:L.R2},nVerify:80,dynamic:P.intModel!=="kin",kV:S.meta.kV||200}},mk?[mk.buffer]:[],{onProgress});
+        if(!live()) return; S.cands=r.cands.slice(0,40); S.badRecs=r.bad; S.sel=S.cands.length?0:-1; S.idInfo={refused:r.refused,truncated:r.truncated,priorEmpty:r.priorEmpty}; } }
+    else { const pk=S.res.rings.peaks; const gmax=cal.scale?Math.max(...pk.map(p=>p.r))*ringScale(cal)*1.05:20; const r=await DW().run("matchRings",{peaks:pk,records:recs,opt:{scale:cal.rank?ringScale(cal):null,scaleErr:cal.err,scalePrior:cal.prior?{scale:ringScale(cal),tol:0.15}:null},gShow:gmax});
+      if(!live()) return; S.rcands=r.cands.slice(0,30); S.badRecs=r.bad; S.rsel=S.rcands.length?0:-1; S.idInfo={priorEmpty:r.priorEmpty}; } }
+  catch(e){ if(!live()) return; if(e&&e.cancelled){ if(S.type==="spots") S.cands=[]; else S.rcands=[]; S.idInfo={cancelled:true}; } else S.err=String(e.message||e); }
   S.idBusy=false; paint(); }
-
+/* 상 찾기 멈춤: Worker 를 끝낸다 (다음 계산 때 새로 만듦). 주 스레드 계산(Worker 없음)은 멈출 수 없다 */
+function cancelIdentify(){ if(!S||!S.idBusy) return; if(!DW().cancel()){ say("계산을 멈출 수 없습니다 (Worker 없음)","warn"); return; } S.idSeq++; S.idBusy=false; if(S.type==="spots") S.cands=[]; else S.rcands=[]; S.idInfo={cancelled:true}; paint(); }
 /* ---------- 화면 ---------- */
 /* 모드: 사용자가 고른 것(파일마다) → 없으면 파일 종류로: 역공간 교정·회절 모드 태그 → SAED, 실공간 이미지 → FFT, 파일 없음 → SAED(열기 안내) */
 const MODE={key:null,mode:null};
 function curMode(){ const src=readSource(); const key=src?src.key:"(none)"; if(MODE.key===key&&MODE.mode) return MODE.mode; if(!src) return "saed";
   const m=metaOf(src.im,src.c); if(m.recip||m.diffMode) return "saed"; if(m.unit&&/^(nm|µm|um|Å|A|pm)$/i.test(m.unit)&&!/diff|saed|sad\b/i.test(src.name)) return "fft";
   // 교정 정보 없음: 회절도는 대부분 어둡고(중앙값 ≪ 최댓값) 몇 점만 밝다, HRTEM 은 중간 회색 → 중앙값/범위 < 0.15 이면 SAED
-  if(/diff|saed|\bsad/i.test(src.name)) return "saed"; const c=src.c; if(c&&c.cum&&c.total){ const half=c.total/2; let k=0; while(k<c.NB-1&&c.cum[k]<half) k++; return k/(c.NB-1)<0.15?"saed":"fft"; } return "saed"; }
+  if(/diff|saed|\bsad/i.test(src.name)) return "saed"; const c=src.c; if(c&&c.cum&&c.total){ const half=c.total/2; let k=0; while(k<c.NB-1&&c.cum[k]<half) k++; if(k/(c.NB-1)<0.15) return "saed"; }
+  return autoMode(src); }
+/* 교정 정보 없는 중간 회색 영상 (8-bit 로그 표시 SAED 사본 ↔ HRTEM): 방위 대칭(DP.saedLikeness) → 애매하면 이름표 OCR(역공간 단위 → SAED) → 그래도 모르면 SAED (FFT 는 위 단추 한 번) */
+const AUTO=new Map();
+function autoMode(src){ const k=src.key; if(AUTO.has(k)) return AUTO.get(k).mode; const c=src.c; const DP=window.DIFF_PATTERN; let mode="saed", unsure=false, why="";
+  try{ const q=DP&&DP.saedLikeness&&c&&c.data?DP.saedLikeness(c.data,c.w,c.h):null;
+    if(q&&q.r2>=0.1&&q.decay){ mode="saed"; why="radial"; } else if(q&&q.r2<0.04){ mode="fft"; why="flat"; }
+    else { unsure=true; why="unsure"; const OC=window.DIFF_OCR; if(OC&&c&&c.data){ const img=c.data instanceof Float32Array?c.data:Float32Array.from(c.data); const r=OC.readAuto(img,c.w,c.h,null,{budget:800}); if(r&&r.conf>=0.5){ mode=r.recip?"saed":"fft"; unsure=false; why="label"; } } } }catch(e){ unsure=true; }
+  AUTO.set(k,{mode,unsure,why}); return mode; }
+const modeUnsure=()=>{ const src=readSource(); if(!src||MODE.key===src.key) return false; const a=AUTO.get(src.key); return !!(a&&a.unsure); };
 function render(root){ if(!S) S=fresh(); const mode=curMode(); P.mode=mode;
   root.innerHTML=`<div class="card df-head"><h3>Diffraction <span class="hint">회절도 읽기 · 상 찾기 · 보정</span></h3>
-    <div class="seg" id="dfMode" role="tablist">${[["fft","FFT (HRTEM)"],["saed","SAED"],["db","Phase DB"]].map(([k,t])=>`<button data-m="${k}" class="${mode===k?"active":""}">${t}</button>`).join("")}</div></div><div id="dfBody"></div>`;
+    <div class="seg" id="dfMode" role="tablist">${[["fft","FFT (HRTEM)"],["saed","SAED"],["db","Phase DB"]].map(([k,t])=>`<button data-m="${k}" class="${mode===k?"active":""}">${t}</button>`).join("")}</div>${modeUnsure()?`<span class="muted" id="dfModeNote" title="교정 정보가 없어 영상 모양으로 골랐습니다 — HRTEM 이면 FFT 를 누르세요"> 자동 선택 (불확실)</span>`:""}</div><div id="dfBody"></div>`;
   $all("#dfMode button",root).forEach(b=>b.onclick=()=>{ const src=readSource(); MODE.key=src?src.key:"(none)"; MODE.mode=b.dataset.m; render(root); });
   const body=$q("#dfBody",root);
   if(P.mode==="fft"){ const rec=typeof curRec==="function"?curRec():null; if(!rec||!rec.images||!rec.images.length){ body.innerHTML=`<div class="card"><div class="note">FFT 는 HRTEM 이미지가 필요합니다. 왼쪽에서 파일을 여세요.</div></div>`; return; } if(typeof renderLattice==="function") renderLattice(body); return; }
@@ -144,7 +174,9 @@ function render(root){ if(!S) S=fresh(); const mode=curMode(); P.mode=mode;
 function renderSaed(body){ const src=readSource();
   if(!src){ body.innerHTML=`<div class="card"><h3>SAED</h3><div class="note">회절 이미지(.dm3 · .dm4 · .tif)를 여세요. 왼쪽 파일 목록에 추가되고 여기서 바로 분석합니다.</div>
       <div class="row" style="margin-top:10px"><button class="btn primary" id="dfOpen">Open file…</button></div></div>`; $q("#dfOpen",body).onclick=openFile; return; }
-  if(S.key!==src.key){ S=fresh(); S.key=src.key; S.name=src.name; const c=src.c; S.w=c.w; S.h=c.h; S.img=Float32Array.from(c.data); S.meta=metaOf(src.im,c); buildDisplay(); S.view=null; setTimeout(analyze,0); }
+  if(S.key!==src.key){ if(S._detach) S._detach(); S=fresh(); S.key=src.key; S.name=src.name; const c=src.c; S.w=c.w; S.h=c.h; S.img=Float32Array.from(c.data); S.meta=metaOf(src.im,c); buildDisplay(); S.view=null;
+    // 보정 출처·패턴 종류는 파일마다 Auto 로 (지난 파일의 'Scale bar'·'Rings' 가 남아 값 없는 보정·틀린 분석이 되던 것)
+    if(P.calSrc!=="auto"||P.pattern!=="auto"){ P.calSrc="auto"; P.pattern="auto"; save(); } setTimeout(analyze,0); }
   body.innerHTML=`<div class="df-grid">
     <div class="df-left">
       <div class="card df-viewer"><div class="row df-vbar">
@@ -177,37 +209,48 @@ function sourceCard(src){ const m=S.meta; const warn=[];
     ${m.scope?`<span>Microscope</span><b>${E(m.scope)}</b>`:""}<span>File calibration</span><b>${m.dmScale?`${E(m.dmScale.toPrecision(6))} ${E(m.unit)}/px`:"없음"}</b></div>
     ${warn.map(w=>`<div class="note warn" style="margin-top:8px">${w}</div>`).join("")}
     <div class="row" style="margin-top:10px"><button class="btn sm" id="dfOpen">Open file…</button></div></div>`; }
-function calCard(){ const m=S.meta, c=calib(); const bar=S.res&&S.res.scaleBar; const opts=[["auto","Auto"],["tag","File tag"],["bar","Scale bar"],["saved","Saved"],["manual","Manual"],["none","None"]];
-  return `<div class="card"><h3>Calibration <span class="hint">${c.scale?`${c.scale.toPrecision(5)} 1/nm/px · ${E(c.label)}`:"보정 없음 — 길이비·각도로만 비교"}</span></h3>
+function kChip(){ return +P.kappaPct!==100?`<span class="df-chip" id="dfKChip" title="κ factor 가 100 % 가 아닙니다 — 모든 파일의 보정에 곱해집니다">κ ${E(P.kappaPct)} %<button data-clear="kappa" title="Reset to 100 %">×</button></span>`:""; }
+function elChip(){ const e=(P.elements||"").trim(); return e?`<span class="df-chip" id="dfElChip" title="Elements 필터가 켜져 있습니다 — 이 원소의 상만 찾습니다">${E(e.length>18?e.slice(0,17)+"…":e)}<button data-clear="els" title="Clear">×</button></span>`:""; }
+function calCard(){ const m=S.meta, c=calib(); const bar=S.res&&S.res.scaleBar; const opts=[["auto","Auto"],["tag","File tag"],["bar","Scale bar"],["camlen","Camera length"],["saved","Saved"],["manual","Manual"],["none","None"]];
+  return `<div class="card"><h3>Calibration <span class="hint">${c.scale?`${gU(c.scale).toPrecision(5)} ${gL()}/px · ${E(c.label)}`:"보정 없음 — 길이비·각도로만 비교"}</span>${kChip()}</h3>
     <div class="seg df-wrap" id="dfCal">${opts.map(([k,t])=>`<button data-c="${k}" class="${P.calSrc===k?"active":""}">${t}</button>`).join("")}</div>
     <div class="df-calbody">
     ${c.src==="tag"?(m.tagScale?`<div class="muted">파일 태그 ${E(m.tagScale.toPrecision(6))} 1/nm/px. 표준 시료로 확인한 값과 다르면 κ 로 고치세요.</div>`:`<div class="note warn">파일에 역공간(1/nm) 교정값이 없습니다.</div>`):""}
     ${c.src==="bar"?`<div class="row"><label class="f">Bar length (px)<input type="number" id="dfBarLen" value="${S.barLen!=null?S.barLen:""}" step="0.5" min="1" style="width:100px"></label>
-       <label class="f">Bar value (1/nm)<input type="number" id="dfBarVal" value="${S.barVal!=null?S.barVal:""}" step="any" min="0" placeholder="e.g. 5" style="width:100px"></label></div>
+       <label class="f">Bar value (${gL()})<input type="number" id="dfBarVal" value="${S.barVal!=null?+gU(S.barVal).toPrecision(6):""}" step="any" min="0" placeholder="e.g. 5" style="width:100px"></label></div>
        <div class="muted">${bar?`그림 속 막대를 찾았습니다 (${bar.lenPx} px${bar.hollow?", 속 빈 테두리 — 선 중심 기준":""}).`:"그림에서 스케일바를 찾지 못했습니다 — 길이를 직접 넣으세요."} ${labelNote()}</div>`:""}
     ${c.src==="saved"?savedCalUI():""}
-    ${c.src==="manual"?`<label class="f">Scale (1/nm per px)<input type="number" id="dfManScale" value="${S.manualScale||""}" step="any" min="0" style="width:140px"></label>`:""}
+    ${c.src==="manual"?`<label class="f">Scale (${gL()} per px)<input type="number" id="dfManScale" value="${S.manualScale?+gU(S.manualScale).toPrecision(6):""}" step="any" min="0" style="width:140px"></label>`:""}
+    ${c.src==="camlen"?camUI():""}
     <div class="row" style="margin-top:8px"><label class="f" title="REDI '측정 오차 %' 와 같은 배율 계수">κ factor (%)<input type="number" id="dfKappa" value="${P.kappaPct}" step="0.1" min="50" max="150" style="width:90px"></label>
       <label class="f">Tolerance (%)<input type="number" id="dfTol" value="${P.tolPct}" step="0.5" min="0.2" max="20" style="width:80px"></label>
-      <label class="f" title="렌즈 찌그러짐 허용">Distortion (%)<input type="number" id="dfDist" value="${P.distPct}" step="0.5" min="0" max="15" style="width:80px"></label></div>
-    <div class="row"><label class="f" title="후보 순위에 보정값을 쓸지 (Auto = 저장한 표준 보정·직접 넣은 값일 때만)">Rank with calibration<select id="dfRankCal">${[["auto","Auto"],["on","On"],["off","Off"]].map(([k,t])=>`<option value="${k}" ${P.rankCal===k?"selected":""}>${t}</option>`).join("")}</select></label><span class="muted">${c.rank?"순위에 보정 사용":"순위는 보정 없이"}</span></div>
+      <label class="f" title="렌즈 찌그러짐 허용">Distortion (%)<input type="number" id="dfDist" value="${P.distPct}" step="0.5" min="0" max="15" style="width:80px"></label>
+      <label class="f" title="표시 단위 (내보내기는 nm)">Units<select id="dfUnit"><option value="nm" ${UA()?"":"selected"}>1/nm · nm</option><option value="A" ${UA()?"selected":""}>1/Å · Å</option></select></label></div>
+    <div class="row"><label class="f" title="후보 순위에 보정값을 쓸지 (Auto = 저장한 표준 보정·직접 넣은 값일 때만)">Rank with calibration<select id="dfRankCal">${[["auto","Auto"],["on","On"],["off","Off"]].map(([k,t])=>`<option value="${k}" ${P.rankCal===k?"selected":""}>${t}</option>`).join("")}</select></label><span class="muted">${c.rank?"순위에 보정 사용":c.prior?"순위는 ±15 % 창으로만":"순위는 보정 없이"}</span></div>
     ${c.ellip>1.0001?`<div class="muted">저장한 보정의 찌그러짐 ${f((c.ellip-1)*100,2)} % (1/nm/px 가 큰 방향 ${f(c.phi*180/Math.PI,1)}°) 을 격자에 적용합니다.</div>`:""}</div></div>`; }
+function camUI(){ const c=camPar(), m=S.meta, sc=camScale(); const val=(a,b)=>a!=null?a:(b!=null?b:"");
+  return `<div class="row"><label class="f">Camera length (mm)<input type="number" id="dfCamL" value="${E(val(S.camL,m.camLen))}" step="any" min="1" style="width:90px"></label>
+    <label class="f">kV<input type="number" id="dfCamKV" value="${E(val(S.camKV,m.kV))}" placeholder="200" step="any" min="1" style="width:70px"></label>
+    <label class="f" title="검출기 화소 크기 (binning 전)">Pixel (µm)<input type="number" id="dfCamPx" value="${E(val(S.camPx,m.camPx))}" step="any" min="0" style="width:80px"></label>
+    <label class="f">Binning<input type="number" id="dfCamBin" value="${E(val(S.camBin,m.bin))}" step="1" min="1" style="width:60px"></label></div>
+    <div class="muted" title="축척 = 화소 × binning ÷ (λ × L). 표시(공칭) 카메라 길이는 수 % 틀릴 수 있어 순위에는 ±15 % 창으로만 씁니다">${sc?`= ${gU(sc).toPrecision(5)} ${gL()}/px · λ ${f(lambda(c.kV)*1e3,3)} pm${c.kVset?"":" (200 kV 가정)"}`:"L 과 화소 크기를 넣으세요"}</div>`; }
 function labelNote(){ const lb=S.res&&S.res.scaleLabel; if(!lb) return S.res&&S.res.scaleBar?"이름표 숫자를 읽지 못했습니다 — 값을 넣으세요.":"";
+  if(S.barSug&&S.barVal==null) return `<span class="df-kbad" title="단위(1/nm ↔ 1/Å, 10 배)를 확실히 읽지 못해 값을 넣지 않았습니다">이름표 "${E(S.barSug.text)}" (${f(S.barSug.conf*100,0)} %) — 단위 확인:</span> ${S.barSug.opts.map((v,i)=>`<button class="btn sm" data-baruse="${v}" title="${i?"단위를 반대로 읽었다면":"읽은 그대로"}">${E(+gU(v).toPrecision(6))} ${gL()}</button>`).join(" ")}`;
   const t=`이름표 "${E(lb.text)}" 를 읽었습니다 (확신 ${f(lb.conf*100,0)} %)`; if(!lb.recip) return `<span class="df-kbad">${t} — 실공간 단위입니다. 회절 이미지가 아니면 FFT (HRTEM) 모드를 쓰세요.</span>`;
-  if(S.barFromOCR&&S.barVal===+lb.valueInvNm.toPrecision(6)) return lb.conf>=0.9?`${t} → 값에 넣었습니다.`:`<span class="df-kbad">${t} → 값에 넣었지만 확신이 낮습니다. 그림과 맞는지 확인하세요.</span>`; return t+"."; }
+  if(S.barFromOCR&&S.barVal===+lb.valueInvNm.toPrecision(6)) return S.barSure?`${t} → 값에 넣었습니다.`:`${t} → 고른 값을 씁니다.`; return t+"."; }
 function savedCalUI(){ const list=S.calList||[]; return list.length?`<label class="f">Saved calibration<select id="dfSaved"><option value="">— choose —</option>${list.map((c,i)=>`<option value="${i}" ${S.savedCal&&S.savedCal.id===c.id?"selected":""}>${E(c.name)} · ${E(c.scale.toPrecision(5))}${c.ellip>1.0001?` · e ${f((c.ellip-1)*100,1)}%`:""}</option>`).join("")}</select></label>`:`<div class="muted">저장한 보정이 없습니다. 표준 시료(Au·Al·Si 등) 패턴을 분석한 뒤 결과에서 'Use as calibration' 을 누르세요.</div>`; }
 function patternCard(){ return `<div class="card"><h3>Pattern</h3><div class="row">
     <div class="seg" id="dfPat">${[["auto","Auto"],["spots","Spots"],["rings","Rings"]].map(([k,t])=>`<button data-p="${k}" class="${P.pattern===k?"active":""}">${t}</button>`).join("")}</div>
-    <button class="btn primary" id="dfRun" ${S.busy?"disabled":""}>Analyze</button></div>
+    <button class="btn primary" id="dfRun" ${S.busy?"disabled":""}>Analyze</button>${S.center||S.ringCenter?`<button class="btn sm" id="dfAutoC" title="직접 지정한 중심을 지우고 자동으로">Auto center</button>`:""}</div>
     ${S.res?`<div class="muted" style="margin-top:6px">${S.type==="rings"?"링(다결정) 패턴":"스폿(단결정) 패턴"}${P.pattern==="auto"?" — 자동 판정":""} · ${f(S.res.ms/1000,1)} s${S.res.spots?` · 스폿 ${S.res.spots.list.length}`:""}</div>`:""}
     ${S.type==="spots"?`<div class="row" style="margin-top:8px"><label class="f" title="센 스폿 N 개만으로 격자 (겹친 상이 있을 때)">Use spots<select id="dfTopN">${[[0,"All"],[8,"Strongest 8"],[12,"Strongest 12"],[16,"Strongest 16"],[24,"Strongest 24"]].map(([k,t])=>`<option value="${k}" ${+P.topN===k?"selected":""}>${t}</option>`).join("")}</select></label>
       <label class="f">Radial distortion<select id="dfRad">${[["auto","Auto"],["on","Fit"],["off","Off"]].map(([k,t])=>`<option value="${k}" ${(P.radial===true?"on":P.radial===false?"off":"auto")===k?"selected":""}>${t}</option>`).join("")}</select></label></div>`:""}</div>`; }
 function latCard(){ const L=curLat(); const r=S.res.spots; if(!L) return `<div class="card"><h3>Lattice</h3><div class="note warn">격자를 맞추지 못했습니다 — 중심을 직접 지정하거나(Set center) 'Use spots' 를 바꿔 보세요.${r.center&&r.center.warning?"<br>"+E(r.center.warning):""}</div></div>`;
-  const cal=calib(); const Lc=correctedFit(L,cal); const s=cal.scale; const rows=[0,1,2].map(i=>{ const g=s?Lc.len[i]*s:null, sg=s?Math.hypot(L.sig[i]/L.len[i],cal.err)*g:null; return `<tr><td class="l"><b>R${i+1}</b></td><td class="num">${f(L.len[i],2)} ± ${f(L.sig[i],2)}</td><td class="num">${g?f(g,4):"–"}</td><td class="num">${g?f(1/g,4)+" ± "+f(sg/g/g,4):"–"}</td></tr>`; }).join("");
+  const cal=calib(); const Lc=correctedFit(L,cal); const s=cal.scale; const rows=[0,1,2].map(i=>{ const g=s?Lc.len[i]*s:null, sg=s?Math.hypot(L.sig[i]/L.len[i],cal.err)*g:null; return `<tr><td class="l"><b>R${i+1}</b></td><td class="num">${f(L.len[i],2)} ± ${f(L.sig[i],2)}</td><td class="num">${g?f(gU(g),4):"–"}</td><td class="num">${g?f(dU(1/g),4)+" ± "+f(dU(sg/g/g),4):"–"}</td></tr>`; }).join("");
   const lats=r.lattices; const c=r.center;
   return `<div class="card"><h3>Lattice <span class="hint">${L.nIndexed} / ${(S.spotsEdit||r.list).length} spots indexed · σ ${f(L.sigmaPx,2)} px</span></h3>
     ${lats.length>1?`<div class="seg" id="dfLat" style="margin-bottom:8px">${lats.map((q,i)=>`<button data-l="${i}" class="${S.lat===i?"active":""}">Lattice ${i+1}</button>`).join("")}</div>`:""}
-    <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">Vector</th><th>|R| (px)</th><th>g (1/nm)</th><th>d (nm)</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th class="l">Vector</th><th>|R| (px)</th><th>g (${gL()})</th><th>d (${dL()})</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="df-kv" style="margin-top:8px"><span>∠R1·R2</span><b>${f(Lc.ang12,2)}° ± ${f(L.sigAng,2)}°</b><span>∠R1·R3</span><b>${f(Lc.ang13,2)}°</b><span>∠R2·R3</span><b>${f(Lc.ang23,2)}°</b>
       <span>R2/R1</span><b>${f(Lc.len[1]/Lc.len[0],4)}</b><span>Center</span><b>${f(L.center.x,1)}, ${f(L.center.y,1)} <span class="muted">(${E(c&&c.source==="user"?"직접 지정":c&&c.origin==="stop"?"빔스토퍼 뒤 · Friedel 짝":c&&c.origin==="spot"?"직접빔":"Friedel 짝")})</span></b>
       ${L.radialUsed?`<span>Radial distortion</span><b>${f(L.radialPct,3)} % at R</b>`:""}</div>
@@ -215,9 +258,9 @@ function latCard(){ const L=curLat(); const r=S.res.spots; if(!L) return `<div c
     ${r.nUnindexed>3?`<div class="muted" style="margin-top:6px">지수 안 붙은 스폿 ${r.nUnindexed} 개 — 이중 회절·제2상·석출물일 수 있습니다${lats.length>1?" (다른 격자 탭 참고)":""}.</div>`:""}
     <div class="muted" style="margin-top:6px">길이비와 각도는 보정과 무관합니다.</div></div>`; }
 function ringCard(){ const R=S.res.rings; const cal=calib(); const s=ringScale(cal); const pk=R.peaks;
-  const rows=pk.map((p,i)=>{ const g=s?p.r*s:null; const flag=p.nearStop?"beam-stop edge":p.broad?"broad":""; return `<tr class="${flag?"df-dim":""}"><td>${i+1}</td><td class="num">${f(p.r,2)}</td><td class="num">${g?f(g,4):"–"}</td><td class="num">${g?f(1/g,4):"–"}</td><td class="num">${f(p.fwhm,1)}</td><td class="num">${f(p.snr,0)}</td><td class="l muted">${flag}</td></tr>`; }).join("");
+  const rows=pk.map((p,i)=>{ const g=s?p.r*s:null; const flag=p.nearStop?"beam-stop edge":p.broad?"broad":""; return `<tr class="${flag?"df-dim":""}"><td>${i+1}</td><td class="num">${f(p.r,2)}</td><td class="num">${g?f(gU(g),4):"–"}</td><td class="num">${g?f(dU(1/g),4):"–"}</td><td class="num">${f(p.fwhm,1)}</td><td class="num">${f(p.snr,0)}</td><td class="l muted">${flag}</td></tr>`; }).join("");
   return `<div class="card"><h3>Rings <span class="hint">center ${f(R.center.x,1)}, ${f(R.center.y,1)} · a/b ${f(R.ratio,4)} · ${R.ringFits.length} rings fitted</span></h3>
-    <div class="tblwrap" style="max-height:40vh"><table class="tbl"><thead><tr><th>#</th><th>r (px)</th><th>g (1/nm)</th><th>d (nm)</th><th>FWHM (px)</th><th>S/N</th><th class="l">Note</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="tblwrap" style="max-height:40vh"><table class="tbl"><thead><tr><th>#</th><th>r (px)</th><th>g (${gL()})</th><th>d (${dL()})</th><th>FWHM (px)</th><th>S/N</th><th class="l">Note</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="margin-top:6px">반지름은 타원을 원으로 편 단축 기준입니다. 빔스토퍼 가장자리·넓은 봉우리는 상 찾기에서 뺍니다.</div></div>`; }
 /* Elements 칸 해석 표시: 원소만 / 조성비(입력 원소만으로 몫, 허용 ±at.%p) / 읽지 못한 조각 */
 function compHint(){ const raw=(P.elements||"").trim(); if(!raw||!window.DIFF_DB||!DIFF_DB.parseComposition) return ""; const c=DIFF_DB.parseComposition(raw); const out=[];
@@ -227,29 +270,44 @@ function compHint(){ const raw=(P.elements||"").trim(); if(!raw||!window.DIFF_DB
   if(c.bad.length) out.push(`<span class="note warn" id="dfCompBad">읽지 못함: ${c.bad.map(E).join(" ")}</span>`);
   return out.join(""); }
 function idCard(){ const cal=calib(); const els=P.elements;
-  const head=`<div class="card"><h3>Phase ID <span class="hint">${cal.scale?"보정값 + 길이비·각도·세기":"보정 없이 — 길이비·각도·세기"}</span></h3>
+  const how=cal.rank?"보정값 + 길이비·각도·세기":cal.prior?"보정 ±15 % 창 + 길이비·각도·세기":"보정 없이 — 길이비·각도·세기";
+  const head=`<div class="card"><h3>Phase ID <span class="hint">${how}</span>${elChip()}${kChip()}</h3>
     <div class="row"><label class="f" style="flex:1;min-width:160px" title="EDS 로 확인한 원소, 조성비를 알면 수까지 (REDI 의 성분·조성비) — 예: Na Y F · Fe3 O4 · Fe3O4 · Fe=42 O=58 (EDS at.%)">Elements<input type="text" id="dfEls" value="${E(els)}" placeholder="e.g. Na Y F · Fe3 O4 · Fe=42 O=58"></label>
       ${compHint()}
       <label class="f">Match<select id="dfElMode"><option value="subset" ${P.elMode==="subset"?"selected":""}>Only these</option><option value="contains" ${P.elMode==="contains"?"selected":""}>Contains all</option></select></label>
       ${S.type==="spots"?`<label class="f" title="동역학 = Bloch-wave (이중 회절·Gjønnes–Moodie 소멸 반영, 상위 12 후보)">Intensities<select id="dfIntM"><option value="dyn" ${P.intModel!=="kin"?"selected":""}>Dynamical</option><option value="kin" ${P.intModel==="kin"?"selected":""}>Kinematic</option></select></label><label class="f">Max zone index<select id="dfMaxIdx">${[3,4,5,6,7].map(k=>`<option ${+P.maxIdx===k?"selected":""}>${k}</option>`).join("")}</select></label>`:""}</div>
     <div class="row df-layers">${[["pack","Built-in"],["lab","Lab"],["local","Local"]].map(([k,t])=>`<label class="df-ck"><input type="checkbox" data-layer="${k}" ${P.layers[k]?"checked":""}> ${t}</label>`).join("")}<button class="btn sm" id="dfId" ${S.idBusy?"disabled":""}>Search</button></div>`;
-  if(S.idBusy) return head+`<div class="muted" style="margin-top:8px">후보를 계산하는 중…</div></div>`;
-  if(S.type==="spots"){ const C=S.cands; if(!C) return head+"</div>"; if(!C.length) return head+`<div class="note" style="margin-top:8px">후보가 없습니다 — 원소·Phase DB 범위를 넓혀 보세요.</div></div>`;
+  if(S.idBusy) return head+`<div class="df-prog" id="dfIdProg"><span class="muted">후보 계산 중…</span><div class="bar"><i style="width:${Math.round((S.idProg||0)*100)}%"></i></div>${DW()&&DW().mode!=="main"?`<button class="btn sm" id="dfIdCancel">Cancel</button>`:""}</div></div>`;
+  const info=S.idInfo||{};
+  if(S.type==="spots"){ const C=S.cands; if(!C) return head+"</div>"; if(!C.length) return head+`<div class="note" id="dfIdEmpty" style="margin-top:8px">${emptyMsg(info)}</div></div>`;
     const Lm=correctedFit(curLat(),cal);
     const tb=C.map((c,i)=>{ const dErr=cal.scale?c.d.map((d,j)=>{ const dm=1/(Lm.len[j]*cal.scale); return (dm-d)/d*100; }):null; const A=candAngles(c), Am=[Lm.ang12,Lm.ang13,Lm.ang23];
       const angS=A?A.map((a,j)=>`${f(a,1)}°<span class="muted"> (${(a-Am[j]>=0?"+":"")+f(a-Am[j],1)})</span>`).join("<br>"):`${f(c.ang12,1)}°`;
       return `<tr data-i="${i}" class="${i===S.sel?"df-sel":""}"><td>${i+1}</td><td class="l"><b>${E(c.phaseName)}</b><div class="muted">${E(c.formula||"")} · ${E(c.sg&&c.sg.symbol||"")} ${c.layer?`<span class="df-tag">${E(c.layer)}</span>`:""}</div></td><td>${uvwS(c.zone)}</td>
-        <td class="mono">${hklS(c.h1)}<br>${hklS(c.h2)}<br>${c.h3?hklS(c.h3):"–"}</td><td class="num">${f(c.d[0],4)}<br>${f(c.d[1],4)}<br>${f(c.d[2],4)}</td>${dErr?`<td class="num">${f(dErr[0],1)}<br>${f(dErr[1],1)}<br>${f(dErr[2],1)}</td>`:""}<td class="num df-ang">${angS}</td>
+        <td class="mono">${hklS(c.h1)}<br>${hklS(c.h2)}<br>${c.h3?hklS(c.h3):"–"}</td><td class="num">${f(dU(c.d[0]),4)}<br>${f(dU(c.d[1]),4)}<br>${f(dU(c.d[2]),4)}</td>${dErr?`<td class="num">${f(dErr[0],1)}<br>${f(dErr[1],1)}<br>${f(dErr[2],1)}</td>`:""}<td class="num df-ang">${angS}</td>
         <td class="num">${f(c.fom,2)}</td><td class="num">${c.hasF?f(c.rho,2):"–"}</td><td class="num">${c.hasF?f(c.forb*100,0)+"%":"–"}</td><td class="num">${c.hasF?f(c.missFrac*100,0)+"%":"–"}</td>${kCell(cal.scale?c.scaleImplied/cal.scale:null,c.scaleImplied,cal)}<td class="num"><b>${f(c.score,2)}</b></td></tr>`; }).join("");
-    return head+`<div class="tblwrap" style="margin-top:10px;max-height:52vh"><table class="tbl df-cand"><thead><tr><th>#</th><th class="l">Phase</th><th>Zone</th><th>R1 / R2 / R3 (hkl)</th><th>d calc (nm)</th>${cal.scale?"<th title=\"(측정 − 계산) ÷ 계산\">Δd (%)</th>":""}<th title="계산 각 ∠R1·R2 / ∠R1·R3 / ∠R2·R3, 괄호 = 계산 − 측정 (REDI 의 각도 오차)">∠ calc (Δ)</th>
+    return head+`<div class="tblwrap" style="margin-top:10px;max-height:52vh"><table class="tbl df-cand"><thead><tr><th>#</th><th class="l">Phase</th><th>Zone</th><th>R1 / R2 / R3 (hkl)</th><th>d calc (${dL()})</th>${cal.scale?"<th title=\"(측정 − 계산) ÷ 계산\">Δd (%)</th>":""}<th title="계산 각 ∠R1·R2 / ∠R1·R3 / ∠R2·R3, 괄호 = 계산 − 측정 (REDI 의 각도 오차)">∠ calc (Δ)</th>
       <th title="길이비·각도(+보정) χ²/자유도">FOM</th><th title="관측 세기 ↔ 예측 세기(동역학 또는 운동학) 순위 상관 — 포화 스폿 제외">ρ</th><th title="운동학적으로 0 인 자리의 관측 세기 비율 (이중 회절 가능)">Forb.</th><th title="예측 강한 반사 중 안 보이는 비율">Miss</th><th title="${cal.scale?"후보가 맞다면 필요한 보정 배율 = 예측 g ÷ 측정 g":"후보가 맞다면 필요한 1/nm/px"}">${cal.scale?"κ":"Scale"}</th><th>Score</th></tr></thead><tbody>${tb}</tbody></table></div>
-      <div class="muted" style="margin-top:6px">Score = FOM + 5·Forb + (1 − ρ) + 3·Miss (작을수록 좋음). ${rankNote(cal)}</div>${tieNote(C,"low")}
+      <div class="muted" style="margin-top:6px">Score = FOM + 5·Forb + (1 − ρ) + 3·Miss (작을수록 좋음). ${rankNote(cal)}</div>${idBanners(C,cal,info,"spots")}${tieNote(C,"low")}
       ${candDetail()}</div>`; }
-  const C=S.rcands; if(!C) return head+"</div>"; if(!C.length) return head+`<div class="note" style="margin-top:8px">후보가 없습니다.</div></div>`;
+  const C=S.rcands; if(!C) return head+"</div>"; if(!C.length) return head+`<div class="note" id="dfIdEmpty" style="margin-top:8px">${info.cancelled?"멈췄습니다 (Cancel).":"후보가 없습니다."}</div></div>`;
   const tb=C.map((c,i)=>`<tr data-i="${i}" class="${i===S.rsel?"df-sel":""}"><td>${i+1}</td><td class="l"><b>${E(c.phaseName)}</b><div class="muted">${E(c.formula||"")} · ${E(c.sg&&c.sg.symbol||"")} ${c.layer?`<span class="df-tag">${E(c.layer)}</span>`:""}</div></td>
     <td class="num">${c.pairs.length}</td><td class="num">${f(c.scale,6)}</td>${kCell(cal.scale?c.scale/ringScale(cal):null,null,cal)}<td class="num">${f(c.explained*100,0)}%</td><td class="num">${f(c.missing*100,0)}%</td><td class="num">${f(c.rho,2)}</td><td class="num">${f(c.dev*100,2)}%</td><td class="num"><b>${f(c.score,3)}</b></td></tr>`).join("");
   return head+`<div class="tblwrap" style="margin-top:10px;max-height:52vh"><table class="tbl df-cand"><thead><tr><th>#</th><th class="l">Phase</th><th>Rings</th><th>Scale (1/nm/px)</th><th>κ</th><th title="짝지은 관측 세기 비율">Explained</th><th title="관측 범위 안 강한 예측 링이 빠진 비율">Missing</th><th>ρ</th><th>Mean dev.</th><th>Score</th></tr></thead><tbody>${tb}</tbody></table></div>
-    <div class="muted" style="margin-top:6px">Score = 설명한 세기 × (1 − 빠진 링) × exp(−어긋남/허용) × (1+ρ)/2 (클수록 좋음). ${rankNote(cal)}</div>${tieNote(C,"high")}${ringDetail()}</div>`; }
+    <div class="muted" style="margin-top:6px">Score = 설명한 세기 × (1 − 빠진 링) × exp(−어긋남/허용) × (1+ρ)/2 (클수록 좋음). ${rankNote(cal)}</div>${idBanners(C,cal,info,"rings")}${tieNote(C,"high")}${ringDetail()}</div>`; }
+/* 후보가 없을 때: 격자 없음 · 얼룩 격자 거부 · 멈춤 · DB 범위 */
+function emptyMsg(info){ if(info.noLattice) return "격자를 찾지 못해 상 찾기를 하지 않았습니다 — Set center 나 Use spots 를 바꿔 보세요.";
+  if(info.refused==="speckle") return `<span title="기저가 이미지의 2.5 % 보다 짧거나 지수 범위가 기저의 25 배를 넘습니다 — 링·결정립 얼룩을 맞춘 가짜 격자일 가능성이 큽니다">격자가 너무 촘촘합니다 (링·얼룩?) — Pattern 을 Rings 로 바꿔 보세요.</span>`;
+  if(info.cancelled) return "멈췄습니다 (Cancel). Search 로 다시 찾습니다."; return "후보가 없습니다 — 원소·Phase DB 범위를 넓혀 보세요."; }
+/* 결과 경고: 맞는 상 없음 · κ ≈ 10 배(단위 1/nm ↔ 1/Å) · 보정 창 밖 · 시간 한도 */
+function idBanners(C,cal,info,kind){ const o=[]; const t=C[0]; if(!t) return "";
+  const bad=kind==="spots"?(t.score>2||(t.missFrac!=null&&t.missFrac>0.8)):(t.score<0.3);
+  if(bad) o.push(`<div class="note warn" id="dfNoMatch" style="margin-top:8px" title="${kind==="spots"?`1 위 Score ${f(t.score,2)} (> 2) · Miss ${t.missFrac==null?"–":f(t.missFrac*100,0)+" %"}`:`1 위 Score ${f(t.score,3)} (< 0.3)`} — DB 에 맞는 상이 없거나 격자·보정·원소 필터가 틀렸을 수 있습니다">No credible match — 1 위도 잘 맞지 않습니다.</div>`);
+  const k=cal.scale?(kind==="spots"?(t.scaleImplied?t.scaleImplied/cal.scale:null):t.scale/ringScale(cal)):null;
+  if(k&&Math.abs(Math.abs(Math.log10(k))-1)<0.1) o.push(`<div class="note warn" id="dfK10" style="margin-top:8px">κ ≈ ${f(k,2)} — 보정이 10 배 틀린 듯합니다. 스케일바 단위(1/nm ↔ 1/Å)를 확인하세요.</div>`);
+  if(info.priorEmpty) o.push(`<div class="muted" style="margin-top:6px">보정 ±15 % 안에 맞는 후보가 없어 창 없이 매겼습니다.</div>`);
+  if(info.truncated) o.push(`<div class="muted" style="margin-top:6px">시간 한도로 일부 후보만 검증했습니다.</div>`);
+  return o.join(""); }
 /* 1·2 위가 거의 같으면(점수 차 < 5 %) 알림 — 같은 구조형(예: fcc 금속끼리)은 보정이 1 % 안으로 맞거나 원소가 없으면 가를 수 없다 */
 function tieNote(list,better){ if(!list||list.length<2) return ""; const a=list[0].score, b=list[1].score; const close=better==="low"?(b-a)<=0.05*Math.max(Math.abs(a),0.05):(a-b)<=0.05*Math.abs(a);
   return close?`<div class="note warn" style="margin-top:8px">1 위(${E(list[0].phaseName)})와 2 위(${E(list[1].phaseName)})의 점수가 거의 같습니다 — 이 패턴만으로는 가를 수 없습니다. Elements 에 EDS 원소를 넣거나 표준 시료로 만든 보정을 쓰세요.</div>`:""; }
@@ -258,6 +316,7 @@ function candAngles(c){ if(!c||!c.g||c.g.length<3||!(c.g[0]>0&&c.g[1]>0&&c.g[2]>
   return [c.ang12!=null?c.ang12:ac((g3*g3-a*a-b*b)/(2*a*b)), ac((a*a+g3*g3-b*b)/(2*a*g3)), ac((b*b+g3*g3-a*a)/(2*b*g3))]; }
 function kCell(k,sc,cal){ if(k==null) return `<td class="num">${sc!=null?f(sc,5):"–"}</td>`; const ok=Math.abs(k-1)<=cal.err; return `<td class="num ${ok?"df-kok":"df-kbad"}" title="${ok?"보정 허용 안":"보정 허용 밖"}">${f(k,3)}</td>`; }
 function rankNote(cal){ if(!cal.scale) return "보정 없이 — 모양(길이비·각도)과 세기가 같은 상은 가를 수 없습니다. 원소나 보정으로 좁히세요.";
+  if(cal.prior) return `${E(cal.label)} 는 공칭값이라 κ ±15 % 밖 후보만 뺍니다. 초록 κ = 허용 ±${f(cal.err*100,1)} % 안.`;
   return cal.rank?`보정(${E(cal.label)}, 허용 ±${f(cal.err*100,1)} %)을 순위에 씁니다.`:`순위는 보정 없이 매기고 κ 만 보여 줍니다 — ${E(cal.label)} 는 공칭값이라 수 % 틀릴 수 있습니다. 초록 κ = 허용 ±${f(cal.err*100,1)} % 안. 보정을 믿으면 Calibration 의 'Rank' 를 켜세요.`; }
 function candDetail(){ const c=S.cands&&S.cands[S.sel]; if(!c) return ""; const L=curLat(); const cal=calib(); const v=c.verify;
   const dy=!!c.dyn; const note=r=>dy?(r.gm?"Gjønnes–Moodie 소멸 — 정대축이면 0, 조금 기울면 생김":r.dz?"ZOLZ 로는 생길 수 없음 (HOLZ·다른 상?)":r.dd?"운동학 금지 — 이중 회절로 생김":""):(r.absent?"공간군 소멸 — 이중 회절?":r.weak?"운동학적으로 약함":"");
@@ -281,8 +340,8 @@ function manualCard(){ if(S.type!=="spots") return ""; const L=curLat(); if(!L) 
       <button class="btn sm" id="dfMGo">Compare</button><button class="btn sm" id="dfMSug" title="측정 d 에 맞는 hkl 쌍 찾기">Suggest hkl</button></div>${m?manualResult(m):""}</div>`; }
 function manualResult(m){ if(m.err) return `<div class="note warn" style="margin-top:8px">${E(m.err)}</div>`;
   if(m.sug) return `<div class="tblwrap" style="margin-top:8px;max-height:30vh"><table class="tbl"><thead><tr><th>R1</th><th>R2</th><th>Zone</th><th>d1 / d2 (nm)</th><th>∠ calc</th><th>Δ∠</th></tr></thead><tbody>${m.sug.map(s=>`<tr><td class="mono">${hklS(s.h1)}</td><td class="mono">${hklS(s.h2)}</td><td>${uvwS(s.z)}</td><td class="num">${f(s.d1,4)} / ${f(s.d2,4)}</td><td class="num">${f(s.ang,2)}°</td><td class="num">${f(s.dAng,2)}</td></tr>`).join("")||`<tr><td colspan="6">맞는 쌍이 없습니다</td></tr>`}</tbody></table></div>`;
-  return `<div class="tblwrap" style="margin-top:8px"><table class="tbl"><thead><tr><th class="l"></th><th>d calc (nm)</th><th>d meas (nm)</th><th>Δ (%)</th></tr></thead><tbody>${m.rows.map(r=>`<tr><td class="l"><b>${r.k}</b> <span class="mono">${hklS(r.h)}</span></td><td class="num">${f(r.dc,4)}</td><td class="num">${r.dm?f(r.dm,4):"–"}</td><td class="num">${r.dm?f((r.dm-r.dc)/r.dc*100,2):"–"}</td></tr>`).join("")}</tbody></table></div>
-    <div class="df-kv" style="margin-top:6px"><span>∠R1·R2</span><b>${f(m.ang,2)}° (측정 ${f(m.angM,2)}°)</b><span>Zone</span><b>${uvwS(m.zone)}</b>${m.kappa?`<span>κ</span><b>${f(m.kappa,4)}</b>`:""}</div>${m.note?`<div class="note warn" style="margin-top:6px">${E(m.note)}</div>`:""}`; }
+  return `<div class="tblwrap" style="margin-top:8px"><table class="tbl"><thead><tr><th class="l"></th><th>d calc (${dL()})</th><th>d meas (${dL()})</th><th>Δ (%)</th></tr></thead><tbody>${m.rows.map(r=>`<tr><td class="l"><b>${r.k}</b> <span class="mono">${hklS(r.h)}</span></td><td class="num">${f(dU(r.dc),4)}</td><td class="num">${r.dm?f(dU(r.dm),4):"–"}</td><td class="num">${r.dm?f((r.dm-r.dc)/r.dc*100,2):"–"}</td></tr>`).join("")}</tbody></table></div>
+    <div class="df-kv" style="margin-top:6px"><span>∠R1·R2</span><b>${f(m.ang,2)}° (측정 ${f(m.angM,2)}°)</b><span>Zone</span><b>${uvwS(m.zone)}</b>${m.kappa?`<span>κ</span><b>${f(m.kappa,4)}</b>`:""}</div>${m.note?`<div class="note warn" id="dfMNote" style="margin-top:6px">${E(m.note)}</div>`:""}`; }
 function resultCards(){ if(!S.res) return ""; if(S.type==="spots") return (S.res.spots?latCard():"")+idCard()+manualCard(); if(S.type==="rings") return ringCard()+idCard(); return ""; }
 
 /* ---------- 링 프로파일 ---------- */
@@ -304,12 +363,19 @@ function wire(body){ const cv=$q("#dfCv",body);
   $q("#dfGamma",body).onchange=e=>{ S.gamma=e.target.value; buildDisplay(); draw(); };
   $all("#dfCal button",body).forEach(b=>b.onclick=async()=>{ P.calSrc=b.dataset.c; save(); if(P.calSrc==="saved") await loadCals(); rerender(); identify(); });
   const num=(id,fn)=>{ const el=$q(id,body); if(el) el.onchange=()=>{ fn(parseFloat(el.value)); save(); rerender(); identify(); }; };
-  num("#dfBarLen",v=>S.barLen=v>0?v:null); num("#dfBarVal",v=>{ S.barVal=v>0?v:null; S.barFromOCR=false; }); num("#dfManScale",v=>S.manualScale=v>0?v:null);
+  const fromU=v=>UA()?v*10:v; // 입력은 지금 표시 단위 → 내부 1/nm
+  num("#dfBarLen",v=>S.barLen=v>0?v:null); num("#dfBarVal",v=>{ S.barVal=v>0?fromU(v):null; S.barFromOCR=false; S.barSug=null; }); num("#dfManScale",v=>S.manualScale=v>0?fromU(v):null);
+  num("#dfCamL",v=>S.camL=v>0?v:null); num("#dfCamKV",v=>S.camKV=v>0?v:null); num("#dfCamPx",v=>S.camPx=v>0?v:null); num("#dfCamBin",v=>S.camBin=v>0?v:null);
+  const un=$q("#dfUnit",body); if(un) un.onchange=()=>{ P.unit=un.value==="A"?"A":"nm"; save(); rerender(); };
+  $all("[data-baruse]",body).forEach(b=>b.onclick=()=>{ S.barVal=+b.dataset.baruse; S.barFromOCR=true; S.barConfirmed=true; S.barSug=null; if(P.calSrc!=="bar"&&P.calSrc!=="auto"){ P.calSrc="bar"; save(); } rerender(); identify(); });
+  $all("[data-clear]",body).forEach(b=>b.onclick=e=>{ e.stopPropagation(); if(b.dataset.clear==="kappa") P.kappaPct=100; else if(b.dataset.clear==="els") P.elements=""; save(); rerender(); identify(); });
+  const ac=$q("#dfIdCancel",body); if(ac) ac.onclick=cancelIdentify;
+  const autoC=$q("#dfAutoC",body); if(autoC) autoC.onclick=()=>{ S.center=null; S.ringCenter=null; analyze(); };
   num("#dfKappa",v=>{ if(v>0) P.kappaPct=v; }); num("#dfTol",v=>{ if(v>0) P.tolPct=v; }); num("#dfDist",v=>{ if(v>=0) P.distPct=v; });
   const rk=$q("#dfRankCal",body); if(rk) rk.onchange=()=>{ P.rankCal=rk.value; save(); rerender(); identify(); };
   const sv=$q("#dfSaved",body); if(sv) sv.onchange=()=>{ S.savedCal=(S.calList||[])[+sv.value]||null; rerender(); identify(); };
   $all("#dfPat button",body).forEach(b=>b.onclick=()=>{ P.pattern=b.dataset.p; save(); if(S.res&&P.pattern!=="auto"&&((P.pattern==="spots"&&S.res.spots)||(P.pattern==="rings"&&S.res.rings))){ S.type=P.pattern; rerender(); identify(); } else analyze(); });
-  $q("#dfRun",body).onclick=()=>{ S.center=null; analyze(); };
+  $q("#dfRun",body).onclick=()=>analyze(); // 직접 지정한 중심(스폿·링)은 유지 — 지우려면 Auto center
   const tn=$q("#dfTopN",body); if(tn) tn.onchange=()=>{ P.topN=+tn.value; save(); refit(); };
   const rd=$q("#dfRad",body); if(rd) rd.onchange=()=>{ P.radial=rd.value==="on"?true:rd.value==="off"?false:"auto"; save(); refit(); };
   $all("#dfLat button",body).forEach(b=>b.onclick=()=>{ S.lat=+b.dataset.l; S.cands=null; rerender(); identify(); });
@@ -343,7 +409,8 @@ function tapAt(sx,sy){ if(!S||!S.view||!S.res) return; const ix=S.view.x+sx/S.vi
   if(S.type==="spots"&&S.res.spots){ const L=curLat(); if(!L) return; let b=null,bd=1e9; for(const s of L.spots){ const d=Math.hypot(s.x-ix,s.y-iy); if(d<bd){ bd=d; b=s; } } if(b&&bd<12/S.view.zoom+6){ const C=S.cands&&S.cands[S.sel]; const h=C&&b.indexed?[0,1,2].map(i=>b.n[0]*C.h1[i]+b.n[1]*C.h2[i]):null; const g=Math.hypot(b.x-L.center.x,b.y-L.center.y); const cal=calib();
       const msg=`스폿 (${b.x.toFixed(1)}, ${b.y.toFixed(1)}) · |g| ${g.toFixed(1)} px${cal.scale?` · d ${(1/gOf([b.x-L.center.x,b.y-L.center.y],cal)).toFixed(4)} nm`:""}${b.indexed?` · n = (${b.n.join(", ")})`:" · 지수 없음"}${h?` · hkl ${hklT(h)}`:""}`; say(msg,"ok"); } } }
 async function analyzeRingsAt(x,y){ // 지정 중심에서 링 다시 (analyze 의 ringCenter)
-  S.busy=true; paint(); try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:"rings",ringCenter:{x,y}}},[copy.buffer]); S.res.rings=r.rings; S.res.mask=r.mask; S.maskCv=null; }catch(e){ S.err=String(e.message||e); } S.busy=false; paint(); identify(); }
+  if(!S||!S.img||S.busy) return; const my=S; S.busy=true; paint(); try{ const copy=new Float32Array(S.img); const r=await DW().run("analyze",{img:copy,w:S.w,h:S.h,opt:{pattern:"rings",ringCenter:{x,y}}},[copy.buffer]); if(S!==my) return; S.res.rings=r.rings; S.res.mask=r.mask; S.maskCv=null; }catch(e){ if(S!==my) return; S.err=String(e.message||e); }
+  S.busy=false; paint(); identify(); }
 function localPeak(x,y,r){ const {img,w,h}=S; let best=null; const R=Math.ceil(r); for(let dy=-R;dy<=R;dy++) for(let dx=-R;dx<=R;dx++){ const xx=Math.round(x)+dx, yy=Math.round(y)+dy; if(xx<1||yy<1||xx>=w-1||yy>=h-1) continue; const v=img[yy*w+xx]; if(!best||v>best.v) best={x:xx,y:yy,v}; }
   if(!best) return null; let sw=0,sx=0,sy=0,mn=Infinity; for(let dy=-3;dy<=3;dy++) for(let dx=-3;dx<=3;dx++){ const v=img[(best.y+dy)*w+best.x+dx]; if(v<mn) mn=v; } for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){ const v=img[(best.y+dy)*w+best.x+dx]-mn; if(v>0){ sw+=v; sx+=v*(best.x+dx); sy+=v*(best.y+dy); } }
   return sw>0?{x:sx/sw,y:sy/sw,I:sw,snr:99,manual:true}:null; }
@@ -359,7 +426,12 @@ function manualCompare(body){ const h1=parseH($q("#dfMh1",body).value), h2=parse
   if(!z.some(Boolean)){ S.mres={err:"두 hkl 이 평행합니다"}; rerender(); return; }
   const L=correctedFit(curLat(),calib()); const s=calib().scale; const dm=i=>s?1/(L.len[i]*s):null; const ab=dc.absent(ph.ops,h1)||dc.absent(ph.ops,h2);
   const rows=[["R1",h1],["R2",h2],["R3",h3]].map(([k,h],i)=>({k,h,dc:dc.dSpacing(ph.cell,h),dm:dm(i)})); const ang=dc.angleG(ph.cell,h1,h2);
-  S.mres={rows,ang,angM:L.ang12,zone:z,kappa:s?rows[0].dm/rows[0].dc:null,note:ab?"넣은 hkl 중 공간군 소멸 반사가 있습니다 (이중 회절이 아니면 맞지 않음)":""}; rerender(); }
+  // 맞지 않음 경고: 각 차 > 3°, 보정 있으면 Δd > 5 %, 없으면 길이비 R2/R1 차 > 5 %
+  const bad=[]; const dAng=Math.abs(ang-L.ang12); if(dAng>3) bad.push(`∠ 차 ${f(dAng,1)}°`);
+  if(s){ const dd=Math.max(...rows.map(r=>Math.abs((r.dm-r.dc)/r.dc))); if(dd>0.05) bad.push(`Δd ${f(dd*100,1)} %`); }
+  else { const rc=rows[0].dc/rows[1].dc, rm=L.len[1]/L.len[0]; const e=Math.abs(rc/rm-1); if(e>0.05) bad.push(`길이비 차 ${f(e*100,1)} %`); }
+  const notes=[]; if(bad.length) notes.push("맞지 않습니다: "+bad.join(" · ")); if(ab) notes.push("넣은 hkl 중 공간군 소멸 반사가 있습니다 (이중 회절이 아니면 맞지 않음)");
+  S.mres={rows,ang,angM:L.ang12,zone:z,kappa:s?rows[0].dm/rows[0].dc:null,note:notes.join(" — "),mismatch:bad.length>0}; rerender(); }
 function manualSuggest(body){ const ph=mPhase(body); const cal=calib(); const L=correctedFit(curLat(),cal); if(!ph){ return; } const dc=DC(); const tol=Math.max(cal.err,0.01);
   const refl=dc.reflections(ph,Math.max(20,(cal.scale?L.len[1]*cal.scale:0)*1.2),{allowed:true}); const out=[];
   if(cal.scale){ const g1=L.len[0]*cal.scale, g2=L.len[1]*cal.scale; const A=refl.filter(r=>Math.abs(r.g-g1)/g1<=tol), B=refl.filter(r=>Math.abs(r.g-g2)/g2<=tol);
@@ -432,5 +504,5 @@ function exportJSON(){ const cal=calib(); const out={app:"INNO Analytics Diffrac
   else { out.rings={center:S.res.rings.center,ellipse:S.res.rings.ellipse,peaks:S.res.rings.peaks}; const C=S.rcands&&S.rcands[S.rsel]; if(C) out.selected={phase:C.phaseName,ref:refOf(C.phaseId),scale:C.scale,pairs:C.pairs}; }
   dl(base()+"_diffraction.json",new Blob([JSON.stringify(out,null,1)],{type:"application/json"})); }
 
-window.DIFF_UI={render,_S:()=>S,_P:P,_identify:identify,_analyze:analyze,_report:reportRows,_angles:candAngles};
+window.DIFF_UI={render,_S:()=>S,_P:P,_identify:identify,_analyze:analyze,_report:reportRows,_angles:candAngles,_cancel:cancelIdentify,_calib:()=>calib()};
 })();

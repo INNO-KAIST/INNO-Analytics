@@ -36,8 +36,8 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps svg.xps-svg{display:block;width:100%;height:auto;user-select:none;touch-action:none;font-family:"DM Sans","Noto Sans KR",system-ui,sans-serif}
 .xps svg.xps-svg .ax{stroke:var(--line2);stroke-width:1}
 .xps svg.xps-svg .gd{stroke:var(--grid);stroke-width:1}
-.xps svg.xps-svg text{fill:var(--muted);font-size:11px}
-.xps svg.xps-svg text.al{fill:var(--ink2);font-size:12px}
+.xps svg.xps-svg text{fill:var(--muted);font-size:calc(11px*var(--xfs,1))}
+.xps svg.xps-svg text.al{fill:var(--ink2);font-size:calc(12px*var(--xfs,1))}
 .xps svg.xps-svg .dat{fill:none;stroke:var(--dat);stroke-width:1.2}
 .xps svg.xps-svg .datp{fill:var(--dat);opacity:.75}
 .xps svg.xps-svg .env{fill:none;stroke:var(--env);stroke-width:2;stroke-linejoin:round}
@@ -51,9 +51,9 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps svg.xps-svg .xh{stroke:var(--ink2);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
 .xps svg.xps-svg .rz{stroke:var(--line2);stroke-width:1;stroke-dasharray:3 3}
 .xps svg.xps-svg .ref{stroke:var(--info);stroke-width:1;opacity:.7}
-.xps svg.xps-svg text.ref{fill:var(--info);font-size:10.5px;opacity:1;stroke:none}
-.xps svg.xps-svg text.pid{fill:var(--ink);font-size:11px;font-weight:600;stroke:var(--surface);stroke-width:3;paint-order:stroke}
-.xps svg.xps-svg text.cl{font-size:11px;font-weight:600;stroke:var(--surface);stroke-width:3;paint-order:stroke;fill:var(--ink2)}
+.xps svg.xps-svg text.ref{fill:var(--info);font-size:calc(10.5px*var(--xfs,1));opacity:1;stroke:none}
+.xps svg.xps-svg text.pid{fill:var(--ink);font-size:calc(11px*var(--xfs,1));font-weight:600;stroke:var(--surface);stroke-width:3;paint-order:stroke}
+.xps svg.xps-svg text.cl{font-size:calc(11px*var(--xfs,1));font-weight:600;stroke:var(--surface);stroke-width:3;paint-order:stroke;fill:var(--ink2)}
 .xps .xps-tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:8px;padding:6px 8px;font-size:11.5px;line-height:1.45;color:var(--ink);z-index:5;min-width:150px;white-space:nowrap}
 .xps .xps-tip i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .xps .xps-tip .k{color:var(--muted)}
@@ -176,3 +176,5 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .wagwrap{max-width:440px}
 .xps svg.sens-strip{display:block}
 .xps table.sens td{vertical-align:middle}
+/* 정량 표: at% 를 원소 바로 옆(3 번째 열)에 — 휴대폰 폭에서 가로 스크롤 없이 보이게 */
+.xps table.xq-tbl td.xq-at{background:color-mix(in srgb,var(--accent) 6%,transparent)}

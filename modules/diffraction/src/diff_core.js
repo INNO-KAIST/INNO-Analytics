@@ -273,7 +273,7 @@ DC.zoneBasis=function(phase,uvw,opt){ opt=opt||{}; const z=DC.reduceInt(uvw); co
   const h3=add(h1,h2,1); const g1=DC.gLen(cell,h1), g2=DC.gLen(cell,h2), g3=DC.gLen(cell,h3);
   return {zone:z,h1,h2,h3,g:[g1,g2,g3],d:[1/g1,1/g2,1/g3],ang12:DC.angleG(cell,h1,h2),ang13:DC.angleG(cell,h1,h3),ang23:DC.angleG(cell,h2,h3),ratio21:g2/g1,ratio31:g3/g1,nSpots:pts.length}; };
 /* 정대축 표: |u|,|v|,|w| ≤ maxIdx 인 방향을 Laue 대칭으로 묶어 대표 하나씩 (같은 무리의 방향은 같은 회절도) */
-DC.zoneTable=function(phase,opt){ opt=opt||{}; const N=opt.maxIdx||5; const gmax=opt.gmax||12; const refl=DC.reflections(phase,gmax,{F:!!(phase.atoms&&phase.atoms.length)}); let Im=0; for(const r of refl) if(r.I!=null&&r.I>Im) Im=r.I;
+DC.zoneTable=function(phase,opt){ opt=opt||{}; const N=opt.maxIdx||5; const gmax=opt.gmax||12; const refl=opt.refl||DC.reflections(phase,gmax,{F:!!(phase.atoms&&phase.atoms.length)}); /* opt.refl: 미리 구한 반사 목록 (같은 gmax) */ let Im=0; for(const r of refl) if(r.I!=null&&r.I>Im) Im=r.I;
   const rots=phase.ops?DC.lauePoints(phase.ops):[[1,0,0,0,1,0,0,0,1]]; const seen=new Set(); const out=[];
   const key=u=>u.join(","); const canon=u=>{ let best=null; for(const R of rots){ const v=[R[0]*u[0]+R[1]*u[1]+R[2]*u[2],R[3]*u[0]+R[4]*u[1]+R[5]*u[2],R[6]*u[0]+R[7]*u[1]+R[8]*u[2]]; for(const s of [1,-1]){ const w=v.map(x=>x*s); if(!best||cmpU(w,best)>0) best=w; } } return best; };
   for(let u=-N;u<=N;u++) for(let v=-N;v<=N;v++) for(let w=-N;w<=N;w++){ if(!u&&!v&&!w) continue; const z=DC.reduceInt([u,v,w]); if(z.some((x,i)=>x!==[u,v,w][i])) continue; const c=canon(z); const k=key(c); if(seen.has(k)) continue; seen.add(k);
