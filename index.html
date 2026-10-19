@@ -46289,6 +46289,66 @@ IC.invert=function(p,min,max){ // Edit ▸ Invert: 8-bit 255−v, 16-bit: (min+m
   return {w:p.w,h:p.h,bit:p.bit,data:p.bit===16?IC.roundTo(out,16):out};
 };
 
+/* ===== Split by size (크기 기준 나누기) — 2026-10-19 =====
+   거의 같은 크기의 둥근 입자(나노입자 TEM)가 겹쳐 한 덩어리가 된 것을 나눈다. ImageJ Watershed(EDM 극대, 허용 0.5)는 목이 넓게 겹친 덩어리를 못 나눔.
+   ① 성분마다 넓이·solidity(넓이/볼록껍질) → 홑입자(solidity ≥ 0.93, 9 px 이상)의 넓이 중앙값 A0, r0 = √(A0/π)
+   ② 덩어리(넓이 > 1.35·A0 또는 solidity < 0.88): 씨앗 = EDM 의 국소 극대 중 높이 ≥ 0.45·r0, 서로 ≥ 0.75·r0 떨어진 것(높은 것부터; 허용 0 — 낮은 목도 나눔)
+      씨앗 수 < round(넓이/A0) 이면 가장 먼 화소를 씨앗으로 더함
+   ③ 씨앗에서 k-means(화소 좌표, 10 번) → 가장 가까운 씨앗으로 나눔(같은 크기 원이 겹친 경계 = 두 중심의 수직이등분선) → 경계에 1 px 선(0)
+   반환: 이진 이미지(255/0), info {A0, r0, split: 나눈 덩어리 수, parts} */
+IC.splitBySize=function(p,o){ o=o||{}; needBinary(p); const W=p.w, H=p.h, N=W*H, src=p.data;
+  const lab=new Int32Array(N).fill(-1), st=new Int32Array(N); const comps=[];
+  for(let i0=0;i0<N;i0++){ if(!(src[i0]>0)||lab[i0]>=0) continue; const id=comps.length; let sp=0; st[sp++]=i0; lab[i0]=id; const px=[];
+    while(sp){ const i=st[--sp]; px.push(i); const x=i%W, y=(i-x)/W; for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(src[j]>0&&lab[j]<0){ lab[j]=id; st[sp++]=j; } } } }
+    comps.push({id,px}); }
+  // solidity: 볼록 껍질(화소 모서리 점들의 monotone chain) 넓이 대비
+  const hullArea=px=>{ const P=[]; const rows=new Map(); for(const i of px){ const x=i%W, y=(i-x)/W; const r=rows.get(y); if(!r) rows.set(y,[x,x]); else { if(x<r[0]) r[0]=x; if(x>r[1]) r[1]=x; } }
+    for(const [y,[a,b]] of rows){ P.push([a,y],[b+1,y],[a,y+1],[b+1,y+1]); } P.sort((u,v)=>u[0]-v[0]||u[1]-v[1]);
+    const cr=(O,A,B)=>(A[0]-O[0])*(B[1]-O[1])-(A[1]-O[1])*(B[0]-O[0]); const lo=[],up=[];
+    for(const q of P){ while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],q)<=0) lo.pop(); lo.push(q); }
+    for(let k=P.length-1;k>=0;k--){ const q=P[k]; while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0) up.pop(); up.push(q); }
+    const hu=lo.slice(0,-1).concat(up.slice(0,-1)); let a=0; for(let k=0;k<hu.length;k++){ const A=hu[k], B=hu[(k+1)%hu.length]; a+=A[0]*B[1]-B[0]*A[1]; } return Math.abs(a)/2; };
+  for(const c of comps){ c.area=c.px.length; c.sol=c.area>=4?c.area/Math.max(c.area,hullArea(c.px)):1; }
+  // 잡음 점(수천 개의 작은 성분)이 중앙값을 차지하지 않게: 넓이 가중 중앙값의 minFrac(기본 0.15) 보다 작은 성분은 홑입자 후보에서 뺌
+  const allA=comps.filter(c=>c.area>=9).map(c=>c.area).sort((a,b)=>a-b); let wm=0; { let tot=0; for(const a of allA) tot+=a; let cs=0; for(const a of allA){ cs+=a; if(cs>=tot/2){ wm=a; break; } } }
+  const aMin=Math.max(9,(o.minFrac>=0?o.minFrac:0.15)*wm);
+  let singles=comps.filter(c=>c.area>=aMin&&c.sol>=0.93).map(c=>c.area).sort((a,b)=>a-b);
+  if(singles.length<3) singles=comps.filter(c=>c.area>=aMin).map(c=>c.area).sort((a,b)=>a-b);
+  const out=new Float32Array(N); for(let i=0;i<N;i++) out[i]=src[i]>0?255:0;
+  if(!singles.length) return {w:W,h:H,bit:8,data:out,info:{A0:NaN,r0:NaN,split:0,parts:0}};
+  const A0=o.A0>0?o.A0:singles[singles.length>>1], r0=Math.sqrt(A0/Math.PI);
+  const e=IC.makeFloatEDM(p,0,false).data; let nSplit=0, nParts=0;
+  // 세기 씨앗(선택, o.gray): 입자 크기 척도의 Laplacian-of-Gaussian 극대 = 원판 중심 (겹쳐 붙어 EDM 에 목이 없어도 찾음).
+  // 큰 입자는 f 배 줄인 이미지에서 계산(σ' = σ/f) — 속도. 어두운 입자면 +∇²(G*I), 밝은 입자면 −∇²
+  let lseed=null; if(o.gray&&o.gray.data&&o.gray.data.length===N){ const f=Math.max(1,Math.floor(r0/8)), w2=Math.ceil(W/f), h2=Math.ceil(H/f); const sm=new Float32Array(w2*h2), cnt=new Float32Array(w2*h2);
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const k=((y/f)|0)*w2+((x/f)|0); sm[k]+=o.gray.data[y*W+x]; cnt[k]++; } for(let k=0;k<sm.length;k++) sm[k]/=cnt[k]||1;
+      const sg=Math.max(1,r0/Math.SQRT2/f); const gg=IC.gaussian({w:w2,h:h2,bit:32,data:sm},{sigma:sg}); const L=(gg.plane||gg).data; const sgn=o.dark?1:-1;
+      const lap=new Float32Array(w2*h2); for(let y=1;y<h2-1;y++) for(let x=1;x<w2-1;x++){ const k=y*w2+x; lap[k]=sgn*(L[k-1]+L[k+1]+L[k-w2]+L[k+w2]-4*L[k]); }
+      lseed=[]; for(let y=1;y<h2-1;y++) for(let x=1;x<w2-1;x++){ const k=y*w2+x, v=lap[k]; if(!(v>0)) continue; let mx=true; for(let dy=-1;dy<=1&&mx;dy++) for(let dx=-1;dx<=1;dx++){ if((dx||dy)&&lap[k+dy*w2+dx]>v){ mx=false; break; } } if(mx){ const X=Math.min(W-1,Math.round((x+0.5)*f-0.5)), Y=Math.min(H-1,Math.round((y+0.5)*f-0.5)); lseed.push([X,Y,v]); } } }
+  const seedsOf=new Map(); if(lseed){ for(const q of lseed){ const id=lab[q[1]*W+q[0]]; if(id<0) continue; (seedsOf.get(id)||seedsOf.set(id,[]).get(id)).push(q); } }
+  for(const c of comps){ if(!(c.area>1.35*A0||(c.sol<0.88&&c.area>0.6*A0))) continue;
+    // 씨앗: EDM 국소 극대(3×3) 중 높이 ≥ 0.45 r0 → 높은 것부터, 서로 0.75 r0 이상
+    const cand=[]; for(const i of c.px){ const v=e[i]; if(v<0.45*r0) continue; const x=i%W, y=(i-x)/W; let mx=true;
+      for(let dy=-1;dy<=1&&mx;dy++) for(let dx=-1;dx<=1;dx++){ if(!dx&&!dy) continue; const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; if(e[yy*W+xx]>v){ mx=false; break; } }
+      if(mx) cand.push([x,y,v]); }
+    cand.sort((a,b)=>b[2]-a[2]); const seeds=[]; const dmin=0.75*r0;
+    const ls=seedsOf.get(c.id); if(ls&&ls.length){ ls.sort((a,b)=>b[2]-a[2]); const top=ls[0][2]; const dl=0.9*r0; for(const q of ls){ if(q[2]<0.25*top) break; if(seeds.every(s=>(s[0]-q[0])**2+(s[1]-q[1])**2>=dl*dl)) seeds.push([q[0],q[1]]); } } // 세기 씨앗이 있으면 그것으로
+    else for(const q of cand){ if(seeds.every(s=>(s[0]-q[0])**2+(s[1]-q[1])**2>=dmin*dmin)) seeds.push([q[0],q[1]]); }
+    // 넓이로 씨앗을 더함: 오목하면 넓이 ≥ (k − 0.4)·A0, 볼록하면 ≥ (k − 0.25)·A0 일 때 k 개 — 볼록한 큰 홑입자(넓이 < 1.75·A0)는 쪼개지 않음
+    const kA=Math.max(seeds.length,Math.floor(c.area/A0+(c.sol<0.9?0.4:0.25)));
+    while(seeds.length<kA){ let best=-1,bi=-1; for(const i of c.px){ const x=i%W, y=(i-x)/W; let d=Infinity; for(const s of seeds){ const t=(s[0]-x)**2+(s[1]-y)**2; if(t<d) d=t; } if(seeds.length===0) d=e[i]; if(d>best){ best=d; bi=i; } } if(bi<0) break; seeds.push([bi%W,(bi-bi%W)/W]); }
+    if(seeds.length<2) continue;
+    // k-means (화소 좌표)
+    const asg=new Int32Array(c.px.length); let S=seeds.map(s=>[s[0]+0.5,s[1]+0.5]);
+    for(let it=0;it<10;it++){ const sx=new Float64Array(S.length), sy=new Float64Array(S.length), sn=new Float64Array(S.length);
+      for(let k=0;k<c.px.length;k++){ const i=c.px[k], x=i%W+0.5, y=(i-i%W)/W+0.5; let bd=Infinity, bj=0; for(let j=0;j<S.length;j++){ const d=(S[j][0]-x)**2+(S[j][1]-y)**2; if(d<bd){ bd=d; bj=j; } } asg[k]=bj; sx[bj]+=x; sy[bj]+=y; sn[bj]++; }
+      let mv=0; for(let j=0;j<S.length;j++) if(sn[j]){ const nx=sx[j]/sn[j], ny=sy[j]/sn[j]; mv=Math.max(mv,Math.abs(nx-S[j][0])+Math.abs(ny-S[j][1])); S[j]=[nx,ny]; } if(mv<0.05) break; }
+    const part=new Map(); for(let k=0;k<c.px.length;k++) part.set(c.px[k],asg[k]);
+    // 경계 1 px: 오른쪽·아래 이웃이 다른 조각이면 이 화소를 0 (8-연결로도 붙지 않게 대각 이웃까지)
+    for(const [i,a] of part){ const x=i%W, y=(i-x)/W; for(const [dx,dy] of [[1,0],[0,1],[1,1],[-1,1]]){ const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const b=part.get(yy*W+xx); if(b!=null&&b!==a){ out[i]=0; break; } } }
+    nSplit++; nParts+=S.length; }
+  return {w:W,h:H,bit:8,data:out,info:{A0,r0,split:nSplit,parts:nParts}};
+};
 })();
 
 /* ============================================================
@@ -46805,6 +46865,40 @@ IC.lineProfile=function(p,x1,y1,x2,y2,width){
   return {values:out,step:n?L/n:0,length:L};
 };
 
+})();
+
+/* ============================================================
+   Auto particles (2026-10-19) — 나노입자 TEM 이미지 한 번에 마스크로. 배율(입자 크기)에 맞춰 스스로 맞춘다.
+   ① 1 차: Gaussian σ 2 → Default 문턱(어두운 쪽이 > 50 % 면 밝은 입자) → 성분 넓이의 '넓이 가중' 중앙값 = 입자 하나의 대략 넓이
+      (개수 중앙값은 잡음 점 수천 개가 차지해 틀림 — 넓이로 가중하면 실제 입자가 차지)
+   ② 2 차: σ = clamp(r/6, 2, 12) (r = 그 넓이의 반지름) 로 다시 흐림 → 같은 방법 문턱 → Fill Holes → Watershed → Split by size
+      배율이 높아 입자가 크면 σ 도 커져 지지막(carbon grid) 결·잡음이 사라진다
+   ③ Size 최솟값 = 홑입자 넓이 A0 의 ¼ (A0 = splitBySize 가 다시 잰 값)
+   반환 {mask(plane), info:{sigma1, sigma, dark, Aw, A0, r0, minPx, split, parts}}
+   ============================================================ */
+(function(){
+"use strict";
+const G=(typeof self!=="undefined")?self:globalThis; const IC=G.IMG_CORE;
+function comps(bin,W,H){ return IC.componentAreas(bin,W,H); }
+function wMedian(a){ const v=a.slice().sort((x,y)=>x-y); let tot=0; for(const x of v) tot+=x; let c=0; for(const x of v){ c+=x; if(c>=tot/2) return x; } return v[v.length-1]||0; }
+function mask(p,sigma,dark){ const g=IC.gaussian(p,{sigma}); const gp=g.plane||g; const t=IC.autoThreshold(gp,"Default",dark); return IC.applyThreshold(gp,t.lower,t.upper); }
+IC.autoParticles=function(p,o){ o=o||{}; const W=p.w, H=p.h;
+  // ① 극성·대략 크기
+  const g1=IC.gaussian(p,{sigma:2}); const gp1=g1.plane||g1; const t=IC.autoThreshold(gp1,"Default",false); let n=0; for(let i=0;i<gp1.data.length;i++){ const v=gp1.data[i]; if(v>=t.lower&&v<=t.upper) n++; }
+  const dark=o.dark!=null?!!o.dark:n/gp1.data.length>0.5;
+  const m1=IC.applyThreshold(gp1,...(()=>{ const q=IC.autoThreshold(gp1,"Default",dark); return [q.lower,q.upper]; })());
+  const b1=new Uint8Array(W*H); for(let i=0;i<b1.length;i++) b1[i]=m1.data[i]>0?1:0;
+  const ar=comps(b1,W,H).filter(a=>a>=9&&a<0.25*W*H); const Aw=ar.length?wMedian(ar):100;
+  // 홑입자 넓이: 넓이 가중 중앙값의 15 % 이상이고 볼록(solidity ≥ 0.93)한 성분의 중앙값 — 덩어리(가중 중앙값을 키움)·잡음(개수 중앙값을 줄임) 둘 다 피함
+  const s1=IC.splitBySize(IC.fillHoles(m1),{minFrac:0.15}); const A1=s1.info.A0>0?s1.info.A0:Aw; const r=Math.sqrt(A1/Math.PI);
+  // ② 크기에 맞춘 흐림
+  const sigma=o.sigma>0?o.sigma:Math.max(2,Math.min(12,r/6));
+  let m=mask(p,sigma,dark); m=IC.fillHoles(m); m=IC.watershed(m);
+  // 작은 조각(¼ 입자보다 작은 것)은 홑입자 크기 추정에서 빼도록 A0 를 2 차 넓이 가중 중앙값 근처 홑입자에서
+  const s=IC.splitBySize(m,{minFrac:0.15,gray:p,dark:!dark}); // 문턱 'dark' = 바탕이 어두움 → 입자는 밝음. splitBySize 의 dark = 입자가 어두움
+  const A0=s.info.A0>0?s.info.A0:Aw; const minPx=Math.max(9,Math.round(0.25*A0));
+  return {mask:{w:W,h:H,bit:8,data:s.data},info:{sigma1:2,sigma,dark,Aw,A1,A0,r0:Math.sqrt(A0/Math.PI),minPx,split:s.info.split,parts:s.info.parts}};
+};
 })();
 
 /* ============================================================
@@ -51451,7 +51545,13 @@ op("colorThreshold",{label:"Color Threshold",group:"thr",kind:"plane",hidden:tru
     if(P.newImage) L.push('rename("Mask of "+ct_a);'); else L.push("ct_m=getImageID(); selectImage(ct_id); close(); selectImage(ct_m); rename(ct_a);");
     return L.join("\n"); },
   help:"ImageJ Image ▸ Adjust ▸ Color Threshold 와 같은 색 변환(HSB·RGB·Lab·YUV)과 pass/stop 규칙."});
-const BIN=[["erode","Erode"],["dilate","Dilate"],["open","Open"],["close","Close-"],["fill","Fill Holes"],["outline","Outline"],["skeleton","Skeletonize"],["watershed","Watershed"],["edm","Distance Map"],["uep","Ultimate Points"],["voronoiX","—"]].slice(0,10);
+const BIN=[["erode","Erode"],["dilate","Dilate"],["open","Open"],["close","Close-"],["fill","Fill Holes"],["outline","Outline"],["skeleton","Skeletonize"],["watershed","Watershed"],["edm","Distance Map"],["uep","Ultimate Points"],["splitsize","Split by size (touching particles)"]];
+/* 원클릭 입자 마스크 (core/55_autopart.js): 배율에 맞춘 흐림 → 문턱(극성 자동) → Fill Holes → Watershed → Split by size. 이 이미지를 마스크로 바꿈 */
+op("autoparticles",{label:"Auto particle mask",group:"bin",hidden:true,params:[],
+  run:async(im,P)=>{ if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ 8-bit"); const r=await call("autoParticles",[curPlaneOf(im),{}]); im._autoInfo=r.info;
+    const i=r.info; setPlanes(im,[r.mask.data],{bit:8,nc:1,c:0,composite:false,nz:1,nt:1},"Auto particle mask",{op:"autoparticles",params:clean(P),label:`Auto particle mask (σ ${i.sigma.toFixed(1)} px, ${i.dark?"bright":"dark"} particles, ${i.split} clumps split)`}); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; return r.info; },
+  ij:()=>`// Auto particle mask: Gaussian Blur (σ = 입자 반지름/6) → setAutoThreshold("Default") → Convert to Mask → Fill Holes → Watershed → (크기 기준 나누기: ImageJ 에 없음)`,
+  help:"입자 크기에 맞춰 흐림 세기를 정하고(배율이 높으면 지지막 결·잡음까지 지움), 붙거나 겹친 같은 크기 입자를 크기·LoG 중심으로 나눕니다."});
 op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","erode",{type:"sel",opts:BIN}),R("iterations","Iterations",1,{type:"int",min:1}),R("count","Count",1,{type:"int",min:1,max:8}),R("edm32","Distance Map as new 32-bit image",false,{type:"bool"}),stackParam],
   run:async(im,P)=>{ const f=P.fn; const all=!!P.stack||!isStack(im); const ix=all?planesOf(im).map((_,k)=>k):[pIndex(im,0,im.z,im.t)];
     if(f==="edm"&&P.edm32){ const r=await call("distanceMap",[curPlaneOf(im),"32-bit"]); const n=addImage({name:"EDM of "+im.name,w:im.w,h:im.h,bit:32,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"binary",params:clean(P),label:"Distance Map (32-bit)"},im); return n; }
@@ -51459,7 +51559,7 @@ op("binary",{label:"Binary",group:"bin",hidden:true,params:[R("fn","Operation","
     for(const k of ix){ const p={w:im.w,h:im.h,bit:8,data:P2[k]}; let r;
       if(f==="erode"||f==="dilate"||f==="open"||f==="close") r=await call("binaryMorph",[p,f,{iterations:+P.iterations,count:+P.count}]);
       else if(f==="fill") r=await call("fillHoles",[p]); else if(f==="outline") r=await call("outline",[p]); else if(f==="skeleton") r=await call("skeletonize",[p]);
-      else if(f==="watershed") r=await call("watershed",[p]); else if(f==="edm") r=await call("distanceMap",[p,"8-bit"]); else if(f==="uep") r=await call("ultimatePoints",[p]);
+      else if(f==="watershed") r=await call("watershed",[p]); else if(f==="edm") r=await call("distanceMap",[p,"8-bit"]); else if(f==="uep") r=await call("ultimatePoints",[p]); else if(f==="splitsize") r=await call("splitBySize",[p,{}]);
       P2[k]=r.data; }
     setPlanes(im,P2,{keepDisplay:f!=="edm"&&f!=="uep"},lab,{op:"binary",params:clean(P),label:lab+((f==="erode"||f==="dilate"||f==="open"||f==="close")?` (×${P.iterations}, count ${P.count})`:"")});
     if(f==="edm"||f==="uep"){ im.kind=""; } },
@@ -52181,19 +52281,14 @@ op("zprofile",{label:"Plot Z-axis Profile",group:"meas",hidden:true,kind:"measur
 async function paAuto(){ const src=cur(); if(!src) return; if(src.rgb){ note("RGB 이미지는 먼저 Type ▸ 8-bit 로 바꾸세요","warn"); return; }
   const a=activeRoi(src); const roi=a&&AREA_T.has(a.type)?{id:uid(),type:a.type,pts:a.pts.map(p=>p.slice()),name:"area"}:null;
   const binSrc=IC.isBinary(curPlaneOf(src)); let w=src;
+  let info=null;
   if(!binSrc){ w=await runOp("duplicate",{slice:true},src); if(!w||!w.id) return; w.name=src.name.replace(/\.[^.]+$/,"")+" particles";
-    await runOp("gaussian",{sigma:2,scaled:false,stack:false},w); if(BUSY) return;
-    const p=curPlaneOf(w); const t=await call("autoThreshold",[p,"Default",false]); let n=0; for(let i=0;i<p.data.length;i++) if(p.data[i]>=t.lower&&p.data[i]<=t.upper) n++;
-    const dark=n/p.data.length>0.5; // 어두운 쪽이 절반을 넘으면 바탕이 어두운 것 → 밝은 입자
-    Object.assign(S.ui.thr,{method:"Default",dark,manual:false});
-    await runOp("threshold",{method:"Default",dark,manual:false,newImage:false,stack:false},w);
-    await runOp("binary",{fn:"fill",iterations:1,count:1,edm32:false,stack:false},w);
-    await runOp("binary",{fn:"watershed",iterations:1,count:1,edm32:false,stack:false},w); }
+    info=await runOp("autoparticles",{},w); if(!info) return; Object.assign(S.ui.thr,{method:"Default",dark:!!info.dark,manual:false}); }
   // 축척 막대·글자: 영역 ROI 가 없으면 자동으로 찾아(Diffraction 의 이름표 읽기) 그 둘레에 닿는 성분을 마스크에서 지운다. 보정이 없으면 막대로 정한다
   let sbTxt="";
   if(!roi&&window.DIFF_OCR&&!binSrc){ try{ const sp=curPlaneOf(src); const bars=DIFF_OCR.findBars(sp.data,src.w,src.h,{max:3});
       const bar=bars.find(b=>{ const cy=(b.y0+b.y1)/2, cx=(b.x0+b.x1)/2; return (cy<0.2*src.h||cy>0.8*src.h||cx<0.2*src.w||cx>0.8*src.w)&&b.lenPx>=20; }); // 축척 막대는 가장자리 근처
-      if(bar){ const len=bar.x1-bar.x0+1, ext=Math.round(0.35*len), px=Math.round(0.1*len); // 글자는 막대 위·아래 어디든 (GMS 는 위)
+      if(bar){ const len=bar.x1-bar.x0+1, ext=Math.round(0.6*len), px=Math.round(0.15*len); // 글자는 막대 위·아래 어디든 (GMS 는 위)
         const B={x0:Math.max(0,bar.x0-px),x1:Math.min(w.w-1,bar.x1+px),y0:Math.max(0,bar.y0-ext),y1:Math.min(w.h-1,bar.y1+ext)};
         const P0=planesOf(w)[0], W0=w.w, seen=new Uint8Array(P0.length); let gone=0;
         for(let y=B.y0;y<=B.y1;y++) for(let x=B.x0;x<=B.x1;x++){ const i0=y*W0+x; if(!(P0[i0]>0)||seen[i0]) continue; const comp=[i0], st=[i0]; seen[i0]=1; let sx=0,sy=0;
@@ -52203,13 +52298,13 @@ async function paAuto(){ const src=cur(); if(!src) return; if(src.rgb){ note("RG
         if(!src.cal){ const r=DIFF_OCR.readAuto(sp.data,src.w,src.h,bar,{budget:2000}); const M={pm:1e-3,"Å":0.1,nm:1,"µm":1e3,um:1e3,mm:1e6};
           if(r&&r.conf>=0.5&&!r.recip&&M[r.unit]){ const nm=r.value*M[r.unit]/len; const cal=nm>=100?{pw:nm/1e3,ph:nm/1e3,unit:"µm"}:{pw:nm,ph:nm,unit:"nm"}; cal.src=`축척 막대 '${r.text}' = ${len} px (Auto)`; setCal(src,cal,true); setCal(w,Object.assign({},cal),true); sbTxt+=` · 눈금 = 막대 '${r.text}' (${g4(cal.pw)} ${cal.unit}/px)`; } } } }catch(e){} }
   if(roi){ roiList(w).push(roi); setActive(w,roi); }
-  const {bin}=await binaryFor(w,{thr:null}); const ar=IC.componentAreas(bin,w.w,w.h).filter(x=>x>=9).sort((x,y)=>x-y);
-  if(!ar.length){ note("입자 후보가 없습니다 — Threshold 를 직접 맞추세요","warn"); return; }
-  const med=ar[ar.length>>1], minPx=Math.max(9,Math.round(0.25*med)); const c=calOf(w), A=S.ui.pa;
+  let minPx; if(info&&info.minPx>0) minPx=info.minPx; else { const {bin}=await binaryFor(w,{thr:null}); const ar=IC.componentAreas(bin,w.w,w.h).filter(x=>x>=9); if(!ar.length){ note("입자 후보가 없습니다 — Threshold 를 직접 맞추세요","warn"); return; }
+    let tot=0; for(const a of ar) tot+=a; ar.sort((x,y)=>x-y); let cs=0, wm=ar[ar.length-1]; for(const a of ar){ cs+=a; if(cs>=tot/2){ wm=a; break; } } minPx=Math.max(9,Math.round(0.25*wm)); } // 이미 마스크면: 넓이 가중 중앙값(잡음 점에 끌리지 않음)
+  const c=calOf(w), A=S.ui.pa;
   A.minSize=A.unitPx?minPx:+(minPx*c.pw*c.ph).toPrecision(3); A.maxSize=""; A.minCirc=0.5; A.maxCirc=1; A.exclude=true; A.holes=false; A.redirect=binSrc?"":"__parent";
   await runOp("analyze",Object.assign({},A,{thr:null}),w);
   const pa=S.particles[w.id]; if(pa){ S.ui.dist.col="ECD"; S.ui.bottom="dist"; S.ui.bottomOpen=true; save(); drawBottom();
-    note(`Auto: ${pa.rows.length} 개 — Gaussian σ 2 · Default${S.ui.thr.dark?" (dark background)":""} · Fill Holes · Watershed · Size ≥ ${g4(A.minSize)} ${A.unitPx?"px²":unitSq(w)} (중앙 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
+    note(`Auto: ${pa.rows.length} 개 — ${info?`Gaussian σ ${info.sigma.toFixed(1)} px(입자 크기에 맞춤) · Default${info.dark?" (밝은 입자)":""} · Fill Holes · Watershed · 붙은 덩어리 ${info.split} 개 크기로 나눔`:"이진 이미지"} · Size ≥ ${g4(A.minSize)} ${A.unitPx?"px²":unitSq(w)} (홑입자 넓이의 ¼) · Circularity 0.5–1 · edge 제외${roi?" · ROI 안":""}${sbTxt}${w.cal?"":" · 눈금 없음(px) — Adjust ▸ Set Scale"}. 원본 이미지(${src.name})는 그대로입니다`,"ok"); }
 }
 
 /* ===== Analyze 패널 ===== */
@@ -52264,7 +52359,7 @@ function panelAnalyze(el,im){
   const A=S.ui.pa; const bin=!im.rgb&&IC.isBinary(curPlaneOf(im)); const c=calOf(im); const us=A.unitPx?"px²":unitSq(im); const fm=formVals(OPS.findMaxima);
   const reds=S.images.filter(x=>x.id!==im.id&&x.w===im.w&&x.h===im.h);
   el.innerHTML=`<div class="im-h">Analyze Particles<span class="sp"></span><button class="btn xs" id="anToDrop" title="Contact angle · pendant drop">Drop Shape ↓</button></div>
-  <div class="im-row"><button class="btn primary" id="paAuto" title="Duplicate → Gaussian σ 2 → Threshold Default (polarity auto) → Fill Holes → Watershed → hide scale bar & label → Analyze (Size ≥ ¼ median, Circularity 0.5–1, exclude edges) → Size distribution. The original image is not changed.">Analyze particles (auto)</button><span class="xs muted">한 번에: 흐림 → 문턱(극성 자동) → 붙은 입자 나누기 → 축척 막대 빼기 → 크기 분포. 원본은 그대로</span></div>
+  <div class="im-row"><button class="btn primary" id="paAuto" title="Duplicate → Gaussian blur scaled to particle size → Threshold Default (polarity auto) → Fill Holes → Watershed → split touching particles by size → hide scale bar &amp; label → Analyze (Size ≥ ¼ single-particle area, Circularity 0.5–1, exclude edges) → Size distribution. The original image is not changed.">Analyze particles (auto)</button><span class="xs muted">한 번에: 입자 크기에 맞춘 흐림 → 문턱(극성 자동) → 붙거나 겹친 입자 나누기 → 축척 막대 빼기 → 크기 분포. 원본은 그대로</span></div>
   <div class="xs muted">아래는 직접 맞출 때(고급): ${bin?"이진 이미지: 255 인 화소를 입자로 셉니다.":`문턱: <b>${S.ui.thr.manual?`수동 ${g4(S.ui.thr.lower)}–${g4(S.ui.thr.upper)}`:`${S.ui.thr.method}${S.ui.thr.dark?" dark":""}`}</b> (Threshold 탭 설정) 범위의 화소를 입자로 셉니다.`} 사각형·타원·다각형 ROI 가 있으면 그 안만 셉니다(축척 막대·글자 빼기).</div>
   <div class="im-row"><label class="im-f"><span>Size</span><input type="number" id="paMin" value="${esc(A.minSize)}" step="any" min="0"><span>–</span><input type="number" id="paMax" value="${esc(A.maxSize)}" step="any" placeholder="∞"><span class="u">${esc(us)}</span></label><label class="im-chk"><input type="checkbox" id="paPx" ${A.unitPx?"checked":""}> Pixel units</label></div>
   <div class="im-row"><label class="im-f"><span>Circularity</span><input type="number" id="paC0" value="${A.minCirc}" min="0" max="1" step="0.05"><span>–</span><input type="number" id="paC1" value="${A.maxCirc}" min="0" max="1" step="0.05"></label></div>
