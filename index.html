@@ -43002,7 +43002,7 @@ function vamasParse(text,fileName){
     const meta={instrument:[H.inst,H.model].filter(s=>s&&s!=="Not Specified").join(" "),sourceLabel:B.src,passEnergy:isNullV(B.pe)?null:B.pe,anMode:B.anMode,
       workFunction:isNullV(B.wf)?null:B.wf,dwell:isNullV(B.dwell)?null:B.dwell,scans:B.scans,sigMode:B.sigMode,ordUnit:B.vars[yi]&&B.vars[yi].unit,
       date:B.date.slice(0,3).some(v=>v>0)?B.date:null,blockId:B.id,sampleId:B.sample,casa:H.comment.some(s=>/casa/i.test(s)),technique:B.tech,
-      tf:null,vamas:vamasBlockMeta(H,B,b)};
+      tf:null,vamas:vamasBlockMeta(H,B,b),casaModel:casaCommentParse(B.comment)};
     meta.vamas.tag=seriesTag(H,B);   // 표시용 "Etch Time 30 s" (이름은 바꾸지 않음 — CasaXPS 는 모든 파일에 'Data Set' 변수를 쓴다)
     if(meta.casa&&c===1) warn.push("CasaXPS 가 만든 VAMAS(dwell·scan = 1) — 세기가 이미 CPS 일 수 있어 counts 환산은 하지 않음");
     out.push(mkSpec({name:region,region,file:fileName,format:"VAMAS",hv,hvSrc:hvOK?"VAMAS 블록":"기본값",be,y,yRaw:c&&c!==1?yr:null,c:c&&!(meta.casa&&c===1)?c:null,
@@ -43012,6 +43012,25 @@ function vamasParse(text,fileName){
   return out;
 }
 
+/* CasaXPS 가 VAMAS 블록 주석에 남기는 모형 (v1.8, 실측 CasaXPS 2.3.25 파일에서 읽은 문법 — CasaXPS 코드·문서 원문은 쓰지 않음):
+   'Calib M = 284.52 A = 284.8 BE ADD'  → 표시 BE 이동 (A − M; 여러 줄이면 합)
+   'CASA region (*name*) (*BG*) KEstart KEend RSF AvWidth StartOffset EndOffset c1 c2 c3 c4 (*tag*) mass …'  (c1…c4 = Cross Section 칸)
+   'CASA comp (*name*) (*shape*) Area v lo hi link k MFWHM v lo hi link k Position v(KE) lo hi link k RSF … MASS … INDEX …'
+   link = 연결 대상 성분 번호(0 부터, −1 = 연결 없음), k = 배율 (CasaXPS 화면 'A*0.667' 등). 에너지는 KE(파일 축 그대로). */
+function casaCommentParse(lines){
+  const L=(lines||[]).map(s=>String(s)); const out={calib:[],shift:0,regions:[],comps:[]};
+  const strs=s=>{ const a=[]; s.replace(/\(\*(.*?)\*\)/g,(m,t)=>{ a.push(t); return ""; }); return a; };
+  const rest=s=>s.replace(/\(\*.*?\*\)/g," ").trim().split(/\s+/).filter(Boolean);
+  L.forEach(s=>{ let m;
+    if((m=s.match(/^\s*Calib\s+M\s*=\s*([-\d.eE+]+)\s+A\s*=\s*([-\d.eE+]+)\s+(BE|KE)\s+ADD/i))){ const M=+m[1], A=+m[2]; out.calib.push({M,A,axis:m[3].toUpperCase()}); out.shift+=(m[3].toUpperCase()==="BE"?1:-1)*(A-M); return; }
+    if(/^\s*CASA region\b/i.test(s)){ const t=strs(s), n=rest(s.replace(/^\s*CASA region/i,"")).map(Number);
+      out.regions.push({name:t[0]||"",bg:t[1]||"",keStart:n[0],keEnd:n[1],rsf:n[2],aw:n[3],startOffset:n[4],endOffset:n[5],cross:n.slice(6,10),tag:t[2]||"",mass:n[10]}); return; }
+    if(/^\s*CASA comp\b/i.test(s)){ const t=strs(s), body=s.replace(/^\s*CASA comp\s*\(\*.*?\*\)\s*\(\*.*?\*\)/i,""); const c={name:t[0]||"",shape:t[1]||""};
+      const grab=key=>{ const r=new RegExp("\\b"+key+"\\s+([-\\d.eE+]+)\\s+([-\\d.eE+]+)\\s+([-\\d.eE+]+)\\s+([-\\d]+)\\s+([-\\d.eE+]+)","i").exec(body); return r?{v:+r[1],lo:+r[2],hi:+r[3],link:parseInt(r[4],10),k:+r[5]}:null; };
+      c.area=grab("Area"); c.fwhm=grab("MFWHM"); c.pos=grab("Position"); const rs=/\bRSF\s+([-\d.eE+]+)/i.exec(body); c.rsf=rs?+rs[1]:null; const ms=/\bMASS\s+([-\d.eE+]+)/i.exec(body); c.mass=ms?+ms[1]:null;
+      out.comps.push(c); } });
+  return out.regions.length||out.comps.length||out.calib.length?out:null;
+}
 /* VAMAS 실험 방식·블록 변수 (v1.7 — 깊이 profile·각도·map 묶음을 만들 수 있게).
    expVals: 실험 변수(예: Etch Time s, Etch Level, Angle deg)의 값(문자열 그대로, expNum 은 숫자), x·y: MAP/MAPDP 위치,
    takeOffPolar/Az: 분석기 축 take-off 각(ARXPS), tilt: 시료 기울기. 숫자가 VAMAS '값 없음'(1e37)이면 null. */
@@ -43180,7 +43199,9 @@ function avantageSheets(sheets,fileName){
   for(const sh of sheets){
     const isNum=v=>typeof v==="number"&&isFinite(v);
     let hr=-1, hc=0, isKE=false;
-    for(let r=0;r<Math.min(sh.nRows,80)&&hr<0;r++) for(let c=0;c<Math.min(sh.nCols,6);c++){ const v=sh.get(r,c); if(typeof v==="string"&&/^(binding|kinetic)\s+energy/i.test(v.trim())){ hr=r; hc=c; isKE=/kinetic/i.test(v); break; } }
+    // 머리칸 = 'Binding/Kinetic Energy' 이고 그 열 아래 몇 줄 안에 숫자가 있는 칸 (v1.8: Kratos→Avantage 내보내기는 위쪽에 'Axis | Kinetic energy | Elements=' 설명 줄이 있어 그 칸을 머리로 잡으면 읽지 못했다)
+    const numBelow=(r,c)=>{ for(let k=r+1;k<=Math.min(sh.nRows-1,r+6);k++) if(isNum(sh.get(k,c))) return true; return false; };
+    for(let r=0;r<Math.min(sh.nRows,80)&&hr<0;r++) for(let c=0;c<Math.min(sh.nCols,6);c++){ const v=sh.get(r,c); if(typeof v==="string"&&/^(binding|kinetic)\s+energy/i.test(v.trim())&&numBelow(r,c)){ hr=r; hc=c; isKE=/kinetic/i.test(v); break; } }
     if(/^titles$/i.test(sh.name)){ const v=sh.get(0,0); if(typeof v==="string") when=v.trim(); }
     if(hr<0){
       // 표 형태(Peak Table 등)는 그대로 보관
@@ -43203,12 +43224,22 @@ function avantageSheets(sheets,fileName){
     const be=isKE?x.map(k=>hv-k):x;
     const unit=colName(ic);
     const w2=[]; if(!/counts\s*\/\s*s|cps/i.test(unit)) w2.push("세기 단위 '"+unit+"' — CPS 로 간주");
+    if(be.length>1&&be[0]>be[be.length-1]) Object.keys(others).forEach(k=>others[k].reverse());   // v1.8: mkSpec 가 BE 오름차순으로 뒤집으므로 추가 열도 같은 순서로 (전에는 뒤집히지 않아 채널이 어긋났다)
     const ext=Object.keys(others).length?{avantageCols:others}:null;
     const pt=pathPoint(path);
     out.push(mkSpec({name:region,region,file:fileName,format:"Avantage XLS",hv,hvSrc:"Avantage 기본값 1486.68 (파일에 없음)",be,y,
       sample:String(fileName||"").replace(/^.*[\\/]/,"").replace(/\.xlsx?$/i,"")+(pt?" · "+pt:""),
       meta:{origPath:path,expDesc:desc,yUnit:unit,when,point:pt},warn:w2,extra:ext}));
   }
+  // v1.8: 시트 이름이 'Sheet5' 처럼 일반 이름이면 Peak Table 의 Start/End BE 가 Avantage 배경 열(0 아닌 구간)을 감싸는 줄의 Name 으로 region 이름을 붙인다
+  const pt=tables.find(t=>/peak\s*table/i.test(t.name));
+  if(pt){ const hi=pt.rows.findIndex(r=>r.some(v=>/^name$/i.test(String(v).trim()))&&r.some(v=>/^start\s*be$/i.test(String(v).trim())));
+    if(hi>=0){ const H=pt.rows[hi].map(v=>String(v).trim()), cN=H.findIndex(v=>/^name$/i.test(v)), cS=H.findIndex(v=>/^start\s*be$/i.test(v)), cE=H.findIndex(v=>/^end\s*be$/i.test(v));
+      const peaks=pt.rows.slice(hi+1).filter(r=>typeof r[cS]==="number"&&typeof r[cE]==="number"&&String(r[cN]).trim()).map(r=>({name:String(r[cN]).trim(),lo:Math.min(r[cS],r[cE]),hi:Math.max(r[cS],r[cE])}));
+      out.forEach(sp=>{ if(!/^sheet\s*\d+$/i.test(sp.region)) return; const cols=sp.extra&&sp.extra.avantageCols; const k=cols&&Object.keys(cols).find(n=>/backgnd/i.test(n)); if(!k) return;
+        const b=cols[k]; let lo=Infinity, hi2=-Infinity; for(let i=0;i<b.length;i++) if(b[i]&&isFinite(b[i])){ const e=sp.be[i]; if(e<lo) lo=e; if(e>hi2) hi2=e; }
+        if(!(hi2>lo)) return; const st=Math.abs(sp.step)||0.05; const m=peaks.filter(p=>Math.abs(lo-p.lo)<=st/2+1e-6&&Math.abs(p.hi-hi2)<=st/2+1e-6);   // Avantage 배경 끝 = Start/End BE 에 가장 가까운 채널
+        if(m.length===1){ sp.meta.sheet=sp.region; const rg=parseRegionName(m[0].name); sp.reg=rg; sp.name=m[0].name; sp.region=rg.el||rg.kind==="survey"?rg.label:m[0].name; } }); } }
   return {spectra:out,tables,warn};
 }
 
@@ -43337,7 +43368,7 @@ async function readFile0(name,u8,opt){
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -43667,9 +43698,33 @@ function casaEnds(be,y,i0,i1,aw){ const N=be.length, w=Math.max(0,Math.round(aw|
 /* CasaXPS 영역 표의 Area · Max Height · Min Height 와 같은 정의: 채널 i0+1 … i1−1 에서 (y − B) 의 사다리꼴 적분·최대·최소 */
 function casaRegionStats(E,y,B){ const N=E.length, a=Math.min(1,N-1), b=Math.max(0,N-2); let t=0,mx=-Infinity,mn=Infinity;
   for(let i=a;i<=b;i++){ const r=y[i]-B[i]; if(i<b) t+=0.5*(r+y[i+1]-B[i+1])*(E[i+1]-E[i]); if(r>mx) mx=r; if(r<mn) mn=r; } return {area:t,maxH:mx,minH:mn}; }
+/* Avantage 규약 Smart (v1.8, SPEC_real_validation §A — 실측 Avantage Peak Table + 'Backgnd.' 열 26 영역에서 역으로 정함; Avantage 코드는 쓰지 않음):
+   ① 평활 S = 9 점 중심 이동평균(창 밖 4 채널까지 — bg._pad = {lo:[창 아래 4 점], hi:[창 위 4 점]} 이 있으면 씀, 없으면 창 안에서 자름).
+   ② 끝점 = S(창 첫 채널), S(창 끝 채널) — Avantage 내보내기 배경의 끝값과 26/26 같음.
+   ③ 구간 [i, j] (i 낮은 BE): S_j > S_i 이면 Shirley(수렴, 피적분 S − B, 낮은 BE 쪽부터 포함 누적합), 아니면 직선(설명서 — 높은 BE 끝이 높지 않으면 Linear).
+   ④ 구간 안(끝 제외)에서 B − S 가 가장 큰 채널 k 가 0 보다 크면 그 채널(값 S_k)을 새 끝점으로 [i,k]·[k,j] 를 다시 계산(재귀). 결과: 배경은 평활 데이터를 넘지 않는 조각 Shirley/직선.
+   남은 차이: 깨끗한(①–③만 쓰는) 영역에서도 Avantage 곡선은 위 Shirley 와 ≤ 0.3 % (d 기준) 다르다 — Avantage 의 Shirley 고정점 식이 조금 다름(미확인). */
+function bgSmartAvantage(E,y,bg){
+  const N=E.length; if(N<3) return bgLinear(E,y,1);
+  const pl=bg&&bg._pad&&bg._pad.lo?Array.from(bg._pad.lo):[], ph=bg&&bg._pad&&bg._pad.hi?Array.from(bg._pad.hi):[];
+  const Y=pl.concat(Array.from(y),ph), o=pl.length, S=new Float64Array(N);
+  for(let i=0;i<N;i++){ const c=i+o; let s=0,k=0; for(let j=Math.max(0,c-4);j<=Math.min(Y.length-1,c+4);j++){ s+=Y[j]; k++; } S[i]=s/k; }
+  const B=new Float64Array(N);
+  const seg=(i,j)=>{ const a=S[i], b=S[j], n=j-i;
+    if(!(b>a)){ for(let t=i;t<=j;t++) B[t]=a+(b-a)*(t-i)/(n||1); return; }
+    for(let t=i;t<=j;t++) B[t]=a;
+    for(let it=0;it<300;it++){ let q=0, Qt=0; for(let t=i+1;t<=j;t++) Qt+=S[t]-B[t]; if(!(Math.abs(Qt)>1e-300)){ for(let t=i;t<=j;t++) B[t]=a+(b-a)*(t-i)/(n||1); return; }
+      let mx=0; const nb=new Float64Array(n+1); nb[0]=a; for(let t=i+1;t<=j;t++){ q+=S[t]-B[t]; nb[t-i]=a+(b-a)*q/Qt; }
+      for(let t=i;t<=j;t++){ mx=Math.max(mx,Math.abs(nb[t-i]-B[t])); B[t]=nb[t-i]; } if(mx<1e-9*(Math.abs(b-a)+1)) break; } };
+  const rec=(i,j,dp)=>{ seg(i,j); if(j-i<2||dp>60) return; let k=-1, ex=0; for(let t=i+1;t<j;t++){ const d=B[t]-S[t]; if(d>ex){ ex=d; k=t; } } if(k<0) return; rec(i,k,dp+1); rec(k,j,dp+1); };
+  rec(0,N-1,0); B.smoothed=S; return B;
+}
+/* 전체 스펙트럼에서 창 [i0, i1] 밖 4 채널씩 (Avantage Smart 의 9 점 평활이 창 밖 채널까지 씀) */
+function avantagePad(y,i0,i1){ const N=y.length, lo=[], hi=[]; for(let j=Math.max(0,i0-4);j<i0;j++) lo.push(y[j]); for(let j=i1+1;j<=Math.min(N-1,i1+4);j++) hi.push(y[j]); return {lo,hi}; }
 function bgStatic(E,y,bg){
   const t=bg.type, n=bg.n||5;
   if(bg.conv==="avantage"&&t==="shirley") return bgShirleyAvantage(E,y,bg);
+  if(bg.conv==="avantage"&&t==="smart") return bgSmartAvantage(E,y,bg);
   if(bg.conv==="casa"&&(t==="linear"||t==="shirley")){ const p=endpointsCasa(E,y,bg.aw!=null?bg.aw:1,bg._ends);
     if(t==="shirley") return bgShirleyCasa(E,y,p);
     const sl=(p.yhi-p.ylo)/((p.Ehi-p.Elo)||1); return Float64Array.from(E,e=>p.ylo+sl*(e-p.Elo)); }
@@ -44752,6 +44807,7 @@ function makeProblem(spec,st){
   const P={E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":st.weight==="casa"?"casa":"poisson"};
   if(st.optimizer==="simplex") P.optimizer="simplex";
   if(P.bg&&P.bg.conv==="casa") P.bg._ends=casaEnds(spec.be,spec.y,r.i0,r.i1,P.bg.aw!=null?P.bg.aw:1);
+  if(P.bg&&P.bg.conv==="avantage"&&P.bg.type==="smart") P.bg._pad=avantagePad(spec.y,r.i0,r.i1);
   return P;
 }
 function newComp(shape,be,o){
@@ -44859,18 +44915,46 @@ function casaBg(name,cross,aw){
   const nm=String(name||"").trim(), w=aw!=null?+aw:1;
   if(/^linear$/i.test(nm)) return {bg:{type:"linear",conv:"casa",aw:w},exact:true,note:"CasaXPS Linear (SPEC §2b)"};
   if(/^shirley$/i.test(nm)) return {bg:{type:"shirley",conv:"casa",aw:w},exact:true,note:"CasaXPS Shirley (SPEC §2b)"};
-  const t=nm.match(/^U\s*([23])\s*Tougaard$/i); if(!t) return null;
-  const u3=t[1]==="3"; let v=String(cross==null?"":cross).split(/[,;\s]+/).filter(x=>x!=="").map(Number);
+  const t=nm.match(/^U\s*([234])\s*Tougaard$/i); if(!t) return null;   // U 4 (CasaXPS Cookbook 2026 p. 70: U(x; B,C,D,T0) = Bx/((C − x²)² + Dx²), x > T0) = 같은 핵에 T0 — INNO u3 핵 + T0
+  const u3=t[1]!=="2"; let v=String(cross==null?"":cross).split(/[,;\s]+/).filter(x=>x!=="").map(Number);
   if(!v.length) v=u3?[0,551,436,3]:[2866,1643,1,0];   // CasaXPS 2.3.27 이 채우는 값 (U 3 실측; U 2 는 앞선 판독의 칸)
-  const [B,C,D,T0]=[v[0],v[1],v[2]!=null?v[2]:0,v[3]!=null?v[3]:0], tg={name:(u3?"U 3":"U 2")+" Tougaard",B,C,D,T0};
+  const [B,C,D,T0]=[v[0],v[1],v[2]!=null?v[2]:0,v[3]!=null?v[3]:0], tg={name:"U "+t[1]+" Tougaard",B,C,D,T0};
   if(!(B>0)) return {bg:{type:"linear",conv:"casa",aw:w,casaTougaard:tg},exact:false,note:"B = 0: treated as Linear — unverified (CasaXPS region table did not recompute Tougaard from typed cells in our check)"};
   return {bg:{type:"tougaard",u3,C:isFinite(C)?C:(u3?551:1643),D:u3?(isFinite(D)?D:0):0,T0:T0>0?T0:0,casaTougaard:tg},exact:false,note:"explicit B: INNO scales B so the background meets the high-BE end; CasaXPS uses the given B — numbers differ (not pinned)"+(!u3&&D?"; U 2 ignores D here":"")};
+}
+/* CasaXPS VAMAS 주석 모형(XPS_IO.casaCommentParse) → INNO 피팅 상태 {lo, hi, bg, comps, cons, weight:"casa", notes} (v1.8).
+   에너지: 측정 BE = hν − KE − shift (CasaXPS 주석의 KE 는 Calib 이동이 들어간 눈금; shift 는 따로 돌려줌 — 시료 대전 보정으로 쓰면 됨). 성분 모양·폭은 casaToComp, 배경은 casaBg.
+   연결: Area link j, k → 넓이 = k × 성분 j 넓이; MFWHM link j, k → 같은 모양이면 F = k × F_j (CasaXPS fwhm 비 = F 비), 모양이 다르면 연결하지 않고 알림;
+   Position link 는 오프셋 표기를 아직 확인하지 못해(실측 파일은 모두 −1) 연결하지 않고 알림. 한계(lo, hi)는 넓이·위치는 그대로, 폭은 F 로 환산. */
+function casaModelToINNO(cm,hv,o){
+  if(!cm||!cm.regions||!cm.regions.length) return null; hv=hv>0?+hv:1486.6; o=o||{};
+  const R=cm.regions[0], notes=[], sh=+cm.shift||0; const be=ke=>hv-ke-sh;   // CasaXPS 는 영역·성분 에너지를 보정(Calib)된 눈금으로 저장한다(실측: 영역 끝 채널 = hν − KE − shift)
+  let lo=Math.min(be(R.keStart),be(R.keEnd)), hi=Math.max(be(R.keStart),be(R.keEnd));
+  // 실측(SPEC_real_validation §B): 배경 끝점 = 영역 안 첫·끝 채널 중심 평균, 주석의 Av.Width 2 → ±1 채널. INNO casa 규약(§2b)은 창의 두 번째·끝에서 두 번째 채널을 쓰므로
+  // 창을 한 채널씩 넓힌다(step 을 알 때). 맞추는 채널(casaVar: 창 끝 두 채널 제외)도 CasaXPS 와 같아진다.
+  const st=Math.abs(o.step)||0; if(st>0){ lo-=st+1e-6; hi+=st+1e-6; } else notes.push("channel step unknown — region not widened by one channel (background end points differ from CasaXPS by one channel)");
+  const aw=R.aw!=null&&isFinite(R.aw)?R.aw/2:1;
+  const g=casaBg(R.bg,R.cross&&R.cross.length?R.cross.join(","):null,aw); let bg;
+  if(g){ bg=g.bg; if(!g.exact) notes.push("background: "+g.note); } else { bg={type:"shirley",conv:"casa",aw}; notes.push(`background '${R.bg}' has no INNO equivalent — Shirley (CasaXPS convention) used`); }
+  if((R.startOffset||0)!==0||(R.endOffset||0)!==0) notes.push("region Start/End Offset ≠ 0 is not applied (INNO has no offset term)");
+  const comps=[], cons={}, ids=cm.comps.map((c,i)=>"casa"+i), wf=[];
+  cm.comps.forEach((c,i)=>{ const r=casaToComp(c.shape,{be:c.pos?be(c.pos.v):0,area:c.area?c.area.v:1,fwhm:c.fwhm?c.fwhm.v:1.2,id:ids[i]});
+    if(!r){ notes.push(`${c.name}: line shape '${c.shape}' not supported — skipped`); comps.push(null); wf.push(null); return; }
+    r.comp.name=c.name; comps.push(r.comp); if(!r.exact) notes.push(`${c.name}: ${r.note}`);
+    const k=c.fwhm&&c.fwhm.v>0&&r.comp.F>0?r.comp.F/c.fwhm.v:1; wf.push(k); });
+  cm.comps.forEach((c,i)=>{ const C=comps[i]; if(!C) return; const q=cons[C.id]={};
+    if(c.area){ if(c.area.link>=0&&comps[c.area.link]) q.area={mode:"link",ref:ids[c.area.link],k:c.area.k,b:0}; else q.area={mode:"free",lo:Math.max(0,c.area.lo),hi:c.area.hi}; }
+    if(c.fwhm&&C.F!=null){ const j=c.fwhm.link;
+      if(j>=0&&comps[j]){ if(comps[j].shape===C.shape&&Math.abs((C.m||0)-(comps[j].m||0))<1e-12&&C.casaN===comps[j].casaN) q.F={mode:"link",ref:ids[j],k:c.fwhm.k,b:0}; else notes.push(`${c.name}: FWHM link to a different line shape not reproduced (fit independently)`); }
+      else q.F={mode:"free",lo:c.fwhm.lo*wf[i],hi:c.fwhm.hi*wf[i]}; }
+    if(c.pos){ if(c.pos.link>=0) notes.push(`${c.name}: position link not reproduced (CasaXPS offset notation not verified)`); q.be={mode:"free",lo:be(c.pos.hi),hi:be(c.pos.lo)}; } });
+  return {lo,hi,bg,comps:comps.filter(Boolean),cons,weight:"casa",shift:cm.shift||0,notes,region:R.name};
 }
 const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg};
+  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg,casaModelToINNO};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -46638,7 +46722,7 @@ function applyAxis(sp,axis,hv){
    ============================================================ */
 function region(sp,p){ return C.sliceRegion(sp.be,sp.y,p.lo,p.hi); }
 /* 배경 설정 + CasaXPS 규약이면 끝점 평균(창 밖 채널 포함, 전체 스펙트럼에서) */
-function bgOf(sp,p,R){ if(p.bg.conv!=="casa") return p.bg; R=R||region(sp,p); if(!R) return p.bg; return Object.assign({},p.bg,{_ends:C.casaEnds(sp.be,sp.y,R.i0,R.i1,p.bg.aw!=null?p.bg.aw:1)}); }
+function bgOf(sp,p,R){ const av=p.bg.conv==="avantage"&&p.bg.type==="smart"; if(p.bg.conv!=="casa"&&!av) return p.bg; R=R||region(sp,p); if(!R) return p.bg; return av?Object.assign({},p.bg,{_pad:C.avantagePad(sp.y,R.i0,R.i1)}):Object.assign({},p.bg,{_ends:C.casaEnds(sp.be,sp.y,R.i0,R.i1,p.bg.aw!=null?p.bg.aw:1)}); }
 function liveBg(p,E,y,sp,R){
   if(p.bg.type!=="active") return C.bgStatic(E,y,sp?bgOf(sp,p,R):p.bg);
   return null;
@@ -47408,10 +47492,10 @@ function panelFit(el,sp){
   el.innerHTML=`
    <div class="xps-h">Fit Range &amp; Background</div>
    <div class="xps-row"><span class="xps-f">BE <input type="number" step="0.05" id="xpsLo" value="${f(p.lo+sh,2)}"> – <input type="number" step="0.05" id="xpsHi" value="${f(p.hi+sh,2)}"> eV</span><button class="btn xs" id="xpsRgA" title="Use the whole spectrum as the fit range">Full range</button><button class="btn xs" id="xpsRgV" title="Use the range currently shown on the graph as the fit range">Visible range</button></div>
-   <div class="xps-row"><select class="xps-sel" id="xpsBg">${bgOpts}</select>${bg.type!=="active"&&bg.type!=="none"&&!(bg.conv==="casa"&&(bg.type==="linear"||bg.type==="shirley"))?`<span class="xps-f" title="Number of points averaged at each endpoint">Endpoints <input type="number" class="w56" min="1" max="50" id="xpsBgN" value="${bg.n||5}"> pts</span>`:""}
+   <div class="xps-row"><select class="xps-sel" id="xpsBg">${bgOpts}</select>${bg.type!=="active"&&bg.type!=="none"&&!(bg.conv==="casa"&&(bg.type==="linear"||bg.type==="shirley"))&&!(bg.conv==="avantage"&&bg.type==="smart")?`<span class="xps-f" title="Number of points averaged at each endpoint">Endpoints <input type="number" class="w56" min="1" max="50" id="xpsBgN" value="${bg.n||5}"> pts</span>`:""}
      ${bg.type==="tougaard"?`<select class="xps-sel" id="xpsTgU"><option value="u2" ${!bg.u3?"selected":""}>U2 (C=1643 eV²)</option><option value="u3" ${bg.u3?"selected":""}>U3 (C, D)</option></select>${bg.u3?`<span class="xps-f">C <input type="number" class="w64" id="xpsTgC" value="${bg.C}"> D <input type="number" class="w64" id="xpsTgD" value="${bg.D}"></span>`:""}<span class="xps-f" title="Loss-onset threshold T0 (eV): cross-section = 0 for losses ≤ T0 (CasaXPS U(x; B, C, D, T0), Fairley et al. 2023). 0 = off">T0 <input type="number" class="w56" step="0.5" min="0" id="xpsTgT" value="${bg.T0||0}"></span>`:""}
      ${bg.type==="active"?`<label class="xps-f"><input type="checkbox" id="xpsBgS" ${bg.cons&&bg.cons.s&&bg.cons.s.mode!=="fixed"?"checked":""}> Fit slope too</label>`:""}
-     ${bg.type==="linear"||bg.type==="shirley"?`<select class="xps-sel" id="xpsConv" title="Region convention — INNO: endpoint averages of n points at the window ends, trapezoid Shirley (SPEC §2). CasaXPS: endpoints at the 2nd / 2nd-last channel averaged over ± Av. width channels, rectangle Shirley sum — reproduces CasaXPS 2.3.27 region Area / Max / Min (SPEC §2b)"><option value="">INNO</option><option value="casa" ${bg.conv==="casa"?"selected":""}>CasaXPS</option>${bg.type==="shirley"?`<option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option>`:""}</select>${bg.conv==="avantage"&&bg.type==="shirley"?`<span class="xps-f" title="Avantage 'Iterations' (1 = simple single pass; manual recommends 10). Avantage switches to Linear if the high-BE end is not higher than the low-BE end">Iter. <input type="number" class="w56" min="1" max="200" id="xpsAvIt" value="${bg.it!=null?bg.it:10}"></span><span class="xps-f" title="Avantage 'Convergence limit': stop when the relative change of the peak area between iterations is at most this (0 = run all iterations)">Conv. <input type="number" class="w64" step="any" min="0" id="xpsAvCl" value="${bg.cl!=null?bg.cl:0}"></span>`:""}${bg.conv==="casa"?`<span class="xps-f" title="CasaXPS 'Av. Width' (channels averaged on each side of the endpoint channel)">Av. width <input type="number" class="w56" min="0" max="25" id="xpsAw" value="${bg.aw!=null?bg.aw:1}"></span>`:""}`:""}
+     ${bg.type==="smart"?`<select class="xps-sel" id="xpsConv" title="Smart convention — INNO: Shirley clipped point by point to the smoothed data (SPEC §2). Avantage: 9-point smoothed data, end points = smoothed value at the window ends, Shirley/linear pieces split where the background would rise above the smoothed data — reproduces Avantage Smart areas to a median 0.4 % (max 4 %) on 26 measured regions (SPEC_real_validation §A)"><option value="">INNO</option><option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option></select>`:""}${bg.type==="linear"||bg.type==="shirley"?`<select class="xps-sel" id="xpsConv" title="Region convention — INNO: endpoint averages of n points at the window ends, trapezoid Shirley (SPEC §2). CasaXPS: endpoints at the 2nd / 2nd-last channel averaged over ± Av. width channels, rectangle Shirley sum — reproduces CasaXPS 2.3.27 region Area / Max / Min (SPEC §2b)"><option value="">INNO</option><option value="casa" ${bg.conv==="casa"?"selected":""}>CasaXPS</option>${bg.type==="shirley"?`<option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option>`:""}</select>${bg.conv==="avantage"&&bg.type==="shirley"?`<span class="xps-f" title="Avantage 'Iterations' (1 = simple single pass; manual recommends 10). Avantage switches to Linear if the high-BE end is not higher than the low-BE end">Iter. <input type="number" class="w56" min="1" max="200" id="xpsAvIt" value="${bg.it!=null?bg.it:10}"></span><span class="xps-f" title="Avantage 'Convergence limit': stop when the relative change of the peak area between iterations is at most this (0 = run all iterations)">Conv. <input type="number" class="w64" step="any" min="0" id="xpsAvCl" value="${bg.cl!=null?bg.cl:0}"></span>`:""}${bg.conv==="casa"?`<span class="xps-f" title="CasaXPS 'Av. Width' (channels averaged on each side of the endpoint channel)">Av. width <input type="number" class="w56" min="0" max="25" id="xpsAw" value="${bg.aw!=null?bg.aw:1}"></span>`:""}`:""}
      ${bg.type==="spline"?`<span class="xps-f" title="Knots = the two window ends (endpoint averages) + your knots. A knot's height is the mean of ±2 data points unless you drag it. Natural cubic spline through the knots">Knots <b id="xpsKnN">${(bg.knots||[]).length}</b>+2</span><button class="btn xs ${S.ui.knotMode?"primary":""}" id="xpsKnA" title="Then click the graph where the background is (outside peaks). Drag a knot to move it; double-click a knot to remove it">${S.ui.knotMode?"Click the graph…":"+ Knot"}</button><button class="btn xs" id="xpsKnR" title="Return dragged knot heights to the local data mean">Auto heights</button><button class="btn xs" id="xpsKnC" title="Remove all knots (straight line between the window ends)">Clear</button>`:""}</div>
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
