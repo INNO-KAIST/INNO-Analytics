@@ -323,9 +323,33 @@ function casaEnds(be,y,i0,i1,aw){ const N=be.length, w=Math.max(0,Math.round(aw|
 /* CasaXPS 영역 표의 Area · Max Height · Min Height 와 같은 정의: 채널 i0+1 … i1−1 에서 (y − B) 의 사다리꼴 적분·최대·최소 */
 function casaRegionStats(E,y,B){ const N=E.length, a=Math.min(1,N-1), b=Math.max(0,N-2); let t=0,mx=-Infinity,mn=Infinity;
   for(let i=a;i<=b;i++){ const r=y[i]-B[i]; if(i<b) t+=0.5*(r+y[i+1]-B[i+1])*(E[i+1]-E[i]); if(r>mx) mx=r; if(r<mn) mn=r; } return {area:t,maxH:mx,minH:mn}; }
+/* Avantage 규약 Smart (v1.8, SPEC_real_validation §A — 실측 Avantage Peak Table + 'Backgnd.' 열 26 영역에서 역으로 정함; Avantage 코드는 쓰지 않음):
+   ① 평활 S = 9 점 중심 이동평균(창 밖 4 채널까지 — bg._pad = {lo:[창 아래 4 점], hi:[창 위 4 점]} 이 있으면 씀, 없으면 창 안에서 자름).
+   ② 끝점 = S(창 첫 채널), S(창 끝 채널) — Avantage 내보내기 배경의 끝값과 26/26 같음.
+   ③ 구간 [i, j] (i 낮은 BE): S_j > S_i 이면 Shirley(수렴, 피적분 S − B, 낮은 BE 쪽부터 포함 누적합), 아니면 직선(설명서 — 높은 BE 끝이 높지 않으면 Linear).
+   ④ 구간 안(끝 제외)에서 B − S 가 가장 큰 채널 k 가 0 보다 크면 그 채널(값 S_k)을 새 끝점으로 [i,k]·[k,j] 를 다시 계산(재귀). 결과: 배경은 평활 데이터를 넘지 않는 조각 Shirley/직선.
+   남은 차이: 깨끗한(①–③만 쓰는) 영역에서도 Avantage 곡선은 위 Shirley 와 ≤ 0.3 % (d 기준) 다르다 — Avantage 의 Shirley 고정점 식이 조금 다름(미확인). */
+function bgSmartAvantage(E,y,bg){
+  const N=E.length; if(N<3) return bgLinear(E,y,1);
+  const pl=bg&&bg._pad&&bg._pad.lo?Array.from(bg._pad.lo):[], ph=bg&&bg._pad&&bg._pad.hi?Array.from(bg._pad.hi):[];
+  const Y=pl.concat(Array.from(y),ph), o=pl.length, S=new Float64Array(N);
+  for(let i=0;i<N;i++){ const c=i+o; let s=0,k=0; for(let j=Math.max(0,c-4);j<=Math.min(Y.length-1,c+4);j++){ s+=Y[j]; k++; } S[i]=s/k; }
+  const B=new Float64Array(N);
+  const seg=(i,j)=>{ const a=S[i], b=S[j], n=j-i;
+    if(!(b>a)){ for(let t=i;t<=j;t++) B[t]=a+(b-a)*(t-i)/(n||1); return; }
+    for(let t=i;t<=j;t++) B[t]=a;
+    for(let it=0;it<300;it++){ let q=0, Qt=0; for(let t=i+1;t<=j;t++) Qt+=S[t]-B[t]; if(!(Math.abs(Qt)>1e-300)){ for(let t=i;t<=j;t++) B[t]=a+(b-a)*(t-i)/(n||1); return; }
+      let mx=0; const nb=new Float64Array(n+1); nb[0]=a; for(let t=i+1;t<=j;t++){ q+=S[t]-B[t]; nb[t-i]=a+(b-a)*q/Qt; }
+      for(let t=i;t<=j;t++){ mx=Math.max(mx,Math.abs(nb[t-i]-B[t])); B[t]=nb[t-i]; } if(mx<1e-9*(Math.abs(b-a)+1)) break; } };
+  const rec=(i,j,dp)=>{ seg(i,j); if(j-i<2||dp>60) return; let k=-1, ex=0; for(let t=i+1;t<j;t++){ const d=B[t]-S[t]; if(d>ex){ ex=d; k=t; } } if(k<0) return; rec(i,k,dp+1); rec(k,j,dp+1); };
+  rec(0,N-1,0); B.smoothed=S; return B;
+}
+/* 전체 스펙트럼에서 창 [i0, i1] 밖 4 채널씩 (Avantage Smart 의 9 점 평활이 창 밖 채널까지 씀) */
+function avantagePad(y,i0,i1){ const N=y.length, lo=[], hi=[]; for(let j=Math.max(0,i0-4);j<i0;j++) lo.push(y[j]); for(let j=i1+1;j<=Math.min(N-1,i1+4);j++) hi.push(y[j]); return {lo,hi}; }
 function bgStatic(E,y,bg){
   const t=bg.type, n=bg.n||5;
   if(bg.conv==="avantage"&&t==="shirley") return bgShirleyAvantage(E,y,bg);
+  if(bg.conv==="avantage"&&t==="smart") return bgSmartAvantage(E,y,bg);
   if(bg.conv==="casa"&&(t==="linear"||t==="shirley")){ const p=endpointsCasa(E,y,bg.aw!=null?bg.aw:1,bg._ends);
     if(t==="shirley") return bgShirleyCasa(E,y,p);
     const sl=(p.yhi-p.ylo)/((p.Ehi-p.Elo)||1); return Float64Array.from(E,e=>p.ylo+sl*(e-p.Elo)); }
@@ -1408,6 +1432,7 @@ function makeProblem(spec,st){
   const P={E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":st.weight==="casa"?"casa":"poisson"};
   if(st.optimizer==="simplex") P.optimizer="simplex";
   if(P.bg&&P.bg.conv==="casa") P.bg._ends=casaEnds(spec.be,spec.y,r.i0,r.i1,P.bg.aw!=null?P.bg.aw:1);
+  if(P.bg&&P.bg.conv==="avantage"&&P.bg.type==="smart") P.bg._pad=avantagePad(spec.y,r.i0,r.i1);
   return P;
 }
 function newComp(shape,be,o){
@@ -1515,17 +1540,45 @@ function casaBg(name,cross,aw){
   const nm=String(name||"").trim(), w=aw!=null?+aw:1;
   if(/^linear$/i.test(nm)) return {bg:{type:"linear",conv:"casa",aw:w},exact:true,note:"CasaXPS Linear (SPEC §2b)"};
   if(/^shirley$/i.test(nm)) return {bg:{type:"shirley",conv:"casa",aw:w},exact:true,note:"CasaXPS Shirley (SPEC §2b)"};
-  const t=nm.match(/^U\s*([23])\s*Tougaard$/i); if(!t) return null;
-  const u3=t[1]==="3"; let v=String(cross==null?"":cross).split(/[,;\s]+/).filter(x=>x!=="").map(Number);
+  const t=nm.match(/^U\s*([234])\s*Tougaard$/i); if(!t) return null;   // U 4 (CasaXPS Cookbook 2026 p. 70: U(x; B,C,D,T0) = Bx/((C − x²)² + Dx²), x > T0) = 같은 핵에 T0 — INNO u3 핵 + T0
+  const u3=t[1]!=="2"; let v=String(cross==null?"":cross).split(/[,;\s]+/).filter(x=>x!=="").map(Number);
   if(!v.length) v=u3?[0,551,436,3]:[2866,1643,1,0];   // CasaXPS 2.3.27 이 채우는 값 (U 3 실측; U 2 는 앞선 판독의 칸)
-  const [B,C,D,T0]=[v[0],v[1],v[2]!=null?v[2]:0,v[3]!=null?v[3]:0], tg={name:(u3?"U 3":"U 2")+" Tougaard",B,C,D,T0};
+  const [B,C,D,T0]=[v[0],v[1],v[2]!=null?v[2]:0,v[3]!=null?v[3]:0], tg={name:"U "+t[1]+" Tougaard",B,C,D,T0};
   if(!(B>0)) return {bg:{type:"linear",conv:"casa",aw:w,casaTougaard:tg},exact:false,note:"B = 0: treated as Linear — unverified (CasaXPS region table did not recompute Tougaard from typed cells in our check)"};
   return {bg:{type:"tougaard",u3,C:isFinite(C)?C:(u3?551:1643),D:u3?(isFinite(D)?D:0):0,T0:T0>0?T0:0,casaTougaard:tg},exact:false,note:"explicit B: INNO scales B so the background meets the high-BE end; CasaXPS uses the given B — numbers differ (not pinned)"+(!u3&&D?"; U 2 ignores D here":"")};
+}
+/* CasaXPS VAMAS 주석 모형(XPS_IO.casaCommentParse) → INNO 피팅 상태 {lo, hi, bg, comps, cons, weight:"casa", notes} (v1.8).
+   에너지: 측정 BE = hν − KE − shift (CasaXPS 주석의 KE 는 Calib 이동이 들어간 눈금; shift 는 따로 돌려줌 — 시료 대전 보정으로 쓰면 됨). 성분 모양·폭은 casaToComp, 배경은 casaBg.
+   연결: Area link j, k → 넓이 = k × 성분 j 넓이; MFWHM link j, k → 같은 모양이면 F = k × F_j (CasaXPS fwhm 비 = F 비), 모양이 다르면 연결하지 않고 알림;
+   Position link 는 오프셋 표기를 아직 확인하지 못해(실측 파일은 모두 −1) 연결하지 않고 알림. 한계(lo, hi)는 넓이·위치는 그대로, 폭은 F 로 환산. */
+function casaModelToINNO(cm,hv,o){
+  if(!cm||!cm.regions||!cm.regions.length) return null; hv=hv>0?+hv:1486.6; o=o||{};
+  const R=cm.regions[0], notes=[], sh=+cm.shift||0; const be=ke=>hv-ke-sh;   // CasaXPS 는 영역·성분 에너지를 보정(Calib)된 눈금으로 저장한다(실측: 영역 끝 채널 = hν − KE − shift)
+  let lo=Math.min(be(R.keStart),be(R.keEnd)), hi=Math.max(be(R.keStart),be(R.keEnd));
+  // 실측(SPEC_real_validation §B): 배경 끝점 = 영역 안 첫·끝 채널 중심 평균, 주석의 Av.Width 2 → ±1 채널. INNO casa 규약(§2b)은 창의 두 번째·끝에서 두 번째 채널을 쓰므로
+  // 창을 한 채널씩 넓힌다(step 을 알 때). 맞추는 채널(casaVar: 창 끝 두 채널 제외)도 CasaXPS 와 같아진다.
+  const st=Math.abs(o.step)||0; if(st>0){ lo-=st+1e-6; hi+=st+1e-6; } else notes.push("channel step unknown — region not widened by one channel (background end points differ from CasaXPS by one channel)");
+  const aw=R.aw!=null&&isFinite(R.aw)?R.aw/2:1;
+  const g=casaBg(R.bg,R.cross&&R.cross.length?R.cross.join(","):null,aw); let bg;
+  if(g){ bg=g.bg; if(!g.exact) notes.push("background: "+g.note); } else { bg={type:"shirley",conv:"casa",aw}; notes.push(`background '${R.bg}' has no INNO equivalent — Shirley (CasaXPS convention) used`); }
+  if((R.startOffset||0)!==0||(R.endOffset||0)!==0) notes.push("region Start/End Offset ≠ 0 is not applied (INNO has no offset term)");
+  const comps=[], cons={}, ids=cm.comps.map((c,i)=>"casa"+i), wf=[];
+  cm.comps.forEach((c,i)=>{ const r=casaToComp(c.shape,{be:c.pos?be(c.pos.v):0,area:c.area?c.area.v:1,fwhm:c.fwhm?c.fwhm.v:1.2,id:ids[i]});
+    if(!r){ notes.push(`${c.name}: line shape '${c.shape}' not supported — skipped`); comps.push(null); wf.push(null); return; }
+    r.comp.name=c.name; comps.push(r.comp); if(!r.exact) notes.push(`${c.name}: ${r.note}`);
+    const k=c.fwhm&&c.fwhm.v>0&&r.comp.F>0?r.comp.F/c.fwhm.v:1; wf.push(k); });
+  cm.comps.forEach((c,i)=>{ const C=comps[i]; if(!C) return; const q=cons[C.id]={};
+    if(c.area){ if(c.area.link>=0&&comps[c.area.link]) q.area={mode:"link",ref:ids[c.area.link],k:c.area.k,b:0}; else q.area={mode:"free",lo:Math.max(0,c.area.lo),hi:c.area.hi}; }
+    if(c.fwhm&&C.F!=null){ const j=c.fwhm.link;
+      if(j>=0&&comps[j]){ if(comps[j].shape===C.shape&&Math.abs((C.m||0)-(comps[j].m||0))<1e-12&&C.casaN===comps[j].casaN) q.F={mode:"link",ref:ids[j],k:c.fwhm.k,b:0}; else notes.push(`${c.name}: FWHM link to a different line shape not reproduced (fit independently)`); }
+      else q.F={mode:"free",lo:c.fwhm.lo*wf[i],hi:c.fwhm.hi*wf[i]}; }
+    if(c.pos){ if(c.pos.link>=0) notes.push(`${c.name}: position link not reproduced (CasaXPS offset notation not verified)`); q.be={mode:"free",lo:be(c.pos.hi),hi:be(c.pos.lo)}; } });
+  return {lo,hi,bg,comps:comps.filter(Boolean),cons,weight:"casa",shift:cm.shift||0,notes,region:R.name};
 }
 const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg};
+  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg,casaModelToINNO};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);

@@ -5,6 +5,10 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-28 XPS v1.8.1 — 실측 대조(Avantage Peak Table 4 시료 · CasaXPS 저장 모델)**(modules/xps/SPEC_real_validation.md):
+  Kratos→Avantage .xls 를 못 열던 것·Backgnd 열 순서 고침, 시트 이름을 Peak Table 에서. Avantage Smart 배경 규약(끝점 9 점 평균·9 점 평활 Shirley·데이터 넘으면 나눔)을 Smart(Avantage) 선택지로 — 배경 오차 중앙 3.9e-3, Area(P) 0.41 %(기본 Smart 4.3 %). Avantage ECF = TPP-2M λ(KE)(2e-4 안), at% 0.01 at% 안 일치. TXFN = 1 자료라 투과 함수는 미결 — 기본값 꺼짐 유지.
+  CasaXPS 주석(CASA region/comp/Calib) 읽기 → INNO 모형; Shirley 배경 ≤2.6e-4, GL(30) 성분 ≤3.8e-4, envelope RMS 0.4 % 안. 저장된 Casa 모형은 수렴 안 된 상태(INNO 재피팅이 6/6 더 낮은 RMS)라 맞춘 값 비교는 불가. Cookbook 2026: SGL·GLT 꼬리·U 4 Tougaard 정의 확인.
+  시험: real_kara 44(자료 없으면 건너뜀) · xps 153 · casa 111 · UI 4 종.
 - **10-28 XPS v1.8 — CasaXPS·Avantage 장점 이식 · 깊이/각도/이미징 화면 · CasaXPS 2.3.27 실측 대조**(modules/xps/SPEC.md §1.8b–§16, SPEC_multi.md, SPEC_proc.md, SPEC_casa_v2.md):
   피팅: 참조 스펙트럼 선형결합(LCF)·측정 스펙트럼 선모양·spline 배경·Simplex·여러 스펙트럼 일괄 적용·at% Monte Carlo, Casa 영역 규약·Avantage Shirley·꼬리(AGT) 호환 모드.
   화면 전환 Spectra · Series · ARXPS · Imaging + Process 탭 — 깊이/연속 측정 조성·PCA(IND·F·MLPCA 잡음)·target testing·MCR-ALS/참조 NNLS, ARXPS 덮개층·다층·Hill·RDP·MaxEnt(σ 하한 1 % 기본), 스펙트럼 영상 맵·ROI·NNLS 화학상태 맵, Jansson/RL/Landweber 디컨볼루션(표시 전용)·Fermi edge·재표본·평활. 긴 계산은 Worker(진행·중지).

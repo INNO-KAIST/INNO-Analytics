@@ -132,6 +132,8 @@ Thermo Avantage manual 'Shirley Background': 반복 수 상한 `it`(기본 10 �
 **높은 BE(낮은 KE) 끝이 낮은 BE 끝보다 높지 않으면 Linear 로 바꿈**(설명서). 끝점·적분은 §2 그대로(설명서에 끝점 평균 규칙은 없음 — Avantage 대조 대기). 반복 B_{k+1} = y_lo + (y_hi−y_lo)Q_k/Q_k(Emax), B_0 = y_lo.
 **Smart 비교**(설명서 'Smart Background'): 둘 다 'Shirley + 배경 ≤ 데이터'. 차이 — Avantage 는 배경이 데이터보다 크면 '배경이 데이터를 따라가고 Shirley 시작점을 창 안으로 옮기며' 넓이를 최대로 하려 함;
 여기 §2 smart 는 반복마다 점별로 `B ← min(B, 평활 데이터)` (시작점을 옮기지 않음, 평활한 데이터와 비교). 시작점 이동 규칙·평활 여부가 공개되지 않아 Avantage Smart 를 그대로 재현하지 않는다(대조 대기).
+**v1.8 `bg = {type:"smart", conv:"avantage"}`** (실측 Avantage 26 영역에서 역으로 정함 — SPEC_real_validation.md §A): 9 점 평활 S, 끝값 = 끝 채널의 S(창 밖 4 채널 포함, `_pad`),
+구간마다 Shirley(S − B, 포함 누적합; 높은 BE 끝이 높지 않으면 직선), 배경이 S 를 넘는 최대 채널에서 나눠 다시(재귀) — Avantage Area(P) 를 중앙 0.4 %·최대 4 % 로 재현(기본 smart 는 4 %·55 %). 기본 smart 는 그대로.
 
 ## 3. 피팅
 ### 3.1 목적함수

@@ -300,7 +300,7 @@ function vamasParse(text,fileName){
     const meta={instrument:[H.inst,H.model].filter(s=>s&&s!=="Not Specified").join(" "),sourceLabel:B.src,passEnergy:isNullV(B.pe)?null:B.pe,anMode:B.anMode,
       workFunction:isNullV(B.wf)?null:B.wf,dwell:isNullV(B.dwell)?null:B.dwell,scans:B.scans,sigMode:B.sigMode,ordUnit:B.vars[yi]&&B.vars[yi].unit,
       date:B.date.slice(0,3).some(v=>v>0)?B.date:null,blockId:B.id,sampleId:B.sample,casa:H.comment.some(s=>/casa/i.test(s)),technique:B.tech,
-      tf:null,vamas:vamasBlockMeta(H,B,b)};
+      tf:null,vamas:vamasBlockMeta(H,B,b),casaModel:casaCommentParse(B.comment)};
     meta.vamas.tag=seriesTag(H,B);   // 표시용 "Etch Time 30 s" (이름은 바꾸지 않음 — CasaXPS 는 모든 파일에 'Data Set' 변수를 쓴다)
     if(meta.casa&&c===1) warn.push("CasaXPS 가 만든 VAMAS(dwell·scan = 1) — 세기가 이미 CPS 일 수 있어 counts 환산은 하지 않음");
     out.push(mkSpec({name:region,region,file:fileName,format:"VAMAS",hv,hvSrc:hvOK?"VAMAS 블록":"기본값",be,y,yRaw:c&&c!==1?yr:null,c:c&&!(meta.casa&&c===1)?c:null,
@@ -310,6 +310,25 @@ function vamasParse(text,fileName){
   return out;
 }
 
+/* CasaXPS 가 VAMAS 블록 주석에 남기는 모형 (v1.8, 실측 CasaXPS 2.3.25 파일에서 읽은 문법 — CasaXPS 코드·문서 원문은 쓰지 않음):
+   'Calib M = 284.52 A = 284.8 BE ADD'  → 표시 BE 이동 (A − M; 여러 줄이면 합)
+   'CASA region (*name*) (*BG*) KEstart KEend RSF AvWidth StartOffset EndOffset c1 c2 c3 c4 (*tag*) mass …'  (c1…c4 = Cross Section 칸)
+   'CASA comp (*name*) (*shape*) Area v lo hi link k MFWHM v lo hi link k Position v(KE) lo hi link k RSF … MASS … INDEX …'
+   link = 연결 대상 성분 번호(0 부터, −1 = 연결 없음), k = 배율 (CasaXPS 화면 'A*0.667' 등). 에너지는 KE(파일 축 그대로). */
+function casaCommentParse(lines){
+  const L=(lines||[]).map(s=>String(s)); const out={calib:[],shift:0,regions:[],comps:[]};
+  const strs=s=>{ const a=[]; s.replace(/\(\*(.*?)\*\)/g,(m,t)=>{ a.push(t); return ""; }); return a; };
+  const rest=s=>s.replace(/\(\*.*?\*\)/g," ").trim().split(/\s+/).filter(Boolean);
+  L.forEach(s=>{ let m;
+    if((m=s.match(/^\s*Calib\s+M\s*=\s*([-\d.eE+]+)\s+A\s*=\s*([-\d.eE+]+)\s+(BE|KE)\s+ADD/i))){ const M=+m[1], A=+m[2]; out.calib.push({M,A,axis:m[3].toUpperCase()}); out.shift+=(m[3].toUpperCase()==="BE"?1:-1)*(A-M); return; }
+    if(/^\s*CASA region\b/i.test(s)){ const t=strs(s), n=rest(s.replace(/^\s*CASA region/i,"")).map(Number);
+      out.regions.push({name:t[0]||"",bg:t[1]||"",keStart:n[0],keEnd:n[1],rsf:n[2],aw:n[3],startOffset:n[4],endOffset:n[5],cross:n.slice(6,10),tag:t[2]||"",mass:n[10]}); return; }
+    if(/^\s*CASA comp\b/i.test(s)){ const t=strs(s), body=s.replace(/^\s*CASA comp\s*\(\*.*?\*\)\s*\(\*.*?\*\)/i,""); const c={name:t[0]||"",shape:t[1]||""};
+      const grab=key=>{ const r=new RegExp("\\b"+key+"\\s+([-\\d.eE+]+)\\s+([-\\d.eE+]+)\\s+([-\\d.eE+]+)\\s+([-\\d]+)\\s+([-\\d.eE+]+)","i").exec(body); return r?{v:+r[1],lo:+r[2],hi:+r[3],link:parseInt(r[4],10),k:+r[5]}:null; };
+      c.area=grab("Area"); c.fwhm=grab("MFWHM"); c.pos=grab("Position"); const rs=/\bRSF\s+([-\d.eE+]+)/i.exec(body); c.rsf=rs?+rs[1]:null; const ms=/\bMASS\s+([-\d.eE+]+)/i.exec(body); c.mass=ms?+ms[1]:null;
+      out.comps.push(c); } });
+  return out.regions.length||out.comps.length||out.calib.length?out:null;
+}
 /* VAMAS 실험 방식·블록 변수 (v1.7 — 깊이 profile·각도·map 묶음을 만들 수 있게).
    expVals: 실험 변수(예: Etch Time s, Etch Level, Angle deg)의 값(문자열 그대로, expNum 은 숫자), x·y: MAP/MAPDP 위치,
    takeOffPolar/Az: 분석기 축 take-off 각(ARXPS), tilt: 시료 기울기. 숫자가 VAMAS '값 없음'(1e37)이면 null. */
@@ -478,7 +497,9 @@ function avantageSheets(sheets,fileName){
   for(const sh of sheets){
     const isNum=v=>typeof v==="number"&&isFinite(v);
     let hr=-1, hc=0, isKE=false;
-    for(let r=0;r<Math.min(sh.nRows,80)&&hr<0;r++) for(let c=0;c<Math.min(sh.nCols,6);c++){ const v=sh.get(r,c); if(typeof v==="string"&&/^(binding|kinetic)\s+energy/i.test(v.trim())){ hr=r; hc=c; isKE=/kinetic/i.test(v); break; } }
+    // 머리칸 = 'Binding/Kinetic Energy' 이고 그 열 아래 몇 줄 안에 숫자가 있는 칸 (v1.8: Kratos→Avantage 내보내기는 위쪽에 'Axis | Kinetic energy | Elements=' 설명 줄이 있어 그 칸을 머리로 잡으면 읽지 못했다)
+    const numBelow=(r,c)=>{ for(let k=r+1;k<=Math.min(sh.nRows-1,r+6);k++) if(isNum(sh.get(k,c))) return true; return false; };
+    for(let r=0;r<Math.min(sh.nRows,80)&&hr<0;r++) for(let c=0;c<Math.min(sh.nCols,6);c++){ const v=sh.get(r,c); if(typeof v==="string"&&/^(binding|kinetic)\s+energy/i.test(v.trim())&&numBelow(r,c)){ hr=r; hc=c; isKE=/kinetic/i.test(v); break; } }
     if(/^titles$/i.test(sh.name)){ const v=sh.get(0,0); if(typeof v==="string") when=v.trim(); }
     if(hr<0){
       // 표 형태(Peak Table 등)는 그대로 보관
@@ -501,12 +522,22 @@ function avantageSheets(sheets,fileName){
     const be=isKE?x.map(k=>hv-k):x;
     const unit=colName(ic);
     const w2=[]; if(!/counts\s*\/\s*s|cps/i.test(unit)) w2.push("세기 단위 '"+unit+"' — CPS 로 간주");
+    if(be.length>1&&be[0]>be[be.length-1]) Object.keys(others).forEach(k=>others[k].reverse());   // v1.8: mkSpec 가 BE 오름차순으로 뒤집으므로 추가 열도 같은 순서로 (전에는 뒤집히지 않아 채널이 어긋났다)
     const ext=Object.keys(others).length?{avantageCols:others}:null;
     const pt=pathPoint(path);
     out.push(mkSpec({name:region,region,file:fileName,format:"Avantage XLS",hv,hvSrc:"Avantage 기본값 1486.68 (파일에 없음)",be,y,
       sample:String(fileName||"").replace(/^.*[\\/]/,"").replace(/\.xlsx?$/i,"")+(pt?" · "+pt:""),
       meta:{origPath:path,expDesc:desc,yUnit:unit,when,point:pt},warn:w2,extra:ext}));
   }
+  // v1.8: 시트 이름이 'Sheet5' 처럼 일반 이름이면 Peak Table 의 Start/End BE 가 Avantage 배경 열(0 아닌 구간)을 감싸는 줄의 Name 으로 region 이름을 붙인다
+  const pt=tables.find(t=>/peak\s*table/i.test(t.name));
+  if(pt){ const hi=pt.rows.findIndex(r=>r.some(v=>/^name$/i.test(String(v).trim()))&&r.some(v=>/^start\s*be$/i.test(String(v).trim())));
+    if(hi>=0){ const H=pt.rows[hi].map(v=>String(v).trim()), cN=H.findIndex(v=>/^name$/i.test(v)), cS=H.findIndex(v=>/^start\s*be$/i.test(v)), cE=H.findIndex(v=>/^end\s*be$/i.test(v));
+      const peaks=pt.rows.slice(hi+1).filter(r=>typeof r[cS]==="number"&&typeof r[cE]==="number"&&String(r[cN]).trim()).map(r=>({name:String(r[cN]).trim(),lo:Math.min(r[cS],r[cE]),hi:Math.max(r[cS],r[cE])}));
+      out.forEach(sp=>{ if(!/^sheet\s*\d+$/i.test(sp.region)) return; const cols=sp.extra&&sp.extra.avantageCols; const k=cols&&Object.keys(cols).find(n=>/backgnd/i.test(n)); if(!k) return;
+        const b=cols[k]; let lo=Infinity, hi2=-Infinity; for(let i=0;i<b.length;i++) if(b[i]&&isFinite(b[i])){ const e=sp.be[i]; if(e<lo) lo=e; if(e>hi2) hi2=e; }
+        if(!(hi2>lo)) return; const st=Math.abs(sp.step)||0.05; const m=peaks.filter(p=>Math.abs(lo-p.lo)<=st/2+1e-6&&Math.abs(p.hi-hi2)<=st/2+1e-6);   // Avantage 배경 끝 = Start/End BE 에 가장 가까운 채널
+        if(m.length===1){ sp.meta.sheet=sp.region; const rg=parseRegionName(m[0].name); sp.reg=rg; sp.name=m[0].name; sp.region=rg.el||rg.kind==="survey"?rg.label:m[0].name; } }); } }
   return {spectra:out,tables,warn};
 }
 
@@ -635,6 +666,6 @@ async function readFile0(name,u8,opt){
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);
