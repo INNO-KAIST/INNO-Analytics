@@ -383,7 +383,7 @@ function addCompAt(be,yv){
   const sp=cur(), p=pr(sp), M=curModel(sp,p); pushHist(p,"성분 추가");
   const bgAt=M?interp(M.E,M.B,be):0; const h=Math.max(1,(yv!=null?yv:(M?interp(M.E,M.y,be):1))-bgAt);
   const r=sp.reg||{}; const dbl=S.ui.addDoublet&&soInfo(r.el,r.orb);
-  const c=C.newComp(S.ui.addShape||"GLS",be,{F:1.2,el:r.el||"",line:dbl?r.orb:(r.orb||""),ch:chOf(sp)});
+  const c=C.newComp(S.ui.addShape||"GLS",be,{F:S.ui.addShape==="TP"?6:1.2,el:r.el||"",line:dbl?r.orb:(r.orb||""),ch:chOf(sp)});
   if(dbl&&dbl.multiplet) note("다중항 준위에 doublet 을 넣었습니다 — 껍질이 닫힌 상태("+(dbl.multiplet.closed||"해당 없음")+")가 아니면 doublet 모형은 맞지 않습니다","warn");
   if(dbl){ c.doublet={dE:dbl.dE||1,r:dbl.r,q:1}; p.cons[c.id]={dE:C.dEConstraint(dbl),r:{mode:"fixed"},q:{mode:"fixed"}}; if(!dbl.dE) note("Δ(스핀–궤도 간격)를 라이브러리에서 쓸 수 없어 1 eV 로 두고 풀어 둡니다 — 문헌값을 넣으세요","warn"); }
   c.name=defName(sp,p,!!dbl); c.slot=slotFor(p);
@@ -451,8 +451,9 @@ function workerURL(){
   const body=src+"\n;\n"+more+"\nconst XJ=("+xjobs.toString()+")(self);\n"+`
 self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   let out;
-  if(d.cmd==="fit") out=C.fitJob(d.prob,d.starts,d.opt);
-  else if(d.cmd==="final") out=C.finalJob(d.prob,d.opt);
+  const tick=()=>{ let last=0; return (it,X)=>{ const t=Date.now(); if(t-last>150){ last=t; self.postMessage({id:d.id,prog:-1,it,chi2:X}); } }; };
+  if(d.cmd==="fit") out=C.fitJob(d.prob,d.starts,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="final") out=C.finalJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="mc") out=C.mcJob(d.prob,d.res,d.M,d.seed,d.opt);
   else if(d.cmd==="auto") out=C.autoJob(d.prob,d.opt);
   else if(d.cmd==="sens") out=C.sensJob(d.spec,d.model,d.variants);
@@ -463,7 +464,7 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   const url=URL.createObjectURL(new Blob([body],{type:"text/javascript"})); WORK={url}; return url;
 }
 function nWorkers(){ const hc=(navigator&&navigator.hardwareConcurrency)||2; return Math.max(1,Math.min(16,hc-1)); }
-function pool(jobs,onDone){
+function pool(jobs,onDone,onProg){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
@@ -471,7 +472,7 @@ function pool(jobs,onDone){
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
-    ws.forEach(w=>{ w.onmessage=e=>{ const d=e.data; if(!d.ok){ failed=d.err; } else outs[d.id]=d.out; done++; onDone&&onDone(); if(done===jobs.length){ ws.forEach(x=>x.terminate()); RUN=null; if(failed&&outs.every(o=>!o)) reject(new Error(failed)); else resolve(outs); } else feed(w); };
+    ws.forEach(w=>{ w.onmessage=e=>{ const d=e.data; if(d.prog!=null&&d.ok==null){ if(onProg) onProg(d); return; } if(!d.ok){ failed=d.err; } else outs[d.id]=d.out; done++; onDone&&onDone(); if(done===jobs.length){ ws.forEach(x=>x.terminate()); RUN=null; if(failed&&outs.every(o=>!o)) reject(new Error(failed)); else resolve(outs); } else feed(w); };
       w.onerror=e=>{ e.preventDefault&&e.preventDefault(); failed=e.message||"Worker 오류"; done++; if(done===jobs.length){ ws.forEach(x=>x.terminate()); RUN=null; reject(new Error(failed)); } else feed(w); };
       feed(w); });
   });
@@ -491,12 +492,12 @@ async function runFit(kind,spArg){
     const starts=C.startPoints(prob,N,(+S.ui.seed||1));
     const K=Math.min(nWorkers(),N); const chunks=[...Array(K)].map(()=>[]); starts.forEach((s,i)=>chunks[i%K].push(s));
     let dn=0; setProg(N>1?`다중 시작 0/${K} 묶음`:"피팅 중…",0.02);
-    const outs=await pool(chunks.map(st=>({cmd:"fit",prob,starts:st,opt:{}})),()=>{ dn++; setProg(`시작점 묶음 ${dn}/${K}`,dn/(K+1)); });
+    const outs=await pool(chunks.map(st=>({cmd:"fit",prob,starts:st,opt:{}})),()=>{ dn++; setProg(`시작점 묶음 ${dn}/${K}`,dn/(K+1)); },N>1?null:d=>setProg(`피팅 중… 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     const ok=outs.filter(Boolean); if(!ok.length) throw new Error("피팅 실패");
     const best=ok.reduce((a,b)=>b.chi2<a.chi2?b:a); const chis=[].concat(...ok.map(o=>o.chis));
     prob.comps=best.comps; prob.bg=best.bg;
     setProg("불확도 계산…",K/(K+1));
-    const [fin]=await pool([{cmd:"final",prob,opt:{}}]);
+    const [fin]=await pool([{cmd:"final",prob,opt:{}}],null,d=>setProg(`다듬기·불확도 — 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     const near=chis.filter(x=>x-best.chi2<1).length;
     fin.multi=N>1?{N,chis,near,frac:near/N}:null;
     if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
@@ -1014,11 +1015,11 @@ function compCard(sp,p,c,ci){
   const sm=r&&r.summ&&r.summ[ci]?r.summ[ci]:null;
   const atb=new Set(); if(r&&r.cov) r.cov.atB.forEach((b,i)=>{ if(b&&r.free[i]&&r.free[i].id===c.id) atb.add(r.free[i].k); });
   const names=C.paramNames(c);
-  const field=k=>{ const cs=(p.cons[c.id]||{})[k]||{mode:"free"}; let v=C.getP(c,k); if(k==="be") v+=sh; const d=k==="area"?0:k==="be"||k==="dE"?3:3;
+  const field=k=>{ const cs=(p.cons[c.id]||{})[k]||C.defaultCons(c,k)||{mode:"free"}; let v=C.getP(c,k); const der=C.derivedParam(c,k); if(k==="be") v+=sh; const d=k==="area"?0:k==="be"||k==="dE"?3:3;
     const sig=sm&&sm.sig?(k==="be"?sm.sig.be:k==="area"?sm.sig.area:null):null;
-    const lab=c.shape==="MEAS"&&k==="wG"?"Broadening":c.shape==="MEAS"&&k==="be"?"BE (max)":c.shape==="LA"&&k==="alpha"?"α (hi BE)":c.shape==="LA"&&k==="beta"?"β (lo BE)":c.shape==="DS"&&k==="alpha"?"α (asym.)":(C.PDEF[k]||{lab:k}).lab;
-    const tip=c.shape==="MEAS"&&k==="wG"?"Extra Gaussian broadening (FWHM, eV) applied to the reference shape. Fixed = off":c.shape==="MEAS"&&k==="be"?"Position of the reference maximum. Fixed = LCF (no shift); Free = shift δ fitted":c.shape==="LA"&&(k==="alpha"||k==="beta")?"Lorentzian power-law exponent — smaller = longer tail on that side (α: high-BE side, β: low-BE side; metals: α < β)":((C.PDEF[k]||{}).lab||k)+" "+((C.PDEF[k]||{}).u||"");
-    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+v).toFixed(d)}" ${cs.mode==="link"?"disabled":""}><button class="cm ${cs.mode}" data-cm="${k}" title="Free → Fixed → Linked">${CMLAB[cs.mode]}</button></div>`; };
+    const lab=c.shape==="MEAS"&&k==="wG"?"Broadening":c.shape==="MEAS"&&k==="be"?"BE (max)":c.shape==="LA"&&k==="alpha"?"α (hi BE)":c.shape==="LA"&&k==="beta"?"β (lo BE)":c.shape==="DS"&&k==="alpha"?"α (asym.)":c.shape==="TLA"&&k==="alpha"?"α (power)":k==="tk"&&c.tail==="PHI"?"Tail k (len.)":(C.PDEF[k]||{lab:k}).lab;
+    const tip=c.shape==="MEAS"&&k==="wG"?"Extra Gaussian broadening (FWHM, eV) applied to the reference shape. Fixed = off":c.shape==="MEAS"&&k==="be"?"Position of the reference maximum. Fixed = LCF (no shift); Free = shift δ fitted":c.shape==="LA"&&(k==="alpha"||k==="beta")?"Lorentzian power-law exponent — smaller = longer tail on that side (α: high-BE side, β: low-BE side; metals: α < β)":(S2TIP(c,k)||((C.PDEF[k]||{}).lab||k)+" "+((C.PDEF[k]||{}).u||""))+(der?` — set by CasaXPS ${k==="stG"?"γ = "+c.stN:"n = "+c.casaN} (width = n·F/144.87)`:"");
+    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+(v==null?C.shapeParams(c,1)[k]||0:v)).toFixed(d)}" ${cs.mode==="link"||der?"disabled":""}>${der?`<button class="cm fixed" disabled title="Width from CasaXPS n — clear n to fit it">n</button>`:`<button class="cm ${cs.mode}" data-cm="${k}" title="Free → Fixed → Linked">${CMLAB[cs.mode]}</button>`}</div>`; };
   const open=sel||S.ui.openAll;
   const head=`<div class="ch" data-sel="${c.id}"><span class="sw" style="background:${colorOf(c)}"></span><input class="nmi" data-nm="${c.id}" value="${esc(c.name||"")}" placeholder="Name"><span class="sum">${c.shape==="MEAS"?"Ref":esc(c.shape)}${c.doublet?" ·D":""} · ${f(c.be+sh,2)} eV${sm&&sm.fwhm?` · ${f(sm.fwhm,2)} eV`:""}</span><button class="btn xs" data-dl="${c.id}" title="Delete">×</button></div>`;
   if(!open) return `<div class="comp" data-c="${c.id}">${head}</div>`;
@@ -1030,12 +1031,42 @@ function compCard(sp,p,c,ci){
   return `<div class="comp ${sel?"sel":""}" data-c="${c.id}">${head}<div class="cb">
     <div class="xps-row">${shapeSel}${isM?"":`<label class="xps-f"><input type="checkbox" data-dbl="${c.id}" ${c.doublet?"checked":""}> Doublet</label>`}
     <span class="xps-f" title="Element this component belongs to (for quantification)">Element <input type="text" class="xps-in w56" data-el="${c.id}" value="${esc(c.el||"")}"></span><label class="xps-f" title="Include in the quantification sum"><input type="checkbox" data-q="${c.id}" ${c.noQuant?"":"checked"}> Quantify</label></div>
+    ${isM?"":s2Opts(c)}
     <div class="pg">${names.map(field).join("")}${ced}</div>
     ${c.doublet&&so?`<div class="muted xs" style="margin-top:4px">${esc(soNote(so))}. 화학 상태에 따라 Δ 는 조금 다를 수 있음</div>`:""}
     ${casaEqTxt(c,sm)}
     ${isM?`<div class="muted xs" style="margin-top:4px">Shift δ = ${f(c.be+sh-tp.eref,3)} eV</div>`:""}
     ${sm?`<div class="muted xs" style="margin-top:4px">True FWHM ${f(sm.fwhm,3)}${sm.sig.fwhm!=null?" ± "+f(sm.sig.fwhm,3):""} eV · height ${g(sm.height,4)} · area ${f(sm.areaPct,1)} %${sm.sig.areaPct!=null?" ± "+f(sm.sig.areaPct,1):""}</div>`:""}
   </div></div>`;
+}
+/* CasaXPS Cookbook 2026 모양 선택 줄 (SPEC_shapes2): 꼬리 T/PHI · 수식어 ST/SB · DS 자름 l · CasaXPS n · 표기 입력. 설명은 title 에만 */
+const S2_N_SHAPES=["LA","TLA","GLN","SGLN","DS","TP"];
+function S2TIP(c,k){ return ({mu:"TLA asymmetry μ > 0 (Cookbook p. 66): weight π/2 + atan(2x/F) + π/μ on (1+4x²/F²)^−α — small μ ≈ symmetric, large μ = strongest high-BE tail",
+  stMu:"ST(μ) (Cookbook p. 66): F·[∫ F toward lower BE + A/μ], unit area — small μ ≈ base shape, large μ = strongest high-BE asymmetry",stG:"ST γ: Gaussian FWHM (eV) convolved after S(μ); 0 = ST(μ)",
+  tk:c.tail==="PHI"?"PHI(j,k) tail length in units of F: (1−GL)·j·exp(−13.8·x/(k·F)) on the high-BE side":"T(k) decay rate per F: (1−GL)·exp(−k·x/F) on the high-BE side",tj:"PHI(j,k) tail amplitude j",
+  ta:"Trapezium height at the high-BE end (α). Only β/α matters — α is fixed by default",tb:"Trapezium height at the low-BE end (β)",
+  F:c.shape==="TP"?"Trapezium width (eV)":c.shape==="GLN"||c.shape==="SGLN"?"Width parameter F (CasaXPS x unit); true FWHM is shown below":null,
+  wL:c.shape==="TP"?"Lorentzian FWHM (eV) convolved with the trapezium":null,
+  m:c.shape==="SGLN"?"SGL height fraction of the Lorentzian (CasaXPS m/100) — not the area fraction of GLS":c.shape==="GLN"?"GL product mix (CasaXPS m/100)":null})[k]||null; }
+function s2Opts(c){ const o=[]; let q=null; try{ q=C.compToCasa(c); }catch(e){}
+  if(c.shape==="GLN"||c.shape==="SGLN") o.push(`<select class="xps-sel" data-tail="${c.id}" title="High-BE exponential tail (CasaXPS Cookbook p. 67): T(k) = GL + (1−GL)·exp(−k·x/F); PHI(j,k) = GL + (1−GL)·j·exp(−13.8·x/(k·F))"><option value="">No tail</option><option value="T" ${c.tail==="T"?"selected":""}>T(k)</option><option value="PHI" ${c.tail==="PHI"?"selected":""}>PHI(j,k)</option></select>`);
+  if(C.S2_MODBASE[c.shape]) o.push(`<select class="xps-sel" data-mod="${c.id}" title="Modifier (Cookbook pp. 66, 68). ST(μ,γ): asymmetric version of this shape, unit area. SB(0): Shirley step ∫ toward lower BE of this shape — a background-like component; its area is the area inside the fit window"><option value="">No modifier</option><option value="ST" ${C.compMod(c)==="ST"?"selected":""}>ST(μ,γ)</option><option value="SB" ${C.compMod(c)==="SB"?"selected":""}>SB(0) step</option></select>`);
+  if(c.shape==="DS") o.push(`<span class="xps-f" title="Shirley-cut DS (Cookbook pp. 66–67): zero beyond l·wL on the high-BE side, minus k·(Shirley response) so it reaches 0 there. Blank = plain DS. Area = area inside the fit window">Cut l <input type="number" class="w56" step="any" min="0" data-dsl="${c.id}" value="${c.dsl>0?c.dsl:""}" placeholder="—"></span>`);
+  if(S2_N_SHAPES.includes(c.shape)) o.push(`<span class="xps-f" title="CasaXPS integer n: ${c.shape==="TP"?"Lorentzian":"Gaussian"} FWHM = n·${c.shape==="DS"?"wL":"F"}/144.87 (measured for LA(1,1,n); assumed for other shapes). Blank = fit the width freely">n <input type="number" class="w56" step="1" min="0" data-cn="${c.id}" value="${c.casaN!=null?c.casaN:""}" placeholder="—"></span>`);
+  o.push(`<span class="xps-f" title="CasaXPS line-shape string — type one to set this component, e.g. ST(1)LA(1,143), GL(30,50)T(2), SGL(30)PHI(1,2), TLA(1.2,2,50), DS(0.3,600,40), TP(1,15,0), SB(0)LA(1,43). Width is kept (true FWHM)">Casa <input type="text" class="xps-in w120" data-casa="${c.id}" value="${esc(q&&q.notation||"")}" placeholder="e.g. GL(30)" spellcheck="false" autocomplete="off"></span>`);
+  return `<div class="xps-row xps-s2">${o.join("")}</div>`; }
+function s2Swap(p,c,n){ const i=p.comps.indexOf(c); ["name","el","line","color","slot","noQuant"].forEach(k=>{ if(c[k]!=null) n[k]=c[k]; }); n.id=c.id; if(c.doublet) n.doublet=Object.assign({},c.doublet); p.comps[i]=n;
+  const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(n).includes(k)) delete cs[k]; }); return n; }
+function bindS2(card,sp,p,c){
+  const done=()=>{ touch(p); renderPanel(); drawPlot(); };
+  const tl=$q(card,"[data-tail]"); if(tl) tl.onchange=()=>{ pushHist(p,"꼬리"); const v=tl.value; if(v){ c.tail=v; if(!(c.tk>0)) c.tk=2; if(v==="PHI"&&c.tj==null) c.tj=1; } else { delete c.tail; delete c.tk; delete c.tj; } const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(c).includes(k)) delete cs[k]; }); done(); };
+  const md=$q(card,"[data-mod]"); if(md) md.onchange=()=>{ pushHist(p,"수식어"); const v=md.value; ["stMu","stG","stN","sbArg"].forEach(k=>delete c[k]); if(v){ c.mod=v; if(v==="ST"){ c.stMu=1; c.stG=0; } else c.sbArg=0; } else delete c.mod; const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(c).includes(k)) delete cs[k]; });
+    if(v==="SB") note("SB(0): Shirley 계단 성분 — 넓이는 피팅 창 안 넓이입니다. 같은 바탕 모양의 봉우리 성분과 함께 쓰세요","info"); done(); };
+  const dl=$q(card,"[data-dsl]"); if(dl) dl.onchange=()=>{ pushHist(p,"DS l"); const v=+dl.value; if(dl.value!==""&&v>0) c.dsl=v; else delete c.dsl; done(); };
+  const cn=$q(card,"[data-cn]"); if(cn) cn.onchange=()=>{ pushHist(p,"Casa n"); const v=+cn.value; if(cn.value!==""&&v>=0&&isFinite(v)) c.casaN=v; else { const k=C.casaNKey(c); if(k){ const sp1=C.shapeParams(c,1); c[k]=sp1[k]; } delete c.casaN; } done(); };
+  const ca=$q(card,"[data-casa]"); if(ca) ca.onchange=()=>{ const str=ca.value.trim(); if(!str) return; let r;
+    try{ const tf=C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm||1.2; r=C.casaToComp(str,{strict:true,be:c.be,area:c.area,fwhm:tf,id:c.id}); }catch(e){ note(e.message,"warn"); ca.value=""; ca.focus(); return; }
+    pushHist(p,"CasaXPS 표기"); s2Swap(p,c,r.comp); if(!r.exact) note("CasaXPS "+str+": "+r.note,"info"); done(); };
 }
 function consEditor(p,c,k){
   const cs=(p.cons[c.id]||{})[k]||{mode:"free"}; const sh=shOf(cur());
@@ -1054,13 +1085,14 @@ function bindComps(el,sp,p){
   $a(el,".comp[data-c]").forEach(card=>{
     const c=p.comps.find(x=>x.id===card.dataset.c); if(!c) return;
     $a(card,"input[data-p]").forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.p; let v=+inp.value; if(!isFinite(v)) return; if(k==="be") v-=sh; pushHist(p,"값 수정"); C.setP(c,k,v); propagate(p); touch(p); drawPlot(); });
-    $a(card,"[data-cm]").forEach(b=>b.onclick=()=>{ const k=b.dataset.cm; const cs=(p.cons[c.id]=p.cons[c.id]||{}); const curm=(cs[k]||{mode:"free"}).mode;
+    $a(card,"[data-cm]").forEach(b=>b.onclick=()=>{ const k=b.dataset.cm; const cs=(p.cons[c.id]=p.cons[c.id]||{}); const curm=(cs[k]||C.defaultCons(c,k)||{mode:"free"}).mode;
       const order=["free","fixed","link"]; let nx=order[(order.indexOf(curm)+1)%3];
       if(nx==="link"&&!p.comps.some(o=>o.id!==c.id&&C.paramNames(o).includes(k))) nx="free";
       const prev=cs[k]||{}; cs[k]=Object.assign({},prev,{mode:nx});
       if(nx==="link"){ const ref=p.comps.find(o=>o.id!==c.id&&C.paramNames(o).includes(k)); cs[k].ref=prev.ref||ref.id; if(k==="be"){ cs[k].k=1; cs[k].b=+(c.be-(p.comps.find(o=>o.id===cs[k].ref)||ref).be).toFixed(3); } else { const rv=C.getP(p.comps.find(o=>o.id===cs[k].ref)||ref,k); cs[k].k=rv?+(C.getP(c,k)/rv).toPrecision(4):1; cs[k].b=0; } }
       S.ui.ced=nx==="fixed"?null:{id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); });
     const shp=$q(card,"[data-shape]"); if(shp) shp.onchange=()=>{ pushHist(p,"모양"); const i=p.comps.indexOf(c); const n=C.convertShape(c,shp.value); if(n.shape==="AGT") n.ch=chOf(sp); n.slot=c.slot; n.noQuant=c.noQuant; p.comps[i]=n; const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(n).includes(k)) delete cs[k]; }); touch(p); renderPanel(); drawPlot(); };
+    bindS2(card,sp,p,c);
     const db=$q(card,"[data-dbl]"); if(db) db.onchange=()=>{ pushHist(p,"doublet"); if(db.checked){ const so=soInfo(c.el||sp.reg.el,c.line||sp.reg.orb)||{dE:null,r:0.5}; if(so.multiplet) note("다중항 준위에 doublet 을 켰습니다 — 껍질이 닫힌 상태("+(so.multiplet.closed||"해당 없음")+")가 아니면 doublet 모형은 맞지 않습니다","warn"); c.doublet={dE:so.dE||1,r:so.r||0.5,q:1}; c.area*=1+c.doublet.r; const cs=(p.cons[c.id]=p.cons[c.id]||{}); cs.dE=C.dEConstraint(so.dE?so:null); cs.r={mode:"fixed"}; cs.q={mode:"fixed"}; if(!so.dE) note("이 궤도의 Δ 를 라이브러리에서 찾지 못했습니다 — 직접 넣으세요","warn"); } else { c.area/=1+c.doublet.r; c.doublet=null; const cs=p.cons[c.id]||{}; delete cs.dE; delete cs.r; delete cs.q; } touch(p); renderPanel(); drawPlot(); };
     const ei=$q(card,"[data-el]"); if(ei) ei.onchange=()=>{ c.el=ei.value.trim(); touch(p); };
     const qi=$q(card,"[data-q]"); if(qi) qi.onchange=()=>{ c.noQuant=!qi.checked; touch(p); };
@@ -1103,10 +1135,11 @@ function panelResult(el,sp){
   const mc=r.mc&&r.mc.summ;
   const rows=[];
   r.comps.forEach((c,i)=>{ const s=r.summ[i]||{sig:{}}; const m=mc?mc[i]:null; const col=colorOf(p.comps[i]||c);
-    const lg=c.shape==="MEAS"?`${esc((c.tpl&&c.tpl.name)||"")} · δ ${f(c.be+sh-(c.tpl?c.tpl.eref:0),2)} eV${c.wG>1e-6?` · w ${f(c.wG,2)}`:""}`:c.shape==="GLS"||c.shape==="GLP"||c.shape==="GLT"?`${Math.round(100*c.m)} %`:c.shape==="V"?`G ${f(c.wG,2)}/L ${f(c.wL,2)}`:c.shape==="DS"?`α ${f(c.alpha,3)}`:c.shape==="LA"?`α ${f(c.alpha,2)} β ${f(c.beta,2)}`:"";
+    const lg=c.shape==="MEAS"?`${esc((c.tpl&&c.tpl.name)||"")} · δ ${f(c.be+sh-(c.tpl?c.tpl.eref:0),2)} eV${c.wG>1e-6?` · w ${f(c.wG,2)}`:""}`:c.shape==="GLS"||c.shape==="GLP"||c.shape==="GLT"?`${Math.round(100*c.m)} %`:c.shape==="V"?`G ${f(c.wG,2)}/L ${f(c.wL,2)}`:c.shape==="DS"?`α ${f(c.alpha,3)}${c.dsl>0?` · l ${f(c.dsl,1)}`:""}`:c.shape==="LA"?`α ${f(c.alpha,2)} β ${f(c.beta,2)}`:c.shape==="TLA"?`α ${f(c.alpha,2)} μ ${f(c.mu,2)}`:c.shape==="GLN"||c.shape==="SGLN"?`${Math.round(100*c.m)} %${c.tail==="T"?` T(${f(c.tk,2)})`:c.tail==="PHI"?` PHI(${f(c.tj,2)},${f(c.tk,2)})`:""}`:c.shape==="TP"?`${f(c.ta,2)} : ${f(c.tb,2)}`:"";
+    const lgm=C.compMod(c)==="ST"?`ST(${f(c.stMu,2)}) `:C.compMod(c)==="SB"?"SB ":"";
     const nm1=c.name||("#"+(i+1));
     const be=s.be+sh, sb=m?m.be.sd:s.sig.be; const fx=k=>s.sig&&s.sig[k]===null;
-    rows.push(`<tr><td><i class="sw" style="background:${col}"></i>${esc(nm1)}${c.doublet?` <span class="muted xs">(pair sum)</span>`:""}</td><td class="num">${pmF(be,sb,2,fx("be"))}</td><td class="num">${pmF(s.fwhm,m?m.fwhm.sd:s.sig.fwhm,2,fx("fwhm"))}</td><td class="num">${g(s.height,4)}</td><td class="num">${pmF(s.area,m?m.area.sd:s.sig.area,0,fx("area"))}</td><td class="num">${pm(s.areaPct,m?m.areaPct.sd:s.sig.areaPct,1)}</td><td>${esc(c.shape)} ${lg}</td></tr>`);
+    rows.push(`<tr><td><i class="sw" style="background:${col}"></i>${esc(nm1)}${c.doublet?` <span class="muted xs">(pair sum)</span>`:""}</td><td class="num">${pmF(be,sb,2,fx("be"))}</td><td class="num">${pmF(s.fwhm,m?m.fwhm.sd:s.sig.fwhm,2,fx("fwhm"))}</td><td class="num">${g(s.height,4)}</td><td class="num">${pmF(s.area,m?m.area.sd:s.sig.area,0,fx("area"))}</td><td class="num">${pm(s.areaPct,m?m.areaPct.sd:s.sig.areaPct,1)}</td><td>${lgm}${esc(c.shape)} ${lg}</td></tr>`);
     if(c.doublet){ const j=(c.line||sp.reg.orb||"").slice(-1); const J=ORB_J[j]||["",""]; const base=nm1.replace(/(1\/2|3\/2|5\/2|7\/2)$/,"");
       rows.push(`<tr class="sub"><td style="padding-left:18px">${esc(base.includes(J[0])?base:base+J[0])}</td><td class="num">${f(be,2)}</td><td class="num">${f(s.fwhm,2)}</td><td class="num"></td><td class="num">${f(s.area1,0)}</td><td></td><td class="muted xs">major</td></tr>`);
       rows.push(`<tr class="sub"><td style="padding-left:18px">${esc((base.includes(J[0])?base.replace(J[0],J[1]):base+J[1]))}</td><td class="num">${f(s.be2+sh,2)}</td><td class="num">${f(s.fwhm*c.doublet.q,2)}</td><td class="num"></td><td class="num">${f(s.area2,0)}</td><td></td><td class="muted xs">Δ ${f(c.doublet.dE,2)}, ratio ${f(c.doublet.r,3)}</td></tr>`); }
@@ -1325,7 +1358,7 @@ function panelQuant(el,sp){
   const intf=interferences(smpK,rows);
   const skipped=rows.skipped||[];
   const noSrc=[...new Set(rows.filter(r=>!srcOf(r.hv)).map(r=>f(r.hv,1)))];
-  const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>c.shape==="DS"&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
+  const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>(c.shape==="DS"||C.compMod(c)==="SB")&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
   const im=S.quant.imfp, tq=S.quant.tf;
   el.innerHTML=`
    <div class="xps-h">Sample <b>${esc(smpDisp(smpK).name)}</b> <span class="muted xs">${esc(smpDisp(smpK).ctx)}</span></div>${chgBanner(sp)}
@@ -1350,7 +1383,7 @@ function panelQuant(el,sp){
    ${nds.length?`<div class="note warn" style="margin-top:6px">검출 안 됨(넓이 ≤ 0 또는 2σ 미만): ${esc(nds.join(", "))} — Σ 에서 뺐습니다.</div>`:""}
    ${intf.map(t=>`<div class="note warn" style="margin-top:6px">${esc(t)}</div>`).join("")}
    ${noSrc.length?`<div class="note warn" style="margin-top:6px">광원 hν = ${esc(noSrc.join(", "))} eV 에 대한 감도계수 표가 없습니다(Scofield 표는 Al Kα·Mg Kα 만). 감도계수를 직접 넣으세요.</div>`:""}
-   ${dsIn?`<div class="note warn" style="margin-top:6px">DS(Doniach–Šunjić) 성분이 있습니다(${esc(dsIn)}): DS 넓이는 피팅 창 안의 적분이라 창 폭에 따라 달라집니다. 같은 창 규칙으로 잰 시료끼리만 at% 를 비교하세요.</div>`:""}
+   ${dsIn?`<div class="note warn" style="margin-top:6px">DS(Doniach–Šunjić)·SB(Shirley 계단) 성분이 있습니다(${esc(dsIn)}): 이 넓이는 피팅 창 안의 적분이라 창 폭에 따라 달라집니다. 같은 창 규칙으로 잰 시료끼리만 at% 를 비교하세요.</div>`:""}
    <div class="muted xs" style="margin-top:4px">ALTHERMO1 은 Scofield 대비 선마다 다르지만(5–95 % 범위 −26…+49 %) KE 와 상관이 없다(log 기울기 0.01) — T·λ 가 들어 있지 않은 값이므로 T·λ 보정을 함께 적용한다.</div>
    ${stoichHTML(sp,used,Q)}
    <div class="xps-row" style="margin-top:6px"><button class="btn sm" id="xqCsv">Quantification CSV</button></div>`;

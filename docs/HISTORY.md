@@ -5,6 +5,11 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-29 XPS v1.9 — CasaXPS Cookbook 2026 선모양**(modules/xps/SPEC_shapes2.md):
+  TLA(α,μ,w) · ST(μ,γ)·SB(0) 수식어(GLS·GLP·LA·V·TLA·GLN·SGLN) · DS(α,n[,l]) · GL(m,n)·SGL(m,n) + T(k)/PHI(j,k) 꼬리 · TP(α,β,n). Casa 표기 읽기·쓰기(ST(1.7)LA(1,200), SB(0)LA(1,43) 등 왕복), 기존 GL(m)T(k) 저장 모형 그대로.
+  독립 기준(scipy·mpmath) 대비 값 1.5e-7 · 넓이 7e-9 · FWHM 5e-8, 합성 재현 200 회 × 9 경우 3σ 안 ≥99 %. 성분 10 개 피팅 약 2 s · MC 1.5 s/회(TP wL 은 기본 고정 — 풀면 퇴화해 느려짐), 반복 진행 표시.
+  미확정(앱에 '가정' 표시): n → 폭 규칙을 LA 외 모양에 적용, DS·SB 넓이 = 피팅 창 안, TLA 표기.
+  시험: shapes2 71 · ui_xps_shapes2 10 · 기존 XPS node·UI 모두 통과.
 - **10-28 XPS v1.8.1 — 실측 대조(Avantage Peak Table 4 시료 · CasaXPS 저장 모델)**(modules/xps/SPEC_real_validation.md):
   Kratos→Avantage .xls 를 못 열던 것·Backgnd 열 순서 고침, 시트 이름을 Peak Table 에서. Avantage Smart 배경 규약(끝점 9 점 평균·9 점 평활 Shirley·데이터 넘으면 나눔)을 Smart(Avantage) 선택지로 — 배경 오차 중앙 3.9e-3, Area(P) 0.41 %(기본 Smart 4.3 %). Avantage ECF = TPP-2M λ(KE)(2e-4 안), at% 0.01 at% 안 일치. TXFN = 1 자료라 투과 함수는 미결 — 기본값 꺼짐 유지.
   CasaXPS 주석(CASA region/comp/Calib) 읽기 → INNO 모형; Shirley 배경 ≤2.6e-4, GL(30) 성분 ≤3.8e-4, envelope RMS 0.4 % 안. 저장된 Casa 모형은 수렴 안 된 상태(INNO 재피팅이 6/6 더 낮은 RMS)라 맞춘 값 비교는 불가. Cookbook 2026: SGL·GLT 꼬리·U 4 Tougaard 정의 확인.

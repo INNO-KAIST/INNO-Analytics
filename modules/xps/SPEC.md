@@ -75,6 +75,11 @@ R. O. Ansell et al., *J. Electroanal. Chem.* 98, 79 (1979)). 매개변수 F, m(=
 상수 꼬리(TM·CT > 0)는 ℝ 넓이가 무한이므로 **넓이는 피팅 창 안 적분**(§1.5 DS 와 같은 규칙): `f = h / ∫_{Emin}^{Emax} h`, 적분은 [lo,0]·[0,hi] 각각 Simpson(간격 ≤ min(F/40, ch/4)).
 검증: quad 대조 ≤ 2e-8; 합성(참 ET 0.06·TM 0.2·CT 0.08, 상수 배경 자유, 30 회) ET·넓이·F 95 % 구간 적중 30/30 · 30/30 · 30/30. 주의: 창 끝 직선 배경은 상수 꼬리를 배경으로 먹는다.
 
+### 1.11 CasaXPS Cookbook 2026 모양 (v1.9) → **SPEC_shapes2.md**
+`TLA`(α, μ, wG), `GLN`·`SGLN` (GL(m,n)·SGL(m,n) + 꼬리 T(k)·PHI(j,k)), `TP`(α, β, wL — 배경 성분), DS(α,n[,l]) (DS + `casaN`·Shirley 자름 `dsl`),
+수식어 `mod` = ST(μ,γ)·SB(0) (GLS·GLP·LA·V·TLA·GLN·SGLN 에). 정의·정규화·창 넓이 규칙(DS·SB)·CasaXPS n 규칙(가정)·검증은 그 문서.
+v1.9 부터 DS(wG > 0) 값도 그 문서 §3 의 정밀 격자(값 ≤ 2e-7)로 계산하고, DS 의 실제 FWHM 은 정밀 교차점으로 구한다(이전 §1.8 격자 오차 ~1e-4, FWHM 선형 보간 ~3e-5).
+
 ### 1.9 Doublet (스핀–궤도 쌍)
 주 성분(낮은 BE, 큰 j) + 짝 성분: 중심 `E0 + Δ`, 넓이 비 `r = A_짝/A_주`, 폭 배율 `q`, 모양 매개변수(m, α, β, T, τ)는 같다.
 q 는 **수명(Lorentzian) 폭에만** 곱한다: V·DS 는 wL, GLS·GLP·GLT·LA 는 F. wG(장비 Gaussian 폭)는 두 짝에 공통 — Coster–Kronig 폭 넓어짐은 core-hole 수명 효과다(v1.1, v1 은 wG 에도 곱했다).
