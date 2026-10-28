@@ -5,6 +5,12 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-28 XPS v1.8 — CasaXPS·Avantage 장점 이식 · 깊이/각도/이미징 화면 · CasaXPS 2.3.27 실측 대조**(modules/xps/SPEC.md §1.8b–§16, SPEC_multi.md, SPEC_proc.md, SPEC_casa_v2.md):
+  피팅: 참조 스펙트럼 선형결합(LCF)·측정 스펙트럼 선모양·spline 배경·Simplex·여러 스펙트럼 일괄 적용·at% Monte Carlo, Casa 영역 규약·Avantage Shirley·꼬리(AGT) 호환 모드.
+  화면 전환 Spectra · Series · ARXPS · Imaging + Process 탭 — 깊이/연속 측정 조성·PCA(IND·F·MLPCA 잡음)·target testing·MCR-ALS/참조 NNLS, ARXPS 덮개층·다층·Hill·RDP·MaxEnt(σ 하한 1 % 기본), 스펙트럼 영상 맵·ROI·NNLS 화학상태 맵, Jansson/RL/Landweber 디컨볼루션(표시 전용)·Fermi edge·재표본·평활. 긴 계산은 Worker(진행·중지).
+  CasaXPS 실측(데모, 화면 판독): Linear/Shirley 끝점 규약, 맞춤 = 비가중 최소제곱(채널 i0+1…i1−1), RMS = √Σr², GL(p)=GLP, SGL(p)=높이 혼합 GLS(4 맞춤 면적 ≤1e-3), 대칭 LA fwhm = 참 FWHM, LA(1,1,n) Gaussian FWHM = n·F/144.87, GL(30)T(2) 면적 일치.
+  미확정: 비대칭 LA·GLT 의 Casa 폭 숫자·비대칭 지수, Casa Tougaard(영역 표가 입력 칸으로 다시 계산되지 않아 미검증), Avantage 투과 함수 기본값(사용자 결정 대기).
+  시험: xps 153 · casa 111 · multi 50 · arxps 32 · image 23 · proc 76 · Chromium ui_xps_multi 43 · ui_xps · fixes 25 · casa 20. 검증 후 CasaXPS 폴더·검증 파일 삭제.
 - **10-19 전수조사 v1.15 — 다섯 영역 점검·수정 · 설명 문장은 말풍선으로**:
   Image Analysis: Find Maxima 잡음 극대 보호(> 5000 점이면 멈춤·안내) · Find (auto)(입자 중심, 합성 133/134·35/35·305/305) · Orientation 이 이미지에 박힌 축척 막대·글자 제외 · 문턱 0–255 Analyze 멈춤 · pm 저장 결과 → nm · Auto 가 손 설정(S.ui.pa)을 바꾸지 않음(다음 이미지 0 개 버그) · 마스크 Analyze 세기는 원본에서 · 굵은 마스크 Skeleton 은 먼저 Skeletonize · Subtract Background·Local 문턱·NaN Background 경고 · Summary 단위 · FFT/Bandpass 약 3–6 배, 순위 필터 약 2–4 배 빠름(이전과 같은 출력) · OCR 확실할 때만 자동 눈금.
   XPS: 대전 보정 뒤 템플릿 저장·불러오기 BE 범위 밀림 · C 1s 기준 성분을 클릭한 성분으로 잡던 것 · 계산 중 편집 덮어쓰기 · Auger α′ 엉터리 · 정량 기본 강한 선만 + 창 안 다른 원소 경고 · KE 텍스트 다시 읽기 · 음수 at% → n.d. · 상수 가중치 · 휴대폰 at% 열.

@@ -1,0 +1,108 @@
+{
+ "source": "CasaXPS 2.3.27PR7-6 (demo), read from the screen by the project lead on 2026-10-28 (6 significant digits). Measured outputs only \u2014 no CasaXPS code or data. Files: test/data/casaval/*.vms (C1s = BCT600 C1s VAMAS; Syn*/Shape_* = synthetic, generated with test/ref/xps_ref.py). Region = channels 19\u2026361 (BE 280.03\u2013297.13).",
+ "region": {
+  "i0": 19,
+  "i1": 361
+ },
+ "regions": [
+  [
+   "C1s",
+   "linear",
+   0,
+   39912.6,
+   14431.5,
+   -413.2
+  ],
+  [
+   "C1s",
+   "linear",
+   1,
+   39564.8,
+   14451.9,
+   -482.0
+  ],
+  [
+   "C1s",
+   "linear",
+   3,
+   37049.1,
+   14261.5,
+   -584.3
+  ],
+  [
+   "C1s",
+   "shirley",
+   1,
+   40352.1,
+   14462.0,
+   -466.0
+  ],
+  [
+   "Syn1",
+   "linear",
+   1,
+   15039.8,
+   9994.4,
+   0.0
+  ],
+  [
+   "Syn1",
+   "shirley",
+   1,
+   12545.3,
+   9868.0,
+   -380.6
+  ],
+  [
+   "Syn2",
+   "shirley",
+   1,
+   15089.8,
+   10027.7,
+   0.0
+  ],
+  [
+   "Syn2",
+   "linear",
+   1,
+   22199.9,
+   10445.0,
+   -309.5
+  ],
+  [
+   "C1s",
+   "tougaard_U2_2866_1643_1_0",
+   1,
+   37823.6,
+   14398.8,
+   -675.5
+  ]
+ ],
+ "fits": [
+  {
+   "file": "Shape_GLP30",
+   "casa": "GL(30)",
+   "truth": "GLP F=1.2 m=0.3 A=15000 E0=285",
+   "area": 14999.8,
+   "fwhm": 1.15343,
+   "pos": 285.0
+  },
+  {
+   "file": "Shape_LA153_243",
+   "casa": "LA(1.53,2.43,0)",
+   "truth": "LA F=1.0 alpha(high BE)=1.53 beta=2.43 wG=0 A=15000",
+   "area": 14997.0,
+   "width": 0.580056,
+   "pos": 285.0
+  },
+  {
+   "file": "Shape_GLS30",
+   "casa": "SGL(30)",
+   "truth": "GLS F=1.2 m=0.3 A=15000",
+   "area": 15279.4,
+   "fwhm": 1.17737,
+   "rms": 882.717,
+   "note": "large RMS: CasaXPS SGL mixing differs from GLS"
+  }
+ ]
+}

@@ -48,7 +48,7 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps svg.xps-svg .mk{stroke:var(--surface);stroke-width:2;cursor:move}
 .xps svg.xps-svg .mk.sel{stroke:var(--env);stroke-width:2.2}
 .xps svg.xps-svg .zr{fill:var(--accent);opacity:.12;stroke:var(--accent);stroke-width:1}
-.xps svg.xps-svg .xh{stroke:var(--ink2);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
+.xps svg.xps-svg .xh{stroke:var(--ink2);stroke-width:1;stroke-dasharray:2 3;opacity:.6;pointer-events:none}
 .xps svg.xps-svg .rz{stroke:var(--line2);stroke-width:1;stroke-dasharray:3 3}
 .xps svg.xps-svg .ref{stroke:var(--info);stroke-width:1;opacity:.7}
 .xps svg.xps-svg text.ref{fill:var(--info);font-size:calc(10.5px*var(--xfs,1));opacity:1;stroke:none}
@@ -178,3 +178,51 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps table.sens td{vertical-align:middle}
 /* 정량 표: at% 를 원소 바로 옆(3 번째 열)에 — 휴대폰 폭에서 가로 스크롤 없이 보이게 */
 .xps table.xq-tbl td.xq-at{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+/* spline 매듭 · 기준 스펙트럼 · 일괄 결과 (SPEC §2 spline · §12 · §15) */
+.xps svg.xps-svg .knot{fill:var(--surface);stroke:var(--accent);stroke-width:1.8;cursor:move}
+.xps svg.xps-svg .knot.man{fill:var(--accent)}
+.xps svg.xps-svg .knot0{fill:none;stroke:var(--accent);stroke-width:1.4;pointer-events:none}
+.xps .xps-batl{max-height:160px;overflow:auto}
+.xps table.xps-bat td,.xps table.xps-bat th{white-space:nowrap}
+.xps .xq-mc{opacity:.85}
+.xps .xps-casa{margin-top:3px;color:var(--ink2);font-variant-numeric:tabular-nums}
+/* v1.8 작업 공간: Series · ARXPS · Imaging (SPEC_multi) · Process 탭 (SPEC_proc) */
+.xps .xps-ws-sw button{padding:5px 12px;font-size:12.5px;white-space:nowrap}
+.xps .xps-ws{display:grid;grid-template-columns:380px minmax(0,1fr);gap:12px;align-items:start;margin-top:12px}
+@media (max-width:1100px){.xps .xps-ws{grid-template-columns:330px minmax(0,1fr)}}
+@media (max-width:860px){.xps .xps-ws{grid-template-columns:minmax(0,1fr)}}
+.xps .xps-ws>.card{min-width:0;padding:10px 12px}
+.xps .xps-ws>.xws-empty{grid-column:1 / -1;padding:28px 18px;text-align:center}
+.xps .xws-side .xps-row>*{min-width:0}
+.xps .xws-side select.xps-sel{max-width:100%}
+.xps .xws-k{width:84px;flex:none;color:var(--muted);font-size:11.5px;font-weight:600}
+@media (max-width:600px){.xps .xws-k{width:100%}}
+.xps .xws-refs{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow:auto;margin:4px 0;padding:4px 6px;border:1px solid var(--line);border-radius:8px}
+.xps .xws-refs label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.xps .xws-main{display:flex;flex-direction:column;gap:6px}
+.xps .xws-fig{border:1px solid var(--line);border-radius:9px;padding:6px 8px 8px;background:var(--surface);min-width:0}
+.xps .xws-fh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12.5px;margin-bottom:4px}
+.xps .xws-fh .t{font-weight:700;color:var(--ink2)}
+.xps .xws-fh .sp{flex:1}
+.xps .xws-plot{min-width:0}
+.xps svg.xc-svg{display:block;width:100%;height:auto;font-family:"DM Sans","Noto Sans KR",system-ui,sans-serif}
+.xps svg.xc-svg .ax{stroke:var(--line2);stroke-width:1}
+.xps svg.xc-svg .gd{stroke:var(--grid);stroke-width:1}
+.xps svg.xc-svg text{fill:var(--muted);font-size:calc(11px*var(--xfs,1))}
+.xps svg.xc-svg text.al{fill:var(--ink2);font-size:calc(12px*var(--xfs,1))}
+.xps table.xws-reg td{vertical-align:middle}
+.xps td.nw,.xps .nw{white-space:nowrap}
+.xps .xps-sm{font-size:11.5px}
+.xps .xps-empty.sm{padding:18px 10px;font-size:12px}
+.xps .xws-pg:empty{display:none}
+/* 영상 지도 */
+.xps .xim-box{max-width:620px}
+.xps .xim-wrap{position:relative;width:100%;max-height:70vh;background:var(--chip);border-radius:4px;overflow:hidden}
+.xps canvas.xim{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair;touch-action:none}
+.xps .xim-roi{position:absolute;border:2px solid #fff;outline:1.5px solid #000;pointer-events:none;box-sizing:border-box}
+.xps .xim-cb{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.xps .xim-cb i{flex:1;height:10px;border-radius:3px;min-width:40px}
+.xps .xim-tip{min-height:15px;margin-top:2px}
+/* 진행 막대: 비율을 모를 때 흐르는 막대 */
+.xps .xps-prog .bar.ind i{width:30%!important;animation:xpsInd 1.2s linear infinite}
+@keyframes xpsInd{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}

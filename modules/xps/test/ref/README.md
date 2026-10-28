@@ -15,6 +15,7 @@ one of the two implementations is wrong.
 | `fixtures/fits.json` | 7 synthetic fits with known truth + 3 real fits (C1s, O1s, Ta4f) |
 | `fixtures/quant.json` | TPP-2M values, a TPP-2M literature check, toy at% for 4 T × 3 λ options |
 | `fixtures/validation.json` | results of `validate.py` |
+| `ref_casa_v2.py` → `ref_casa_v2.json` | CasaXPS 2.3.27 V2 readings (`casa_readings_v2.md`) re-simulated with scipy: CasaXPS Linear endpoints, unweighted LSQ on channels i0+1…i1−1, RMS = √Σr², SGL as height mix, LA(1,1,n) with wG = n·F/144.87 (`../../SPEC_casa_v2.md`; checked by `test_xps_casa.js` §5) |
 
 All arrays are stored at full double precision. Energies are binding energies (BE) in ascending order, as the
 spec requires internally. Real data are taken from `../data/bct600/*.txt` (sorted ascending, treated as CPS with

@@ -255,10 +255,10 @@ function vamasParse(text,fileName){
     if(H.mode==="MAP"||H.mode==="MAPDP"){ B.x=nxt(); B.y=nxt(); }
     B.expVals=[]; for(let i=0;i<H.nExp;i++) B.expVals.push(nxt());
     B.src=nxt();
-    if(SPUT_MODES.includes(H.mode)||SPUT_TECH.includes(B.tech)){ nxt(); nxt(); nxt(); }
+    if(SPUT_MODES.includes(H.mode)||SPUT_TECH.includes(B.tech)){ B.sputIon=[nxt(),nxt(),nxt()]; }
     B.hv=nxf(); B.power=nxt(); B.bwx=nxt(); B.bwy=nxt();
-    if(["MAP","MAPDP","MAPSV","MAPSVDP","SEM"].includes(H.mode)){ nxt(); nxt(); }
-    if(["MAP","MAPSVDP","SEM"].includes(H.mode)){ for(let i=0;i<6;i++) nxt(); }
+    if(["MAP","MAPDP","MAPSV","MAPSVDP","SEM"].includes(H.mode)){ B.fovX=nxf(); B.fovY=nxf(); }
+    if(["MAPSV","MAPSVDP","SEM"].includes(H.mode)){ B.linescan=[]; for(let i=0;i<6;i++) B.linescan.push(nxf()); }   // ISO 14976: first/last linescan start·finish x,y (MAPSV·MAPSVDP·SEM; v1.7 fix — was MAP)
     B.polar=nxf(); B.azim=nxf(); B.anMode=nxt(); B.pe=nxf();
     if(B.tech==="AES diff") nxt();
     B.mag=nxf(); B.wf=nxf(); B.bias=nxf(); B.awx=nxf(); B.awy=nxf(); B.toPolar=nxf(); B.toAz=nxf();
@@ -268,7 +268,7 @@ function vamasParse(text,fileName){
     else { nvar=nxi()-1; B.absLabel=nxt(); B.absUnit=nxt(); }
     B.vars=[]; for(let i=0;i<nvar;i++) B.vars.push({label:nxt(),unit:nxt()});
     B.sigMode=nxt(); B.dwell=nxf(); B.scans=nxi(); B.tcorr=nxf();
-    if(SPUT_MODES.includes(H.mode)&&["AES","AES diff","AES dir","EDX","ELS","UPS","XPS","XRF"].includes(B.tech)){ for(let i=0;i<7;i++) nxt(); }
+    if(SPUT_MODES.includes(H.mode)&&["AES","AES diff","AES dir","EDX","ELS","UPS","XPS","XRF"].includes(B.tech)){ B.sput={energy:nxf(),current:nxf(),widthX:nxf(),widthY:nxf(),polar:nxf(),azimuth:nxf(),mode:nxt()}; }
     B.tilt=nxf(); B.tiltAz=nxf(); B.rot=nxf();
     const nadd=nxi(); B.add=[]; for(let i=0;i<nadd;i++) B.add.push({label:nxt(),unit:nxt(),value:nxt()});
     for(let i=0;i<nFutB;i++) nxt();
@@ -300,13 +300,63 @@ function vamasParse(text,fileName){
     const meta={instrument:[H.inst,H.model].filter(s=>s&&s!=="Not Specified").join(" "),sourceLabel:B.src,passEnergy:isNullV(B.pe)?null:B.pe,anMode:B.anMode,
       workFunction:isNullV(B.wf)?null:B.wf,dwell:isNullV(B.dwell)?null:B.dwell,scans:B.scans,sigMode:B.sigMode,ordUnit:B.vars[yi]&&B.vars[yi].unit,
       date:B.date.slice(0,3).some(v=>v>0)?B.date:null,blockId:B.id,sampleId:B.sample,casa:H.comment.some(s=>/casa/i.test(s)),technique:B.tech,
-      tf:null};
+      tf:null,vamas:vamasBlockMeta(H,B,b)};
+    meta.vamas.tag=seriesTag(H,B);   // 표시용 "Etch Time 30 s" (이름은 바꾸지 않음 — CasaXPS 는 모든 파일에 'Data Set' 변수를 쓴다)
     if(meta.casa&&c===1) warn.push("CasaXPS 가 만든 VAMAS(dwell·scan = 1) — 세기가 이미 CPS 일 수 있어 counts 환산은 하지 않음");
     out.push(mkSpec({name:region,region,file:fileName,format:"VAMAS",hv,hvSrc:hvOK?"VAMAS 블록":"기본값",be,y,yRaw:c&&c!==1?yr:null,c:c&&!(meta.casa&&c===1)?c:null,
       cSrc:c&&!(meta.casa&&c===1)?`VAMAS: collection time ${B.dwell} s × ${B.scans} scans`:null,tfArr:ti>=0?cols[ti]:null,
       sample:(B.id.match(/^\[(.+?)\]/)||[])[1]||(B.sample&&B.sample!==B.id?B.sample:""),meta,warn}));
   }
   return out;
+}
+
+/* VAMAS 실험 방식·블록 변수 (v1.7 — 깊이 profile·각도·map 묶음을 만들 수 있게).
+   expVals: 실험 변수(예: Etch Time s, Etch Level, Angle deg)의 값(문자열 그대로, expNum 은 숫자), x·y: MAP/MAPDP 위치,
+   takeOffPolar/Az: 분석기 축 take-off 각(ARXPS), tilt: 시료 기울기. 숫자가 VAMAS '값 없음'(1e37)이면 null. */
+function vamasBlockMeta(H,B,index){
+  const num=v=>{ const x=typeof v==="number"?v:parseFloat(v); return isFinite(x)&&!isNullV(x)?x:null; };
+  return {mode:H.mode,scan:H.scan,nReg:H.nReg!=null?H.nReg:null,nPos:H.nPos!=null?H.nPos:null,nX:H.nX!=null?H.nX:null,nY:H.nY!=null?H.nY:null,
+    expVars:H.expVars.slice(),expVals:B.expVals.slice(),expNum:B.expVals.map(num),blockIndex:index,
+    x:B.x!=null?num(B.x):null,y:B.y!=null?num(B.y):null,fov:B.fovX!=null?[num(B.fovX),num(B.fovY)]:null,linescan:B.linescan||null,
+    takeOffPolar:num(B.toPolar),takeOffAz:num(B.toAz),srcPolar:num(B.polar),srcAz:num(B.azim),tilt:num(B.tilt),tiltAz:num(B.tiltAz),rotation:num(B.rot),
+    sputter:B.sput||null,sputIon:B.sputIon||null,add:B.add.slice()};
+}
+function seriesTag(H,B){
+  const a=[]; H.expVars.forEach((v,i)=>a.push(v.label+" "+B.expVals[i]+(v.unit&&v.unit!=="n"?" "+v.unit:"")));
+  if(H.mode==="MAP"||H.mode==="MAPDP") a.push("x "+B.x+" y "+B.y);
+  return a.join(", ");
+}
+/* VAMAS 머리 요약: readFile 결과의 vamas 칸 */
+function vamasHeader(text){
+  const L=text.split(/\r?\n/); let p=0; const nx=()=>(L[p++]||"").trim();
+  const H={}; nx(); H.inst=nx(); H.model=nx(); H.operator=nx(); H.exp=nx(); const nc=parseInt(nx(),10); for(let i=0;i<nc;i++) nx();
+  H.mode=nx(); H.scan=nx(); if(["MAP","MAPDP","NORM","SDP"].includes(H.mode)) H.nReg=parseInt(nx(),10);
+  if(H.mode==="MAP"||H.mode==="MAPDP"){ H.nPos=parseInt(nx(),10); H.nX=parseInt(nx(),10); H.nY=parseInt(nx(),10); }
+  const ne=parseInt(nx(),10); H.expVars=[]; for(let i=0;i<ne;i++) H.expVars.push({label:nx(),unit:nx()});
+  return H;
+}
+
+/* ============================================================
+   6b) 여러 열 텍스트: 에너지 1열 + 스펙트럼 여러 열 (깊이 profile·각도 series 내보내기)
+   머리줄(숫자 줄 앞의 마지막 글 줄)을 열 이름으로 쓰고, 이름 안의 첫 숫자를 좌표(식각 시간·각도 등)로 읽는다.
+   단일 스펙트럼 읽기(textParse)는 바꾸지 않는다 — 이 함수는 series 화면이 직접 부른다.
+   ============================================================ */
+function textMultiParse(text,fileName,opt){
+  opt=opt||{}; const L=text.split(/\r?\n/); const cd=commaDecimal(L); const rows=[]; let hdr=[], lastHdr="";
+  const split=s=>cd?s.split(/[\t;]+|\s{2,}/).map(t=>t.trim()).filter(t=>t!=="").map(t=>t.replace(",",".")):s.split(/[\t,;]+|\s+/).filter(t=>t!=="");
+  for(const raw of L){ const s=raw.trim(); if(!s) continue; const parts=split(s); const nums=parts.map(Number);
+    if(parts.length>=2&&nums.every(isFinite)) rows.push(nums); else if(!rows.length){ hdr.push(s); lastHdr=raw; } }
+  if(rows.length<5) throw new Error("숫자 행이 5개 미만입니다");
+  const nc=Math.min(...rows.map(r=>r.length)); if(nc<2) throw new Error("열이 2개 미만입니다");
+  let names=lastHdr?lastHdr.split(/\t|;|,(?!\d)/).map(t=>t.trim()).filter(t=>t!==""):[]; if(names.length!==nc) names=lastHdr?lastHdr.trim().split(/\s{2,}|\t/).map(t=>t.trim()):[];
+  if(names.length!==nc) names=Array.from({length:nc},(_,i)=>i?"col"+i:"E");
+  const h=hdr.join(" ").toLowerCase(); const isKE=opt.axis==="KE"?true:opt.axis==="BE"?false:/kinetic|\bke\b/.test(h)&&!/binding|\bbe\b/.test(h);
+  const hv=opt.hv||1486.6; let E=rows.map(r=>isKE?hv-r[0]:r[0]); let Y=[]; for(let c=1;c<nc;c++) Y.push(rows.map(r=>r[c]));
+  if(E.length>1&&E[0]>E[E.length-1]){ E=E.reverse(); Y=Y.map(y=>y.reverse()); }
+  for(let i=1;i<E.length;i++) if(!(E[i]>E[i-1])) throw new Error("에너지 축이 단조롭지 않습니다");
+  const labels=names.slice(1); const coord=labels.map(s=>{ const m=/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/.exec(s); return m?parseFloat(m[0]):null; });
+  return {E:Float64Array.from(E),Y:Y.map(y=>Float64Array.from(y)),labels,coord,axis:isKE?"KE":"BE",hv,file:fileName,header:hdr.slice(0,5),commaDecimal:cd,
+    warn:coord.some(v=>v==null)?["열 이름에서 좌표(숫자)를 읽지 못한 열이 있습니다 — 순서 번호를 쓰세요"]:[]};
 }
 
 /* ============================================================
@@ -580,11 +630,11 @@ async function readFile0(name,u8,opt){
   }
   if(u8[0]===0x50&&u8[1]===0x4B){ const r=avantageSheets(await xlsxWorkbook(u8),name); if(!r.spectra.length) throw new Error("xlsx 에서 에너지·세기 열을 찾지 못했습니다"); return r; }
   const text=utf8(u8);
-  if(/^VAMAS/i.test(head.trim())) return {spectra:vamasParse(text,name),tables:[],warn:[]};
+  if(/^VAMAS/i.test(head.trim())) return {spectra:vamasParse(text,name),tables:[],warn:[],vamas:vamasHeader(text)};
   if(/\.avg$/i.test(low)||/\$SPACEAXES|DS_EXT_SUPROPID/.test(text.slice(0,20000))) return {spectra:avgParse(text,name),tables:[],warn:[]};
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,readFile,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);

@@ -1,0 +1,67 @@
+# CasaXPS 2.3.27PR7-6 (demo) readings — 2026-10-28, read from screen (6 sig. digits)
+Files (synthetic generators + real): /mnt/user-data/outputs/casaval/*.vms (C1s.vms = BCT600 C1s VAMAS, KE axis, 381 pts, step 0.05, BE 279.08–298.08)
+
+## Region conventions inferred (default region Start 297.13 / End 280.03 BE = channels i0..i1 where E[i0]=280.03, E[i1]=297.13)
+- Endpoint values: mean of y over channels (i0+1)±w and (i1−1)±w, w = "Av. Width" (integer channels); line anchored at E[i0+1], E[i1−1].
+  Reproduces Casa Max/Min Height exactly for w = 0, 1, 3. Areas within 1e-4 (rule for area integration not pinned: trapz over [i0+1,i1−1] gives 39911.2/39567.5/37047.6 vs Casa 39912.6/39564.8/37049.1).
+- Shirley: converged Proctor–Sherwood with EXCLUSIVE rectangle cumulative sum Q_i = Σ_{j<i}(y_j − B_j) (from low-BE side; equivalently inclusive from high-BE side).
+  Exact on noise-free Syn2 (Casa 15089.8 / max 10027.7 ; INNO trapz-converged 15039.8 / 9994.5). Real C1s w=1: Casa 40352.1/14462.0/−466.0 vs exclusive-sum 40401.0/14463.2/−464.4 (0.12 %).
+
+## Readings
+| file | BG | Av.W | Area | Max H | Min H | fwhm | pos |
+|---|---|---|---|---|---|---|---|
+| C1s | Shirley | 1 | 40352.1 | 14462.0 | −466.0 | 1.4938 | 284.5106 |
+| C1s | Linear | 1 | 39564.8 | 14451.9 | −482.0 | 1.49326 | 284.5094 |
+| C1s | Linear | 0 | 39912.6 | 14431.5 | −413.2 | 1.49214 | 284.5095 |
+| C1s | Linear | 3 | 37049.1 | 14261.5 | −584.3 | 1.48471 | 284.5095 |
+| C1s | U 2 Tougaard (2866,1643,1,0) | 1 | 37823.6 | 14398.8 | −675.5 | 1.49063 | 284.5092 |
+| Syn1 (linear ramp+G) | Linear | 1 | 15039.8 | 9994.4 | 0.0 | 1.41375 | 284.9999 |
+| Syn1 | Shirley | 1 | 12545.3 | 9868.0 | −380.6 | 1.39992 | 284.9839 |
+| Syn2 (Shirley-consistent) | Shirley | 1 | 15089.8 | 10027.7 | 0 | 1.41375 | 284.9999 |
+| Syn2 | Linear | 1 | 22199.9 | 10445.0 | −309.5 | 1.46497 | 285.0442 |
+
+## Fits (Linear BG, Marquardt, fit twice)
+| synthetic truth (INNO SPEC def) | Casa line shape | Casa area | Casa fwhm | pos | Casa RMS (DoF) |
+|---|---|---|---|---|---|
+| GLP F=1.2 m=0.3, A=15000, E0=285 (true FWHM 1.15362) | GL(30) | 14999.8 | 1.15343 | 285.0000 | 8.31557 (156) |
+| GLS F=1.2 m=0.3, A=15000 | SGL(30) | 15279.4 | 1.17737 | 285.0001 | 882.717 (338) → shape differs |
+| LA F=1.0 α(high BE)=1.53 β=2.43 wG=0, A=15000 | LA(1.53,2.43,0) | 14997.0 | 0.580056 | 285.0000 | 15.6509 (338); asym index 0.2275 |
+Real C1s, 2 comps default (LA(50)? first run), Linear BG: FWHM 1.75 / 2.40, raw areas 26551.42 / 12837.62, %conc 67.41/32.59.
+
+## V2 round (2026-10-28 evening; default region 297.13/280.03, Linear, Av.W 1, Marquardt ×2)
+| file | shape | Area | fwhm | pos | RMS (DoF) |
+|---|---|---|---|---|---|
+| V2_LA_1_1_F1 | LA(1,1,0) | 14573.8 | 0.974061 | 285.0004 | 864.459 (338) |
+| V2_LA_2_2_F1 | LA(2,2,0) | 14995.1 | 0.643126 | 285.0000 | 18.793 (338) |
+(Region-only check for LA_2_2: Linear region area 14979.0, fwhm 0.645808, pos 284.9995, min −0.2)
+| V2_LA_153_243_F2 | LA(1.53,2.43,0) | 14979.3 | 1.15857 | 284.9999 | 60.9276 (338); asym 0.2275 |
+(Region: Linear area 14902.4, fwhm 1.33268, pos 285.0130, max 9011.6, min −0.0)
+| V2_SGLh30_F1.2 | SGL(30) | 14888.6 | 1.19223 | 285.0002 | 442.323 (338) |
+(Region: area 14235.1, fwhm 1.1982, pos 284.9998, max 10233.2, min −1.1)
+| V2_SGLprinted30_F1.2 | SGL(30) | 13038.1 | 1.4036 | 285.0008 | 1404.47 (338) |
+(Region: area 13112.6, fwhm 1.36334, pos 285.0000, max 7678.9, min −2.5)
+| V2_GL30T2_F1.2 | GL(30)T(2) | 14999.8 | 1.18051 | 285.0000 | 6.80617 (337); asym 0.2138  → MATCH |
+(Region: area 15000.0, fwhm 1.34179, pos 285.0448, max 10036.7, min −0.0)
+| V2_Voigt_wG0.6_wL0.4 | LA(1,1,m) scan (m fixed; Casa has no free m) | | | | |
+|  m=100 | | 15820.8 | 0.787418 | 285.0000 | 2409.41 |
+|  m=200 | | 15001.9 | 0.832929 | 285.0000 | 554.538 |
+|  m=250 | | 14722.9 | 0.845688 | 285.0001 | 376.266 |
+|  m=300 | | 14505.1 | 0.855121 | 285.0001 | 725.425 |
+|  m=400 | | 14190.6 | 0.867488 | 285.0001 | 1349.96 |
+|  m=600 | | 13824.0 | 0.88082 | 285.0001 | 2092.17 |
+|  m=1000 | | 13490.2 | 0.892121 | 285.0001 | 2766.1 |
+(Region: area 14333.2, fwhm 0.841937, pos 284.9998, max 13768.5, min −1.0). Best RMS ~376 → Casa LA(1,1,m) does not reproduce a true Voigt (wG0.6,wL0.4) exactly with the fwhm parameter free.
+| Shape_GLS30 (truth GLS F1.2 m0.3) | SGL(19.5) | 14771.0 | 1.20112 | 285.0001 | 249.968 (338) |
+| C1s | BG "U 3 Tougaard" | Casa auto-fills Cross Section = "0, 551, 436, 3" (B=0) → region values identical to Linear (39564.8 / 14451.9 / −482.0 / fwhm 1.49326); i.e. U3 B is NOT auto-scaled, Tougaard params live in the Cross Section cell (B,C,D,T0) |
+Not available in demo UI: Shirley iteration count; spline BG needs interactive knot placement (skipped).
+
+## V2 round 2 (same settings)
+| file | shape | Area | fwhm | pos | RMS (DoF) | asym |
+|---|---|---|---|---|---|---|
+| V2_LA_153_243_F2 | LA(2.43,1.53,0) (tail on wrong side) | 14809.5 | 1.15664 | 285.1730 | 5828.77 (338) | −0.2944 |
+| V2_GL30T2_F1.2 | GL(30)T(1) | 15879.2 | 0.925413 | 284.9024 | 5537.1 (337) | 0.4151 |
+| V2_GL30T2_F1.2 | GL(0)T(2) | 14909.8 | 1.21258 | 285.0053 | 536.367 (337) | 0.1973 |
+| V2_GL30T2_F1.2 | GL(30) | 14731.9 | 1.3348 | 285.0961 | 2161.72 (337) | 0.0000 |
+Note: DoF 337 appears for every shape on V2_GL30T2 (also plain GL(30), 3 params) → the 337 is a property of that file/region (one fewer channel), not of the T(k) tail.
+
+Tougaard caveat: editing BG Type to "U 2/U 3 Tougaard" and/or the Cross Section cell (tried "1000,551,436,0" for U3, "2866,1643,1,0" for U2) never changed the region Area/Max/Min from the Linear values (39564.8/14451.9/−482.0) in this session — the region table apparently does not recompute the Tougaard background from typed cells. Therefore "U3 default B=0 ≡ Linear" is NOT established; the round-1 U2 reading (37823.6) was obtained by a route not reproduced here. Treat all Casa Tougaard comparisons as unverified.

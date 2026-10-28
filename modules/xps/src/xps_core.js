@@ -51,12 +51,14 @@ function lgamma(x){
    1) Lineshape (넓이 1, SPEC §1)
    ============================================================ */
 const SHAPES={
-  GLS:{name:"GL sum (pseudo-Voigt · Avantage Sum)",p:["F","m"]},
+  GLS:{name:"GL sum (pseudo-Voigt, area-weighted)",p:["F","m"]},
   GLP:{name:"GL product (Avantage Product · Casa GL)",p:["F","m"]},
   V:{name:"Voigt (G⊗L convolution)",p:["wG","wL"]},
   DS:{name:"Doniach–Šunjić ⊗ G (asymmetric, metals)",p:["alpha","wL","wG"]},
   LA:{name:"LA(α,β) ⊗ G (CasaXPS LA style)",p:["F","alpha","beta","wG"]},
   GLT:{name:"GL sum + exponential tail",p:["F","m","T","tau"]},
+  MEAS:{name:"Measured line shape (reference spectrum)",p:["wG"]},
+  AGT:{name:"GL product + Avantage tail (ET, TM, CT)",p:["F","m","ET","TM","CT"]},   // SPEC §1.10 — Avantage tail function   // SPEC §12 — 모양 = 측정 template(c.tpl), wG = 추가 Gaussian 넓힘
 };
 const PDEF={   // 기본 한계·이름·단위
   be:{lab:"BE",u:"eV"}, area:{lab:"Area",u:"CPS·eV",lo:0,hi:Infinity},
@@ -64,10 +66,14 @@ const PDEF={   // 기본 한계·이름·단위
   wG:{lab:"G FWHM",u:"eV",lo:0,hi:8}, wL:{lab:"L FWHM",u:"eV",lo:0.005,hi:8},
   alpha:{lab:"α",u:"",lo:0,hi:0.45}, beta:{lab:"β",u:"",lo:0.55,hi:20},
   T:{lab:"Tail frac.",u:"",lo:0,hi:1}, tau:{lab:"Tail len.",u:"eV",lo:0.02,hi:20},
+  ET:{lab:"ET (exp. tail)",u:"/ch",lo:0.001,hi:1}, TM:{lab:"TM (tail mix)",u:"",lo:0,hi:1}, CT:{lab:"CT (const. tail)",u:"",lo:0,hi:1},
   dE:{lab:"Δ(SO)",u:"eV",lo:0.05,hi:40}, r:{lab:"Area ratio",u:"",lo:0.01,hi:5}, q:{lab:"Width fac.",u:"",lo:0.3,hi:3},
   c0:{lab:"Bkg c₀",u:"CPS",lo:-Infinity,hi:Infinity}, k:{lab:"Shirley k",u:"1/eV",lo:0,hi:Infinity}, s:{lab:"Bkg slope",u:"CPS/eV",lo:-Infinity,hi:Infinity},
 };
 const LA_ALPHA_LO=0.55;
+/* CasaXPS LA(α,β,n): Gaussian FWHM = n·CASA_LA_RHO·(Lorentzian F) — CasaXPS 2.3.27 LA(1,1,n) n-scan on V2_Voigt_wG0.6_wL0.4 (n = 100…1000,
+   fwhm 상대 ≤ 1.6e-4 재현; SPEC_casa_v2 §2). 1/144.87 ± 0.3 %. α = β = 1 에서만 측정됨 */
+const CASA_LA_RHO=1/144.87;
 function gauss(x,F){ return (2/F)*Math.sqrt(LN2/PI)*Math.exp(-4*LN2*x*x/(F*F)); }
 function lorentz(x,F){ return (2/(PI*F))/(1+4*x*x/(F*F)); }
 function glpNorm(F,m){ const a=4*LN2*(1-m), b=4*m; if(b<1e-12) return F*Math.sqrt(PI/a); if(a<1e-14) return F*PI/Math.sqrt(b); return F*(PI/Math.sqrt(b))*erfcx(Math.sqrt(a/b)); }
@@ -109,6 +115,8 @@ function econv(v,h,tau){
 /* 상대좌표 x(배열)에서 넓이 1 프로파일. ctx={lo,hi}: 피팅 영역(상대좌표, DS 정규화·격자 범위) */
 function shapeUnit(shape,x,p,ctx){
   const n=x.length, out=new Float64Array(n);
+  if(shape==="MEAS") return tplShape(p.tpl,x,p.wG||0);
+  if(shape==="AGT") return aglShape(x,p,ctx);
   if(shape==="GLS"){ const F=p.F,m=p.m; for(let i=0;i<n;i++) out[i]=glsVal(x[i],F,m); return out; }
   if(shape==="GLP"){ const F=p.F,m=p.m, N=glpNorm(F,m), a=4*LN2*(1-m)/(F*F), b=4*m/(F*F); for(let i=0;i<n;i++){ const t=x[i]*x[i]; out[i]=Math.exp(-a*t)/(1+b*t)/N; } return out; }
   if(shape==="V"){ for(let i=0;i<n;i++) out[i]=voigt(x[i],p.wG,p.wL); return out; }
@@ -178,7 +186,8 @@ function gridIntegral(v,k0,h,a,b){
 /* 실제 FWHM (수치): 넓이 1 프로파일의 반치폭. 단일 봉우리 가정 */
 function trueFWHM(shape,p){
   const w=shape==="V"?(0.5346*p.wL+Math.sqrt(0.2166*p.wL*p.wL+p.wG*p.wG)):shape==="DS"?Math.max(p.wL,0.01)+(p.wG||0):shape==="LA"?p.F+(p.wG||0):p.F;
-  const R=6*w+(shape==="GLT"?6*p.tau:0), N=2401; const x=new Float64Array(N); for(let i=0;i<N;i++) x[i]=-R+2*R*i/(N-1);
+  let R=6*w+(shape==="GLT"?6*p.tau:0), N=2401;
+  if(shape==="MEAS"){ const tc=tplCache(p.tpl); R=Math.max(Math.abs(tc.x[0]),Math.abs(tc.x[tc.x.length-1]))+5*(p.wG||0)*FW2SIG+0.05; N=4001; } const x=new Float64Array(N); for(let i=0;i<N;i++) x[i]=-R+2*R*i/(N-1);
   const v=shapeUnit(shape,x,p,{lo:-R,hi:R});
   let im=0; for(let i=1;i<N;i++) if(v[i]>v[im]) im=i;
   const half=v[im]/2; let a=null,b=null;
@@ -195,7 +204,9 @@ function shapeParams(c,scale){
   const q=scale||1, p={};
   SHAPES[c.shape].p.forEach(k=>p[k]=c[k]);
   if(q!==1){ ["F","wL"].forEach(k=>{ if(p[k]!=null) p[k]*=q; }); }   // 수명 폭만 (SPEC 1.9 v1.1) — wG 는 공통
-  if(c.shape==="LA"){ p.alpha=Math.max(LA_ALPHA_LO,p.alpha); p.beta=Math.max(LA_ALPHA_LO,p.beta); }
+  if(c.shape==="LA"){ p.alpha=Math.max(LA_ALPHA_LO,p.alpha); p.beta=Math.max(LA_ALPHA_LO,p.beta); if(c.casaN!=null) p.wG=Math.max(0,+c.casaN)*CASA_LA_RHO*p.F; }
+  if(c.shape==="MEAS") p.tpl=c.tpl;
+  if(c.shape==="AGT"){ p.ch=c.ch; if(c.tu) p.tu=c.tu; }
   return p;
 }
 /* E: 절대 BE 배열, ctx={emin,emax} → Float64Array */
@@ -256,7 +267,8 @@ function bgShirley(E,y,n,smart){
 function bgTougaard(E,y,n,o){
   const N=E.length, p=endpoints(E,y,n); o=o||{};
   const C=o.C!=null?o.C:1643, D=o.D||0, U3=!!o.u3;
-  const K=T=>T<=0?0:(U3?T/((C-T*T)*(C-T*T)+D*T*T):T/((C+T*T)*(C+T*T)));
+  const T0=o.T0>0?+o.T0:0;   // CasaXPS U(x; B,C,D,T0): 0 for x <= T0 (Fairley et al. 2023 SI Eq. 9) — 기본 0 은 전과 같음
+  const K=T=>T<=T0?0:(U3?T/((C-T*T)*(C-T*T)+D*T*T):T/((C+T*T)*(C+T*T)));
   const I=new Float64Array(N);
   for(let i=1;i<N;i++){ let s=0; for(let j=0;j<i;j++){ const fa=K(E[i]-E[j])*(y[j]-p.ylo), fb=K(E[i]-E[j+1])*(y[j+1]-p.ylo); s+=0.5*(fa+fb)*(E[j+1]-E[j]); } I[i]=s; }
   // I(E_hi): 선형 보간
@@ -264,16 +276,68 @@ function bgTougaard(E,y,n,o){
   let s=Math.abs(Ih)>1e-300?(p.yhi-p.ylo)/Ih:0; const neg=s<0; if(neg) s=0;   // 음의 손실 단면적 금지 (SPEC 2 v1.1)
   const B=Float64Array.from(I,v=>p.ylo+s*v); B.scale=s; B.negClamped=neg; return B;
 }
+/* CasaXPS 호환 영역 규약 (SPEC §2b, CasaXPS 2.3.27 실측으로 정함): 끝점 = 창의 두 번째·끝에서 두 번째 채널(i0+1, i1−1)을 중심으로 ±aw 채널 평균,
+   직선은 그 두 채널 에너지에 고정. Shirley 누적은 배타적 직사각 합 Q_i = Σ_{j<i}(y_j − B_j) (j = i0+1 부터). */
+function endpointsCasa(E,y,aw,ends){
+  const N=E.length, w=Math.max(0,Math.round(aw||0)), a=Math.min(1,N-1), b=Math.max(0,N-2);
+  if(ends&&isFinite(ends.ylo)&&isFinite(ends.yhi)) return {ylo:ends.ylo,yhi:ends.yhi,Elo:E[a],Ehi:E[b],ia:a,ib:b,n:2*w+1};   // 창 밖 채널까지 평균(전체 스펙트럼에서 미리 계산)
+  const av=c=>{ let s=0,k=0; for(let j=Math.max(0,c-w);j<=Math.min(N-1,c+w);j++){ s+=y[j]; k++; } return s/k; };
+  return {ylo:av(a),yhi:av(b),Elo:E[a],Ehi:E[b],ia:a,ib:b,n:2*w+1};
+}
+function bgShirleyCasa(E,y,p){
+  const N=E.length, a=p.ia, b=p.ib, d=p.yhi-p.ylo; let B=new Float64Array(N).fill(p.ylo); for(let i=b;i<N;i++) B[i]=p.yhi;
+  const tol=1e-7*(Math.abs(d)+1e-12); let it=0, conv=false;
+  for(;it<200;it++){ const nb=new Float64Array(N); let Q=0; const Qs=new Float64Array(N);
+    for(let i=a;i<=b;i++){ Qs[i]=Q; Q+=y[i]-B[i]; }
+    const Qt=Qs[b]; let mx=0;
+    for(let i=0;i<N;i++){ const q=i<=a?0:i>=b?Qt:Qs[i]; nb[i]=Math.abs(Qt)>1e-300?p.ylo+d*q/Qt:p.ylo; mx=Math.max(mx,Math.abs(nb[i]-B[i])); }
+    B=nb; if(mx<tol){ conv=true; break; } }
+  B.iter=it+1; B.converged=conv; return B;
+}
+/* Avantage 규약 Shirley (SPEC §2c; Thermo Avantage Data System manual, Shirley Background): 반복 수 상한 it(기본 10, 1 = 단순 한 번),
+   넓이 변화가 cl(상대) 이하이면 멈춤; 높은 BE(낮은 KE) 끝이 낮은 BE 끝보다 낮거나 같으면 Linear 로 바꿈. 끝점·적분은 INNO §2 그대로 */
+function bgShirleyAvantage(E,y,bg){
+  const N=E.length, p=endpoints(E,y,bg.n||5), d=p.yhi-p.ylo, itMax=Math.max(1,Math.round(bg.it!=null?bg.it:10)), cl=bg.cl!=null?+bg.cl:0;
+  if(!(d>0)){ const B=bgLinear(E,y,bg.n||5); B.fallback="linear"; return B; }
+  let B=new Float64Array(N).fill(p.ylo), Aold=null, it=0, conv=false;
+  for(;it<itMax;it++){ const Q=cumtrapz(E,Float64Array.from(y,(v,i)=>v-B[i])), Qt=Q[N-1]; B=Float64Array.from(Q,q=>Math.abs(Qt)>1e-300?p.ylo+d*q/Qt:p.ylo);
+    const A=cumtrapz(E,Float64Array.from(y,(v,i)=>v-B[i]))[N-1]; if(Aold!=null&&Math.abs(A-Aold)<=cl*Math.abs(A)){ conv=true; it++; break; } Aold=A; }
+  B.iter=it; B.converged=conv||it>=itMax; return B;
+}
+/* Avantage 꼬리 함수 성분 (SPEC §1.10; manual, Tail Function — after Sherwood, Briggs & Seah, Practical Surface Analysis, App. 3):
+   GL = exp(−4ln2(1−M)x²/F²)/(1+4M x²/F²) (F = 2β), 높은 BE 쪽(x>0) h = GL + (1−GL)·T, T = TM·CT + (1−TM)·exp(−ET·Dx), Dx = x/ch (채널 수).
+   낮은 BE 쪽 h = GL. 상수 꼬리는 ℝ 넓이가 무한이라 넓이는 DS 처럼 피팅 창 안 적분(Simpson, [lo,0]·[0,hi] 따로, 간격 ≤ min(F/40, ch/4)) */
+function aglRaw(x,p){ const F=p.F,m=p.m,a=4*LN2*(1-m)/(F*F),b=4*m/(F*F),t=x*x,g=Math.exp(-a*t)/(1+b*t); if(x<=0) return g;
+  const ch=p.tu==="fwhm"?F:(p.ch>0?p.ch:0.05), T=(p.TM||0)*(p.CT||0)+(1-(p.TM||0))*Math.exp(-(p.ET!=null?p.ET:0.05)*x/ch); return g+(1-g)*T; }   // tu = "fwhm": CasaXPS GL(m)T(k) — 꼬리 길이 단위 = f (SPEC §1.10)
+function aglShape(x,p,ctx){ const n=x.length, out=new Float64Array(n); let xmin=Infinity,xmax=-Infinity; for(let i=0;i<n;i++){ if(x[i]<xmin) xmin=x[i]; if(x[i]>xmax) xmax=x[i]; }
+  const lo=ctx&&ctx.lo!=null?ctx.lo:xmin, hi=ctx&&ctx.hi!=null?ctx.hi:xmax, h=Math.min(p.F/40,(p.ch>0?p.ch:0.05)/4);
+  const simp=(a,b)=>{ if(!(b>a)) return 0; let k=Math.max(2,Math.ceil((b-a)/h)); if(k%2) k++; const hh=(b-a)/k; let s=aglRaw(a,p)+aglRaw(b,p); for(let i=1;i<k;i++) s+=(i%2?4:2)*aglRaw(a+i*hh,p); return s*hh/3; };
+  const N=lo<0&&hi>0?simp(lo,0)+simp(0,hi):simp(lo,hi);
+  for(let i=0;i<n;i++) out[i]=aglRaw(x[i],p)/(N>0?N:1); return out; }
+/* Avantage Voigt 표기(SPEC §13b): M = fL/(fL+fG) 로 가정(설명서의 비 식은 그림이라 읽지 못함 — 대조 대기), fV = Olivero–Longbothum 0.5346 fL + √(0.2166 fL² + fG²) */
+function avantageVoigt(wG,wL){ const fV=0.5346*wL+Math.sqrt(0.2166*wL*wL+wG*wG); return {fV,M:wL+wG>0?wL/(wL+wG):0,fG:wG}; }
+function voigtFromAvantage(fV,M){ if(M>=1) return {wG:0,wL:fV}; const r=M/(1-M), fG=fV/(0.5346*r+Math.sqrt(0.2166*r*r+1)); return {wG:fG,wL:r*fG}; }
+/* 전체 스펙트럼(be, y)에서 창 [i0, i1] 의 Casa 끝점 평균 — 평균 창(±aw)이 피팅 창 밖 채널을 포함할 수 있어서 */
+function casaEnds(be,y,i0,i1,aw){ const N=be.length, w=Math.max(0,Math.round(aw||0)); const av=c=>{ let s=0,k=0; for(let j=Math.max(0,c-w);j<=Math.min(N-1,c+w);j++){ s+=y[j]; k++; } return s/k; };
+  return {ylo:av(Math.min(i0+1,N-1)),yhi:av(Math.max(i1-1,0))}; }
+/* CasaXPS 영역 표의 Area · Max Height · Min Height 와 같은 정의: 채널 i0+1 … i1−1 에서 (y − B) 의 사다리꼴 적분·최대·최소 */
+function casaRegionStats(E,y,B){ const N=E.length, a=Math.min(1,N-1), b=Math.max(0,N-2); let t=0,mx=-Infinity,mn=Infinity;
+  for(let i=a;i<=b;i++){ const r=y[i]-B[i]; if(i<b) t+=0.5*(r+y[i+1]-B[i+1])*(E[i+1]-E[i]); if(r>mx) mx=r; if(r<mn) mn=r; } return {area:t,maxH:mx,minH:mn}; }
 function bgStatic(E,y,bg){
   const t=bg.type, n=bg.n||5;
+  if(bg.conv==="avantage"&&t==="shirley") return bgShirleyAvantage(E,y,bg);
+  if(bg.conv==="casa"&&(t==="linear"||t==="shirley")){ const p=endpointsCasa(E,y,bg.aw!=null?bg.aw:1,bg._ends);
+    if(t==="shirley") return bgShirleyCasa(E,y,p);
+    const sl=(p.yhi-p.ylo)/((p.Ehi-p.Elo)||1); return Float64Array.from(E,e=>p.ylo+sl*(e-p.Elo)); }
   if(t==="linear") return bgLinear(E,y,n);
   if(t==="shirley") return bgShirley(E,y,n,false);
   if(t==="smart") return bgShirley(E,y,n,true);
-  if(t==="tougaard") return bgTougaard(E,y,n,{C:bg.C,D:bg.D,u3:bg.u3});
+  if(t==="tougaard") return bgTougaard(E,y,n,{C:bg.C,D:bg.D,u3:bg.u3,T0:bg.T0});
+  if(t==="spline") return bgSpline(E,y,bg);
   if(t==="none") return new Float64Array(E.length);
   return null;   // active
 }
-const BG_TYPES={linear:"Linear",shirley:"Shirley",smart:"Smart",tougaard:"Tougaard (U2/U3)",active:"Shirley (in-fit)",none:"None"};
+const BG_TYPES={linear:"Linear",shirley:"Shirley",smart:"Smart",tougaard:"Tougaard (U2/U3)",active:"Shirley (in-fit)",spline:"Spline (knots)",none:"None"};
 
 /* ============================================================
    4) 문제 구성 · 매개변수 벡터 · 제약/연결
@@ -295,6 +359,7 @@ function buildMap(prob){
   const free=[], links=[], fixed=[];
   comps.forEach((c,ci)=>{
     paramNames(c).forEach(k=>{
+      if(k==="wG"&&c.shape==="LA"&&c.casaN!=null){ fixed.push({ci,k}); return; }   // CasaXPS LA(α,β,n): wG = n·CASA_LA_RHO·F (SPEC_casa_v2 §2)
       const cs=((prob.cons||{})[c.id]||{})[k]||{mode:"free"};
       if(cs.mode==="fixed") { fixed.push({ci,k}); return; }
       if(cs.mode==="link"&&cs.ref!=null&&byId[cs.ref]!=null&&byId[cs.ref]!==ci){ links.push({ci,k,ri:byId[cs.ref],rk:cs.rk||k,mul:cs.k!=null?+cs.k:1,add:cs.b!=null?+cs.b:0}); return; }
@@ -414,7 +479,9 @@ function rng(seed){ let a=(seed>>>0)||1; const u=()=>{ a|=0; a=a+0x6D2B79F5|0; l
    절대 척도는 어차피 φ = χ²/(N−p) 로 다시 정해진다 (SPEC §3.1). */
 function constVar(y){ const n=y.length, q=[]; for(let i=1;i<n-1;i++){ const d=y[i]-(y[i-1]+y[i+1])/2; q.push(d*d/1.5); } q.sort((a,b)=>a-b);
   let v=q.length?q[Math.floor(q.length/2)]/0.4549:1; if(!(v>0)){ let m=0; for(const t of y) m=Math.max(m,Math.abs(t)); v=Math.max(1e-12,(1e-3*m)**2); } return Float64Array.from(y,()=>v); }
-function dataVar(prob,ys){ return prob.weight==="const"?constVar(prob.y):varianceFrom(ys,prob.c); }
+/* CasaXPS 피팅 가중 (SPEC_casa_v2 §1, CasaXPS 2.3.27 V2 실측): 가중 없는 최소제곱, 창 [i0, i1] 의 양 끝 채널은 빼고 i0+1 … i1−1 만 (DoF = N − 2 − p) */
+function casaVar(y){ const n=y.length; return Float64Array.from(y,(v,i)=>i===0||i===n-1?1e30:1); }
+function dataVar(prob,ys){ return prob.weight==="const"?constVar(prob.y):prob.weight==="casa"?casaVar(prob.y):varianceFrom(ys,prob.c); }
 function varianceFrom(yhat,c){ const cc=c>0?c:1; let m=0; for(const t of yhat) if(t>m) m=t; const vmin=Math.max(1/cc,1e-6*m); return Float64Array.from(yhat,v=>Math.max(v,vmin)/cc); }
 /* 넓이 초기값: 비선형 매개변수 고정, 가중 NNLS */
 function initAreas(prob,map,v){
@@ -500,8 +567,9 @@ function fitOnce(prob,opt){
   const ys=smoothQ(E,y,smoothHW(E));
   let v=dataVar(prob,ys);
   if(opt.initAreas!==false){ initAreas(prob,map,v); if(prob.bg.type==="active"){ map=buildMap(prob); applyLinks(prob,map); } }   // k 상한 반영
-  let r=lmFit(prob,map,v,opt); const chi2p1=r.chi2;
-  if(opt.irls!==false&&prob.weight!=="const"){ v=varianceFrom(r.mu,prob.c); r=lmFit(prob,map,v,opt); }
+  const fitter=(opt.optimizer||prob.optimizer)==="simplex"?nmFit:lmFit;   // SPEC §3.3 (Simplex: §14)
+  let r=fitter(prob,map,v,opt); const chi2p1=r.chi2;
+  if(opt.irls!==false&&prob.weight!=="const"&&prob.weight!=="casa"){ v=varianceFrom(r.mu,prob.c); r=fitter(prob,map,v,opt); }
   r.v=v; r.map=map; r.chi2p1=chi2p1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
   return r;
 }
@@ -560,7 +628,7 @@ function covariance(prob,res){
   const As=new Float64Array(k*k); for(let a=0;a<k;a++) for(let b=0;b<k;b++) As[a*k+b]=A[a*k+b]/(d[a]*d[b]);
   let inv=invSym(As,k); let singular=false;
   if(!inv){ singular=true; for(let a=0;a<k;a++) As[a*k+a]*=1+1e-8; inv=invSym(As,k); }
-  const nfree=np; const dof=Math.max(1,n-k);
+  const nfree=np; const dof=Math.max(1,n-k-(prob.weight==="casa"?2:0));
   const phi=res.chi2/dof;
   const C=new Float64Array(np*np).fill(NaN);
   if(inv) for(let a=0;a<k;a++) for(let b=0;b<k;b++) C[act[a]*np+act[b]]=inv[a*k+b]/(d[a]*d[b])*phi;
@@ -579,11 +647,13 @@ function fitStats(prob,res){
   let runs=1, np_=0, nn=0; for(let i=0;i<n;i++){ if(r[i]>=0) np_++; else nn++; if(i&&((r[i]>=0)!==(r[i-1]>=0))) runs++; }
   const mR=1+2*np_*nn/n, vR=2*np_*nn*(2*np_*nn-n)/(n*n*(n-1)); const zR=vR>0?(runs-mR)/Math.sqrt(vR):0;
   const dof=Math.max(1,n-p);
+  // CasaXPS 'RMS'·DoF (weight = "casa"; SPEC_casa_v2 §1): √Σ(y − μ)² 과 (N − 2) − p, 채널 i0+1 … i1−1
+  let casa=null; if(prob.weight==="casa"){ let s2=0; for(let i=1;i<n-1;i++) s2+=(y[i]-mu[i])*(y[i]-mu[i]); casa={rms:Math.sqrt(s2),dof:Math.max(1,n-2-p),n:n-2}; }
   // 모형 비교용 χ²_d: 데이터만으로 정한 분산(평활 데이터) — 모형마다 같은 가중 (SPEC 3.5 v1.1)
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
   const AICc=n*Math.log(chi2d/n)+2*p+(n-p-1>0?2*p*(p+1)/(n-p-1):Infinity), BIC=n*Math.log(chi2d/n)+p*Math.log(n);
-  return {N:n,p,dof,chi2,chi2d,chi2nu:chi2/dof,R2:ss>0?1-sr/ss:null,rmsNorm:Math.sqrt(chi2/n),DW:a0>0?dw/a0:null,rho1,ar1Inflate:rho1>0?Math.sqrt((1+rho1)/(1-Math.min(rho1,0.95))):1,runs,runsZ:zR,AICc,BIC,resid:r};
+  return {N:n,p,dof,chi2,chi2d,chi2nu:chi2/dof,R2:ss>0?1-sr/ss:null,rmsNorm:Math.sqrt(chi2/n),DW:a0>0?dw/a0:null,rho1,ar1Inflate:rho1>0?Math.sqrt((1+rho1)/(1-Math.min(rho1,0.95))):1,runs,runsZ:zR,AICc,BIC,resid:r,casa};
 }
 
 /* 성분별 결과(보이는 값) + 델타 방법 불확도 */
@@ -626,10 +696,13 @@ function monteCarlo(prob,res,M,opt){
   const rho=Math.max(0,Math.min(0.95,st.rho1)); const phi=st.chi2nu; const n=prob.E.length;
   const base=clone(stripProb(prob)); base.E=prob.E;
   const samples=[]; let fails=0;
+  // 기준 스펙트럼 잡음(SPEC §12.5): 측정 선모양 성분의 template 을 원자료에 잡음을 더해 다시 만든다(배경 빼기·넓이 정규화 포함)
+  const refNoise=opt.refNoise!==false&&base.comps.some(c=>c.shape==="MEAS"&&c.tpl&&c.tpl.raw);
   for(let m=0;m<M;m++){
     const y=new Float64Array(n); let e=0;
     for(let i=0;i<n;i++){ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; y[i]=res.mu[i]+e*Math.sqrt(phi*res.v[i]); }
     const P=clone(base); P.E=prob.E; P.y=y;
+    if(refNoise){ const pt={}; P.comps.forEach(c=>{ if(c.shape!=="MEAS"||!c.tpl||!c.tpl.raw) return; const id=c.tpl.id; if(!pt[id]) pt[id]=perturbTpl(c.tpl,R); c.tpl=pt[id]; }); }
     try{ const r=fitOnce(P,{initAreas:false,irls:opt.irls!==false,maxit:opt.maxit||200}); samples.push(compSummary(P,r,null).map(q=>({be:q.be,area:q.area,areaPct:q.areaPct,fwhm:q.fwhm,height:q.height}))); }
     catch(e){ fails++; }
     if(opt.progress) opt.progress(m+1,M);
@@ -658,6 +731,7 @@ function noiseEstimate(E,y){
 function tfValue(tf,KE,PE){
   if(!tf||tf.model==="none") return 1;
   if(tf.model==="power"){ const pe=PE||tf.pe||50; return Math.pow(pe/KE,tf.x!=null?tf.x:1); }
+  if(tf.model==="avantage"){ const pe=PE||tf.pe; if(!(pe>0)) return NaN; const t=Math.log10(KE/pe); let s=0; for(let k=tf.coef.length-1;k>=0;k--) s=s*t+tf.coef[k]; return pe*Math.pow(10,s); }   // manual, Transmission Function: log10[A/(PE·XSF)] = Σ aₖ (log10(KE/PE))ᵏ
   if(tf.model==="thermo"){ const pe=PE||tf.pe; if(!(pe>0)) return NaN; const t=Math.log(KE/pe); let s=0; for(let k=tf.coef.length-1;k>=0;k--) s=s*t+tf.coef[k]; return Math.exp(s); }
   if(tf.model==="table"){ const T=tf.table; if(!T||T.length<2) return NaN; if(KE<=T[0][0]) return T[0][1]; if(KE>=T[T.length-1][0]) return T[T.length-1][1];   // 표 밖은 끝값 (SPEC 4)
     const lk=Math.log(KE); let i=1; while(i<T.length-1&&Math.log(T[i][0])<lk) i++; const a=T[i-1], b=T[i]; const f=(lk-Math.log(a[0]))/(Math.log(b[0])-Math.log(a[0])); return Math.exp(Math.log(a[1])+f*(Math.log(b[1])-Math.log(a[1]))); }
@@ -1061,6 +1135,9 @@ function sensVariants(model,spec,o){
   push(mk(bgLv[0],0,0));
   if(o.mode==="full"){ bgLv.forEach(b=>loLv.forEach(dl=>hiLv.forEach(dh=>push(mk(b,dl,dh))))); }
   else { bgLv.forEach(b=>push(mk(b,0,0))); loLv.forEach(dl=>push(mk(bgLv[0],dl,0))); hiLv.forEach(dh=>push(mk(bgLv[0],0,dh))); }
+  // Spline 배경(SPEC §11 v1.7): 사용자 매듭 하나씩 ±dk 옮김(자동 y 는 새 자리에서 다시, 끌어 둔 y 는 그대로) — 다른 요인은 기준 수준(두 방식 모두 하나씩)
+  if(cur.type==="spline"&&(cur.knots||[]).length){ const dk=o.dk!=null?o.dk:dw;
+    cur.knots.forEach((k,ki)=>[-dk,dk].forEach(dd=>{ const v=mk(bgLv[0],0,0); v.bg.knots[ki].e=k.e+dd; v.f.kn=ki+(dd<0?"-":"+"); out.push(v); })); }
   return out;
 }
 /* 변형들을 실제로 맞춘다(Worker 안에서). spec={be,y,c}, model={lo,hi,bg,comps,cons}.
@@ -1070,7 +1147,7 @@ function sensJob(spec,model,variants){
     try{
       // 지금 창 안에 있던 성분 중심이 변형 창에서 잘려 나가면 건너뜀(창 밖에 있던 성분 — 꼬리·가장자리 — 은 사용자 모형 그대로 둔다)
       if(model.comps.some(c=>c.be>=model.lo&&c.be<=model.hi&&(c.be<v.lo||c.be>v.hi))) return {i,ok:false,err:"성분 중심이 창 밖으로 잘림"};
-      const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons,weight:model.weight});
+      const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons,weight:model.weight,optimizer:model.optimizer});
       const r=fitOnce(P,{}); const st=fitStats(P,r); const tot=P.comps.reduce((s,c)=>s+c.area,0);
       return {i,ok:true,conv:r.conv,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
     }catch(e){ return {i,ok:false,err:String(e&&e.message||e)}; }
@@ -1089,12 +1166,237 @@ function sensSummary(variants,res){
       // 배경 효과는 끝점 점 수를 따지지 않고, 끝점 효과는 같은 배경 종류 안에서만)
       const b0=(variants[0]||{}).f||{};
       // 배경 효과: 끝점 점 수가 '다른 배경에 준 값(nRef)' 이거나 없는(피팅 안 배경) 변형만 — 지금 배경의 n=3·10 변형이 섞이지 않게
-      const same=(f,fk)=>["bg","n","lo","hi"].every(k=>k===fk||(fk==="bg"&&k==="n"&&(f.n==null||f.n===f.nRef))||f[k]===b0[k]);
-      const eff={}; ["bg","n","lo","hi"].forEach(fk=>{ const g={}; ok.forEach(r=>{ const v=variants[r.i]; const c=r.comps.find(x=>x.id===id); if(!v||!c||c[q]==null||!same(v.f,fk)) return; const lv=String(v.f[fk]); (g[lv]=g[lv]||[]).push(c[q]); });
+      const same=(f,fk)=>(fk==="kn"||(f.kn||"0")===(b0.kn||"0"))&&["bg","n","lo","hi"].every(k=>k===fk||(fk==="bg"&&k==="n"&&(f.n==null||f.n===f.nRef))||f[k]===b0[k]);
+      const eff={}; ["bg","n","lo","hi"].concat(variants.some(v=>v&&v.f&&v.f.kn)?["kn"]:[]).forEach(fk=>{ const g={}; ok.forEach(r=>{ const v=variants[r.i]; const c=r.comps.find(x=>x.id===id); if(!v||!c||c[q]==null||!same(v.f,fk)) return; const lv=String(v.f[fk]); (g[lv]=g[lv]||[]).push(c[q]); });
         const ms=Object.values(g).map(a=>a.reduce((s,x)=>s+x,0)/a.length); eff[fk]=ms.length>1?Math.max(...ms)-Math.min(...ms):0; });
       s.eff=eff; o[q]=s; });
     return o; });
   return {n:variants.length,nOk:ok.length,nFail:variants.length-ok.length,base:!!base,comps,chi2nu:st(ok.map(r=>r.chi2nu))};
+}
+
+/* ============================================================
+   13) 측정 선모양 · 기준 스펙트럼 선형 결합 (SPEC §12)
+   CasaXPS 'line shapes defined from spectra' · Avantage 'NLLS fitting to reference levels' 와 같은 목적 — 식은 SPEC 에서 정의
+   ============================================================ */
+/* PCHIP 기울기 — scipy.interpolate.PchipInterpolator 와 같은 정의(Fritsch–Butland 가중 조화평균, 끝은 3점 한쪽식 + 모양 보존) */
+function pchipSlopes(x,y){
+  const n=x.length, m=new Float64Array(n); if(n<2) return m;
+  const h=new Float64Array(n-1), d=new Float64Array(n-1);
+  for(let k=0;k<n-1;k++){ h[k]=x[k+1]-x[k]; d[k]=(y[k+1]-y[k])/h[k]; }
+  if(n===2){ m[0]=m[1]=d[0]; return m; }
+  for(let k=1;k<n-1;k++){ const a=d[k-1], b=d[k];
+    if(Math.sign(a)!==Math.sign(b)||a===0||b===0){ m[k]=0; continue; }
+    const w1=2*h[k]+h[k-1], w2=h[k]+2*h[k-1]; m[k]=(w1+w2)/(w1/a+w2/b); }
+  const edge=(h0,h1,m0,m1)=>{ let t=((2*h0+h1)*m0-h0*m1)/(h0+h1); if(Math.sign(t)!==Math.sign(m0)) t=0; else if(Math.sign(m0)!==Math.sign(m1)&&Math.abs(t)>3*Math.abs(m0)) t=3*m0; return t; };
+  m[0]=edge(h[0],h[1],d[0],d[1]); m[n-1]=edge(h[n-2],h[n-3],d[n-2],d[n-3]);
+  return m;
+}
+/* 보간값: 마디 밖은 0 (template 은 배경을 뺀 봉우리). m=null 이면 선형 */
+function interpAt(x,y,m,t){
+  const n=x.length; if(!(t>=x[0]&&t<=x[n-1])) return 0;
+  let lo=0, hi=n-1; while(hi-lo>1){ const mid=(lo+hi)>>1; if(x[mid]<=t) lo=mid; else hi=mid; }
+  const h=x[hi]-x[lo], s=(t-x[lo])/h;
+  if(!m) return y[lo]+(y[hi]-y[lo])*s;
+  const s2=s*s, s3=s2*s;
+  return (2*s3-3*s2+1)*y[lo]+(s3-2*s2+s)*h*m[lo]+(3*s2-2*s3)*y[hi]+(s3-s2)*h*m[hi];
+}
+/* 보간 함수의 정확한 적분: Hermite 3차 조각 ∫ = h(y_k+y_{k+1})/2 + h²(m_k − m_{k+1})/12, 선형 = 사다리꼴 */
+function interpIntegral(x,y,kind){
+  const n=x.length, m=kind==="linear"?null:pchipSlopes(x,y); let s=0;
+  for(let k=0;k<n-1;k++){ const h=x[k+1]-x[k]; s+=0.5*h*(y[k]+y[k+1]); if(m) s+=h*h*(m[k]-m[k+1])/12; }
+  return s;
+}
+/* template = {kind:"tpl", id, name, interp, eref(보정 BE), x(= 보정 BE − eref, 오름차순), v(넓이 1), area0, raw:{E,y,bg|B,shift,noise,kappa}}
+   E 는 측정(보정 전) BE 오름차순, o.shift = 그 스펙트럼의 대전 보정 Δ. eref 를 주지 않으면 배경 뺀 신호의 (평활) 최댓값 위치. */
+function makeTemplate(E,y,o){
+  o=o||{}; const n=E.length; if(n<5) throw new Error("기준 스펙트럼 영역의 점이 5개 미만입니다");
+  const bg=o.B?null:clone(o.bg||{type:"shirley",n:5});
+  let B=o.B?Float64Array.from(o.B):bgStatic(E,y,bg); if(!B) B=bgShirley(E,y,(bg&&bg.n)||5,true);
+  const z=Float64Array.from(y,(t,i)=>t-B[i]); const sh=+o.shift||0;
+  let eref=o.eref;
+  if(eref==null||!isFinite(eref)){ const zs=smoothQ(E,z,smoothHW(E)); let im=0; for(let i=1;i<n;i++) if(zs[i]>zs[im]) im=i;
+    let e=E[im]; if(im>0&&im<n-1){ const a=zs[im-1],b=zs[im],c=zs[im+1], dd=a-2*b+c; if(dd<0){ const off=Math.max(-0.5,Math.min(0.5,0.5*(a-c)/dd)); e=E[im]+off*(off>0?E[im+1]-E[im]:E[im]-E[im-1]); } }
+    eref=e+sh; }
+  const interp=o.interp==="linear"?"linear":"pchip";
+  const x=Array.from(E,e=>e+sh-eref);
+  const I=interpIntegral(x,Array.from(z),interp);
+  if(!(I>0)) throw new Error("배경을 뺀 기준 스펙트럼의 넓이가 0 이하입니다 — 영역·배경을 확인하세요");
+  const v=Array.from(z,t=>t/I);
+  let raw=null;
+  if(o.keepRaw!==false){ const noise=o.noise==="const"?"const":"poisson"; const nz=noise==="poisson"?noiseEstimate(E,y):null;
+    raw={E:Array.from(E),y:Array.from(y),bg,B:o.B?Array.from(o.B):null,shift:sh,noise,kappa:nz&&nz.kappa>0?nz.kappa:null}; }
+  return {kind:"tpl",id:o.id||("t"+Math.random().toString(36).slice(2,8)),name:o.name||"",interp,eref,x,v,area0:I,raw};
+}
+/* 원자료에 잡음을 더해 template 을 다시 만든다(Monte Carlo). 분산: poisson 이면 κ·max(ŷ, 1e-6·max ŷ) (κ: SPEC §6 2차 차분 추정), const 면 constVar.
+   eref 는 고정(성분 위치의 뜻이 바뀌지 않게) */
+function perturbTpl(t,R){
+  const r=t.raw; if(!r) return t; const E=Float64Array.from(r.E), y0=Float64Array.from(r.y), n=E.length;
+  let va;
+  if(r.noise==="const") va=constVar(y0);
+  else { const ys=smoothQ(E,y0,smoothHW(E)); let mx=0; for(const q of ys) mx=Math.max(mx,q); const k=r.kappa>0?r.kappa:1; va=Float64Array.from(ys,q=>k*Math.max(q,1e-6*mx)); }
+  const y=new Float64Array(n); for(let i=0;i<n;i++) y[i]=y0[i]+Math.sqrt(va[i])*R.g();
+  return makeTemplate(E,y,{bg:r.bg,B:r.B,shift:r.shift,eref:t.eref,interp:t.interp,id:t.id,name:t.name,keepRaw:false});
+}
+/* 캐시: 기울기 · 넓힘 격자 (template 객체마다; JSON 복사본은 새 객체라 새로 만든다) */
+const TPLC=typeof WeakMap!=="undefined"?new WeakMap():null;
+function tplCache(t){
+  if(!t||!t.x) throw new Error("측정 선모양의 template 이 없습니다");
+  let c=TPLC&&TPLC.get(t); if(c) return c;
+  const x=Float64Array.from(t.x), v=Float64Array.from(t.v); let st=Infinity; for(let i=1;i<x.length;i++) st=Math.min(st,x[i]-x[i-1]);
+  c={x,v,m:t.interp==="linear"?null:pchipSlopes(x,v),step:st,conv:[]}; if(TPLC) TPLC.set(t,c); return c;
+}
+/* 넓이 1 측정 선모양 (상대좌표 X = E − be). wG > 0: 균일 격자(h = 0.04·2^−k ≤ min(wG/16, 점 간격/4))에서 보간값 ⊗ 이산 정규화 Gaussian(±5σ), 격자 → 점은 Catmull–Rom */
+function tplShape(t,X,wG){
+  const c=tplCache(t), n=X.length, out=new Float64Array(n);
+  if(!(wG>1e-6)){ for(let i=0;i<n;i++) out[i]=interpAt(c.x,c.v,c.m,X[i]); return out; }
+  let g=null; for(const q of c.conv) if(q.wG===wG){ g=q; break; }
+  if(!g){ let h=0.04; const lim=Math.min(wG/16,c.step/4); while(h>lim&&h>0.0005) h/=2;
+    const P=5*wG*FW2SIG+h, a=c.x[0]-P, b=c.x[c.x.length-1]+P; while((b-a)/h>400000) h*=2;
+    const k0=Math.floor(a/h), k1=Math.ceil(b/h), M=k1-k0+1; const base=new Float64Array(M);
+    for(let i=0;i<M;i++) base[i]=interpAt(c.x,c.v,c.m,(k0+i)*h);
+    g={wG,h,k0,M,v:gconv(base,h,wG)}; c.conv.push(g); if(c.conv.length>6) c.conv.shift(); }
+  const xa=g.k0*g.h, xb=(g.k0+g.M-1)*g.h;
+  for(let i=0;i<n;i++){ const xi=X[i]; out[i]=xi<xa||xi>xb?0:crAt(g.v,g.k0,g.h,xi); }
+  return out;
+}
+/* 대칭 행렬 고윳값 (Jacobi 회전, 작은 행렬용) */
+function symEig(A,k){
+  const a=Float64Array.from(A);
+  for(let sweep=0;sweep<100;sweep++){ let off=0; for(let p=0;p<k;p++) for(let q=p+1;q<k;q++) off+=a[p*k+q]*a[p*k+q]; if(off<1e-30) break;
+    for(let p=0;p<k;p++) for(let q=p+1;q<k;q++){ const apq=a[p*k+q]; if(Math.abs(apq)<1e-300) continue;
+      const th=(a[q*k+q]-a[p*k+p])/(2*apq), t=Math.sign(th||1)/(Math.abs(th)+Math.sqrt(th*th+1)), cs=1/Math.sqrt(t*t+1), sn=t*cs;
+      for(let r=0;r<k;r++){ const arp=a[r*k+p], arq=a[r*k+q]; a[r*k+p]=cs*arp-sn*arq; a[r*k+q]=sn*arp+cs*arq; }
+      for(let r=0;r<k;r++){ const apr=a[p*k+r], aqr=a[q*k+r]; a[p*k+r]=cs*apr-sn*aqr; a[q*k+r]=sn*apr+cs*aqr; } } }
+  return Array.from({length:k},(_,i)=>a[i*k+i]).sort((x,y)=>x-y);
+}
+/* 공선성 진단 (SPEC §12.4): 측정 선모양 성분(넓이 1, 지금 위치·넓힘)을 데이터 점에서 계산해 1/√v 가중한 열 X_j.
+   조건수 κ = √(λmax/λmin), λ = 열을 단위 길이로 맞춘 XᵀX 의 고윳값(Belsley 척도 조건수). VIF_j = (R⁻¹)_jj, R = 열의 상관행렬(평균을 뺀 열).
+   경고: κ > 30 또는 VIF > 10 */
+function lcfDiag(prob,v){
+  const E=prob.E, n=E.length, ctx={emin:E[0],emax:E[n-1]};
+  const idx=prob.comps.map((c,i)=>c.shape==="MEAS"&&c.tpl?i:-1).filter(i=>i>=0); if(idx.length<2) return null;
+  const X=idx.map(i=>{ const c=Object.assign({},prob.comps[i],{area:1,doublet:null}); const u=compEval(c,E,ctx); if(v) for(let k=0;k<n;k++) u[k]/=Math.sqrt(v[k]); return u; });
+  const k=X.length, dot=(a,b)=>{ let s=0; for(let i=0;i<n;i++) s+=a[i]*b[i]; return s; };
+  const nr=X.map(c=>Math.sqrt(dot(c,c))); const G=new Float64Array(k*k);
+  for(let a=0;a<k;a++) for(let b=0;b<k;b++) G[a*k+b]=nr[a]>0&&nr[b]>0?dot(X[a],X[b])/(nr[a]*nr[b]):(a===b?1:0);
+  const ev=symEig(G,k); const cond=ev[0]>0?Math.sqrt(ev[k-1]/ev[0]):Infinity;
+  const Xc=X.map(c=>{ let m=0; for(let i=0;i<n;i++) m+=c[i]; m/=n; return Float64Array.from(c,t=>t-m); }); const nc=Xc.map(c=>Math.sqrt(dot(c,c)));
+  const Rm=new Float64Array(k*k); for(let a=0;a<k;a++) for(let b=0;b<k;b++) Rm[a*k+b]=nc[a]>0&&nc[b]>0?dot(Xc[a],Xc[b])/(nc[a]*nc[b]):(a===b?1:0);
+  const Ri=invSym(Rm,k); const vif=Ri?Array.from({length:k},(_,i)=>Ri[i*k+i]):Array(k).fill(Infinity);
+  return {cond,vif,ids:idx.map(i=>prob.comps[i].id),warn:!(cond<=30)||vif.some(x=>!(x<=10))};
+}
+
+/* ============================================================
+   14) Spline 배경 (SPEC §2 spline) — CasaXPS 'Cubic Spline' 과 같은 목적
+   매듭: 끝점 둘(endpoints 평균, bg.ends !== false) + 사용자 매듭 {e, y?}. y 가 없으면 가장 가까운 점 ±kh(기본 2) 점 평균.
+   자연 3차 spline(양 끝 2차 도함수 0), 끝 매듭 밖은 끝 기울기로 직선 연장.
+   ============================================================ */
+function splineKnots(E,y,bg){
+  const N=E.length, out=[]; bg=bg||{};
+  if(bg.ends!==false){ const p=endpoints(E,y,bg.n||5); out.push({e:p.Elo,y:p.ylo,end:true},{e:p.Ehi,y:p.yhi,end:true}); }
+  const hw=bg.kh!=null?Math.max(0,Math.round(bg.kh)):2;
+  (bg.knots||[]).forEach(k=>{ if(!k||!isFinite(k.e)) return; let yv=k.y;
+    if(yv==null||!isFinite(yv)){ let i=0, d=Infinity; for(let j=0;j<N;j++){ const dd=Math.abs(E[j]-k.e); if(dd<d){ d=dd; i=j; } }
+      const a=Math.max(0,i-hw), b=Math.min(N-1,i+hw); let s=0; for(let j=a;j<=b;j++) s+=y[j]; yv=s/(b-a+1); }
+    out.push({e:+k.e,y:+yv,auto:k.y==null}); });
+  out.sort((a,b)=>a.e-b.e);
+  const u=[]; out.forEach(k=>{ const L=u[u.length-1]; if(L&&Math.abs(L.e-k.e)<1e-9){ if(L.end) u[u.length-1]=k; } else u.push(k); });
+  return u;
+}
+/* 자연 3차 spline 의 마디 2차 도함수 M (M_0 = M_{K−1} = 0, 삼중대각 Thomas) */
+function naturalSplineM(xs,ys){
+  const K=xs.length, M=new Float64Array(K); if(K<3) return M;
+  const a=new Float64Array(K), b=new Float64Array(K), c=new Float64Array(K), d=new Float64Array(K);
+  for(let i=1;i<K-1;i++){ const h0=xs[i]-xs[i-1], h1=xs[i+1]-xs[i]; a[i]=h0; b[i]=2*(h0+h1); c[i]=h1; d[i]=6*((ys[i+1]-ys[i])/h1-(ys[i]-ys[i-1])/h0); }
+  for(let i=2;i<K-1;i++){ const w=a[i]/b[i-1]; b[i]-=w*c[i-1]; d[i]-=w*d[i-1]; }
+  for(let i=K-2;i>=1;i--) M[i]=(d[i]-(i<K-2?c[i]*M[i+1]:0))/b[i];
+  return M;
+}
+function splineAt(xs,ys,M,t){
+  const K=xs.length; if(!K) return 0; if(K===1) return ys[0];
+  if(t<=xs[0]){ const h=xs[1]-xs[0]; const s=(ys[1]-ys[0])/h-h*(2*M[0]+M[1])/6; return ys[0]+s*(t-xs[0]); }
+  if(t>=xs[K-1]){ const h=xs[K-1]-xs[K-2]; const s=(ys[K-1]-ys[K-2])/h+h*(M[K-2]+2*M[K-1])/6; return ys[K-1]+s*(t-xs[K-1]); }
+  let lo=0, hi=K-1; while(hi-lo>1){ const m=(lo+hi)>>1; if(xs[m]<=t) lo=m; else hi=m; }
+  const h=xs[hi]-xs[lo], A=(xs[hi]-t)/h, Bq=(t-xs[lo])/h;
+  return A*ys[lo]+Bq*ys[hi]+((A*A*A-A)*M[lo]+(Bq*Bq*Bq-Bq)*M[hi])*h*h/6;
+}
+function bgSpline(E,y,bg){
+  const ks=splineKnots(E,y,bg), xs=ks.map(k=>k.e), ys=ks.map(k=>k.y), M=naturalSplineM(xs,ys);
+  const B=Float64Array.from(E,e=>splineAt(xs,ys,M,e)); B.knots=ks; return B;
+}
+
+/* ============================================================
+   15) Simplex (Nelder–Mead) 최적화 (SPEC §14) — CasaXPS 의 Marquardt/Simplex 선택과 같은 목적
+   변수: MINUIT 변환 u 를 매개변수마다 척도 s_j 로 나눈 z (s_j = 전형적 걸음 dp_j 에 해당하는 u 변화). 계수 ρ=1, χ=2, γ=½, σ=½ (Nelder & Mead 1965; Lagarias et al. 1998).
+   정지: max|z_i − z_0| ≤ xtol 그리고 max|f_i − f_0| ≤ ftol·max(1,|f_0|). 수렴 뒤 같은 점에서 새 simplex 로 다시 시작해 개선이 없을 때까지(최대 6 회).
+   ============================================================ */
+function nmFit(prob,map,v,opt){
+  opt=opt||{}; const E=prob.E, y=prob.y, n=E.length, np=map.free.length; const ev=makeEvaluator(prob,map);
+  const sw=Float64Array.from(v,x=>1/Math.sqrt(x));
+  const lo=map.free.map(f=>f.lo), hi=map.free.map(f=>f.hi);
+  const p0=getVec(prob,map).map((x,i)=>Math.min(hi[i],Math.max(lo[i],x)));
+  const u0=p0.map((x,i)=>toU(x,lo[i],hi[i]));
+  const chi=mu=>{ let s=0; for(let i=0;i<n;i++){ const r=(y[i]-mu[i])*sw[i]; s+=r*r; } return s; };
+  setVec(prob,map,p0); let cur=ev.full();
+  if(!np) return {chi2:chi(cur.mu),iter:0,conv:true,mu:cur.mu,B:cur.B,comps:ev.comps()};
+  let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
+  const s=map.free.map((f,j)=>{ const p=p0[j]; let dp;
+    if(f.k==="be"||f.k==="dE") dp=0.1; else if(Math.abs(p)>1e-8) dp=0.1*Math.abs(p); else if(isFinite(lo[j])&&isFinite(hi[j])) dp=0.05*(hi[j]-lo[j]); else dp=1e-3*Math.max(1,ymax);
+    let pu=Math.min(hi[j],p+dp); if(pu===p) pu=Math.max(lo[j],p-dp); let d=Math.abs(toU(pu,lo[j],hi[j])-u0[j]);
+    if(!(d>1e-9)) d=Math.abs(toU(Math.max(lo[j],p-dp),lo[j],hi[j])-u0[j]); return d>1e-9?d:1e-3; });
+  let nfev=0; const maxfev=opt.maxfev||Math.max(4000,1500*(np+1));
+  const F=z=>{ nfev++; const p=z.map((zi,j)=>fromU(u0[j]+s[j]*zi,lo[j],hi[j])); setVec(prob,map,p); const X=chi(ev.full().mu); return isFinite(X)?X:Infinity; };
+  const xtol=opt.xtol||1e-7, ftol=opt.ftol||1e-12;
+  let best=new Array(np).fill(0), fbest=F(best), conv=false;
+  for(let rs=0;rs<6&&nfev<maxfev;rs++){
+    const step=rs===0?1:0.2;
+    let sim=[best.slice()], fs=[fbest];
+    for(let j=0;j<np;j++){ const z=best.slice(); z[j]+=step; sim.push(z); fs.push(F(z)); }
+    let ok=false;
+    while(nfev<maxfev){
+      const ord=fs.map((f,i)=>i).sort((a,b)=>fs[a]-fs[b]); sim=ord.map(i=>sim[i]); fs=ord.map(i=>fs[i]);
+      let dx=0, df=0; for(let i=1;i<=np;i++){ df=Math.max(df,Math.abs(fs[i]-fs[0])); for(let j=0;j<np;j++) dx=Math.max(dx,Math.abs(sim[i][j]-sim[0][j])); }
+      if(dx<=xtol&&df<=ftol*Math.max(1,Math.abs(fs[0]))){ ok=true; break; }
+      const xb=new Array(np).fill(0); for(let i=0;i<np;i++) for(let j=0;j<np;j++) xb[j]+=sim[i][j]/np;
+      const W=sim[np], at=c=>xb.map((b,j)=>b+c*(b-W[j]));
+      const xr=at(1), fr=F(xr);
+      if(fr<fs[0]){ const xe=at(2), fe=F(xe); if(fe<fr){ sim[np]=xe; fs[np]=fe; } else { sim[np]=xr; fs[np]=fr; } continue; }
+      if(fr<fs[np-1]){ sim[np]=xr; fs[np]=fr; continue; }
+      let shrink=false;
+      if(fr<fs[np]){ const xc=at(0.5), fc=F(xc); if(fc<=fr){ sim[np]=xc; fs[np]=fc; } else shrink=true; }
+      else { const xcc=at(-0.5), fcc=F(xcc); if(fcc<fs[np]){ sim[np]=xcc; fs[np]=fcc; } else shrink=true; }
+      if(shrink){ for(let i=1;i<=np;i++){ sim[i]=sim[i].map((z,j)=>sim[0][j]+0.5*(z-sim[0][j])); fs[i]=F(sim[i]); } }
+    }
+    const imp=fbest-fs[0]; best=sim[0].slice(); fbest=fs[0];
+    if(ok&&rs>0&&imp<=ftol*Math.max(1,Math.abs(fbest))*10){ conv=true; break; }
+    if(!ok) break;
+  }
+  const p=best.map((zi,j)=>fromU(u0[j]+s[j]*zi,lo[j],hi[j])); setVec(prob,map,p); cur=ev.full();
+  return {chi2:chi(cur.mu),iter:nfev,conv,mu:cur.mu,B:cur.B,comps:ev.comps(),optimizer:"simplex"};
+}
+
+/* ============================================================
+   16) 여러 스펙트럼에 같은 모형 (SPEC §15) · 정량 Monte Carlo (SPEC §4)
+   ============================================================ */
+/* 모형(보정 BE 기준) → 다른 스펙트럼: 성분 BE·free BE 한계·spline 매듭을 Δ_src − Δ_dst 만큼, 창도 같은 보정 BE 로(스펙트럼 끝에서 자름) */
+function propagateModel(model,shSrc,shDst,beRange){
+  const d=(+shSrc||0)-(+shDst||0); const m=shiftModelBE(model.comps,model.cons,d);
+  const bg=clone(model.bg||{type:"smart",n:5}); if(bg.knots) bg.knots.forEach(k=>{ k.e+=d; });
+  if(bg.type==="active"){ bg.c0=null; bg.k=null; }
+  let lo=model.lo+d, hi=model.hi+d; if(beRange){ lo=Math.max(beRange[0],lo); hi=Math.min(beRange[1],hi); }
+  const out={lo,hi,bg,comps:m.comps,cons:m.cons,weight:model.weight||"poisson"}; if(model.optimizer==="simplex") out.optimizer="simplex"; return out;
+}
+/* 한 스펙트럼 피팅 작업(Worker): 넓이는 NNLS 로 다시 시작 */
+function batchJob(spec,model,opt){ const P=makeProblem(spec,model); const r=fitOnce(P,opt||{}); const out=finalize(P,r); out.lo=model.lo; out.hi=model.hi; return out; }
+/* at% Monte Carlo: 넓이를 N(A, σ_A) 에서 M 번 뽑아 at% 분포 → 평균·sd·2.5/97.5 백분위. 검출 안 됨(nd)은 기준값으로 정한 집합을 고정 */
+function quantMC(rows,opts,M,seed){
+  const base=quantify(rows,opts); const R=rng(seed||7); M=M||2000; const use=base.map(r=>!r.nd&&isFinite(r.nrm)&&r.den>0);
+  const A=base.map(()=>new Float64Array(M)); let ok=0;
+  for(let m=0;m<M;m++){ let tot=0; const nn=base.map((r,i)=>{ const g=R.g(); if(!use[i]) return 0; const a=r.area+(r.sArea>0?r.sArea*g:0); const v=a/r.den; tot+=v; return v; });
+    if(!(tot>0)) continue; base.forEach((r,i)=>{ if(use[i]) A[i][ok]=100*nn[i]/tot; }); ok++; }
+  const pct=(s,q)=>{ const t=(s.length-1)*q, k=Math.floor(t); return s[k]+(s[Math.min(k+1,s.length-1)]-s[k])*(t-k); };
+  return base.map((r,i)=>{ if(!use[i]||!ok) return null; const a=Array.from(A[i].subarray(0,ok)).sort((x,y)=>x-y); const mu=a.reduce((s,x)=>s+x,0)/ok;
+    const sd=Math.sqrt(a.reduce((s,x)=>s+(x-mu)*(x-mu),0)/Math.max(1,ok-1)); return {mean:mu,sd,lo:pct(a,0.025),hi:pct(a,0.975),n:ok}; });
 }
 
 /* ============================================================
@@ -1103,7 +1405,10 @@ function sensSummary(variants,res){
 function sliceRegion(be,y,lo,hi){ const i0=be.findIndex(e=>e>=lo); let i1=-1; for(let i=be.length-1;i>=0;i--) if(be[i]<=hi){ i1=i; break; } if(i0<0||i1<i0) return null; return {E:be.slice(i0,i1+1),y:y.slice(i0,i1+1),i0,i1}; }
 function makeProblem(spec,st){
   const r=sliceRegion(spec.be,spec.y,st.lo,st.hi); if(!r||r.E.length<8) throw new Error("영역 안 데이터 점이 8개 미만입니다");
-  return {E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":"poisson"};
+  const P={E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":st.weight==="casa"?"casa":"poisson"};
+  if(st.optimizer==="simplex") P.optimizer="simplex";
+  if(P.bg&&P.bg.conv==="casa") P.bg._ends=casaEnds(spec.be,spec.y,r.i0,r.i1,P.bg.aw!=null?P.bg.aw:1);
+  return P;
 }
 function newComp(shape,be,o){
   o=o||{}; const c={id:o.id||("c"+Math.random().toString(36).slice(2,8)),name:o.name||"",shape,be,area:o.area||1,el:o.el||"",line:o.line||"",doublet:null,color:o.color||null};
@@ -1113,12 +1418,15 @@ function newComp(shape,be,o){
   if(shape==="DS"){ c.alpha=o.alpha!=null?o.alpha:0.1; c.wL=o.wL!=null?o.wL:0.3; c.wG=o.wG!=null?o.wG:F*0.7; }
   if(shape==="LA"){ c.F=o.F||F*0.8; c.alpha=o.alpha!=null?o.alpha:1; c.beta=o.beta!=null?o.beta:1.5; c.wG=o.wG!=null?o.wG:F*0.4; }
   if(shape==="GLT"){ c.F=F; c.m=o.m!=null?o.m:0.3; c.T=o.T!=null?o.T:0.2; c.tau=o.tau!=null?o.tau:1.0; }
+  if(shape==="MEAS"){ c.tpl=o.tpl||null; c.wG=o.wG!=null?o.wG:0; }
+  if(shape==="AGT"){ c.F=F; c.m=o.m!=null?o.m:0.3; c.ET=o.ET!=null?o.ET:0.05; c.TM=o.TM!=null?o.TM:0; c.CT=o.CT!=null?o.CT:0; c.ch=o.ch!=null?o.ch:0.05; if(o.tu) c.tu=o.tu; }
   if(o.doublet) c.doublet={dE:o.doublet.dE,r:o.doublet.r,q:o.doublet.q!=null?o.doublet.q:1};
   return c;
 }
 /* 모양 바꾸기: 현재 폭을 최대한 보존 */
 function convertShape(c,shape){
   if(c.shape===shape) return c;
+  if(shape==="MEAS") throw new Error("측정 선모양은 기준 스펙트럼에서만 만들 수 있습니다");
   const tf=trueFWHM(c.shape,shapeParams(c,1)).fwhm||1.2;
   const n=newComp(shape,c.be,{F:tf,id:c.id,name:c.name,el:c.el,line:c.line,color:c.color}); n.area=c.area; if(c.doublet) n.doublet=Object.assign({},c.doublet);
   if((shape==="GLS"||shape==="GLP"||shape==="GLT")&&c.m!=null) n.m=c.m;
@@ -1141,7 +1449,8 @@ function finalize(P,r){
     stats:Object.assign({},st,{resid:Array.from(st.resid)}),
     cov:{sig:cov.sig,corr:Array.from(cov.corr),C:Array.from(cov.C),atB:cov.atB,phi:cov.phi,dof:cov.dof,singular:cov.singular,names:cov.names,np:cov.np},
     summ,multi:r.multi||null,free:map.free.map(f=>({id:f.id,k:f.k,lo:f.lo,hi:f.hi})),
-    sumSig:{all:areaSumSigma(P,map,cov,P.comps.map((c,i)=>i))}};
+    sumSig:{all:areaSumSigma(P,map,cov,P.comps.map((c,i)=>i))},
+    lcf:lcfDiag(P,r.v),optimizer:P.optimizer==="simplex"?"simplex":"lm"};
 }
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
@@ -1163,10 +1472,60 @@ function mcJob(prob,res,M,seed,opt){
   return monteCarlo(P,r,M,Object.assign({},opt,{seed}));
 }
 
+
+/* ============================================================
+   16) CasaXPS 표기 ↔ INNO 성분·배경 (SPEC_casa_v2.md — CasaXPS 2.3.27 V2 실측으로 정함; CasaXPS 코드는 쓰지 않음)
+   ============================================================ */
+const CASA_AL=PI/2, CASA_AG=Math.sqrt(PI/(4*LN2));   // ∫ 1/(1+4t²) dt, ∫ exp(−4ln2 t²) dt (F = 1)
+/* SGL(p) = (1 − p/100)·exp(−4ln2 x²/F²) + (p/100)/(1 + 4x²/F²) (높이 혼합, 같은 F) ≡ GLS(F, m) 넓이 혼합 — 같은 함수, m ↔ p 만 다름 */
+function sglToGLS(p){ const h=Math.min(1,Math.max(0,p/100)); return h*CASA_AL/(h*CASA_AL+(1-h)*CASA_AG); }
+function glsToSGL(m){ m=Math.min(1,Math.max(0,m)); const a=m/CASA_AL, b=(1-m)/CASA_AG; return a+b>0?100*a/(a+b):0; }
+/* F = 1 일 때의 실제 FWHM (척도 불변 모양의 폭 인자) */
+function casaWidthFactor(shape,o){ const c=newComp(shape,0,Object.assign({F:1},o)); c.F=1; if(o.wG!=null) c.wG=o.wG; if(o.casaN!=null) c.casaN=o.casaN; return trueFWHM(shape,shapeParams(c,1)).fwhm; }
+/* INNO 성분 → CasaXPS 표기 + CasaXPS 'fwhm' 칸에 들어갈 수. exact = 실측으로 같은 수가 확인된 경우만 */
+function compToCasa(c){
+  const sp=shapeParams(c,1), r=(v,d)=>+(+v).toFixed(d);
+  if(c.shape==="GLP") return {notation:`GL(${r(100*c.m,2)})`,fwhm:trueFWHM("GLP",sp).fwhm,exact:true,note:"CasaXPS GL(p) = GLP, m = p/100; CasaXPS fwhm = true FWHM (−1.7e-4 measured)"};
+  if(c.shape==="GLS") return {notation:`SGL(${r(glsToSGL(c.m),2)})`,fwhm:c.F,exact:true,note:"CasaXPS SGL(p) = height mix with one F = GLS with m = sglToGLS(p); fwhm = F (= true FWHM)"};
+  if(c.shape==="LA"){ const sym=Math.abs(c.alpha-c.beta)<1e-9; const n=c.casaN!=null?+c.casaN:(sp.wG>1e-9?sp.wG/(CASA_LA_RHO*sp.F):0), ni=Math.round(n);
+    const not=`LA(${r(c.alpha,3)},${r(c.beta,3)},${ni})`;
+    if(!sym) return {notation:not,fwhm:null,n,exact:false,note:"asymmetric LA: CasaXPS's width number is not the true FWHM (LA(1.53,2.43,0), F 1 → 0.580056, true FWHM 0.66569) — rule not pinned; shape and tail side are the same"};
+    return {notation:not,fwhm:trueFWHM("LA",sp).fwhm,n,exact:Math.abs(n-ni)<0.05&&(c.alpha===1||ni===0),note:"symmetric LA: CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (measured for α = β = 1 only)"}; }
+  if(c.shape==="AGT"&&c.tu==="fwhm"&&!(c.TM>0)) return {notation:`GL(${r(100*c.m,2)})T(${r(c.ET,4)})`,fwhm:null,exact:false,note:"same shape as CasaXPS GL(p)T(k) (area/position match); CasaXPS's fwhm number (1.18051 for F 1.2, p 30, k 2) is neither F nor the true FWHM (1.3413) — not pinned"};
+  return {notation:null,fwhm:null,exact:false,note:"no CasaXPS line shape with the same definition"};
+}
+/* CasaXPS 표기('GL(30)', 'SGL(30)', 'LA(1.53,2.43,0)', 'LA(1,250)', 'LA(50)', 'GL(30)T(2)') + CasaXPS fwhm → INNO 성분 */
+function casaToComp(str,o){
+  o=o||{}; const s=String(str||"").replace(/\s+/g,""), be=o.be!=null?+o.be:0, area=o.area!=null?+o.area:1, fw=o.fwhm>0?+o.fwhm:1.2; let m;
+  const mk=(shape,q)=>{ const c=newComp(shape,be,Object.assign({area},q)); if(o.id) c.id=o.id; return c; };
+  if((m=s.match(/^GL\(([\d.]+)\)T\(([\d.]+)\)$/i))){ const c=mk("AGT",{F:fw,m:+m[1]/100,ET:+m[2],TM:0,CT:0,tu:"fwhm"}); return {comp:c,exact:false,note:"F set to the CasaXPS fwhm number — CasaXPS's fwhm for GL(p)T(k) is not F (measured 1.18051 for F 1.2); refit the width"}; }
+  if((m=s.match(/^SGL\(([\d.]+)\)$/i))){ const c=mk("GLS",{F:fw,m:sglToGLS(+m[1])}); return {comp:c,exact:true,note:"SGL(p) = GLS with m = "+c.m.toFixed(4)}; }
+  if((m=s.match(/^GL\(([\d.]+)\)$/i))){ const mm=+m[1]/100, c=mk("GLP",{F:1,m:mm}); c.F=fw/casaWidthFactor("GLP",{m:mm}); return {comp:c,exact:true,note:"GL(p) = GLP; F from the true FWHM"}; }
+  let al,bt,n;
+  if((m=s.match(/^LA\(([\d.]+)\)$/i))){ al=bt=1; n=1401-14.01*(+m[1]); }   // Fairley et al. 2023 SI Eq. 6
+  else if((m=s.match(/^LA\(([\d.]+),([\d.]+)\)$/i))){ if(+m[2]>=20&&Number.isInteger(+m[2])){ al=bt=+m[1]; n=+m[2]; } else { al=+m[1]; bt=+m[2]; n=0; } }   // 'LA(1,1283)' (CasaXPS 2.3.25 review) = LA(α=β, n); 'LA(1.53,2.43)' = LA(α,β,0) — 해석(미확인)
+  else if((m=s.match(/^LA\(([\d.]+),([\d.]+),([\d.]+)\)$/i))){ al=+m[1]; bt=+m[2]; n=+m[3]; }
+  if(al!=null){ const c=mk("LA",{F:1,alpha:al,beta:bt,wG:0}); c.casaN=n; const sym=Math.abs(al-bt)<1e-9;
+    c.F=fw/casaWidthFactor("LA",{alpha:al,beta:bt,casaN:n,wG:0})||fw;
+    return {comp:c,exact:sym&&(al===1||n===0),note:sym?"CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (wG fixed by n)":"asymmetric LA: CasaXPS width number → F not pinned; F set from the true FWHM — refit the width"}; }
+  return null;
+}
+/* CasaXPS 배경 이름 + Cross Section 칸("B, C, D, T0") → INNO bg. U 2/U 3 Tougaard 에서 B = 0 (U 3 기본값 "0, 551, 436, 3") 이면 CasaXPS 는 Linear 를 그린다(실측) */
+function casaBg(name,cross,aw){
+  const nm=String(name||"").trim(), w=aw!=null?+aw:1;
+  if(/^linear$/i.test(nm)) return {bg:{type:"linear",conv:"casa",aw:w},exact:true,note:"CasaXPS Linear (SPEC §2b)"};
+  if(/^shirley$/i.test(nm)) return {bg:{type:"shirley",conv:"casa",aw:w},exact:true,note:"CasaXPS Shirley (SPEC §2b)"};
+  const t=nm.match(/^U\s*([23])\s*Tougaard$/i); if(!t) return null;
+  const u3=t[1]==="3"; let v=String(cross==null?"":cross).split(/[,;\s]+/).filter(x=>x!=="").map(Number);
+  if(!v.length) v=u3?[0,551,436,3]:[2866,1643,1,0];   // CasaXPS 2.3.27 이 채우는 값 (U 3 실측; U 2 는 앞선 판독의 칸)
+  const [B,C,D,T0]=[v[0],v[1],v[2]!=null?v[2]:0,v[3]!=null?v[3]:0], tg={name:(u3?"U 3":"U 2")+" Tougaard",B,C,D,T0};
+  if(!(B>0)) return {bg:{type:"linear",conv:"casa",aw:w,casaTougaard:tg},exact:false,note:"B = 0: treated as Linear — unverified (CasaXPS region table did not recompute Tougaard from typed cells in our check)"};
+  return {bg:{type:"tougaard",u3,C:isFinite(C)?C:(u3?551:1643),D:u3?(isFinite(D)?D:0):0,T0:T0>0?T0:0,casaTougaard:tg},exact:false,note:"explicit B: INNO scales B so the background meets the high-BE end; CasaXPS uses the given B — numbers differ (not pinned)"+(!u3&&D?"; U 2 ignores D here":"")};
+}
 const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb};
+  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
