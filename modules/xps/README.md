@@ -11,6 +11,7 @@ XPS 읽기·배경·피팅·불확도·정량·survey 판별 탭. **배포본(HT
 | `src/xps_ui.js`, `src/xps.css` | 화면. v1.8: 위쪽 작업 공간 전환 **Spectra · Series · ARXPS · Imaging** + Peak Fit 옆 **Process** 탭 (SPEC.md §16) |
 | `SPEC_multi.md`, `src/xps_multi.js` · `xps_arxps.js` · `xps_image.js` | series·다변량(PCA·MLPCA·TFA·MCR-ALS·기준 NNLS) · ARXPS · 분광 영상 엔진. DOM 없음 |
 | `SPEC_proc.md`, `src/xps_proc.js` | 디컨볼루션 · 다시 표본화 · 평활/미분 · Fermi edge · 기준 봉우리 PSF 엔진. DOM 없음 |
+| `src/xps_guide.js` | v1.9.3 피팅 안내(SPEC.md §17) — Fit check(피팅 뒤 진단 R1–R9 · 한 번 누르기 조치), 영역 레시피(Ce 3d Burroughs v/u), 단계 피팅(stagedFit · 보통 피팅보다 나빠지지 않음). DOM 없음, core 다음에 주입(`xps-guide-src`, Worker 에도) |
 | `src/xps_lib.js` | 원소 라이브러리 — **생성물**(`build/build_lib.py`). 직접 고치지 말 것 |
 | `build/build_lib.py` | `data/` → `src/xps_lib.js`. 검사(Scofield 논문 대조·doublet 합·Auger 대조·순서 역전)가 어긋나면 중단 |
 | `build/assemble_core.py`, `build/extract_kherve.py` | 원자료 정리(X-ray Data Booklet 전사 · KherveFitting 수치 추출) |
@@ -26,6 +27,9 @@ XPS 읽기·배경·피팅·불확도·정량·survey 판별 탭. **배포본(HT
 | `test/stall_stress.js`, `test/stall_stress_cmp.js` | 같은 무작위 합성 스펙트럼을 한 엔진으로 피팅해 기록(옛 = `XPS_NOSTALL=1`) → 두 기록의 χ² 비·시간 비교 (SPEC §3.3b 표) |
 | `test/test_xps_casa.js` | v1.7 CasaXPS/Avantage 대응 기능 시험: 측정 선모양·LCF·기준 잡음 MC(§12), spline 배경(§2), Simplex(§14), 여러 스펙트럼 일괄(§15), at% MC(§4), CasaXPS 2.3.27 실측 대조(§2b·§13), CasaXPS·Avantage 규약 기준 대조(§2b·§2c·§1.10·§4). 약 5 분, `QUICK=1` 이면 약 40 초 |
 | `test/test_casa_v3.js` | CasaXPS 2.3.27 Round 3–6 실측 대조(SPEC_casa_v3·v4): 폭 숫자·asym 규칙, DS 넓이·위치, ST 모양·위치, 표기 왕복, casaModelToINNO. 약 2 초. `test/ref/check_casa_v4.js [core]` 는 같은 판독의 표 출력 |
+| `test/test_guide.js` | v1.9.3 피팅 안내(SPEC §17): 레시피 자료·대전 보정 고정·정렬, 2차 차분 잡음(MA(1)), 규칙마다 양성 대조, 잘 놓인 피팅 거짓 경보(270 개), 조치, 단계 피팅 '나빠지지 않음', 합성 Ce 3d(Ce³⁺ 0·20·50 %) 회복 · 순진한 Auto suggest 와 한계 닿음 비교. 약 2–3 분, `QUICK=1` 약 30 초 |
+| `test/test_real_ce.js` | 실측 사례 S3(CeO₂, 비공개 `test/data/real/ce`, 없으면 건너뜀): 순진한 피팅의 Fit check · 레시피 + 단계 피팅의 Ce³⁺·u‴ 분율·χ²ν·한계 닿음 · 대전 기준 어긋남 |
+| `test/ui_xps_guide.py` | 브라우저 실측: 위성 영역 한 줄 안내 + Recipe 선택 · 순진한 피팅 → Fit check(배지·title·Apply recipe) → 레시피 → Staged fit(Worker) → Ce³⁺·u‴ 표시 · 빠진 선 → Add a line → 다시 피팅 · 390 px |
 | `test/test_real_a2.js` | K-Alpha 실측 a2(비공개 `test/data/real/a2`, 없으면 건너뜀): Avantage 규약 v1.9.2 Smart·Shirley 배경 · Area(P) · at% · VGD prop 415 (TF 제거) — SPEC §2c·§4. src 에 avantage_a2 패치가 들어 있는지 먼저 확인 |
 | `test/ref/ref_casa.py` → `ref_casa.json` | 위 기능의 독립 기준 구현(PchipInterpolator·quad·nnls·least_squares·CubicSpline·Nelder–Mead·numpy MC) |
 | `test/ref/casa_readings.json`, `test/data/casaval/` | CasaXPS 2.3.27 화면 실측값과 그 자료(합성 + BCT C1s) — CasaXPS 코드·자료 아님 |
@@ -43,10 +47,13 @@ python3 -I test/ref/ref_xps.py           # 기준 ① 다시 만들기 (SPEC 을
 python3 -I test/ref/ref_casa.py         # 기준 (v1.7 기능, 약 25 초)
 node test/test_xps.js                    # 약 6 분
 node test/test_xps_casa.js               # 약 4 분 (QUICK=1 약 40 초)
+node test/test_guide.js                  # 약 2–3 분 (QUICK=1 약 30 초) — v1.9.3 피팅 안내
+node test/test_real_ce.js                # 실측 S3 (자료 없으면 건너뜀)
 python3 ../inject_all.py "../../INNO Analytics.html" "../../INNO Analytics.html"
 python3 test/ui_xps.py "../../INNO Analytics.html" <그림 폴더>
 python3 test/ui_xps_fixes.py "../../INNO Analytics.html" <그림 폴더>
 python3 test/ui_xps_casa.py "../../INNO Analytics.html" <그림 폴더>
 python3 test/ui_xps_multi.py "../../INNO Analytics.html" <그림 폴더>   # 약 3 분
+python3 test/ui_xps_guide.py "../../INNO Analytics.html" <그림 폴더>
 QUICK=1 node test/test_multi.js; QUICK=1 node test/test_arxps.js; node test/test_image.js; QUICK=1 node test/test_proc.js
 ```

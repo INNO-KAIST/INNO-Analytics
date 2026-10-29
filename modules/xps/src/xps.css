@@ -226,3 +226,16 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 /* 진행 막대: 비율을 모를 때 흐르는 막대 */
 .xps .xps-prog .bar.ind i{width:30%!important;animation:xpsInd 1.2s linear infinite}
 @keyframes xpsInd{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+/* v1.9.3 Fit check (SPEC §17) — 짧은 줄, 설명은 title */
+.xps .xps-chk{border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin:6px 0;font-size:11.5px}
+.xps .xps-chk-h{display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px}
+.xps .xps-chk-h>span:last-child:not(.badge){margin-left:auto;font-weight:400}
+.xps .xps-chk ul{list-style:none;margin:4px 0 0;padding:0}
+.xps .xps-chk li{display:flex;align-items:center;gap:6px;padding:2px 0;min-width:0}
+.xps .xps-chk li .tx{flex:1;min-width:0;overflow-wrap:anywhere;cursor:help}
+.xps .xps-chk li .ic{flex:none;width:15px;height:15px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;background:var(--info-soft);color:var(--info)}
+.xps .xps-chk li.warn .ic,.xps .xps-chk li.bad .ic{background:var(--warn-soft);color:var(--warn)}
+.xps .xps-chk li .btn{flex:none}
+.xps .xps-chk-d{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin:4px 0 2px}
+.xps .xps-chk-d b{font-size:13px;font-variant-numeric:tabular-nums}
+.xps .xps-chk-d>span{cursor:help}

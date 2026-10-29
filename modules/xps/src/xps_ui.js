@@ -6,6 +6,7 @@
 (function(){
 "use strict";
 const C=window.XPS_CORE, IO=window.XPS_IO;
+const GD=()=>window.XPS_GUIDE||null;   // v1.9.3 fit guidance (SPEC §17): fit check · region recipes · staged fit
 const LIB=()=>window.XPS_LIB||{core:{},scofield:{al:{},mg:{}},althermo1:{},auger:[],meta:{sources:{}}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $q=(r,s)=>r.querySelector(s), $a=(r,s)=>[...r.querySelectorAll(s)];
@@ -449,7 +450,7 @@ function workerURL(){
   const el=document.getElementById("xps-core-src"); const src=el?el.textContent:null;
   if(!src) return null;
   /* 엔진 순서: core → multi → arxps → image → proc (각 파일이 self 에 전역을 단다). xj = Series·ARXPS·Imaging·Processing 작업 */
-  const more=["xps-multi-src","xps-arxps-src","xps-image-src","xps-proc-src"].map(id=>{ const q=document.getElementById(id); return q?q.textContent:""; }).join("\n;\n");
+  const more=["xps-guide-src","xps-multi-src","xps-arxps-src","xps-image-src","xps-proc-src"].map(id=>{ const q=document.getElementById(id); return q?q.textContent:""; }).join("\n;\n");
   const body=src+"\n;\n"+more+"\nconst XJ=("+xjobs.toString()+")(self);\n"+`
 self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   let out;
@@ -460,6 +461,7 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   else if(d.cmd==="auto") out=C.autoJob(d.prob,d.opt);
   else if(d.cmd==="sens") out=C.sensJob(d.spec,d.model,d.variants);
   else if(d.cmd==="batch") out=C.batchJob(d.spec,d.model,d.opt);
+  else if(d.cmd==="staged") out=self.XPS_GUIDE.stagedJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="xj") out=XJ[d.job](d.args,(fr,t)=>self.postMessage({id:d.id,prog:fr,txt:t||""}));
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
@@ -470,7 +472,7 @@ function pool(jobs,onDone,onProg){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -924,17 +926,17 @@ function panelFit(el,sp){
      ${bg.type==="spline"?`<span class="xps-f" title="Knots = the two window ends (endpoint averages) + your knots. A knot's height is the mean of ±2 data points unless you drag it. Natural cubic spline through the knots">Knots <b id="xpsKnN">${(bg.knots||[]).length}</b>+2</span><button class="btn xs ${S.ui.knotMode?"primary":""}" id="xpsKnA" title="Then click the graph where the background is (outside peaks). Drag a knot to move it; double-click a knot to remove it">${S.ui.knotMode?"Click the graph…":"+ Knot"}</button><button class="btn xs" id="xpsKnR" title="Return dragged knot heights to the local data mean">Auto heights</button><button class="btn xs" id="xpsKnC" title="Remove all knots (straight line between the window ends)">Clear</button>`:""}</div>
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
-   <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}
-   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>
+   <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}${recipeBanner(sp,p)}
+   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>
    <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>Auto suggest</b> 또는 그래프 위 <b>+ Add component</b> 로 직접 놓으세요.</div>`}</div>
    ${refHTML(sp,p)}
    <hr class="xps-hr">
    <div class="xps-h">Fit</div>
-   <div class="xps-row"><button class="btn primary sm" id="xpsFit" title="Least-squares fit of the current components (LM + 2-pass IRLS weighting)">Fit</button><button class="btn sm" id="xpsMulti" title="Start from many points spread evenly within the bounds of the nonlinear parameters → keep the lowest χ²">Multi-start</button><span class="xps-f"><input type="number" class="w56" id="xpsStarts" min="2" max="400" value="${S.ui.starts||24}"> runs</span>
+   <div class="xps-row"><button class="btn primary sm" id="xpsFit" title="Least-squares fit of the current components (LM + 2-pass IRLS weighting)">Fit</button><button class="btn sm" id="xpsMulti" title="Start from many points spread evenly within the bounds of the nonlinear parameters → keep the lowest χ²">Multi-start</button><span class="xps-f"><input type="number" class="w56" id="xpsStarts" min="2" max="400" value="${S.ui.starts||24}"> runs</span><button class="btn sm" id="xpsStaged" title="For many overlapping lines: (1) heights only, (2) positions within their ranges with widths linked, (3) your constraints. The normal fit from the same start runs too and the lower χ² (data-variance χ²_d) is kept, so it is never worse than Fit (SPEC §17.4)">Staged fit</button>
      <select class="xps-sel" id="xpsOpt" title="Optimizer — Marquardt: Levenberg–Marquardt (default, fast). Simplex: Nelder–Mead, derivative-free (slower; for rough χ² surfaces). Both reach the same minimum on well-posed fits"><option value="lm" ${p.optimizer!=="simplex"?"selected":""}>Marquardt</option><option value="simplex" ${p.optimizer==="simplex"?"selected":""}>Simplex</option></select>
      <select class="xps-sel" id="xpsW" title="Weighting — Poisson: variance ∝ intensity (raw counts). Constant: equal weight for every point (background-subtracted or processed data)"><option value="poisson" ${p.weight!=="const"?"selected":""}>Poisson weight</option><option value="const" ${p.weight==="const"?"selected":""}>Constant weight</option></select>
      <button class="btn sm" id="xpsMC" title="Re-add noise to the best model and refit → 95 % confidence intervals (uncertainty for reporting)">Monte Carlo uncertainty</button><span class="xps-f"><input type="number" class="w56" id="xpsMCN" min="20" max="5000" value="${S.ui.mcN||200}"> runs</span></div>
-   ${r?fitStrip(r,sp):`<div class="muted xs">Weighting: ${p.weight==="const"?"constant (척도는 잔차에서 추정)":sp.c?`Poisson (${esc(sp.cSrc)})`:"quasi-Poisson (척도는 잔차에서 추정)"} · LM${p.weight==="const"?"":" + 2-pass IRLS"}</div>`}
+   ${r?fitStrip(r,sp)+checkHTML(sp,p):`<div class="muted xs">Weighting: ${p.weight==="const"?"constant (척도는 잔차에서 추정)":sp.c?`Poisson (${esc(sp.cSrc)})`:"quasi-Poisson (척도는 잔차에서 추정)"} · LM${p.weight==="const"?"":" + 2-pass IRLS"}</div>`}
    <div class="xps-row" style="margin-top:6px"><button class="btn xs" id="xpsSnap" ${r&&!r.stale?"":"disabled"} title="Save this fit to the model-comparison list">Save to model comparison</button><span class="muted xs">저장한 모형은 Results 탭에서 AICc·BIC 로 비교</span></div>
    ${batchPanelHTML(sp,p)}`;
   // 영역
@@ -970,7 +972,7 @@ function panelFit(el,sp){
   $q(el,"#xpsStarts").onchange=e=>{ S.ui.starts=Math.max(2,Math.min(400,+e.target.value||24)); save(); };
   $q(el,"#xpsMCN").onchange=e=>{ S.ui.mcN=Math.max(20,Math.min(5000,+e.target.value||200)); save(); };
   $q(el,"#xpsSnap").onclick=()=>snapshotModel(sp,p);
-  bindComps(el,sp,p);
+  bindComps(el,sp,p); bindGuide(el,sp,p);
 }
 /* 배경 경고: Tougaard 음의 세기(0 으로 둠), 정적 배경의 넓이 편향 */
 function bgWarn(sp,p){
@@ -1057,11 +1059,75 @@ function fitStrip(r,sp){
   if(r.stale){ w+=`<div class="note warn" style="margin-top:4px">피팅 뒤 성분·영역을 바꿨습니다 — 위 숫자는 <b>이전 모형</b>의 값입니다. <b>Fit</b> 을 다시 누르세요.</div>`; return `<div class="strip stale">${parts.join("")}</div>${w}`; }
   if(r.stop==="stalled") w+=stallNote(r,nm,shOf(sp));
   if(r.branch) w+=rescueNote(r,nm,shOf(sp));
-  if(at.length) w+=`<div class="note warn" style="margin-top:4px"><b>한계에 닿은 매개변수</b>: ${at.map(a=>esc(atTxt(a))).join(", ")}<br>이 값은 데이터가 아니라 한계가 정한 값이라 σ 를 계산하지 않습니다. 넓이가 하한 0 이면 그 성분을 빼고 다시 피팅하세요. Δ·FWHM·BE 등이 물리적 한계에 붙었다면 모형(성분 수·배경·모양)이 데이터와 맞지 않는다는 신호입니다.</div>`;
+  // 한계에 닿은 매개변수: v1.9.3 부터 Fit check(SPEC §17.1 R1)가 이름·한계·권하는 조치와 함께 보인다
   if(r.lcf&&r.lcf.warn) w+=`<div class="note warn" style="margin-top:4px">기준 스펙트럼끼리 너무 닮았습니다(κ ${f(r.lcf.cond,0)}) — 분율의 불확도가 큽니다. 기준을 줄이거나 Monte Carlo 로 구간을 확인하세요.</div>`;
   if(st.chi2nu>3) w+=`<div class="note warn" style="margin-top:4px">χ²ν 가 큽니다 — 성분이 부족하거나 배경·모양이 맞지 않을 수 있습니다(잔차 그림 확인).</div>`;
   if(r.cov&&r.cov.singular) w+=`<div class="note warn" style="margin-top:4px">공분산 행렬이 특이에 가깝습니다 — 서로 구별되지 않는 매개변수가 있습니다(Results 탭의 Parameter Correlation Matrix).</div>`;
   return `<div class="strip">${parts.join("")}</div>${w}`;
+}
+/* ============================================================
+   v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
+   ============================================================ */
+const CHECK_V=1;
+const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions. Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
+function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
+function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
+  return `<select class="xps-sel" id="xpsRcpO" title="${esc(R.name+" — literature starting model with doublet links (ΔE shared, u/v area 2/3, equal widths), window and background. "+R.cite)}">${R.options.map(o=>`<option value="${o.id}" ${o.id===cur_?"selected":""}>${esc(o.label)}</option>`).join("")}</select><button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe (anchored to the charge correction; lines aligned to the data within ±3 eV). Pitfalls: "+R.pitfalls)}">Recipe</button>`; }
+function recipeBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!r.el) return ""; const ci=G_.complexInfo(r.el,r.orb); if(!ci||(ci.kind==="multiplet"&&!ci.recipes.length)) return "";
+  const rc=ci.recipes.length?G_.recipeById(ci.recipes[0]):null; const inUse=rc&&p.comps.some(c=>c.recipe===rc.id);
+  if(inUse){ const m=p.recipe||{}; return `<div class="muted xs" style="margin:2px 0 4px" title="${esc(rc.pitfalls+"\n"+rc.cite)}">Recipe model: ${esc(rc.name)}${m.label?" · "+esc(m.label):""}${m.align!=null&&Math.abs(m.align)>0.05?` · aligned ${m.align>0?"+":""}${f(m.align,2)} eV`:""} ⓘ</div>`; }
+  return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?" — literature recipe available (Recipe)":""} ⓘ</div>`; }
+function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&GD().recipeById(id); if(!R) return; let M;
+  try{ M=GD().recipeModel(id,{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
+  pushHist(p,"Recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; S.ui.rcpOpt=M.recipe.opt; touch(p); rerender();
+  const a=M.recipe.align, far=Math.abs(a)>0.5;
+  note(`${R.name} · ${M.recipe.label}: ${M.comps.length} pairs, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the charge-corrected literature positions — check the charge correction (differential charging?).`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); }
+async function runStaged(spArg){
+  const sp=spArg&&spArg.uid?spArg:cur(); if(!sp) return; const p=pr(sp);
+  if(!p.comps.length){ note("No components — use Auto suggest or Recipe first","warn"); return; }
+  if(RUN){ note("Already computing","warn"); return; }
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn"); return; }
+  pushHist(p,"Staged fit"); const hEnt=p.hist[p.hist.length-1]; const t0=performance.now(), ver=p.ver;
+  try{ setProg("Staged fit: heights → positions → all, plus the normal fit…",null);
+    const [fin]=await pool([{cmd:"staged",prob,opt:{}}],null,d=>setProg(`Staged fit… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
+    if(!fin) throw new Error("no result");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn"); return; }
+    p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; save(); hideProg(); rerender();
+    const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn");
+  }catch(e){ hideProg(); RUN=null; note("Staged fit stopped: "+(e.message||e),"warn"); }
+}
+function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free) return null; const sh=shOf(sp);
+  if(r.check&&r.check.sh===sh&&r.check.v===CHECK_V) return r.check.items;
+  const R=C.sliceRegion(sp.be,sp.y,r.lo!=null?r.lo:p.lo,r.hi!=null?r.hi:p.hi); if(!R||R.E.length!==r.mu.length) return null;
+  const rg=sp.reg||{}; const so=rg.el?soInfo(rg.el,rg.orb):null; const rc=(r.comps||[]).find(c=>c.recipe); let items=[];
+  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE}); }catch(e){ console.error(e); return null; }
+  r.check={sh,v:CHECK_V,items}; return items; }
+function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
+  const dv=GD().recipeDerived(r,{id:R.id}).filter(d=>d.v!=null); if(!dv.length) return "";
+  return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" title="${esc(d.tip)}">${esc(d.label)} <b>${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
+function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
+  const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
+  const st=s?`<span class="muted xs" title="${esc(`Staged fit (SPEC §17.4): stage χ² ${s.stages.map(q=>g(q.chi2,5)).join(" → ")}; data-variance χ²_d staged ${g(s.chi2dStaged,6)} vs normal fit ${g(s.chi2dNormal,6)} — the lower one is kept`)}">staged: kept ${esc(s.used)} ⓘ</span>`:"";
+  const rows=items.map((x,i)=>`<li class="${x.sev}"><span class="ic">${x.sev==="info"?"i":"!"}</span><span class="tx" title="${esc(x.tip)}">${esc(x.label)} ⓘ</span>${x.act?`<button class="btn xs" data-chk="${i}">${esc(x.act.label)}</button>`:""}</li>`).join("");
+  return `<div class="xps-chk" id="xpsChk"><div class="xps-chk-h"><span title="${esc(CHECK_HELP)}">Fit check ⓘ</span>${nW?`<span class="badge wr">${nW}</span>`:`<span class="badge ok">OK</span>`}${st}</div>${derivedHTML(p)}${rows?`<ul>${rows}</ul>`:`<div class="muted xs">No issues found.</div>`}</div>`; }
+function applyCheck(sp,p,act){ if(!act) return;
+  if(act.type==="staged"){ runStaged(sp); return; }
+  if(act.type==="recipe"){ applyRecipe(sp,act.recipe,S.ui.rcpOpt||"mix"); return; }
+  pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
+  try{ msg=GD().applyAction(m,act,{be0:sp.be[0],be1:sp.be[sp.n-1]}); }catch(e){ note(e.message,"warn"); return; }
+  if(msg==null){ p.hist.pop(); note("Could not apply: "+act.label,"warn"); return; }
+  p.lo=m.lo; p.hi=m.hi; p.bg=m.bg; p.comps=m.comps; p.cons=m.cons;
+  p.comps.forEach(c=>{ if(c.slot==null){ if(!c.name) c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } });
+  if(act.type==="bg") S.ui.knotMode=false;
+  touch(p); rerender(); note(`${act.label}: done — press Fit to refit`,"ok",{label:"Fit",fn:()=>runFit("one",sp)}); }
+function bindGuide(el,sp,p){
+  const st=$q(el,"#xpsStaged"); if(st) st.onclick=()=>runStaged(sp);
+  const ro=$q(el,"#xpsRcpO"); if(ro) ro.onchange=()=>{ S.ui.rcpOpt=ro.value; save(); };
+  const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>applyRecipe(sp,ra.dataset.rcp,(ro&&ro.value)||S.ui.rcpOpt||"mix");
+  const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.act); });
 }
 function compCard(sp,p,c,ci){
   const sel=S.ui.selComp===c.id, sh=shOf(sp); const r=p.result&&!p.result.stale?p.result:null;
@@ -2478,7 +2544,7 @@ function drawWS(){ if(!ROOT) return; const ws=S.ui.ws||"spectra"; const main=$q(
   else box.innerHTML="";
   placeShared(); drawMsg(); }
 
-window.XPS_UI={render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
+window.XPS_UI={_staged:sp=>runStaged(sp||cur()),_recipe:(id,opt)=>applyRecipe(cur(),id,opt),_check:()=>{ const sp=cur(); return sp?checkOf(sp,pr(sp)):null; },_applyCheck:i=>{ const sp=cur(), p=pr(sp); const it=checkOf(sp,p); if(it&&it[i]) applyCheck(sp,p,it[i].act); },render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
   /* v1.8 Series · ARXPS · Imaging · Processing (시험용 손잡이) */
   _res:()=>RES,_pres:()=>PRES,_ims:()=>IMS,_drawWS:()=>drawWS(),_ser:{compute:q=>serCompute(q),pca:()=>serPCA(),resolve:()=>serResolve(),build:()=>buildSet(SER()),tt:()=>ttRows(),profiles:()=>resolveProfiles(),applyFit:r=>{ const D=buildSet(SER()); const rs=D&&D.regions.find(x=>x.region===r); return rs?serApplyFit(rs):null; }},
   _arx:{get:()=>arxIntensities(),ov:()=>arxFitOv(),ml:()=>arxFitMl(),rdp:()=>arxRDP(),me:()=>arxMaxent(),al:k=>arxAL(arxKE(k))},

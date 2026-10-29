@@ -86,13 +86,13 @@ edjs=''.join(rd(f'{ED}/{f}')+'\n' for f in ('ed_data.js','ed_core.js','ed_ui.js'
 core=rd(f'{DR}/dre_core.js'); ui=rd(f'{DR}/dre_ui.js'); ifjs=rd(f'{IF}/interf_suggest.js')
 assert os.path.exists(f'{XP}/xps_lib.js'), 'xps_lib.js 없음: python3 -I modules/xps/build/build_lib.py 먼저'
 xlib=rd(f'{XP}/xps_lib.js'); xio=rd(f'{XP}/xps_io.js'); xcore=rd(f'{XP}/xps_core.js'); xui=rd(f'{XP}/xps_ui.js')
-# XPS 엔진(v1.8): core → multi → arxps → image → proc 순서. 페이지 전역 + XPS 탭 Worker(xps_ui.js workerURL 가 이 태그들의 글을 이어 붙임)
-xmulti=rd(f'{XP}/xps_multi.js'); xarx=rd(f'{XP}/xps_arxps.js'); ximg=rd(f'{XP}/xps_image.js'); xproc=rd(f'{XP}/xps_proc.js')
+# XPS 엔진(v1.8; v1.9.3 guide): core → guide → multi → arxps → image → proc 순서. 페이지 전역 + XPS 탭 Worker(xps_ui.js workerURL 가 이 태그들의 글을 이어 붙임)
+xguide=rd(f'{XP}/xps_guide.js'); xmulti=rd(f'{XP}/xps_multi.js'); xarx=rd(f'{XP}/xps_arxps.js'); ximg=rd(f'{XP}/xps_image.js'); xproc=rd(f'{XP}/xps_proc.js')
 icore=''.join(rd(os.path.join(IM,'core',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'core'))) if f.endswith('.js'))
 iio=rd(f'{IM}/zstd_vendor.js')+'\n'+rd(f'{IM}/img_io.js')+'\n'+rd(f'{IM}/img_micro.js')+'\n'+rd(f'{IM}/img_afm.js')+'\n'+rd(f'{IM}/img_lif.js')+'\n'+rd(f'{IM}/img_oir.js'); iui='(function(){\n"use strict";\n'+''.join(rd(os.path.join(IM,'ui',f))+'\n' for f in sorted(os.listdir(os.path.join(IM,'ui'))) if f.endswith('.js'))+'})();\n'
 DFS=[('diff-src-sg','diff_sg.js'),('diff-src-scat','diff_scat.js'),('diff-src-core','diff_core.js'),('diff-src-dyn','diff_dyn.js'),('diff-src-ocr','diff_ocr.js'),('diff-src-pattern','diff_pattern.js'),('diff-src-index','diff_index.js'),('diff-pack','diff_pack.js'),('diff-db','diff_db.js'),('diff-db-ui','diff_db_ui.js'),('diff-work','diff_work.js'),('diff-ui','diff_ui.js')]
 dfjs=[(i,rd(f'{DF}/{fn}')) for i,fn in DFS if os.path.exists(f'{DF}/{fn}')]
-for name,src in tuple(dfjs)+(('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_multi',xmulti),('xps_arxps',xarx),('xps_image',ximg),('xps_proc',xproc),('xps_ui',xui)):
+for name,src in tuple(dfjs)+(('touch',tjs),('img_core',icore),('img_io',iio),('img_ui',iui),('ed',edjs),('dre_core',core),('dre_ui',ui),('interf',ifjs),('xps_lib',xlib),('xps_io',xio),('xps_core',xcore),('xps_guide',xguide),('xps_multi',xmulti),('xps_arxps',xarx),('xps_image',ximg),('xps_proc',xproc),('xps_ui',xui)):
     assert '</script' not in src.lower(), name+': script 종료 태그'
     # 문법 확인 (node 가 있으면): 주석이 코드를 삼키는 등의 편집 실수를 주입 전에 막음
     import shutil as _sh, subprocess as _sp, tempfile as _tf
@@ -103,7 +103,7 @@ for name,src in tuple(dfjs)+(('touch',tjs),('img_core',icore),('img_io',iio),('i
 body=('<!-- INNO-ED:BEGIN js -->\n<script id="ed-js">\n'+edjs+'</script>\n<!-- INNO-ED:END -->\n'
       '<!-- INNO-DRE:BEGIN js -->\n<script id="dre-core-src">\n'+core+'</script>\n<script id="dre-ui">\n'+ui+'</script>\n<!-- INNO-DRE:END -->\n'
       '<!-- INNO-IF:BEGIN js -->\n<script id="interf-suggest">\n'+ifjs+'</script>\n<!-- INNO-IF:END -->\n'
-      '<!-- INNO-XPS:BEGIN js -->\n<script id="xps-lib">\n'+xlib+'</script>\n<script id="xps-io">\n'+xio+'</script>\n<script id="xps-core-src">\n'+xcore+'</script>\n<script id="xps-multi-src">\n'+xmulti+'</script>\n<script id="xps-arxps-src">\n'+xarx+'</script>\n<script id="xps-image-src">\n'+ximg+'</script>\n<script id="xps-proc-src">\n'+xproc+'</script>\n<script id="xps-ui">\n'+xui+'</script>\n<!-- INNO-XPS:END -->\n'
+      '<!-- INNO-XPS:BEGIN js -->\n<script id="xps-lib">\n'+xlib+'</script>\n<script id="xps-io">\n'+xio+'</script>\n<script id="xps-core-src">\n'+xcore+'</script>\n<script id="xps-guide-src">\n'+xguide+'</script>\n<script id="xps-multi-src">\n'+xmulti+'</script>\n<script id="xps-arxps-src">\n'+xarx+'</script>\n<script id="xps-image-src">\n'+ximg+'</script>\n<script id="xps-proc-src">\n'+xproc+'</script>\n<script id="xps-ui">\n'+xui+'</script>\n<!-- INNO-XPS:END -->\n'
       '<!-- INNO-IMG:BEGIN js -->\n<script id="img-core-src">\n'+icore+'</script>\n<script id="img-io">\n'+iio+'</script>\n<script id="img-ui">\n'+iui+'</script>\n<!-- INNO-IMG:END -->\n'
       '<!-- INNO-DIFF:BEGIN js -->\n'+''.join('<script id="'+i+'">\n'+t+'</script>\n' for i,t in dfjs)+'<!-- INNO-DIFF:END -->\n')
 k=s.index('<script>window.INNO_UX') if '<script>window.INNO_UX' in s else s.rindex('</body>')
