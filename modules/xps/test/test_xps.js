@@ -88,6 +88,18 @@ console.log("== 3 파일 읽기 회귀");
     let mx=0; for(let i=0;i<n;i++) mx=Math.max(mx,Math.abs(s.y[i]*s.c-s.yRaw[i])); ok(mx<1e-9,`VGD ${f}: CPS × c = VGData`); }
   const s=(await IO.readFile("C1s_Scan.VGD",new Uint8Array(fs.readFileSync(k+"C1s_Scan.VGD")))).spectra[0];
   const T=[200,600,1000,1400].map(KE=>C.tfValue(s.meta.tf,KE,50)); ok(T.every((t,i)=>i===0||t<T[i-1]),"VGD transmission 계수 → T(KE) 단조 감소 (CAE 모드 물리)",T.map(t=>t.toFixed(2)).join(" > "));
+  // VGD prop 415 (Acq_TXFN_Correction, bool) · 416 (모드): TF 를 측정 때 제거한 파일 → meta.tfRemoved (정량에서 TF 를 다시 나누지 않음, avantage_a2_patch §5)
+  { const u=new Uint8Array(fs.readFileSync(k+"C1s_Scan.VGD")), cfb=IO.cfbOpen(u); let loc=null;
+    // 415 값(VT_BOOL)의 자리: 속성 묶음 스트림 안 오프셋 → 같은 64 바이트 조각을 파일에서 찾아(유일) 그 자리를 false 로 바꾼 사본
+    cfb.list().filter(p=>/^\u0005/.test(p.split("/").pop())&&!/SummaryInformation/.test(p)).forEach(p=>{ const b=cfb.read(p), V=new DataView(b.buffer,b.byteOffset,b.byteLength); if(b.length<48) return;
+      for(let q=0;q<V.getUint32(24,true);q++){ const so=V.getUint32(44+20*q,true), np=V.getUint32(so+4,true);
+        for(let i=0;i<np;i++) if(V.getUint32(so+8+8*i,true)===415){ const vo=so+V.getUint32(so+12+8*i,true); if(V.getUint16(vo,true)===11) loc={b,vo}; } } });
+    let hits=[], m=null; if(loc){ const bs=loc.vo-loc.vo%64, pat=loc.b.subarray(bs,Math.min(loc.b.length,bs+64)); m=loc.vo-bs+4;
+      for(let i=0;i+pat.length<=u.length&&hits.length<2;i++){ let j=0; while(j<pat.length&&u[i+j]===pat[j]) j++; if(j===pat.length) hits.push(i); } }
+    const u2=u.slice(); if(hits.length===1){ u2[hits[0]+m]=0; u2[hits[0]+m+1]=0; }
+    const s2=hits.length===1?(await IO.readFile("C1s_Scan.VGD",u2)).spectra[0]:null;
+    ok(s.meta.tfRemoved===true&&s.meta.tfMode===3&&/removed at acquisition/.test(s.meta.tf.src)&&s.meta.tf.coef.length===4,"VGD prop 415 = true · 416 = 3 → meta.tfRemoved, tfMode 3 (TF coefficients kept for information)",`tfRemoved ${s.meta.tfRemoved}, tfMode ${s.meta.tfMode}`);
+    ok(s2&&s2.meta.tfRemoved===false&&s2.meta.tfMode===3&&!/removed/.test(s2.meta.tf.src)&&s2.n===s.n,"VGD copy with prop 415 = false → meta.tfRemoved false (TF from the file applies)",`hits ${hits.length}, tfRemoved ${s2&&s2.meta.tfRemoved}`); }
 }
 
 console.log("== 4 라이브러리");

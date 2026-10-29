@@ -3,7 +3,7 @@
 1 성분 모양 선택에 새 모양(TLA · GL(m,n) · SGL(m,n) · TP) → TLA 로 바꿔 피팅(합성 TLA 자료, 참값 회복)
 2 GL(m,n) 꼬리 선택 T/PHI → 매개변수 칸   3 수식어 ST/SB → 칸·기본 고정   4 CasaXPS 표기 입력(ST(1)LA(1,143), DS(0.3,600,40), TP(1,15,0)) · 오류 문구
 5 칸 편집(μ) → 상태 반영   6 GL(30,50)T(2) · ST(1)LA(1,143) 로 피팅   7 390 px 가로 넘침 없음 · 콘솔 오류 없음
-8 멈춤 규칙(SPEC §3.3b): 정지 이유가 Worker 결과에 실림 · 'stalled' 결과 → 한 줄 알림(매개변수 이름) + title 자세히 + 'Stalled' 칸"""
+8 멈춤 규칙(SPEC §3.3b): 정지 이유가 Worker 결과에 실림 · 'stalled' 결과 → 한 줄 알림(매개변수 이름) + title 자세히 + 'Stalled' 칸 · 8b 갇힌 매개변수 되돌림(branch) 알림"""
 import sys, os, json, tempfile, math, random
 from playwright.sync_api import sync_playwright
 
@@ -139,11 +139,14 @@ with sync_playwright() as p:
           and 'not recognised' in m4 and before == after, [c4.get('casaN'), wg_dis, c4b.get('dsl'), ta_btn, m4[:80]])
 
     # ---- 5 칸 편집
-    # ---- 4c CasaXPS 줄 (SPEC_casa_v3 §3): 꼭대기 매끈(TLA) → fwhm·asym 그대로(정함), 꺾인 꼭대기 LA(2,3,0) → '≈' (경험값)
+    # ---- 4c CasaXPS 줄 (SPEC_casa_v4 §2–§3): 꼭대기 매끈(TLA)·꺾인 꼭대기 LA(2,3,0) 모두 fwhm·asym 정함 → '≈' 없음; DS 는 피팅 창으로 CasaXPS Area
     eqt = lambda: J(f"(()=>{{ const e=document.querySelector('[data-casaeq=\"{cid()}\"]'); return e?e.textContent:null; }})()")
+    casa('DS(0.1,100)'); t4ds = eqt()
+    dsA = J("(()=>{ const p=XPS_UI._pr(), s=XPS_UI._cur(), c=p.comps[0], R=XPS_CORE.sliceRegion(s.be,s.y,p.lo,p.hi), a=R.E[0], b=R.E[R.E.length-1]; return c.area*XPS_CORE.dsCasaAreaFactor(c,Math.min(a,b),Math.max(a,b)); })()")
     casa('LA(2,3,0)'); t4la = eqt(); casa('TLA(1.3,3,0)'); t4tla = eqt()
-    check("4c CasaXPS line under the component: TLA(1.3,3,0) shows fwhm and asym without '≈' (pinned); LA(2,3,0) shows 'fwhm ≈ …, asym ≈ …' (empirical)",
-          t4tla and 'TLA(1.3,3,0)' in t4tla and 'asym' in t4tla and '≈' not in t4tla and t4la and 'fwhm ≈' in t4la and 'asym ≈' in t4la, [t4tla, t4la])
+    check("4c CasaXPS line under the component: TLA(1.3,3,0) and LA(2,3,0) show fwhm and asym without '≈' (pinned rule); DS(0.1,100) shows the CasaXPS area (INNO window area × dsCasaAreaFactor)",
+          t4tla and 'TLA(1.3,3,0)' in t4tla and 'asym' in t4tla and '≈' not in t4tla and t4la and 'LA(2,3,0)' in t4la and 'asym' in t4la and '≈' not in t4la
+          and t4ds and 'DS(0.1,100)' in t4ds and dsA and f'area {dsA:.1f}' in t4ds, [t4tla, t4la, t4ds, dsA])
     pg.fill('input[data-p="mu"]', '2.5'); pg.press('input[data-p="mu"]', 'Enter'); pg.wait_for_timeout(200)
     check('5 editing the μ field updates the component', abs(cur()['mu'] - 2.5) < 1e-12, cur()['mu'])
 
@@ -169,6 +172,14 @@ with sync_playwright() as p:
     J("(()=>{ const n=Array.from(document.querySelectorAll('.note.warn')).find(e=>e.textContent.indexOf('진전 멈춤')>=0); if(n) n.scrollIntoView({block:'center'}); })()"); pg.wait_for_timeout(150)
     pg.screenshot(path=os.path.join(out, 's2_08_stalled.png'), full_page=False)
     J("(()=>{ const r=XPS_UI._pr().result; r.stop='converged'; r.stall=null; XPS_UI.rerender(); })()")
+    # 8b 갇힌 매개변수를 시작값에서 다시 푼 결과(r.branch, SPEC §3.3b v1.9.2) → 한 줄 알림(되돌린 매개변수 이름) + title 에 값·χ² 변화; 결과에 branch 가 실려 옴(정상 피팅은 null)
+    br8 = J('(()=>{ const r=XPS_UI._pr().result; return r.branch===undefined?"missing":r.branch; })()')
+    J("(()=>{ const p=XPS_UI._pr(), r=p.result, c=r.comps[0]; r.branch={kind:'rescue',reset:[{id:c.id,ci:0,k:'F',from:0.05,to:1.2}],flags:[{id:c.id,ci:0,k:'F',p:0.05,lo:0.05,hi:10,why:['bound','flat']}],Xinc:2083,X:1958.5,at:28,cut:true}; XPS_UI.rerender(); })()")
+    pg.wait_for_timeout(250)
+    n8b = J("(()=>{ const ns=Array.from(document.querySelectorAll('.note')).filter(e=>e.textContent.indexOf('시작값에서 다시')>=0); return {n:ns.length, text:ns[0]&&ns[0].textContent, title:ns[0]&&ns[0].title, warn:!!(ns[0]&&ns[0].classList.contains('warn'))}; })()")
+    check("8b a fit whose trapped parameter was reset (result.branch, null after a normal fit) shows one short Korean notice naming the reset parameter; the tooltip gives the old/start values, why (bound/flat) and the χ² change",
+          br8 is None and n8b['n'] == 1 and 'FWHM' in (n8b['text'] or '') and len(n8b['text'] or '') < 120 and '한계 근처' in (n8b['title'] or '') and '2,083' in (n8b['title'] or '') and '1,958.5' in (n8b['title'] or '') and 'SPEC §3.3b' in (n8b['title'] or '') and not n8b['warn'], [br8, n8b])
+    J("(()=>{ const r=XPS_UI._pr().result; r.branch=null; XPS_UI.rerender(); })()")
 
     # ---- 7 390 px
     pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(400)

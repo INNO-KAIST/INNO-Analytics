@@ -154,6 +154,28 @@ with sync_playwright() as p:
     st4 = J("(()=>{ const S=XPS_UI._state(); const v=S.specs.filter(x=>x.format==='VGD'); const g=r=>v.find(x=>x.region===r); const sm=S.samples[v[0].sample]; return {sel:XPS_UI._cur().region, refRegion:S.specs.find(x=>x.uid===sm.ref.uid).region, shift:sm.shift, o1s:XPS_UI._pr(g('O 1s')).comps.length, ba:XPS_UI._pr(g('Ba 4d')).comps.length, c1s:!!(XPS_UI._pr(g('C 1s')).result)}; })()")
     check('4 calibrate while switching spectrum: fits C 1s only, view stays where the user went', st4['refRegion'] == 'C 1s' and st4['c1s'] and st4['o1s'] == 0 and st4['ba'] == 0 and st4['sel'] == 'O 1s' and abs(st4['shift'] - 0.159) < 0.05, st4)
 
+    # ---- 11 (v1.9.2): K2312 VGD 는 prop 415 = true (TF 를 측정 때 제거) → 'auto' 에서 TF 를 다시 나누지 않음 + 짧은 배지(설명은 title)
+    J("(()=>{ const S=XPS_UI._state(); S.quant.tf={model:'auto'}; S.ui.tab='quant'; XPS_UI.rerender(); })()"); pg.wait_for_timeout(300)
+    k11 = J("XPS_UI._state().specs.find(x=>x.format==='VGD').sample")
+    q11 = J(f"XPS_UI._quantRows({json.dumps(k11)}).filter(r=>r.sp.format==='VGD').map(r=>({{el:r.el,tf:r.tf.model,rm:!!r.tf.removed,meta:r.sp.meta.tfRemoved}}))")
+    b11 = J("(()=>{ const b=document.querySelector('[data-tfrm=\"panel\"]'); const t=[...document.querySelectorAll('#xpsPanel table.xq-tbl td.num')].map(e=>e.textContent); return b?{text:b.textContent, title:b.title, prof:!!document.querySelector('#xqProf')}:null; })()")
+    J("(()=>{ const S=XPS_UI._state(); S.quant.tf={model:'power',x:1}; XPS_UI.rerender(); })()"); pg.wait_for_timeout(200)
+    w11 = J("(()=>{ const b=document.querySelector('[data-tfrm=\"power\"]'); return b?b.textContent:null; })()")
+    J("(()=>{ const S=XPS_UI._state(); S.quant.tf={model:'auto'}; S.ui.tab='fit'; XPS_UI.rerender(); })()"); pg.wait_for_timeout(200)
+    check("11 VGD with TF removed at acquisition (prop 415): 'auto' transmission applies none (T = 1) for every VGD row; short badge, explanation in the tooltip; no 'Use VGD transmission' button; forcing (PE/KE)^x warns",
+          len(q11) >= 4 and all(r['tf'] == 'none' and r['rm'] and r['meta'] for r in q11) and b11 and 'TF already removed at acquisition' in b11['text'] and len(b11['text']) < 50
+          and 'prop 415' in b11['title'] and '9.8 at%' in b11['title'] and not b11['prof'] and w11 and 'twice' in w11, [q11[:2], b11 and b11['text'], w11])
+
+    # ---- 12 (v1.9.2): Avantage 규약 Shirley 가 데이터 위로 지나는 경고 (avantage_a2_patch §4) — K2312 O 1s 전체 창: above 60 % → 강한 경고, Ta 4d: 경고 없음
+    def avwarn(region, typ):
+        J(f"(()=>{{ const S=XPS_UI._state(); const s=S.specs.filter(x=>x.format==='VGD'&&x.region==='{region}').pop(); S.sel=s.uid; const p=XPS_UI._pr(s); p.lo=s.be[0]; p.hi=s.be[s.n-1]; p.bg={{type:'{typ}',conv:'avantage',avgEV:0.5}}; p.ver=(p.ver||0)+1; S.ui.tab='fit'; XPS_UI.rerender(); }})()")
+        pg.wait_for_timeout(300)
+        return J("(()=>{ const e=document.querySelector('[data-avwarn]'); return e?{kind:e.dataset.avwarn, text:e.textContent, title:e.title}:null; })()")
+    w12o, w12t, w12s = avwarn('O 1s', 'shirley'), avwarn('Ta 4d', 'shirley'), avwarn('O 1s', 'smart')
+    check("12 Avantage-convention Shirley above the data over most of the window (K2312 O 1s): one-line strong warning 'use Smart', numbers in the tooltip; none for Ta 4d Shirley or O 1s Smart",
+          w12o and w12o['kind'] == 'strong' and 'use Smart' in w12o['text'] and len(w12o['text']) < 70 and 'above the smoothed data on 60 %' in w12o['title'] and w12t is None and w12s is None, [w12o, w12t, w12s])
+    pg.screenshot(path=os.path.join(out, 'f12_avantage_warn.png'), full_page=True)
+
     # ---- 7 · 9: 텍스트 파일 (KE · 쉼표 소수 · 배경 뺀 자료)
     pg.set_input_files('#xpsFin', [f_ke, f_cd, f_bs])
     pg.wait_for_function("['KE-1','CD-1','BS-1'].every(k=>XPS_UI._state().specs.some(s=>s.sample===k))", timeout=20000); pg.wait_for_timeout(300)

@@ -138,8 +138,10 @@ function applyAxis(sp,axis,hv){
    보이는 모형 (피팅 전에도 지금 성분으로 계산)
    ============================================================ */
 function region(sp,p){ return C.sliceRegion(sp.be,sp.y,p.lo,p.hi); }
+/* 피팅 창의 BE 끝 (compEval 이 정규화하는 창 — DS 의 CasaXPS 넓이 환산용, SPEC_casa_v4 §2) */
+function winOf(sp,p){ const R=region(sp,p); if(!R||R.E.length<2) return null; const a=R.E[0], b=R.E[R.E.length-1]; return {emin:Math.min(a,b),emax:Math.max(a,b)}; }
 /* 배경 설정 + CasaXPS 규약이면 끝점 평균(창 밖 채널 포함, 전체 스펙트럼에서) */
-function bgOf(sp,p,R){ const av=p.bg.conv==="avantage"&&p.bg.type==="smart"; if(p.bg.conv!=="casa"&&!av) return p.bg; R=R||region(sp,p); if(!R) return p.bg; return av?Object.assign({},p.bg,{_pad:C.avantagePad(sp.y,R.i0,R.i1)}):Object.assign({},p.bg,{_ends:C.casaEnds(sp.be,sp.y,R.i0,R.i1,p.bg.aw!=null?p.bg.aw:1)}); }
+function bgOf(sp,p,R){ const av=p.bg.conv==="avantage"&&(p.bg.type==="smart"||p.bg.type==="shirley"); if(p.bg.conv!=="casa"&&!av) return p.bg; R=R||region(sp,p); if(!R) return p.bg; return av?Object.assign({},p.bg,{_pad:C.avantagePad(sp.y,R.i0,R.i1,C.avantageHalf(p.bg,R.E))}):Object.assign({},p.bg,{_ends:C.casaEnds(sp.be,sp.y,R.i0,R.i1,p.bg.aw!=null?p.bg.aw:1)}); }
 function liveBg(p,E,y,sp,R){
   if(p.bg.type!=="active") return C.bgStatic(E,y,sp?bgOf(sp,p,R):p.bg);
   return null;
@@ -503,6 +505,7 @@ async function runFit(kind,spArg){
     if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
     fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
     if(best.stop==="stalled"&&fin.stop!=="stalled"){ fin.stop="stalled"; fin.stall=best.stall||fin.stall||null; }   // 시작점 피팅에서 멈췄으면 그것을 알림 (SPEC §3.3b)
+    if(best.branch&&!fin.branch) fin.branch=best.branch;   // 시작점 피팅에서 갇힌 매개변수를 되돌려 풀었으면 그것도 (SPEC §3.3b)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
@@ -663,7 +666,7 @@ function casaRegionTxt(sp,p){ if(p.bg.conv!=="casa"||!(p.bg.type==="linear"||p.b
   const E=Float64Array.from(R.E), y=Float64Array.from(R.y), B=C.bgStatic(E,y,bgOf(sp,p,R)); const st=C.casaRegionStats(E,y,B);
   return `<div class="xps-casa xs" title="Same definitions as the CasaXPS Regions table (trapezoid of data − background over channels Start+1 … End−1; Max/Min of data − background there)">CasaXPS region: Area ${g(st.area,6)} · Max ${f(st.maxH,1)} · Min ${f(st.minH,1)}</div>`; }
 /* 같은 모양의 CasaXPS 표기 (SPEC §13): GLP = GL(100m), CasaXPS 의 fwhm = 실제 FWHM. LA 는 모양·꼬리 쪽이 같고 폭 숫자의 환산은 미확인 */
-function casaEqTxt(c,sm){ return casaEq1(c,sm)+avEqTxt(c,sm); }
+function casaEqTxt(c,sm,win){ return casaEq1(c,sm,win)+avEqTxt(c,sm); }
 /* Avantage 표기 (SPEC §13b, Thermo Avantage manual: Product = Sherwood GL 곱, β ≈ ½FWHM → F = 2β; Convolution 은 (fV, M) 표시) */
 function avEqTxt(c,sm){
   if(c.shape==="GLP") return `<div class="muted xs" title="Avantage G-L Product: exp(−(1−M)ln2·x²/β²)/(1+M·x²/β²) with β = F/2, M = L/G Mix/100 — same function. Avantage's peak-table FWHM is the measured (true) FWHM">Avantage: Product, L/G Mix ${+(100*c.m).toFixed(1)} %, β ${f(c.F/2,4)} eV</div>`;
@@ -671,12 +674,13 @@ function avEqTxt(c,sm){
   if(c.shape==="AGT") return `<div class="muted xs" title="Avantage tail function on a G-L Product: H[GL + (1−GL)T], T = TM·CT + (1−TM)·exp(−ET·Dx), Dx in channels (here ${f(c.ch,3)} eV per channel)">Avantage: Product + tail, ET ${g(c.ET,3)} · TM ${g(c.TM,3)} · CT ${g(c.CT,3)}</div>`;
   return ""; }
 function chOf(sp){ return sp&&sp.n>1?Math.abs((sp.be[sp.n-1]-sp.be[0])/(sp.n-1)):0.05; }
-function casaEq1(c,sm){ let q; try{ q=C.compToCasa(c); }catch(e){ return ""; }
+function casaEq1(c,sm,win){ let q; try{ q=C.compToCasa(c,win||undefined); }catch(e){ return ""; }
   if(!q||!q.notation) return "";
-  // CasaXPS fwhm·asym (SPEC_casa_v3 §3): 실측으로 정한 경우(fwhmExact) 그대로, 경험값·미정이면 '≈'. posShift: CasaXPS 위치 − INNO 원점 (DS; ST 는 미정)
+  // CasaXPS fwhm·asym (SPEC_casa_v4 §3): 실측으로 정한 경우(fwhmExact) 그대로, 근사면 '≈'. posShift: CasaXPS 위치 − INNO 원점 (DS: wL·|cot|, ST: 표의 가장 큰 마디 — §4).
+  // DS: 피팅 창(win)을 알면 CasaXPS Area = INNO 창 넓이 × dsCasaAreaFactor (SPEC_casa_v4 §2)
   const fw=c.shape==="GLP"&&sm&&sm.fwhm?sm.fwhm:q.fwhm, ax=q.fwhmExact?"":"≈ ";
   const as=q.asym!=null&&Math.abs(q.asym)>5e-5?`, asym ${ax}${f(q.asym,4)}`:"", ps=q.posShift>1e-6?`, pos INNO + ${f(q.posShift,4)} eV`:q.posShift===null&&q.fwhm!=null?", pos ≈ (offset not pinned)":"";
-  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}" data-casaeq="${esc(c.id)}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${ax}${f(fw,4)}`:""}${as}${ps}${q.exact||(!q.fwhmExact&&fw!=null)?"":" ≈"}</div>`; }
+  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}" data-casaeq="${esc(c.id)}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${ax}${f(fw,4)}`:""}${as}${ps}${q.area!=null?`, area ${f(q.area,1)}`:""}${q.exact||(!q.fwhmExact&&fw!=null)?"":" ≈"}</div>`; }
 /* ============================================================
    화면 뼈대
    ============================================================ */
@@ -913,10 +917,10 @@ function panelFit(el,sp){
   el.innerHTML=`
    <div class="xps-h">Fit Range &amp; Background</div>
    <div class="xps-row"><span class="xps-f">BE <input type="number" step="0.05" id="xpsLo" value="${f(p.lo+sh,2)}"> – <input type="number" step="0.05" id="xpsHi" value="${f(p.hi+sh,2)}"> eV</span><button class="btn xs" id="xpsRgA" title="Use the whole spectrum as the fit range">Full range</button><button class="btn xs" id="xpsRgV" title="Use the range currently shown on the graph as the fit range">Visible range</button></div>
-   <div class="xps-row"><select class="xps-sel" id="xpsBg">${bgOpts}</select>${bg.type!=="active"&&bg.type!=="none"&&!(bg.conv==="casa"&&(bg.type==="linear"||bg.type==="shirley"))&&!(bg.conv==="avantage"&&bg.type==="smart")?`<span class="xps-f" title="Number of points averaged at each endpoint">Endpoints <input type="number" class="w56" min="1" max="50" id="xpsBgN" value="${bg.n||5}"> pts</span>`:""}
+   <div class="xps-row"><select class="xps-sel" id="xpsBg">${bgOpts}</select>${bg.type!=="active"&&bg.type!=="none"&&!(bg.conv==="casa"&&(bg.type==="linear"||bg.type==="shirley"))&&!(bg.conv==="avantage"&&(bg.type==="smart"||(bg.type==="shirley"&&bg.avgEV>0)))?`<span class="xps-f" title="Number of points averaged at each endpoint">Endpoints <input type="number" class="w56" min="1" max="50" id="xpsBgN" value="${bg.n||5}"> pts</span>`:""}
      ${bg.type==="tougaard"?`<select class="xps-sel" id="xpsTgU"><option value="u2" ${!bg.u3?"selected":""}>U2 (C=1643 eV²)</option><option value="u3" ${bg.u3?"selected":""}>U3 (C, D)</option></select>${bg.u3?`<span class="xps-f">C <input type="number" class="w64" id="xpsTgC" value="${bg.C}"> D <input type="number" class="w64" id="xpsTgD" value="${bg.D}"></span>`:""}<span class="xps-f" title="Loss-onset threshold T0 (eV): cross-section = 0 for losses ≤ T0 (CasaXPS U(x; B, C, D, T0), Fairley et al. 2023). 0 = off">T0 <input type="number" class="w56" step="0.5" min="0" id="xpsTgT" value="${bg.T0||0}"></span>`:""}
      ${bg.type==="active"?`<label class="xps-f"><input type="checkbox" id="xpsBgS" ${bg.cons&&bg.cons.s&&bg.cons.s.mode!=="fixed"?"checked":""}> Fit slope too</label>`:""}
-     ${bg.type==="smart"?`<select class="xps-sel" id="xpsConv" title="Smart convention — INNO: Shirley clipped point by point to the smoothed data (SPEC §2). Avantage: 9-point smoothed data, end points = smoothed value at the window ends, Shirley/linear pieces split where the background would rise above the smoothed data — reproduces Avantage Smart areas to a median 0.4 % (max 4 %) on 26 measured regions (SPEC_real_validation §A)"><option value="">INNO</option><option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option></select>`:""}${bg.type==="linear"||bg.type==="shirley"?`<select class="xps-sel" id="xpsConv" title="Region convention — INNO: endpoint averages of n points at the window ends, trapezoid Shirley (SPEC §2). CasaXPS: endpoints at the 2nd / 2nd-last channel averaged over ± Av. width channels, rectangle Shirley sum — reproduces CasaXPS 2.3.27 region Area / Max / Min (SPEC §2b)"><option value="">INNO</option><option value="casa" ${bg.conv==="casa"?"selected":""}>CasaXPS</option>${bg.type==="shirley"?`<option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option>`:""}</select>${bg.conv==="avantage"&&bg.type==="shirley"?`<span class="xps-f" title="Avantage 'Iterations' (1 = simple single pass; manual recommends 10). Avantage switches to Linear if the high-BE end is not higher than the low-BE end">Iter. <input type="number" class="w56" min="1" max="200" id="xpsAvIt" value="${bg.it!=null?bg.it:10}"></span><span class="xps-f" title="Avantage 'Convergence limit': stop when the relative change of the peak area between iterations is at most this (0 = run all iterations)">Conv. <input type="number" class="w64" step="any" min="0" id="xpsAvCl" value="${bg.cl!=null?bg.cl:0}"></span>`:""}${bg.conv==="casa"?`<span class="xps-f" title="CasaXPS 'Av. Width' (channels averaged on each side of the endpoint channel)">Av. width <input type="number" class="w56" min="0" max="25" id="xpsAw" value="${bg.aw!=null?bg.aw:1}"></span>`:""}`:""}
+     ${bg.type==="smart"?`<select class="xps-sel" id="xpsConv" title="Smart convention — INNO: Shirley clipped point by point to the smoothed data (SPEC §2). Avantage: end values = mean of ±h channels (Avg. eV), Shirley/linear pieces split where the background would rise above the smoothed data — K-Alpha: 10 of 12 regions within 0.1 % area (SPEC §2c)"><option value="">INNO</option><option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option></select>${bg.conv==="avantage"?avAvgHTML(sp,p):""}`:""}${bg.type==="linear"||bg.type==="shirley"?`<select class="xps-sel" id="xpsConv" title="Region convention — INNO: endpoint averages of n points at the window ends, trapezoid Shirley (SPEC §2). CasaXPS: endpoints at the 2nd / 2nd-last channel averaged over ± Av. width channels, rectangle Shirley sum — reproduces CasaXPS 2.3.27 region Area / Max / Min (SPEC §2b)"><option value="">INNO</option><option value="casa" ${bg.conv==="casa"?"selected":""}>CasaXPS</option>${bg.type==="shirley"?`<option value="avantage" ${bg.conv==="avantage"?"selected":""}>Avantage</option>`:""}</select>${bg.conv==="avantage"&&bg.type==="shirley"?avAvgHTML(sp,p):""}${bg.conv==="avantage"&&bg.type==="shirley"&&!(bg.avgEV>0)?`<span class="xps-f" title="Avantage 'Iterations' (v1.8 rule, used only while Avg. is empty) (1 = simple single pass; manual recommends 10). Avantage switches to Linear if the high-BE end is not higher than the low-BE end">Iter. <input type="number" class="w56" min="1" max="200" id="xpsAvIt" value="${bg.it!=null?bg.it:10}"></span><span class="xps-f" title="Avantage 'Convergence limit': stop when the relative change of the peak area between iterations is at most this (0 = run all iterations)">Conv. <input type="number" class="w64" step="any" min="0" id="xpsAvCl" value="${bg.cl!=null?bg.cl:0}"></span>`:""}${bg.conv==="casa"?`<span class="xps-f" title="CasaXPS 'Av. Width' (channels averaged on each side of the endpoint channel)">Av. width <input type="number" class="w56" min="0" max="25" id="xpsAw" value="${bg.aw!=null?bg.aw:1}"></span>`:""}`:""}
      ${bg.type==="spline"?`<span class="xps-f" title="Knots = the two window ends (endpoint averages) + your knots. A knot's height is the mean of ±2 data points unless you drag it. Natural cubic spline through the knots">Knots <b id="xpsKnN">${(bg.knots||[]).length}</b>+2</span><button class="btn xs ${S.ui.knotMode?"primary":""}" id="xpsKnA" title="Then click the graph where the background is (outside peaks). Drag a knot to move it; double-click a knot to remove it">${S.ui.knotMode?"Click the graph…":"+ Knot"}</button><button class="btn xs" id="xpsKnR" title="Return dragged knot heights to the local data mean">Auto heights</button><button class="btn xs" id="xpsKnC" title="Remove all knots (straight line between the window ends)">Clear</button>`:""}</div>
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
@@ -945,7 +949,8 @@ function panelFit(el,sp){
     $q(el,"#xpsKnC").onclick=()=>{ pushHist(p,"매듭 지움"); bg.knots=[]; touch(p); rerender(); }; }
   $q(el,"#xpsOpt").onchange=e=>{ pushHist(p,"최적화"); p.optimizer=e.target.value==="simplex"?"simplex":undefined; touch(p); renderPanel(); };
   bindRef(el,sp,p); bindBatchPanel(el,sp,p);
-  const cv=$q(el,"#xpsConv"); if(cv) cv.onchange=()=>{ pushHist(p,"영역 규약"); if(cv.value==="casa"){ bg.conv="casa"; if(bg.aw==null) bg.aw=1; } else if(cv.value==="avantage"){ bg.conv="avantage"; if(bg.it==null) bg.it=10; } else delete bg.conv; touch(p); rerender(); };
+  const cv=$q(el,"#xpsConv"); if(cv) cv.onchange=()=>{ pushHist(p,"영역 규약"); if(cv.value==="casa"){ bg.conv="casa"; if(bg.aw==null) bg.aw=1; } else if(cv.value==="avantage"){ bg.conv="avantage"; if(bg.it==null) bg.it=10; if(bg.avgEV==null) bg.avgEV=0.5; /* 새로 고른 Avantage 규약: Avg. 0.50 eV (v1.9.2 규칙; 비우면 v1.8) */ } else delete bg.conv; touch(p); rerender(); };
+  const aev=$q(el,"#xpsAvEV"); if(aev) aev.onchange=()=>{ pushHist(p,"Avantage 끝값 평균"); const v=+aev.value; if(aev.value.trim()!==""&&v>0) bg.avgEV=Math.min(20,v); else delete bg.avgEV; touch(p); rerender(); };
   const ait=$q(el,"#xpsAvIt"); if(ait) ait.onchange=()=>{ bg.it=Math.max(1,Math.min(200,Math.round(+ait.value||10))); touch(p); rerender(); };
   const acl=$q(el,"#xpsAvCl"); if(acl) acl.onchange=()=>{ bg.cl=Math.max(0,+acl.value||0); touch(p); rerender(); };
   const aw=$q(el,"#xpsAw"); if(aw) aw.onchange=()=>{ bg.aw=Math.max(0,Math.min(25,Math.round(+aw.value||0))); touch(p); rerender(); };
@@ -970,12 +975,37 @@ function panelFit(el,sp){
 /* 배경 경고: Tougaard 음의 세기(0 으로 둠), 정적 배경의 넓이 편향 */
 function bgWarn(sp,p){
   const out=[];
-  if(p.bg.type==="shirley"&&p.bg.conv==="avantage"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.fallback) out.push("Avantage 규약: 높은 BE 끝이 낮은 BE 끝보다 낮아 Avantage 처럼 Linear 로 바꿨습니다."); } }
+  let avw="";
+  if(p.bg.conv==="avantage"&&(p.bg.type==="shirley"||p.bg.type==="smart")){ const R=region(sp,p); if(R&&R.E.length>8){
+    if(p.bg.type==="shirley"){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),bgOf(sp,p,R)); if(B&&B.fallback) out.push("Avantage convention: the high-BE end is not above the low-BE end, so the background is Linear (as in Avantage)."); }
+    const w=avBgWarn(sp,p,R); if(w) avw=`<div class="note warn" style="margin-top:4px" data-avwarn="${w.strong?"strong":"warn"}" title="${esc(w.tip)}">${esc(w.t)} ⓘ</div>`; } }
   if(p.bg.type==="shirley"||p.bg.type==="smart"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),bgOf(sp,p,R)); if(B&&B.converged===false) out.push("Shirley 반복이 수렴하지 않았습니다(200 회) — 배경이 기울어 Shirley 고정점이 없는 경우입니다. ‘Shirley (in-fit)’ + ‘Fit slope too’, 또는 Linear 를 쓰세요."); } }
   if((p.bg.type==="shirley"||p.bg.type==="smart"||p.bg.type==="linear")&&p.hi-p.lo>20) out.push("창이 넓습니다("+f(p.hi-p.lo,0)+" eV): 끝점으로 정하는 배경은 창이 넓을수록 모양 오차가 쌓여 넓이가 틀립니다(합성 143 경우, Smart: 20–40 eV 최대 ≈8 %, 40 eV 넘으면 최대 ≈14 %; 20 eV 이하는 ≈3 %). ‘Shirley (in-fit)’ + ‘Fit slope too’을 권합니다.");
   if(p.bg.type==="tougaard"){ const R=region(sp,p); if(R&&R.E.length>8){ const B=C.bgStatic(Float64Array.from(R.E),Float64Array.from(R.y),p.bg); if(B&&B.negClamped) out.push("높은 BE 끝이 낮은 BE 끝보다 낮아 Tougaard 세기가 음수가 됩니다 — 비물리적이라 0 으로 두었습니다(평평한 배경). 영역을 봉우리 뒤로 30 eV 이상 넓히거나 다른 배경을 쓰세요."); } }
   if(p.bg.type!=="active"&&p.bg.type!=="none"&&p.comps.some(c=>(c.shape==="GLS"||c.shape==="GLP"||c.shape==="V")&&((c.m||0)>0.3||(c.wL||0)>0.4))) out.push("Lorentzian 꼬리가 큰 성분 + 끝점으로 정하는 배경: 창 밖·끝점 평균 안으로 들어간 꼬리 넓이가 빠져 넓이가 몇 % 작게 나옵니다(합성 시험 −2…−5 %). 창을 넓히거나 ‘Shirley (in-fit)’를 쓰세요.");
-  return out.map(t=>`<div class="note warn" style="margin-top:4px">${esc(t)}</div>`).join("");
+  return avw+out.map(t=>`<div class="note warn" style="margin-top:4px">${esc(t)}</div>`).join("");
+}
+/* Avantage 규약 'Avg. (eV)' 칸 (v1.9.2, test/ref/avantage_a2_patch.md §5): Avantage 의 'Background Average at Start & End'. 비우면 v1.8 규칙 */
+function avAvgHTML(sp,p){ const bg=p.bg, on=bg.avgEV>0, R=on?region(sp,p):null, h=R?C.avantageHalf(bg,R.E):null;
+  return `<span class="xps-f" title="Enter Avantage's 'Background Average at Start &amp; End' (eV). Each end value = plain mean of ±h channels around the end channel, h = round(W / (2·step)), including channels outside the window. Empty = v1.8 rule (${bg.type==="smart"?"9-point smoothing":"Iter. / Conv."}). SPEC §2c">Avg. (eV) <input type="number" class="w56" step="0.05" min="0" id="xpsAvEV" value="${on?+bg.avgEV:""}" placeholder="v1.8"></span>${h!=null?`<span class="muted xs" data-avh="${h}" title="Channels averaged at each end (window channel ± h)">±${h} ch · ${2*h+1} pts</span>`:""}`; }
+/* Avantage 규약 Shirley/Smart 가 평활 데이터 위로 지나는 경고 (avantage_a2_patch.md §4): above > 20 % 또는 음의 넓이 > 5 % → 경고,
+   above > 50 % 또는 (Shirley) 순 넓이 < Smart 넓이의 50 % → 강한 경고. v1.9.2 규칙(Avg. eV)일 때만. 넓이 계산은 영역마다 기억 */
+const AVW=new Map();
+function avBgWarn(sp,p,R){
+  const bg=p.bg; if(bg.conv!=="avantage"||(bg.type!=="shirley"&&bg.type!=="smart")||!C.avantageV19(bg)||!R||R.E.length<=8) return null;
+  const key=[sp.uid,R.i0,R.i1,sp.y[R.i0],sp.y[R.i1],bg.type,bg.avgEV,bg.ah,bg.rule].join("|"); if(AVW.has(key)) return AVW.get(key);
+  const E=Float64Array.from(R.E), y=Float64Array.from(R.y);
+  const net=B=>{ let P=0,N=0; for(let i=1;i<E.length;i++){ const a=0.5*((y[i]-B[i])+(y[i-1]-B[i-1]))*Math.abs(E[i]-E[i-1]); if(a>0) P+=a; else N-=a; } return {P,N,A:P-N}; };
+  let w=null; const B=C.bgStatic(E,y,bgOf(sp,p,R));
+  if(B&&!B.fallback){ const S=B.smoothed; let ab=B.aboveFrac; if(ab==null&&S){ let n=0; for(let i=1;i<E.length-1;i++) if(B[i]>S[i]) n++; ab=n/Math.max(1,E.length-2); } ab=ab||0;
+    const a=net(B), neg=a.P>0?a.N/a.P:0; let rs=null;
+    if(bg.type==="shirley"){ const Bs=C.bgStatic(E,y,bgOf(sp,{bg:Object.assign({},bg,{type:"smart"})},R)); const as=Bs?net(Bs).A:0; rs=as>0?a.A/as:null; }
+    const strong=ab>0.5||(rs!=null&&rs<0.5), mild=ab>0.2||neg>0.05, nm=bg.type==="shirley"?"Shirley":"Smart";
+    if(strong||mild) w={strong,ab,neg,rs,
+      t:strong?(bg.type==="shirley"?"Avantage's Shirley fails to converge here; use Smart":"Avantage Smart runs above the data over most of the window"):`Avantage ${nm} runs above the data over part of the window — check the area`,
+      tip:`Avantage-convention ${nm} lies above the smoothed data on ${f(100*ab,0)} % of the window; negative part of the net area = ${f(100*neg,1)} % of the positive part`+(rs!=null?`; net area = ${f(100*rs,0)} % of the Avantage Smart area`:"")+
+        `. INNO reproduces Avantage's curve here for cross-checking, so the area is not physical. Warning: above > 20 % or negative part > 5 %; strong: above > 50 % or net area < 50 % of Smart.`}; }
+  if(AVW.size>200) AVW.clear(); AVW.set(key,w); return w;
 }
 function bgHelp(t){
   return {linear:"끝점 평균을 잇는 직선.",
@@ -985,6 +1015,16 @@ function bgHelp(t){
     spline:"매듭(창 양끝 평균 + 직접 놓은 점)을 지나는 자연 3차 spline. 매듭은 봉우리 밖 배경 위에 두세요.",
     active:"배경 = c₀ + k·∫(성분 합) (+ 기울기). 배경과 봉우리를 함께 피팅 — 겹친 영역에서 가장 일관된 방법.",
     none:"배경 없음 (서베이·이미 뺀 데이터)."}[t]||"";
+}
+/* 갇힌 매개변수를 되돌려 푼 피팅 알림 한 줄 (SPEC §3.3b): 되돌린 매개변수 이름, 자세한 것은 title */
+function rescueNote(r,nm,sh){
+  const b=r.branch; if(!b||b.kind!=="rescue"||!(b.reset||[]).length) return "";
+  const lab=q=>`${nm(q.id)} ${(C.PDEF[q.k]||{lab:q.k}).lab}`, why={bound:"한계 근처",flat:"모형이 거의 보지 못함"};
+  const fw=q=>{ const f=(b.flags||[]).find(x=>x.id===q.id&&x.k===q.k); return f?f.why.map(w=>why[w]||w).join(", "):""; };
+  const add=q=>q.k==="be"?sh||0:0;
+  const tip=b.reset.map(q=>`${lab(q)}: ${g(q.from+add(q),4)} (${fw(q)}) → 시작값 ${g(q.to+add(q),4)} 에서 다시`).join("\n")+
+    `\nLM 이 이 매개변수에 갇혀(감쇠가 큰 걸음만 이어짐) 있어, 시작값으로 되돌려 고정한 채 나머지를 풀고 다시 모두 풀었습니다. 같은 가중의 χ² ${g(b.Xinc,6)} → ${g(b.X,6)} (옛 경로보다 낮을 때만 택함). (SPEC §3.3b)`;
+  return `<div class="note" style="margin-top:4px" title="${esc(tip)}">갇힌 매개변수를 시작값에서 다시 풂 — ${esc(b.reset.slice(0,3).map(lab).join(", "))}${b.reset.length>3?` 외 ${b.reset.length-3}개`:""} ⓘ</div>`;
 }
 /* 멈춘 피팅 알림 한 줄 (SPEC §3.3b): 잘 정해지지 않는 매개변수 이름만, 자세한 것은 title */
 function stallNote(r,nm,sh){
@@ -1016,6 +1056,7 @@ function fitStrip(r,sp){
   // 피팅 뒤 모형을 바꿨으면(stale) 위 숫자와 경고는 이전 모형의 것 — 경고는 숨기고 다시 피팅하라고만 한다
   if(r.stale){ w+=`<div class="note warn" style="margin-top:4px">피팅 뒤 성분·영역을 바꿨습니다 — 위 숫자는 <b>이전 모형</b>의 값입니다. <b>Fit</b> 을 다시 누르세요.</div>`; return `<div class="strip stale">${parts.join("")}</div>${w}`; }
   if(r.stop==="stalled") w+=stallNote(r,nm,shOf(sp));
+  if(r.branch) w+=rescueNote(r,nm,shOf(sp));
   if(at.length) w+=`<div class="note warn" style="margin-top:4px"><b>한계에 닿은 매개변수</b>: ${at.map(a=>esc(atTxt(a))).join(", ")}<br>이 값은 데이터가 아니라 한계가 정한 값이라 σ 를 계산하지 않습니다. 넓이가 하한 0 이면 그 성분을 빼고 다시 피팅하세요. Δ·FWHM·BE 등이 물리적 한계에 붙었다면 모형(성분 수·배경·모양)이 데이터와 맞지 않는다는 신호입니다.</div>`;
   if(r.lcf&&r.lcf.warn) w+=`<div class="note warn" style="margin-top:4px">기준 스펙트럼끼리 너무 닮았습니다(κ ${f(r.lcf.cond,0)}) — 분율의 불확도가 큽니다. 기준을 줄이거나 Monte Carlo 로 구간을 확인하세요.</div>`;
   if(st.chi2nu>3) w+=`<div class="note warn" style="margin-top:4px">χ²ν 가 큽니다 — 성분이 부족하거나 배경·모양이 맞지 않을 수 있습니다(잔차 그림 확인).</div>`;
@@ -1046,7 +1087,7 @@ function compCard(sp,p,c,ci){
     ${isM?"":s2Opts(c)}
     <div class="pg">${names.map(field).join("")}${ced}</div>
     ${c.doublet&&so?`<div class="muted xs" style="margin-top:4px">${esc(soNote(so))}. 화학 상태에 따라 Δ 는 조금 다를 수 있음</div>`:""}
-    ${casaEqTxt(c,sm)}
+    ${casaEqTxt(c,sm,c.shape==="DS"?winOf(sp,p):null)}
     ${isM?`<div class="muted xs" style="margin-top:4px">Shift δ = ${f(c.be+sh-tp.eref,3)} eV</div>`:""}
     ${sm?`<div class="muted xs" style="margin-top:4px">True FWHM ${f(sm.fwhm,3)}${sm.sig.fwhm!=null?" ± "+f(sm.sig.fwhm,3):""} eV · height ${g(sm.height,4)} · area ${f(sm.areaPct,1)} %${sm.sig.areaPct!=null?" ± "+f(sm.sig.areaPct,1):""}</div>`:""}
   </div></div>`;
@@ -1345,8 +1386,13 @@ function interferences(sample,rows){
       out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 주선(${hit.map(b=>f(b.be,1)).join(", ")} eV) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); });
   return out;
 }
+/* VGD prop 415 (Acq_TXFN_Correction) = true: transmission 은 측정 때 이미 제거됨 → 'auto'·'profile' 에서 TF 를 다시 나누지 않는다 (이중 보정 — K-Alpha 실측에서 at% 최대 9.8 차, SPEC §4).
+   'power' 는 사용자가 고른 것이라 그대로 두고 표에 경고만 */
+const TF_RM_TIP="Transmission function already removed at acquisition (VGD prop 415 Acq_TXFN_Correction = true). INNO does not apply it again: on K-Alpha data, a second correction changed at% by up to 9.8 at%. The coefficients are still shown in the VGD info tab.";
+function tfRemoved(sp){ return !!(sp&&sp.meta&&sp.meta.tfRemoved); }
 function tfFor(sp){
   const q=S.quant.tf; const own=sp.meta&&sp.meta.tf;
+  if(tfRemoved(sp)&&(q.model==="auto"||q.model==="profile")) return {model:"none",removed:true,note:"VGD: TXF removed at acquisition (prop 415)"};
   const av=t=>S.quant.tfAv&&t&&t.model==="thermo"?Object.assign({},t,{model:"avantage"}):t;   // Avantage 설명서 형태(log10 · ×PE, SPEC §4) — 선택
   if(q.model==="auto") return av(own?own:(S.quant.tfProfile?S.quant.tfProfile:{model:"none"}));
   if(q.model==="power") return {model:"power",x:+q.x||1,pe:sp.meta&&sp.meta.passEnergy};
@@ -1357,13 +1403,14 @@ function panelQuant(el,sp){
   const smpK=SK(sp);
   const rows=quantRows(smpK);
   const used=rows.filter(r=>r.inc&&r.S>0);
-  const qo={imfp:S.quant.imfp};
+  const qo={imfp:S.quant.imfp}, tq=S.quant.tf;
   const Q=used.length?C.quantify(used.map(r=>({label:r.el,el:r.el,area:r.area,sArea:r.sArea,S:r.S,BE:r.BE,hv:r.hv,PE:r.PE,tf:r.tf})),qo):[];
   const qi=new Map(); used.forEach((r,i)=>qi.set(r.id,Q[i]));
   // at% Monte Carlo (CasaXPS 식): 넓이를 N(A, σ_A) 에서 2000 번 → 95 % 구간. 넓이 상대오차가 크면 델타 ±σ 와 다름
   const QM=used.length?C.quantMC(used.map(r=>({label:r.el,el:r.el,area:r.area,sArea:r.sArea,S:r.S,BE:r.BE,hv:r.hv,PE:r.PE,tf:r.tf})),qo,2000,7):[]; const qmi=new Map(); used.forEach((r,i)=>qmi.set(r.id,QM[i]));
-  const anyVgdTF=S.specs.some(s=>s.meta&&s.meta.tf);
-  const noTF=used.some(r=>!r.tf||r.tf.model==="none");
+  const anyVgdTF=S.specs.some(s=>s.meta&&s.meta.tf&&!s.meta.tfRemoved);   // TF 를 제거한 VGD 의 계수는 기본 장비 함수로 쓰지 않음
+  const noTF=used.some(r=>(!r.tf||r.tf.model==="none")&&!(r.tf&&r.tf.removed));
+  const nRm=rows.filter(r=>r.tf&&r.tf.removed).length, pwRm=tq.model==="power"&&used.some(r=>tfRemoved(r.sp));
   const peMix=new Set(used.map(r=>r.PE).filter(v=>v!=null)).size>1;
   const dup=Object.entries(used.reduce((m,r)=>{ m[r.el]=(m[r.el]||0)+1; return m; },{})).filter(([k,v])=>v>1).map(([k])=>k);
   const nds=used.filter(r=>{ const q=qi.get(r.id); return q&&q.nd; }).map(r=>r.el+" "+(r.line||""));
@@ -1371,11 +1418,11 @@ function panelQuant(el,sp){
   const skipped=rows.skipped||[];
   const noSrc=[...new Set(rows.filter(r=>!srcOf(r.hv)).map(r=>f(r.hv,1)))];
   const dsIn=used.filter(r=>{ const res=pr(r.sp).result; return res&&!res.stale&&res.comps.some(c=>(c.shape==="DS"||C.compMod(c)==="SB")&&!c.noQuant&&(c.el||r.sp.reg.el)===r.el); }).map(r=>r.el+" "+(r.line||"")).join(", ");
-  const im=S.quant.imfp, tq=S.quant.tf;
+  const im=S.quant.imfp;
   el.innerHTML=`
    <div class="xps-h">Sample <b>${esc(smpDisp(smpK).name)}</b> <span class="muted xs">${esc(smpDisp(smpK).ctx)}</span></div>${chgBanner(sp)}
    <div class="xps-row"><span class="xps-f">RSF library <select class="xps-sel" id="xqLib"><option value="scofield">Scofield 1976 (Al Kα)</option><option value="althermo1">Avantage ALTHERMO1</option><option value="custom">Custom values</option></select></span></div>
-   <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">From file (VGD/avg), else none</option><option value="power">(PE/KE)^x</option><option value="none">None</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}${tq.model==="auto"&&S.specs.some(s=>s.meta&&s.meta.tf)?`<label class="xps-f" title="Read the VGD/avg transmission coefficients as in the Avantage manual: log10[A/(PE·XSF)] = a + b·x + c·x² + d·x³, x = log10(KE/PE) → T = PE·10^poly. Off = earlier natural-log reading (SPEC §4)"><input type="checkbox" id="xqTfAv" ${S.quant.tfAv?"checked":""}> Avantage form (log10)</label>`:""}</div>
+   <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">From file (VGD/avg), else none</option><option value="power">(PE/KE)^x</option><option value="none">None</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}${nRm?`<span class="badge inf" data-tfrm="panel" title="${esc(TF_RM_TIP)}">TF already removed at acquisition (${nRm})</span>`:""}${pwRm?`<span class="badge wr" data-tfrm="power" title="${esc(TF_RM_TIP)} (PE/KE)^x is applied anyway because you chose it — this corrects twice.">TF applied twice?</span>`:""}${tq.model==="auto"&&anyVgdTF?`<label class="xps-f" title="Read the VGD/avg transmission coefficients as in the Avantage manual: log10[A/(PE·XSF)] = a + b·x + c·x² + d·x³, x = log10(KE/PE) → T = PE·10^poly. Off = earlier natural-log reading (SPEC §4)"><input type="checkbox" id="xqTfAv" ${S.quant.tfAv?"checked":""}> Avantage form (log10)</label>`:""}</div>
    <div class="xps-row"><span class="xps-f">IMFP <select class="xps-sel" id="xqIm"><option value="power">KE^n</option><option value="tpp2m">TPP-2M (enter material)</option><option value="none">None</option></select></span>${im.model==="power"?`<span class="xps-f">n <input type="number" class="w56" step="0.05" id="xqImn" value="${im.n}"></span>`:""}
      ${im.model==="tpp2m"?`<span class="xps-f" title="Density (g/cm³)">ρ <input type="number" class="w56" step="0.1" id="xqR" value="${im.mat.rho}"></span><span class="xps-f" title="Valence electrons per molecule (or atom)">Nv <input type="number" class="w56" id="xqNv" value="${im.mat.Nv}"></span><span class="xps-f" title="Molar mass (g/mol)">M <input type="number" class="w64" id="xqM" value="${im.mat.M}"></span><span class="xps-f" title="Band gap (eV)">Eg <input type="number" class="w56" step="0.1" id="xqEg" value="${im.mat.Eg}"></span>`:""}</div>
    <div class="tw" style="margin-top:6px"><table class="xps-tbl xq-tbl"><thead><tr><th></th><th>Element · line</th><th class="num">at %</th><th class="num">BE</th><th class="num">Area</th><th class="num">RSF (S)</th><th class="num">T</th><th class="num">λ</th></tr></thead><tbody>
@@ -1383,7 +1430,7 @@ function panelQuant(el,sp){
      return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
      <td class="num">${f(r.BE+r.sh,2)}</td><td class="num">${g(r.area,5)}${r.sArea?`<div class="muted xs">± ${g(r.sArea,3)}</div>`:""}</td>
      <td class="num"><input type="number" class="w56" step="any" data-qrsf="${esc(r.id)}" value="${r.S!=null?+(+r.S).toPrecision(5):""}" placeholder="?"><div class="muted xs">${esc(r.Ssrc)}</div></td>
-     <td class="num">${q?g(q.T,4):"—"}</td><td class="num">${q?g(q.L,4):"—"}</td></tr>`; }).join("")}
+     <td class="num">${q?g(q.T,4):"—"}${r.tf&&r.tf.removed?`<div class="muted xs" data-tfrm="${esc(r.id)}" title="${esc(TF_RM_TIP)}">removed ⓘ</div>`:""}</td><td class="num">${q?g(q.L,4):"—"}</td></tr>`; }).join("")}
    ${skipped.map(k=>`<tr><td></td><td colspan="7"><b>${esc(k.el||"?")}</b> <span class="muted xs">${esc(k.sp.region)}</span> <span class="badge wr" title="The fit range has ${k.n} data points (≥ 9 needed). Widen it in Peak Fit">Fit range too narrow</span></td></tr>`).join("")}
    ${!rows.length&&!skipped.length?`<tr><td colspan="8" class="muted">No region spectra in this sample.</td></tr>`:""}
    </tbody></table></div>
@@ -1410,7 +1457,7 @@ function panelQuant(el,sp){
   $a(el,"[data-qinc]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qinc]=S.quant.rows[i.dataset.qinc]||{}); o.inc=i.checked; save(); renderPanel(); });
   $a(el,"[data-qline]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qline]=S.quant.rows[i.dataset.qline]||{}); o.line=i.value; delete o.rsf; save(); renderPanel(); });
   $a(el,"[data-qrsf]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qrsf]=S.quant.rows[i.dataset.qrsf]||{}); if(i.value==="") delete o.rsf; else o.rsf=+i.value; save(); renderPanel(); });
-  const pf=$q(el,"#xqProf"); if(pf) pf.onclick=()=>{ const s=S.specs.find(x=>x.meta&&x.meta.tf); S.quant.tfProfile=C.clone(s.meta.tf); save(); renderPanel(); note("VGD 의 transmission 계수를 기본 장비 함수로 저장했습니다 (PE "+s.meta.tf.pe+" eV)","ok"); };
+  const pf=$q(el,"#xqProf"); if(pf) pf.onclick=()=>{ const s=S.specs.find(x=>x.meta&&x.meta.tf&&!x.meta.tfRemoved); S.quant.tfProfile=C.clone(s.meta.tf); save(); renderPanel(); note("VGD 의 transmission 계수를 기본 장비 함수로 저장했습니다 (PE "+s.meta.tf.pe+" eV)","ok"); };
   $q(el,"#xqCsv").onclick=()=>exportQuant(smpK,rows,qi,qmi);
   bindStoich(el,sp);
 }

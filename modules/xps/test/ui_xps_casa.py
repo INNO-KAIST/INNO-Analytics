@@ -240,13 +240,26 @@ with sync_playwright() as p:
     # ---- 9 Avantage 규약 Shirley + 꼬리 성분
     pg.select_option('#xpsBg', 'shirley'); pg.wait_for_timeout(150)
     pg.select_option('#xpsConv', 'avantage'); pg.wait_for_timeout(200)
-    bg9 = J('XPS_UI._pr().bg'); has_it = pg.query_selector('#xpsAvIt') is not None
+    bg9 = J('XPS_UI._pr().bg'); has_ev = pg.query_selector('#xpsAvEV') is not None; it_hidden = pg.query_selector('#xpsAvIt') is None
+    avh = J("(()=>{ const e=document.querySelector('[data-avh]'); return e?e.textContent:null; })()")
+    # 창 밖 채널 pad (makeProblem · 화면 bgOf 모두): 길이 = min(h, 창 밖 남은 채널) — 창을 조금 좁혀 양쪽에 채널을 남김
+    pad9 = J("(()=>{ const p=XPS_UI._pr(), s=XPS_UI._cur(); const lo=s.be[3], hi=s.be[s.n-9]; const P=XPS_CORE.makeProblem({be:s.be,y:s.y,c:null},{lo,hi,bg:p.bg,comps:[],cons:{}}); const R=XPS_CORE.sliceRegion(s.be,s.y,lo,hi); return P.bg._pad?[P.bg._pad.lo.length,P.bg._pad.hi.length,Math.min(5,R.i0),Math.min(5,s.n-1-R.i1)]:null; })()")
+    # Avg. 비우기 → v1.8 규칙 (Iter./Conv. 다시 보임); 다시 0.5
+    pg.fill('#xpsAvEV', ''); pg.dispatch_event('#xpsAvEV', 'change'); pg.wait_for_timeout(200)
+    bg9e = J('XPS_UI._pr().bg'); it_back = pg.query_selector('#xpsAvIt') is not None
+    pg.fill('#xpsAvEV', '0.5'); pg.dispatch_event('#xpsAvEV', 'change'); pg.wait_for_timeout(200)
+    pg.select_option('#xpsBg', 'smart'); pg.wait_for_timeout(200)
+    sm9 = {'ev': pg.query_selector('#xpsAvEV') is not None, 'n': pg.query_selector('#xpsBgN') is None, 'conv': J('XPS_UI._pr().bg.conv'), 'avgEV': J('XPS_UI._pr().bg.avgEV')}
+    pg.select_option('#xpsBg', 'shirley'); pg.wait_for_timeout(200)
+    check("9a Avantage Shirley/Smart: 'Avg. (eV)' field replaces Iter./Conv. (new choice = 0.50 eV, ±h channels shown; window pad passed to Shirley too); empty → v1.8 rule with Iter./Conv.",
+          bg9.get('conv') == 'avantage' and bg9.get('avgEV') == 0.5 and has_ev and it_hidden and avh and '±5 ch' in avh and '11 pts' in avh and pad9 and pad9[0] == pad9[2] and pad9[1] == pad9[3] and pad9[3] == 5 and pad9[0] >= 3
+          and 'avgEV' not in bg9e and it_back and sm9['ev'] and sm9['n'] and sm9['conv'] == 'avantage' and sm9['avgEV'] == 0.5, [bg9.get('avgEV'), avh, pad9, it_back, sm9])
     cid = J('XPS_UI._pr().comps[0].id')
     pg.select_option(f'[data-shape="{cid}"]', 'AGT'); pg.wait_for_timeout(200)
     c9 = J('XPS_UI._pr().comps[0]'); html9 = J("document.querySelector('#xpsComps').innerHTML")
     fit()
     r9 = J('XPS_UI._pr().result.stats.chi2nu')
-    check('9 Avantage Shirley (iterations field) + GL product with Avantage tail (ET/TM/CT, channel width from data) fits', bg9.get('conv') == 'avantage' and bg9.get('it') == 10 and has_it and c9['shape'] == 'AGT' and abs(c9['ch'] - 0.05) < 1e-9 and 'Avantage: Product + tail' in html9 and r9 > 0, f"χ²ν {r9:.3f} (curved background, Shirley misfit expected)")
+    check('9 Avantage Shirley + GL product with Avantage tail (ET/TM/CT, channel width from data) fits', bg9.get('conv') == 'avantage' and c9['shape'] == 'AGT' and abs(c9['ch'] - 0.05) < 1e-9 and 'Avantage: Product + tail' in html9 and r9 > 0, f"χ²ν {r9:.3f} (curved background, Shirley misfit expected)")
 
     # ---- 390 px: 새 패널이 가로로 넘치지 않음
     pg.set_viewport_size({'width': 390, 'height': 844}); select('Depth-1', 'Si 2p'); open_det('#xpsRefD'); open_det('#xpsBatD'); pg.wait_for_timeout(300)

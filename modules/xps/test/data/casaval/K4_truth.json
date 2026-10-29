@@ -1,0 +1,117 @@
+{
+ "K_ST13_GL0_F1_2": {
+  "casa": "ST(1.3)GL(0)",
+  "comp": {
+   "id": "cfzxhzo",
+   "name": "",
+   "shape": "GLP",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.268034941950035,
+   "m": 0,
+   "mod": "ST",
+   "stMu": 1.3,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 15000,
+  "max": 11604.903185281155,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; GL(p) = GLP; F from the true FWHM"
+ },
+ "K_ST2_GL0_F1_2": {
+  "casa": "ST(2)GL(0)",
+  "comp": {
+   "id": "cng5zfu",
+   "name": "",
+   "shape": "GLP",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.3030245401067668,
+   "m": 0,
+   "mod": "ST",
+   "stMu": 2,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 14999.999999999996,
+  "max": 11565.203930402451,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; GL(p) = GLP; F from the true FWHM"
+ },
+ "K_ST25_GL0_F1_2": {
+  "casa": "ST(2.5)GL(0)",
+  "comp": {
+   "id": "cgyu1h0",
+   "name": "",
+   "shape": "GLP",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.3224474213456396,
+   "m": 0,
+   "mod": "ST",
+   "stMu": 2.5,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 15000,
+  "max": 11536.011851285863,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; GL(p) = GLP; F from the true FWHM"
+ },
+ "K_ST4_GL0_F1_2": {
+  "casa": "ST(4)GL(0)",
+  "comp": {
+   "id": "cfbpzoe",
+   "name": "",
+   "shape": "GLP",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.361849914699384,
+   "m": 0,
+   "mod": "ST",
+   "stMu": 4,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 15000.000000000002,
+  "max": 11531.017824499226,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; GL(p) = GLP; F from the true FWHM"
+ },
+ "K_ST6_GL0_F1_2": {
+  "casa": "ST(6)GL(0)",
+  "comp": {
+   "id": "cduytep",
+   "name": "",
+   "shape": "GLP",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.3908437041106556,
+   "m": 0,
+   "mod": "ST",
+   "stMu": 6,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 14999.999999999995,
+  "max": 11530.490329203072,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; GL(p) = GLP; F from the true FWHM"
+ }
+}

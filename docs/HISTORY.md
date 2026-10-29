@@ -5,6 +5,16 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-29 XPS v1.9.2 — 멈춤 규칙 재설계 · CasaXPS 4–6차 실측 반영 · Avantage 배경 규약(K-Alpha) · 측정 때 뺀 투과 함수**(modules/xps/SPEC.md §2c·§3.3b·§4, SPEC_casa_v4.md, test/ref/avantage_a2_patch.md):
+  멈춤 규칙: 옛 LM 을 현직으로 그대로 두고, 갇히면 옆에서 시도 갈래(rescue = 한계·평탄 매개변수를 시작값으로 되돌려 고정 → 나머지 → 모두, 없으면 kick) 하나를 같은 계산량씩 번갈아 풀어 겨룸. 갈래는 잡음 바닥(χ²/ν ≤ 1 + √(2/ν))에 닿을 때만 결과가 되고, 2차(IRLS)는 두 끝점에서 풀어 낮은 쪽 → 옛 LM 보다 최종 χ² 가 나빠지지 않음.
+  무작위 1100 개 최종 χ² 옛과 비트 동일(v1.9.1 은 320 개 중 5 개 나빠짐), 2900 개 더: 나빠짐 0 · 좋아짐 2; 시험 묶음 피팅 23 764 개 나빠짐 0 · 좋아짐 3 · 갈래 없는 23 751 개 비트 동일. TP wL 자유 66 s → 3.9–4.6 s(χ² −2.7e-2), 갈래 채택은 한 줄 알림.
+  CasaXPS 4–6차: 폭 숫자·asym 하나의 규칙(격자 F/40 포물선 꼭짓점, fwhm = 2·min(l, h), asym = 1 − l/h — 경험 δ 대체, 14 모양 fwhm ≤ 5.3e-4 · asym ≤ 6e-4), DS 넓이 = 진폭 × ∫ ±600·wL(창 넓이 × 인자, ≤ 4.1e-4), DS 위치 ≤ 1.6e-4 eV,
+  ST = 계단을 (바탕 FWHM)/80 늦춘 모양 + 위치 = 원점 + 가장 큰 마디 k·(바탕 FWHM)/40(16 판독 ≤ 0.16 meV; 가져온 ST 는 stCasaK). casaToComp exact 를 compToCasa 와 맞춤, casaModelToINNO 가 DS 넓이·한계·연결을 환산, 성분 카드에 DS CasaXPS Area. 근사로 남음: ⊗G 바탕 ST 의 폭·넓이(≤ 0.5 %).
+  Avantage 배경(K-Alpha 2 시료 S1·S2, Smart 12 · Shirley 12 영역): 끝값 = 끝 채널 ±round(W/2·step) 채널 단순 평균(창 밖 포함, 48/48), 모양 = 고정점 u = p·u₁ + (1−p)·G(q·u₁ + (1−q)·u)(p 0.07, q 0.25 — Iter./Conv. 로는 재현 안 됨),
+  Smart 는 데이터 넘는 곳에서 나눔, Shirley 는 나누지 않음. 21/24 영역 일치(ΔB/H 중앙 4.2e-4 · 1.4e-5, Area(P) 중앙 0.006 % · 0.005 %), Avantage Area(P) 로 at% 차 ≤ 0.005 at%(INNO Area(P) 로 ≤ 0.056). Kratos 26 영역도 h 4 로 Area(P) 중앙 0.41 % → 0.044 %.
+  Avg. eV 를 줄 때만 새 규칙(화면 'Avg. (eV)' 칸, 새로 고르면 0.50, 비우면 v1.8 + Iter./Conv.), Shirley 에도 창 밖 채널 전달, Avantage 곡선이 데이터 위 > 20 % 면 경고 · > 50 % 면 "use Smart". INNO 기본 배경은 그대로.
+  투과 함수: VGD prop 415(Acq_TXFN_Correction) = true 면 meta.tfRemoved — 'auto' 에서도 다시 나누지 않음(이중 보정이 at% 최대 9.8 at% 틀어지게 함), 정량 표에 짧은 배지(설명은 title), (PE/KE)^x 를 고르면 경고.
+  시험: xps 155 · casa 111 · casa_v3 117 · shapes2 77 · real_kara 44 · real_a2 23 · multi 50 · arxps 32 · image 23 · proc 76 · Chromium ui_xps · fixes 27 · casa 21 · shapes2 13 · multi 43 · fitlog_compare 38 피팅 비트 동일.
 - **10-29 XPS v1.9.1 — 피팅 멈춤 규칙 · CasaXPS 3차 실측 반영**(modules/xps/SPEC.md §3.3b, SPEC_casa_v3.md):
   LM 멈춤 규칙: 감쇠 지배 걸음 8 회(거절 ≥5) → Gauss–Newton kick → 그래도 이득 없으면 stalled + 정해지지 않는 매개변수 표시(한 줄 알림). TP wL 자유 퇴화 피팅 66 s → 4–5 s(χ² +0.19 %). 시험 피팅 23 717 건 중 23 687 건 비트 동일, 무작위 320 건: 같음 298 · 나음 10 · 나쁨 5(꺾인 모양의 다른 국소 최솟값).
   CasaXPS 3차 판독: GL(m,n)·SGL(m,n)·TLA·DS 모양과 n 규칙(n·F/144.87) 일치, Casa fwhm = 2L · 비대칭 지수 = 1 − L/H(꺾인 꼭대기는 경험 δ), Casa DoF = 배경과 다른 채널 수 − p, DS 위치 = 원점 + wL·|cot(π/(2−α))|. casaToComp 의 'Casa fwhm = 참 FWHM' 가정 제거(TLA 8 % 오차 → 5e-5).

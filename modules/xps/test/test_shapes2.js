@@ -4,7 +4,8 @@
       허용: 값 ≤ 1e-5 (최댓값 대비), 넓이 ≤ 1e-6, FWHM ≤ 1e-5 (상대)
    2) 표기 왕복 · 오류 · 하위 호환(AGT GL(m)T(k) ≡ GLN tail T)
    3) 합성 잡음 스펙트럼 회복: 매개변수가 3σ 안 ≥ 90 % (모양마다 200 회; QUICK 40 회)
-   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 · 4b 퇴화 매개변수(TP wL)까지 풀었을 때 멈춤 규칙(SPEC §3.3b) */
+   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 · 4b 퇴화 매개변수(TP wL)까지 풀었을 때 멈춤 규칙(SPEC §3.3b)
+   4c) 멈춤 규칙이 최종 χ² 를 나쁘게 만들지 않음 — 무작위 합성 스펙트럼 고정 표본(규칙 끔·켬 비교) */
 const path=require("path"), fs=require("fs");
 const C=require("../src/xps_core.js");
 const REF=JSON.parse(fs.readFileSync(path.join(__dirname,"ref/ref_shapes2.json"),"utf8"));
@@ -107,15 +108,38 @@ console.log("== 4 속도 (10 성분 × 2000 채널)");
   const P=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons});
   const t0=Date.now(); const r=C.fitOnce(P,{}); const tf=Date.now()-t0; const t1=Date.now(); const mc=C.monteCarlo(P,Object.assign({},r),5,{seed:3}); const tm=(Date.now()-t1)/5;
   ok(tf<5000&&tm<3000&&r.chi2/2000<1.2,`10 성분(새 모양 모두) × 2000 채널 피팅 ${(tf/1000).toFixed(1)} s (≤ 5 s) (${r.iter} 반복) · Monte Carlo ${(tm/1000).toFixed(1)} s/회 (≤ 3 s; 자유 = BE·넓이·주 폭 — CasaXPS 처럼 모양 매개변수 고정)`,`χ²/N ${(r.chi2/2000).toFixed(2)}`);
-  /* 4b 퇴화 매개변수까지 푼 경우 (SPEC §3.3b · SPEC_shapes2 §3): TP 의 wL 도 자유 → wL 이 0.0015·F 아래로 가면 모형이 wL 을 보지 못하고
-     사다리꼴 가장자리가 채널보다 날카로워 χ² 가 계단처럼 끊긴다. 옛 LM 은 감쇠에 갇혀 기어감(QUICK 자료 450 + 452 반복 · 66 s).
-     멈춤 규칙: ≤ 5 s 에 끝나고, 멈췄으면(stalled) wL 을 '잘 정해지지 않음'으로 표시. χ² 참고값 = 옛 LM (XPS_NOSTALL=1 로 잰 값) */
+  /* 4b 퇴화 매개변수까지 푼 경우 (SPEC §3.3b · SPEC_shapes2 §3): TP 의 wL 도 자유 → 처음 Gauss–Newton 걸음들이 wL 을 하한(0.005)으로 보내고,
+     거기서는 모형이 wL 을 보지 못해(기울기 0) LM 이 감쇠에 갇혀 기어감(옛 LM: QUICK 자료 450 + 452 반복 · 66 s, χ² 2013.57).
+     규칙(v1.9.2): 갇힌 뒤 16 번 더 가도 안 끝나면 wL 을 시작값으로 되돌려 고정 → 나머지 → 모두 다시 푸는 갈래(rescue)를 풀고, 옛 경로가 따라잡지 못하면 갈래를 택함.
+     판정: ≤ 5 s · 최종 χ² ≤ 옛 LM 의 χ²(XPS_NOSTALL=1 로 잰 값) · 멈췄으면(stalled) wL 표시 */
   { const cons2=C.clone(cons); cons2.c8.wL={mode:"free"};
     const P2=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
     const t2=Date.now(); const r2=C.fitOnce(P2,{}); const tf2=Date.now()-t2; const fl=((r2.stall||{}).flags||[]).map(q=>`${q.id}|${q.k}(${q.why.join("+")})`);
-    const REF=QUICK?{chi2:2013.5711,it:"450+452",s:65.8}:{chi2:1940.0021,it:"15+7",s:3.1};
+    const REF=QUICK?{chi2:2013.5711049269707,it:"450+452",s:65.8}:{chi2:1940.0021061926182,it:"15+7",s:3.1};
     const rel=(r2.chi2-REF.chi2)/REF.chi2, okStop=r2.stop==="stalled"?fl.some(t=>t.startsWith("c8|wL")):r2.stop==="converged";
-    ok(okStop&&tf2<5000&&rel<2.5e-3,`TP wL 까지 자유(퇴화): ${(tf2/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${fl.length?" · 표시 "+fl.join(", "):""}`,
-      `χ² ${r2.chi2.toFixed(2)} vs 옛 LM ${REF.chi2} (${REF.it} 반복, ${REF.s} s): ${rel>=0?"+":""}${rel.toExponential(1)} (허용 < 2.5e-3)`); } }
+    const br=r2.branch?` · 갈래 ${r2.branch.kind}${r2.branch.reset.length?" ("+r2.branch.reset.map(q=>q.id+"|"+q.k).join(", ")+" 되돌림)":""}`:"";
+    ok(okStop&&tf2<5000&&rel<=1e-7,`TP wL 까지 자유(퇴화): ${(tf2/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${br}${fl.length?" · 표시 "+fl.join(", "):""}`,
+      `χ² ${r2.chi2.toFixed(2)} vs 옛 LM ${REF.chi2.toFixed(4)} (${REF.it} 반복, ${REF.s} s): ${rel>=0?"+":""}${rel.toExponential(1)} (허용 ≤ +1e-7)`);
+    /* 같은 문제·다른 잡음(전체 모드만): 잡음 = C.rng(seed) 의 Poisson 근사. 옛 LM(XPS_NOSTALL=1)의 χ²·반복·시간을 기준으로 — 3·5·6 은 옛 LM 이 2차 500 번까지 기어감, 4 는 갇히지 않음(비트 같음) */
+    if(!QUICK) [[3,1980.2494613747012,"128+500",29.6],[4,1974.7418719910895,"50+2",2.9],[5,2112.2358369480357,"263+500",35.0],[6,2070.9979109246174,"74+500",27.4]].forEach(([sd,ref,it,sec])=>{
+      const Rs=C.rng(sd), ys=Float64Array.from(mu,v=>Math.max(0,Math.round(v+100+Math.sqrt(v+100)*Rs.g())));
+      const Ps=C.makeProblem({be:E,y:ys,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
+      const t3=Date.now(); const rs=C.fitOnce(Ps,{}); const tf3=Date.now()-t3, rl=rs.chi2/ref-1;
+      ok(rl<=1e-7&&tf3<10000&&(rs.trig||rs.chi2===ref),`  같은 문제·잡음 seed ${sd}: ${(tf3/1000).toFixed(1)} s (≤ 10 s) · ${rs.iter1}+${rs.iter} 반복 · 갈래 ${rs.trig}${rs.branch?" ("+rs.branch.kind+")":""}`,
+        `χ² ${rs.chi2.toFixed(2)} vs 옛 LM ${ref.toFixed(2)} (${it} 반복, ${sec} s): ${rl>=0?"+":""}${rl.toExponential(1)}`); }); } }
+
+/* 4c 멈춤 규칙이 최종 χ² 를 나쁘게 만들지 않음 (SPEC §3.3b): 무작위 합성 스펙트럼(test/stall_gen.js) 의 고정 표본을 같은 프로세스에서
+   규칙 끔(옛 LM)·켬으로 피팅 → 최종 χ² 새 ≤ 옛·(1 + 1e-7), 갈래를 풀지 않은 피팅은 비트 단위로 같음. 표본 = 갈래가 생기는 seed(바닥에 못 닿아 현직이 이김 —
+   rescue·kick, 1차·2차) + 갇혔다가 grace 안에 끝나는 seed + 갇히지 않는 seed. 3989·3132 = 현직이 1차를 끝까지 간 뒤 바닥의 갈래 채택 → 2차를 두 끝점에서(옛 2차 = 옛 최종). 1차 현직을 도중에 버리는 경우는 §4b 와 잡음 seed 3·5·6.
+   전체 1100 개는 node test/stall_neverworse.js (2 코어 약 40 분) */
+console.log("== 4c 멈춤 규칙 — 최종 χ² 가 옛 LM 보다 나빠지지 않음 (고정 표본)");
+{ const G=require("./stall_gen.js");
+  const seeds=QUICK?[3,4,5,8,38,722,1018,418,340,3989]:[3,4,5,8,38,722,1018,418,340,150,420,910,521,60,98,3989,3132];
+  let worse=[], notId=[], n=0, nb=0, maxR=-Infinity, ta=0, tb=0;
+  for(const s of seeds){ const g=G.gen(C,s); C._hook.stall=false; const a=G.run(C,g); C._hook.stall=true; const b=G.run(C,g); if(!a||!b||a.rec.err||b.rec.err) continue;
+    n++; ta+=a.rec.ms; tb+=b.rec.ms; const rel=b.rec.chi2/a.rec.chi2-1; maxR=Math.max(maxR,rel); if(rel>1e-7) worse.push(`${s} ${rel.toExponential(2)}`);
+    if(b.rec.trig) nb++; else if(b.rec.chi2!==a.rec.chi2||JSON.stringify(b.rec.p)!==JSON.stringify(a.rec.p)) notId.push(s); }
+  ok(!worse.length&&!notId.length&&n===seeds.length,`${n} 피팅(갈래 ${nb}): 최종 χ² 새 ≤ 옛·(1+1e-7) 모두 · 갈래 없는 ${n-nb} 개 비트 같음`,
+    `최대 새/옛 − 1 = ${maxR.toExponential(2)} · 시간 옛 ${(ta/1000).toFixed(1)} s → 새 ${(tb/1000).toFixed(1)} s${worse.length?" · 나빠짐 "+worse.join(", "):""}${notId.length?" · 비트 다름 "+notId.join(","):""}`); }
 
 console.log(`\n${pass} 통과 · ${fail} 실패`); if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }

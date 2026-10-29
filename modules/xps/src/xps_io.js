@@ -173,6 +173,8 @@ function propVal(u8,D,o){
      105 광원 에너지 · 108/109 spot(µm) · 305 dwell(s) · 306 scan 수 · 404 pass energy · 406 분석기 work function
      411 lens mode · 605 flood gun 모드 · 303/304 측정 시작·끝 · 6 장비 · 17 Avantage 판 · 16 원래 경로
      100000–100003 transmission 함수 계수(DS_ANPROPID_TXFN_COEFF[0..3])
+     415 Acq_TXFN_Correction (bool: 측정 때 transmission 을 이미 보정·제거) · 416 TXFN 보정 모드 (3 = 'TXF Shape Correction, retaining Intensity' 에서 봄)
+       → meta.tfRemoved = (415 === true), meta.tfMode = 416. tfRemoved 이면 정량에서 TF 를 다시 나누면 안 된다 (이중 보정, test/ref/avantage_a2_patch.md §5)
    VGData = scan 합 counts(double). CPS = counts/(dwell·scans).
    ============================================================ */
 function vgdParse(u8,fileName){
@@ -200,6 +202,7 @@ function vgdParse(u8,fileName){
   const r6=v=>typeof v==="number"?+v.toPrecision(6):v;   // float32 → 사람이 쓴 값(0.05000000074 → 0.05)
   const hv=r6(gv(105)), dwell=r6(gv(305)), scans=gv(306)!=null?gv(306):gv(328), pe=r6(gv(404)), wf=r6(gv(406));
   const tfc=[100000,100001,100002,100003].map(gv); const tfOK=tfc.every(v=>typeof v==="number"&&isFinite(v));
+  const txfnCorr=gv(415), txfnMode=gv(416), tfRemoved=txfnCorr===true;   // Acq_TXFN_Correction (bool) · 모드 (3 = TXF Shape Correction, retaining Intensity)
   let title="", summ=null; try{ if(C.has("\u0005SummaryInformation")){ summ=propsetParse(C.read("\u0005SummaryInformation")); const pr=summ[0]&&summ[0].props; if(pr&&pr[2]) title=String(pr[2].v||""); } }catch(e){}
   const warn=[];
   const hvUse=(typeof hv==="number"&&hv>100)?hv:1486.68;
@@ -214,7 +217,8 @@ function vgdParse(u8,fileName){
   const be=ke.map(k=>hvUse-k);
   const base=(title||String(fileName||"").replace(/^.*[\\/]/,"")).replace(/\.vgd$/i,"").replace(/\s*(Scan|Snap|Region)$/i,"").trim();
   const meta={instrument:gv(6)||"", software:gv(17)||"", origPath:gv(16)||"", passEnergy:pe, dwell, scans, workFunction:wf, lensMode:gv(411)||"", floodGun:gv(605)||"",
-    spot:[gv(108),gv(109)], start:gv(303), end:gv(304), tf:tfOK?{model:"thermo",coef:tfc,pe,src:"VGD 파일의 transmission 계수 (형태 ln T = Σaₖ(ln(KE/PE))ᵏ 은 추정)"}:null,
+    spot:[gv(108),gv(109)], start:gv(303), end:gv(304), tf:tfOK?{model:"thermo",coef:tfc,pe,src:"VGD 파일의 transmission 계수 (형태 ln T = Σaₖ(ln(KE/PE))ᵏ 은 추정)"+(tfRemoved?" (removed at acquisition, prop 415)":"")}:null,
+    tfRemoved, tfMode:txfnMode,
     propIds:Object.keys(P).length, propStream:best?best.stream.replace(/\u0005/g,"\\x05"):""};
   const sample=pathSample(meta.origPath);
   const out=[];

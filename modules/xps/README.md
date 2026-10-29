@@ -21,8 +21,12 @@ XPS 읽기·배경·피팅·불확도·정량·survey 판별 탭. **배포본(HT
 | `test/ref/xps_ref.py`, `make_fixtures.py`, `validate.py` → `fixtures/` | 기준 구현 ② (SPEC 만 보고 따로 작성, 닫힌 꼴·제3자 패키지 대조). 자세한 것은 `test/ref/README.md` |
 | `test/survey_bench.js` | 합성 survey 판별 성능 측정 |
 | `test/fitlog_hook.js`, `test/fitlog_compare.js` | LM 멈춤 규칙(SPEC §3.3b) 검증: `node -r ./test/fitlog_hook.js test/<시험>.js` 를 `XPS_FITLOG=<파일>`(·`XPS_NOSTALL=1` 옛 동작)로 돌려 모든 피팅을 기록 → 두 폴더 비교 |
-| `test/stall_stress.js`, `test/stall_stress_cmp.js` | 같은 무작위 합성 스펙트럼 320 개를 옛(`XPS_NOSTALL=1`)·새 LM 으로 피팅해 χ² 비·시간 비교 (SPEC §3.3b 표) |
+| `test/stall_gen.js` | 멈춤 규칙 시험용 무작위 합성 스펙트럼 생성기(seed → 문제; 성분 1–6·모든 모양·ST/SB·배경 5 종·가중 3 종·약 25 % 는 모양 매개변수까지 자유) |
+| `test/stall_neverworse.js` | 멈춤 규칙 '옛 LM 보다 나빠지지 않음' 회귀 시험: 같은 문제를 한 프로세스에서 규칙 끔·켬으로 번갈아 피팅 → 최종 χ² 새 ≤ 옛·(1+1e-7), 갈래 없는 피팅 비트 동일, 시간 합 (기본 seed 1–1100; 고정 표본은 `test_shapes2.js` §4c) |
+| `test/stall_stress.js`, `test/stall_stress_cmp.js` | 같은 무작위 합성 스펙트럼을 한 엔진으로 피팅해 기록(옛 = `XPS_NOSTALL=1`) → 두 기록의 χ² 비·시간 비교 (SPEC §3.3b 표) |
 | `test/test_xps_casa.js` | v1.7 CasaXPS/Avantage 대응 기능 시험: 측정 선모양·LCF·기준 잡음 MC(§12), spline 배경(§2), Simplex(§14), 여러 스펙트럼 일괄(§15), at% MC(§4), CasaXPS 2.3.27 실측 대조(§2b·§13), CasaXPS·Avantage 규약 기준 대조(§2b·§2c·§1.10·§4). 약 5 분, `QUICK=1` 이면 약 40 초 |
+| `test/test_casa_v3.js` | CasaXPS 2.3.27 Round 3–6 실측 대조(SPEC_casa_v3·v4): 폭 숫자·asym 규칙, DS 넓이·위치, ST 모양·위치, 표기 왕복, casaModelToINNO. 약 2 초. `test/ref/check_casa_v4.js [core]` 는 같은 판독의 표 출력 |
+| `test/test_real_a2.js` | K-Alpha 실측 a2(비공개 `test/data/real/a2`, 없으면 건너뜀): Avantage 규약 v1.9.2 Smart·Shirley 배경 · Area(P) · at% · VGD prop 415 (TF 제거) — SPEC §2c·§4. src 에 avantage_a2 패치가 들어 있는지 먼저 확인 |
 | `test/ref/ref_casa.py` → `ref_casa.json` | 위 기능의 독립 기준 구현(PchipInterpolator·quad·nnls·least_squares·CubicSpline·Nelder–Mead·numpy MC) |
 | `test/ref/casa_readings.json`, `test/data/casaval/` | CasaXPS 2.3.27 화면 실측값과 그 자료(합성 + BCT C1s) — CasaXPS 코드·자료 아님 |
 | `test/ref/make_casaval2.py` | CasaXPS 추가 판독용 무잡음 합성 VAMAS(`test/data/casaval/V2_*.vms`: LA 폭 환산·f_G(n)·SGL 가설) |

@@ -26,5 +26,12 @@ for(const f of files){
   console.log(`${f}: ${s.n} 피팅 · 같음 ${s.same} · 더 좋음 ${s.better} · 나쁨 ${s.worse} · 어긋남 ${s.mism} · stalled ${s.stall} · 반복 줄어듦 ${s.earlier} · 반복 합 ${s.iterOld} → ${s.iterNew} · 최대 |Δχ²|/χ² ${s.maxRel.toExponential(1)} · 최대 |Δp|/σ ${s.maxDp.toExponential(1)} · (σ 없는) 최대 |Δp|/|p| ${s.maxDpRel.toExponential(1)}`);
   Object.keys(tot).forEach(k=>tot[k]+=s[k]);
 }
+/* '절대 나빠지지 않음' 판정 (SPEC §3.3b): 최종 χ² 새 ≤ 옛·(1 + NW), 갈래 없는(trig 0) 피팅은 χ²·매개변수 비트 단위로 같음 */
+{ const NW=+(process.env.NW||1e-7); let n=0, worse=[], ident=0, notId=[], acted=0, maxR=-Infinity;
+  for(const f of files){ const a=rd(path.join(A,f)), b=rd(path.join(B,f)); for(let i=0;i<Math.min(a.length,b.length);i++){ const x=a[i], y=b[i]; if(x.n!==y.n||x.key!==y.key||x.ys!==y.ys) continue; n++;
+    const rel=y.chi2/x.chi2-1; maxR=Math.max(maxR,rel); if(rel>NW) worse.push(`${f}#${i} ${y.sec||""} ${rel.toExponential(2)}`);
+    if(y.trig){ acted++; continue; } if(y.chi2===x.chi2&&JSON.stringify(y.p)===JSON.stringify(x.p)) ident++; else notId.push(`${f}#${i}`); } }
+  console.log(`절대 나빠지지 않음: ${n} 피팅 · 나빠짐(> ${NW}) ${worse.length} · 최대 새/옛 − 1 = ${maxR.toExponential(2)} · 갈래 있음 ${acted} · 갈래 없음 ${ident+notId.length} 중 비트 같음 ${ident}`);
+  worse.slice(0,20).forEach(t=>console.log("  나빠짐 "+t)); notId.slice(0,20).forEach(t=>console.log("  비트 다름(갈래 없음) "+t)); }
 console.log(`합계: ${tot.n} 피팅 · 같음 ${tot.same} · 더 좋음 ${tot.better} · 나쁨 ${tot.worse} · 어긋남 ${tot.mism} · stalled ${tot.stall} · 반복 줄어듦 ${tot.earlier} · 반복 합 ${tot.iterOld} → ${tot.iterNew}`);
 if(listed.length){ console.log("같지 않거나 stalled 인 피팅:"); listed.slice(0,+process.env.LIST||60).forEach(q=>console.log(`  ${q.f}#${q.i} np ${q.np} N ${q.n}: Δχ²/χ² ${q.rel.toExponential(2)} (1차 ${q.rel1.toExponential(2)}) · |Δp|/σ ${q.dp.toExponential(1)} · |Δp|/|p|(σ 없음) ${q.dpr.toExponential(1)} · 반복 ${q.itO} → ${q.itN} · ${q.stopO||"-"} → ${q.stopN}${q.stop1?"(1차 "+q.stop1+")":""} ${q.flags}`)); }
