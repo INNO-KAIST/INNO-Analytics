@@ -1,0 +1,179 @@
+{
+ "K_GL30n100_F1_2": {
+  "casa": "GL(30,100)",
+  "comp": {
+   "id": "ckkgob0",
+   "name": "",
+   "shape": "GLN",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.0009685906274361,
+   "m": 0.3,
+   "wG": 0,
+   "casaN": 100
+  },
+  "areaInWindow": 14999.999999974341,
+  "max": 11647.395672166473,
+  "note": "Gaussian FWHM = n·F/144.87 assumed (LA rule, measured for LA(1,1,n) only)"
+ },
+ "K_SGL30n100_F1_2": {
+  "casa": "SGL(30,100)",
+  "comp": {
+   "id": "cvat7ov",
+   "name": "",
+   "shape": "SGLN",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 0.9581872439172638,
+   "m": 0.3,
+   "wG": 0,
+   "casaN": 100
+  },
+  "areaInWindow": 14782.536101043335,
+  "max": 10519.07567079491,
+  "note": "Gaussian FWHM = n·F/144.87 assumed (LA rule, measured for LA(1,1,n) only)"
+ },
+ "K_TLA12_3_0_F1": {
+  "casa": "TLA(1.2,3,0)",
+  "comp": {
+   "id": "ce1pd1f",
+   "name": "",
+   "shape": "TLA",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.1527701117598235,
+   "alpha": 1.2,
+   "mu": 3,
+   "wG": 0,
+   "casaN": 0
+  },
+  "areaInWindow": 14845.324992660084,
+  "max": 10685.255939563802,
+  "note": "TLA(α,μ,n) notation assumed by analogy with LA(α,β,n) (Cookbook p. 66 gives TLA(x:α,μ,w)); Gaussian FWHM = n·F/144.87 assumed; CasaXPS fwhm taken as the true FWHM (not verified for asymmetric shapes) — refit the width"
+ },
+ "K_TLA12_3_100_F1": {
+  "casa": "TLA(1.2,3,100)",
+  "comp": {
+   "id": "cchu94g",
+   "name": "",
+   "shape": "TLA",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 0.8109704459556418,
+   "alpha": 1.2,
+   "mu": 3,
+   "wG": 0,
+   "casaN": 100
+  },
+  "areaInWindow": 14905.737183447298,
+  "max": 11730.682738375279,
+  "note": "TLA(α,μ,n) notation assumed by analogy with LA(α,β,n) (Cookbook p. 66 gives TLA(x:α,μ,w)); Gaussian FWHM = n·F/144.87 assumed; CasaXPS fwhm taken as the true FWHM (not verified for asymmetric shapes) — refit the width"
+ },
+ "K_DS01_100_F1": {
+  "casa": "DS(0.1,100)",
+  "comp": {
+   "id": "c8ol9bs",
+   "name": "",
+   "shape": "DS",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "alpha": 0.1,
+   "wL": 0.659022740194333,
+   "wG": 0,
+   "casaN": 100
+  },
+  "areaInWindow": 14999.995467840014,
+  "max": 8616.236930744382,
+  "note": "DS area = area inside the fit window (Cookbook DS is not integrable for α > 0); Gaussian FWHM = n·wL/144.87 assumed; CasaXPS fwhm taken as the true FWHM (not verified for asymmetric shapes) — refit the width"
+ },
+ "K_ST17_LA11200_F1": {
+  "casa": "ST(1.7)LA(1,1,200)",
+  "comp": {
+   "id": "c3a130m",
+   "name": "",
+   "shape": "LA",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 0.5021805487444903,
+   "alpha": 1,
+   "beta": 1,
+   "wG": 0,
+   "casaN": 200,
+   "mod": "ST",
+   "stMu": 1.7,
+   "stN": 0,
+   "stG": 0
+  },
+  "areaInWindow": 14755.502633237678,
+  "max": 11927.32895940783,
+  "note": "ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66; γ → FWHM γ·F/144.87 assumed; CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (wG fixed by n)"
+ },
+ "K_LA2_3_0_F1": {
+  "casa": "LA(2,3,0)",
+  "comp": {
+   "id": "cmvrx0z",
+   "name": "",
+   "shape": "LA",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 1.7339535183242958,
+   "alpha": 2,
+   "beta": 3,
+   "wG": 0,
+   "casaN": 0
+  },
+  "areaInWindow": 14998.822473176699,
+  "max": 12567.899836534778,
+  "note": "asymmetric LA: CasaXPS width number → F not pinned; F set from the true FWHM — refit the width"
+ },
+ "K_LA1_1_250_F1": {
+  "casa": "LA(1,1,250)",
+  "comp": {
+   "id": "czqs3mo",
+   "name": "",
+   "shape": "LA",
+   "be": 285,
+   "area": 15000,
+   "el": "",
+   "line": "",
+   "doublet": null,
+   "color": null,
+   "F": 0.4307383123655676,
+   "alpha": 1,
+   "beta": 1,
+   "wG": 0,
+   "casaN": 250
+  },
+  "areaInWindow": 14747.220292321535,
+  "max": 11830.624803440081,
+  "note": "CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (wG fixed by n)"
+ }
+}

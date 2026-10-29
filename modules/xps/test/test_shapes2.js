@@ -4,7 +4,7 @@
       허용: 값 ≤ 1e-5 (최댓값 대비), 넓이 ≤ 1e-6, FWHM ≤ 1e-5 (상대)
    2) 표기 왕복 · 오류 · 하위 호환(AGT GL(m)T(k) ≡ GLN tail T)
    3) 합성 잡음 스펙트럼 회복: 매개변수가 3σ 안 ≥ 90 % (모양마다 200 회; QUICK 40 회)
-   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 */
+   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 · 4b 퇴화 매개변수(TP wL)까지 풀었을 때 멈춤 규칙(SPEC §3.3b) */
 const path=require("path"), fs=require("fs");
 const C=require("../src/xps_core.js");
 const REF=JSON.parse(fs.readFileSync(path.join(__dirname,"ref/ref_shapes2.json"),"utf8"));
@@ -54,7 +54,7 @@ console.log("== 2 CasaXPS 표기 왕복 · 오류 · 하위 호환");
   ok(msgs.every(m=>m&&m.length>20)&&C.casaToComp("XYZ(1)")===null,"알 수 없는/잘못된 표기 → strict: 분명한 오류 문구 · 기본: null (이전 동작)",msgs[0]);
   // GL(m)T(k) — 이전 AGT(tu 'fwhm', TM 0) 와 같은 모양 (정규화만 다름: AGT = 창 넓이, GLN = ℝ 넓이)
   const E=Float64Array.from({length:801},(_,i)=>280+0.025*i), ctx={emin:280,emax:300};
-  const ag=C.compEval(C.newComp("AGT",289,{F:1.2,m:0.3,ET:2,TM:0,CT:0,tu:"fwhm"}),E,ctx), gn=C.compEval(C.casaToComp("GL(30)T(2)",{be:289,fwhm:1.2}).comp,E,ctx);
+  const ag=C.compEval(C.newComp("AGT",289,{F:1.2,m:0.3,ET:2,TM:0,CT:0,tu:"fwhm"}),E,ctx), gn=C.compEval(Object.assign(C.casaToComp("GL(30)T(2)",{be:289,fwhm:1.2}).comp,{F:1.2}),E,ctx);   // 같은 F 로 (CasaXPS fwhm 1.2 → F 1.22, SPEC_casa_v3 §3)
   let sA=0,sG=0; for(let i=1;i<E.length;i++){ sA+=0.5*(ag[i]+ag[i-1])*0.025; sG+=0.5*(gn[i]+gn[i-1])*0.025; } let d=0; ag.forEach((v,i)=>{ d=Math.max(d,Math.abs(v/sA-gn[i]/sG)); });
   ok(d<1e-6,"GL(30)T(2): 새 GLN(tail T) 모양 = 이전 AGT(tu 'fwhm') 모양 (창 안 넓이로 맞춘 뒤)",e1(d));
   const old=C.newComp("AGT",289,{F:1.2,m:0.3,ET:2,TM:0,CT:0,tu:"fwhm"}); ok(C.compToCasa(old).notation==="GL(30)T(2)"&&C.paramNames(old).join()==="be,area,F,m,ET,TM,CT","저장된 AGT 성분은 그대로 읽힘 (표기·매개변수 이름 그대로)");
@@ -106,6 +106,16 @@ console.log("== 4 속도 (10 성분 × 2000 채널)");
   const cons={}; comps.forEach(c=>{ cons[c.id]={}; C.paramNames(c).forEach(k=>{ if(!["be","area",c.shape==="DS"||c.shape==="V"?"wL":"F"].includes(k)) cons[c.id][k]={mode:"fixed"}; }); });
   const P=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons});
   const t0=Date.now(); const r=C.fitOnce(P,{}); const tf=Date.now()-t0; const t1=Date.now(); const mc=C.monteCarlo(P,Object.assign({},r),5,{seed:3}); const tm=(Date.now()-t1)/5;
-  ok(tf<5000&&tm<3000&&r.chi2/2000<1.2,`10 성분(새 모양 모두) × 2000 채널 피팅 ${(tf/1000).toFixed(1)} s (≤ 5 s) (${r.iter} 반복) · Monte Carlo ${(tm/1000).toFixed(1)} s/회 (≤ 3 s; 자유 = BE·넓이·주 폭 — CasaXPS 처럼 모양 매개변수 고정)`,`χ²/N ${(r.chi2/2000).toFixed(2)}`); }
+  ok(tf<5000&&tm<3000&&r.chi2/2000<1.2,`10 성분(새 모양 모두) × 2000 채널 피팅 ${(tf/1000).toFixed(1)} s (≤ 5 s) (${r.iter} 반복) · Monte Carlo ${(tm/1000).toFixed(1)} s/회 (≤ 3 s; 자유 = BE·넓이·주 폭 — CasaXPS 처럼 모양 매개변수 고정)`,`χ²/N ${(r.chi2/2000).toFixed(2)}`);
+  /* 4b 퇴화 매개변수까지 푼 경우 (SPEC §3.3b · SPEC_shapes2 §3): TP 의 wL 도 자유 → wL 이 0.0015·F 아래로 가면 모형이 wL 을 보지 못하고
+     사다리꼴 가장자리가 채널보다 날카로워 χ² 가 계단처럼 끊긴다. 옛 LM 은 감쇠에 갇혀 기어감(QUICK 자료 450 + 452 반복 · 66 s).
+     멈춤 규칙: ≤ 5 s 에 끝나고, 멈췄으면(stalled) wL 을 '잘 정해지지 않음'으로 표시. χ² 참고값 = 옛 LM (XPS_NOSTALL=1 로 잰 값) */
+  { const cons2=C.clone(cons); cons2.c8.wL={mode:"free"};
+    const P2=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
+    const t2=Date.now(); const r2=C.fitOnce(P2,{}); const tf2=Date.now()-t2; const fl=((r2.stall||{}).flags||[]).map(q=>`${q.id}|${q.k}(${q.why.join("+")})`);
+    const REF=QUICK?{chi2:2013.5711,it:"450+452",s:65.8}:{chi2:1940.0021,it:"15+7",s:3.1};
+    const rel=(r2.chi2-REF.chi2)/REF.chi2, okStop=r2.stop==="stalled"?fl.some(t=>t.startsWith("c8|wL")):r2.stop==="converged";
+    ok(okStop&&tf2<5000&&rel<2.5e-3,`TP wL 까지 자유(퇴화): ${(tf2/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${fl.length?" · 표시 "+fl.join(", "):""}`,
+      `χ² ${r2.chi2.toFixed(2)} vs 옛 LM ${REF.chi2} (${REF.it} 반복, ${REF.s} s): ${rel>=0?"+":""}${rel.toExponential(1)} (허용 < 2.5e-3)`); } }
 
 console.log(`\n${pass} 통과 · ${fail} 실패`); if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }

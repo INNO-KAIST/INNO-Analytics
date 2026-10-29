@@ -502,10 +502,11 @@ async function runFit(kind,spArg){
     fin.multi=N>1?{N,chis,near,frac:near/N}:null;
     if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
     fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
+    if(best.stop==="stalled"&&fin.stop!=="stalled"){ fin.stop="stalled"; fin.stall=best.stall||fin.stall||null; }   // 시작점 피팅에서 멈췄으면 그것을 알림 (SPEC §3.3b)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
-    const st=fin.stats; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv?"ok":"warn");
+    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn");
   }catch(e){ hideProg(); RUN=null; note("피팅 중단: "+(e.message||e),"warn"); }
 }
 async function runMC(){
@@ -672,8 +673,10 @@ function avEqTxt(c,sm){
 function chOf(sp){ return sp&&sp.n>1?Math.abs((sp.be[sp.n-1]-sp.be[0])/(sp.n-1)):0.05; }
 function casaEq1(c,sm){ let q; try{ q=C.compToCasa(c); }catch(e){ return ""; }
   if(!q||!q.notation) return "";
-  const fw=c.shape==="GLP"&&sm&&sm.fwhm?sm.fwhm:q.fwhm;
-  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${f(fw,4)}`:""}${q.exact?"":" ≈"}</div>`; }
+  // CasaXPS fwhm·asym (SPEC_casa_v3 §3): 실측으로 정한 경우(fwhmExact) 그대로, 경험값·미정이면 '≈'. posShift: CasaXPS 위치 − INNO 원점 (DS; ST 는 미정)
+  const fw=c.shape==="GLP"&&sm&&sm.fwhm?sm.fwhm:q.fwhm, ax=q.fwhmExact?"":"≈ ";
+  const as=q.asym!=null&&Math.abs(q.asym)>5e-5?`, asym ${ax}${f(q.asym,4)}`:"", ps=q.posShift>1e-6?`, pos INNO + ${f(q.posShift,4)} eV`:q.posShift===null&&q.fwhm!=null?", pos ≈ (offset not pinned)":"";
+  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}" data-casaeq="${esc(c.id)}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${ax}${f(fw,4)}`:""}${as}${ps}${q.exact||(!q.fwhmExact&&fw!=null)?"":" ≈"}</div>`; }
 /* ============================================================
    화면 뼈대
    ============================================================ */
@@ -983,6 +986,13 @@ function bgHelp(t){
     active:"배경 = c₀ + k·∫(성분 합) (+ 기울기). 배경과 봉우리를 함께 피팅 — 겹친 영역에서 가장 일관된 방법.",
     none:"배경 없음 (서베이·이미 뺀 데이터)."}[t]||"";
 }
+/* 멈춘 피팅 알림 한 줄 (SPEC §3.3b): 잘 정해지지 않는 매개변수 이름만, 자세한 것은 title */
+function stallNote(r,nm,sh){
+  const why={bound:"한계 근처",flat:"전 범위를 움직여도 χ² 가 거의 그대로",degenerate:"다른 매개변수와 구별되지 않음"};
+  const fl=(r.stall&&r.stall.flags)||[]; const lab=q=>`${nm(q.id)} ${(C.PDEF[q.k]||{lab:q.k}).lab}`;
+  const tip=(fl.length?fl.map(q=>`${lab(q)} = ${g(q.p+(q.k==="be"?sh||0:0),4)} — ${q.why.map(w=>why[w]||w).join(", ")}`).join("\n")+"\n":"")+"감쇠가 큰 걸음만 이어지고 새 Gauss–Newton 시도 뒤에도 χ² 감소가 χ²ν 보다 작아 멈췄습니다. 이 매개변수를 고정하거나 한계를 좁힌 뒤 다시 피팅하세요. (SPEC §3.3b)";
+  return `<div class="note warn" style="margin-top:4px" title="${esc(tip)}">진전 멈춤(일찍 끝냄)${fl.length?` — 잘 정해지지 않음: ${esc(fl.slice(0,3).map(lab).join(", "))}${fl.length>3?` 외 ${fl.length-3}개`:""}`:""} ⓘ</div>`;
+}
 function fitStrip(r,sp){
   const st=r.stats; const at=(r.cov&&r.cov.atB||[]).map((b,i)=>b?r.free[i]:null).filter(Boolean);
   // 이름은 그 피팅 당시의 성분 목록(r.comps)에서 — 피팅 뒤 성분을 바꿨으면 지금 목록에 없을 수 있다
@@ -997,6 +1007,7 @@ function fitStrip(r,sp){
     `<div class="${Math.abs(st.rho1)>0.3?"warn":""}" title="Neighbour correlation of the normalized residuals">Residual ρ₁<b>${f(st.rho1,2)}</b></div>`,
     `<div class="${Math.abs(st.runsZ)>3?"warn":""}" title="Runs-test z of the residual signs (|z|>3 = structured residual)">runs z<b>${f(st.runsZ,1)}</b></div>`,
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
+    r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
   if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="Fraction of starts reaching the minimum (Δχ²<1)">Same minimum<b>${r.multi.near}/${r.multi.N}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
@@ -1004,6 +1015,7 @@ function fitStrip(r,sp){
   let w="";
   // 피팅 뒤 모형을 바꿨으면(stale) 위 숫자와 경고는 이전 모형의 것 — 경고는 숨기고 다시 피팅하라고만 한다
   if(r.stale){ w+=`<div class="note warn" style="margin-top:4px">피팅 뒤 성분·영역을 바꿨습니다 — 위 숫자는 <b>이전 모형</b>의 값입니다. <b>Fit</b> 을 다시 누르세요.</div>`; return `<div class="strip stale">${parts.join("")}</div>${w}`; }
+  if(r.stop==="stalled") w+=stallNote(r,nm,shOf(sp));
   if(at.length) w+=`<div class="note warn" style="margin-top:4px"><b>한계에 닿은 매개변수</b>: ${at.map(a=>esc(atTxt(a))).join(", ")}<br>이 값은 데이터가 아니라 한계가 정한 값이라 σ 를 계산하지 않습니다. 넓이가 하한 0 이면 그 성분을 빼고 다시 피팅하세요. Δ·FWHM·BE 등이 물리적 한계에 붙었다면 모형(성분 수·배경·모양)이 데이터와 맞지 않는다는 신호입니다.</div>`;
   if(r.lcf&&r.lcf.warn) w+=`<div class="note warn" style="margin-top:4px">기준 스펙트럼끼리 너무 닮았습니다(κ ${f(r.lcf.cond,0)}) — 분율의 불확도가 큽니다. 기준을 줄이거나 Monte Carlo 로 구간을 확인하세요.</div>`;
   if(st.chi2nu>3) w+=`<div class="note warn" style="margin-top:4px">χ²ν 가 큽니다 — 성분이 부족하거나 배경·모양이 맞지 않을 수 있습니다(잔차 그림 확인).</div>`;
@@ -1065,7 +1077,7 @@ function bindS2(card,sp,p,c){
   const dl=$q(card,"[data-dsl]"); if(dl) dl.onchange=()=>{ pushHist(p,"DS l"); const v=+dl.value; if(dl.value!==""&&v>0) c.dsl=v; else delete c.dsl; done(); };
   const cn=$q(card,"[data-cn]"); if(cn) cn.onchange=()=>{ pushHist(p,"Casa n"); const v=+cn.value; if(cn.value!==""&&v>=0&&isFinite(v)) c.casaN=v; else { const k=C.casaNKey(c); if(k){ const sp1=C.shapeParams(c,1); c[k]=sp1[k]; } delete c.casaN; } done(); };
   const ca=$q(card,"[data-casa]"); if(ca) ca.onchange=()=>{ const str=ca.value.trim(); if(!str) return; let r;
-    try{ const tf=C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm||1.2; r=C.casaToComp(str,{strict:true,be:c.be,area:c.area,fwhm:tf,id:c.id}); }catch(e){ note(e.message,"warn"); ca.value=""; ca.focus(); return; }
+    try{ const tf=C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm||1.2; r=C.casaToComp(str,{strict:true,be:c.be,area:c.area,fwhm:tf,id:c.id,innoUnits:true}); }catch(e){ note(e.message,"warn"); ca.value=""; ca.focus(); return; }
     pushHist(p,"CasaXPS 표기"); s2Swap(p,c,r.comp); if(!r.exact) note("CasaXPS "+str+": "+r.note,"info"); done(); };
 }
 function consEditor(p,c,k){

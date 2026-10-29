@@ -2,7 +2,8 @@
 사용: python3 test/ui_xps_shapes2.py <주입된 html> <그림 폴더>
 1 성분 모양 선택에 새 모양(TLA · GL(m,n) · SGL(m,n) · TP) → TLA 로 바꿔 피팅(합성 TLA 자료, 참값 회복)
 2 GL(m,n) 꼬리 선택 T/PHI → 매개변수 칸   3 수식어 ST/SB → 칸·기본 고정   4 CasaXPS 표기 입력(ST(1)LA(1,143), DS(0.3,600,40), TP(1,15,0)) · 오류 문구
-5 칸 편집(μ) → 상태 반영   6 GL(30,50)T(2) · ST(1)LA(1,143) 로 피팅   7 390 px 가로 넘침 없음 · 콘솔 오류 없음"""
+5 칸 편집(μ) → 상태 반영   6 GL(30,50)T(2) · ST(1)LA(1,143) 로 피팅   7 390 px 가로 넘침 없음 · 콘솔 오류 없음
+8 멈춤 규칙(SPEC §3.3b): 정지 이유가 Worker 결과에 실림 · 'stalled' 결과 → 한 줄 알림(매개변수 이름) + title 자세히 + 'Stalled' 칸"""
 import sys, os, json, tempfile, math, random
 from playwright.sync_api import sync_playwright
 
@@ -138,7 +139,12 @@ with sync_playwright() as p:
           and 'not recognised' in m4 and before == after, [c4.get('casaN'), wg_dis, c4b.get('dsl'), ta_btn, m4[:80]])
 
     # ---- 5 칸 편집
-    casa('TLA(1.3,3,0)'); pg.fill('input[data-p="mu"]', '2.5'); pg.press('input[data-p="mu"]', 'Enter'); pg.wait_for_timeout(200)
+    # ---- 4c CasaXPS 줄 (SPEC_casa_v3 §3): 꼭대기 매끈(TLA) → fwhm·asym 그대로(정함), 꺾인 꼭대기 LA(2,3,0) → '≈' (경험값)
+    eqt = lambda: J(f"(()=>{{ const e=document.querySelector('[data-casaeq=\"{cid()}\"]'); return e?e.textContent:null; }})()")
+    casa('LA(2,3,0)'); t4la = eqt(); casa('TLA(1.3,3,0)'); t4tla = eqt()
+    check("4c CasaXPS line under the component: TLA(1.3,3,0) shows fwhm and asym without '≈' (pinned); LA(2,3,0) shows 'fwhm ≈ …, asym ≈ …' (empirical)",
+          t4tla and 'TLA(1.3,3,0)' in t4tla and 'asym' in t4tla and '≈' not in t4tla and t4la and 'fwhm ≈' in t4la and 'asym ≈' in t4la, [t4tla, t4la])
+    pg.fill('input[data-p="mu"]', '2.5'); pg.press('input[data-p="mu"]', 'Enter'); pg.wait_for_timeout(200)
     check('5 editing the μ field updates the component', abs(cur()['mu'] - 2.5) < 1e-12, cur()['mu'])
 
     # ---- 6 다른 새 모양으로 피팅
@@ -151,6 +157,18 @@ with sync_playwright() as p:
     check('6 fits with GL(30,50)T(2) and ST(1)LA(1,143) run (finite χ²ν, true FWHM reported); ST legend in the card',
           r6['shape'] == 'GLN' and r6['chi2nu'] > 0 and r6['fwhm'] and r6b['mod'] == 'ST' and r6b['chi2nu'] > 0 and r6b['fwhm'] and 'ST(' in tbl, [r6, r6b])
     pg.screenshot(path=os.path.join(out, 's2_06_st_fit.png'), full_page=True)
+
+    # ---- 8 멈춤 규칙 (SPEC §3.3b): 피팅 결과에 정지 이유가 실려 오고(Worker), 'stalled' 면 한 줄 알림 + 자세한 것은 title
+    st8 = J('(()=>{ const r=XPS_UI._pr().result; return {stop:r.stop, sstop:r.stats.stop}; })()')
+    J("(()=>{ const p=XPS_UI._pr(), r=p.result, c=r.comps[0]; r.stop='stalled'; r.stall={gain:0.05,phi:1,flags:[{id:c.id,ci:0,k:'F',p:c.F,lo:0.05,hi:10,why:['flat']},{id:'bg',ci:-1,k:'c0',p:1,lo:-1e9,hi:1e9,why:['degenerate']}]}; XPS_UI.rerender(); })()")
+    pg.wait_for_timeout(250)
+    n8 = J("(()=>{ const ns=Array.from(document.querySelectorAll('.note.warn')).filter(e=>e.textContent.indexOf('진전 멈춤')>=0); const s=Array.from(document.querySelectorAll('.strip > div')).find(e=>e.textContent.indexOf('Stalled')===0); return {n:ns.length, text:ns[0]&&ns[0].textContent, lines:ns[0]&&Math.round(ns[0].getBoundingClientRect().height/parseFloat(getComputedStyle(ns[0]).lineHeight||'16')), title:ns[0]&&ns[0].title, strip:!!s, stripWarn:!!(s&&s.classList.contains('warn'))}; })()")
+    check("8 stop reason reaches the UI from the Worker (result.stop / stats.stop = 'converged' after a normal fit); a 'stalled' result shows one short Korean notice naming the ill-determined parameters, details in the tooltip, and a 'Stalled' box in the strip",
+          st8['stop'] == 'converged' and st8['sstop'] == 'converged' and n8['n'] == 1 and '진전 멈춤' in (n8['text'] or '') and 'FWHM' in (n8['text'] or '') and '배경' in (n8['text'] or '')
+          and '구별되지 않음' in (n8['title'] or '') and 'SPEC §3.3b' in (n8['title'] or '') and n8['strip'] and n8['stripWarn'] and len(n8['text'] or '') < 120, [st8, n8])
+    J("(()=>{ const n=Array.from(document.querySelectorAll('.note.warn')).find(e=>e.textContent.indexOf('진전 멈춤')>=0); if(n) n.scrollIntoView({block:'center'}); })()"); pg.wait_for_timeout(150)
+    pg.screenshot(path=os.path.join(out, 's2_08_stalled.png'), full_page=False)
+    J("(()=>{ const r=XPS_UI._pr().result; r.stop='converged'; r.stall=null; XPS_UI.rerender(); })()")
 
     # ---- 7 390 px
     pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(400)

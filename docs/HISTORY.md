@@ -5,6 +5,10 @@
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
 ## 최근 작업
+- **10-29 XPS v1.9.1 — 피팅 멈춤 규칙 · CasaXPS 3차 실측 반영**(modules/xps/SPEC.md §3.3b, SPEC_casa_v3.md):
+  LM 멈춤 규칙: 감쇠 지배 걸음 8 회(거절 ≥5) → Gauss–Newton kick → 그래도 이득 없으면 stalled + 정해지지 않는 매개변수 표시(한 줄 알림). TP wL 자유 퇴화 피팅 66 s → 4–5 s(χ² +0.19 %). 시험 피팅 23 717 건 중 23 687 건 비트 동일, 무작위 320 건: 같음 298 · 나음 10 · 나쁨 5(꺾인 모양의 다른 국소 최솟값).
+  CasaXPS 3차 판독: GL(m,n)·SGL(m,n)·TLA·DS 모양과 n 규칙(n·F/144.87) 일치, Casa fwhm = 2L · 비대칭 지수 = 1 − L/H(꺾인 꼭대기는 경험 δ), Casa DoF = 배경과 다른 채널 수 − p, DS 위치 = 원점 + wL·|cot(π/(2−α))|. casaToComp 의 'Casa fwhm = 참 FWHM' 가정 제거(TLA 8 % 오차 → 5e-5).
+  미확정: DS 넓이 정규화, ST 위치·fwhm, 낮은 BE 꼬리 모양의 폭 기준. 시험: casa_v3 69 · shapes2 72 · xps 153 · casa 111 · real 44 · UI 5 종.
 - **10-29 XPS v1.9 — CasaXPS Cookbook 2026 선모양**(modules/xps/SPEC_shapes2.md):
   TLA(α,μ,w) · ST(μ,γ)·SB(0) 수식어(GLS·GLP·LA·V·TLA·GLN·SGLN) · DS(α,n[,l]) · GL(m,n)·SGL(m,n) + T(k)/PHI(j,k) 꼬리 · TP(α,β,n). Casa 표기 읽기·쓰기(ST(1.7)LA(1,200), SB(0)LA(1,43) 등 왕복), 기존 GL(m)T(k) 저장 모형 그대로.
   독립 기준(scipy·mpmath) 대비 값 1.5e-7 · 넓이 7e-9 · FWHM 5e-8, 합성 재현 200 회 × 9 경우 3σ 안 ≥99 %. 성분 10 개 피팅 약 2 s · MC 1.5 s/회(TP wL 은 기본 고정 — 풀면 퇴화해 느려짐), 반복 진행 표시.
