@@ -43576,7 +43576,7 @@ function trueFWHM(shape,p){
   const half=v[im]/2; let a=null,b=null;
   for(let i=im;i>0;i--) if(v[i-1]<half){ a=x[i-1]+(half-v[i-1])/(v[i]-v[i-1])*(x[i]-x[i-1]); break; }
   for(let i=im;i<N-1;i++) if(v[i+1]<half){ b=x[i]+(v[i]-half)/(v[i]-v[i+1])*(x[i+1]-x[i]); break; }
-  return {fwhm:a!=null&&b!=null?b-a:null,xmax:x[im],ymax:v[im]};
+  return {fwhm:a!=null&&b!=null?b-a:null,xmax:x[im],ymax:v[im],lo:a,hi:b};   // lo/hi: 반높이 점 (낮은/높은 BE 쪽, 원점 기준) — casaWidthAsym
 }
 
 /* ============================================================
@@ -43859,7 +43859,7 @@ function s2FWHM(sh,p){
   const cross=(i0,i1)=>{ const f=fine(x[i0],x[i1]); for(let i=0;i<K;i++){ const a=f.vs[i]-half, b=f.vs[i+1]-half; if(a===0) return f.xs[i]; if(a*b<0) return f.xs[i]+a/(a-b)*(f.xs[i+1]-f.xs[i]); } return null; };   // 간격 dx/64 → 선형 보간 오차 ~1e-9·폭
   for(let i=im;i>0;i--) if(v[i-1]<half){ A=cross(i-1,i); break; }
   for(let i=im;i<N-1;i++) if(v[i+1]<half){ Bx=cross(i,i+1); break; }
-  const res={fwhm:A!=null&&Bx!=null?Bx-A:null,xmax:xm,ymax:ym}; if(S2FW.size>512) S2FW.clear(); S2FW.set(key,res); return res; }
+  const res={fwhm:A!=null&&Bx!=null?Bx-A:null,xmax:xm,ymax:ym,lo:A,hi:Bx}; if(S2FW.size>512) S2FW.clear(); S2FW.set(key,res); return res; }
 /* Avantage Voigt 표기(SPEC §13b): M = fL/(fL+fG) 로 가정(설명서의 비 식은 그림이라 읽지 못함 — 대조 대기), fV = Olivero–Longbothum 0.5346 fL + √(0.2166 fL² + fG²) */
 function avantageVoigt(wG,wL){ const fV=0.5346*wL+Math.sqrt(0.2166*wL*wL+wG*wG); return {fV,M:wL+wG>0?wL/(wL+wG):0,fG:wG}; }
 function voigtFromAvantage(fV,M){ if(M>=1) return {wG:0,wL:fV}; const r=M/(1-M), fG=fV/(0.5346*r+Math.sqrt(0.2166*r*r+1)); return {wG:fG,wL:r*fG}; }
@@ -44080,7 +44080,47 @@ function initAreas(prob,map,v){
     if(Q[n-1]>0) prob.bg._khi=Math.max(1.5*(ymx-ymn)/Q[n-1],2*prob.bg.k);
   }
 }
-/* LM 한 번. prob 은 제자리에서 바뀐다. v: 분산 배열 */
+/* 멈춤(stall) 규칙 (SPEC §3.3b). 받아들인 걸음의 λ 가 W 번 연속 1 … 1e6 (감쇠가 곡률보다 큼 — 걸음이 Gauss–Newton 의 절반 미만,
+   그러나 수치 잡음 한계(λ > 1e6, 수렴 막바지)는 아님)이고
+   그 W 번 중 rej 번 이상이 먼저 거절된 걸음(χ² 증가)을 겪었으면 '감쇠에 갇힘'으로 본다 (곡률이 급한 골짜기·모형의 꺾임/불연속).
+   처음 갇히면 λ 를 처음 값 1e-3 으로 되돌려 Gauss–Newton 걸음을 시험(kick). kick 뒤 다시 갇혔을 때 kick 이후 χ² 감소가
+   < ε_c·φ̂ 이고 kick 의 첫 걸음이 λ < 1 로 받아들여졌으면 수렴, < τ·φ̂ 이면 멈춤(stalled), 아니면 다시 kick. φ̂ = χ²/(N_eff − p).
+   1차가 멈추면 2차(IRLS)의 첫 λ = 1e-3 을 kick 으로 센다. 거절 없이 λ 가 줄어 가는 고원(밖으로 넓혀 가는 중)에는 아무것도 하지 않는다. */
+const LM_STALL={W:8,lam:1,lamHi:1e6,rej:5,tau:0.3,conv:1e-6};   // 창·λ 범위·창 안 거절 수·멈춤 τ·수렴 ε_c (SPEC §3.3b)
+const FIT_HOOK={fit:null,lm:null,stall:true};   // 시험용 기록 고리 (test/fitlog_hook.js; 화면에서는 비어 있음)
+/* 대칭 행렬 고유값·고유벡터 (Jacobi). 반환 {w: 고유값, V: 열 = 고유벡터(행 우선 k×k)} */
+function eigSym(A,k){
+  const a=Float64Array.from(A), V=new Float64Array(k*k); for(let i=0;i<k;i++) V[i*k+i]=1;
+  for(let sweep=0;sweep<100;sweep++){ let off=0, dg=0; for(let p=0;p<k;p++){ dg+=a[p*k+p]*a[p*k+p]; for(let q=p+1;q<k;q++) off+=a[p*k+q]*a[p*k+q]; } if(off<=1e-30*dg) break;
+    for(let p=0;p<k;p++) for(let q=p+1;q<k;q++){ const apq=a[p*k+q]; if(Math.abs(apq)<1e-300) continue;
+      const th=(a[q*k+q]-a[p*k+p])/(2*apq), t=Math.sign(th||1)/(Math.abs(th)+Math.sqrt(th*th+1)), cs=1/Math.sqrt(t*t+1), sn=t*cs;
+      for(let r=0;r<k;r++){ const arp=a[r*k+p], arq=a[r*k+q]; a[r*k+p]=cs*arp-sn*arq; a[r*k+q]=sn*arp+cs*arq; }
+      for(let r=0;r<k;r++){ const apr=a[p*k+r], aqr=a[q*k+r]; a[p*k+r]=cs*apr-sn*aqr; a[q*k+r]=sn*apr+cs*aqr; }
+      for(let r=0;r<k;r++){ const vrp=V[r*k+p], vrq=V[r*k+q]; V[r*k+p]=cs*vrp-sn*vrq; V[r*k+q]=sn*vrp+cs*vrq; } } }
+  return {w:Array.from({length:k},(_,i)=>a[i*k+i]),V};
+}
+/* 멈춘 피팅에서 잘 정해지지 않은 매개변수 고르기 (SPEC §3.3b): 마지막 Jacobian 의 JᵀJ (자연 매개변수 공간)
+   - bound: 한계까지 남은 거리 < 1e-3·(hi − lo) (한쪽 한계면 < 1e-3·(|p| + 1))
+   - flat : 전 범위(유한 한계) 또는 ±(|p|+0.1) 를 움직여도 Δχ² < 0.01·φ̂ (모형이 그 매개변수를 거의 보지 못함)
+   - degenerate: 상관 행렬 R = D⁻¹ JᵀJ D⁻¹ 의 고유값 < 1e-9 인 방향에 성분 |v_j|² > 0.2 (다른 매개변수와 구별 안 됨) */
+function illDetermined(map,p,A,u,phi){
+  const np=p.length, out=[]; const dn=new Float64Array(np);
+  for(let j=0;j<np;j++){ const f=map.free[j], d=dPdU(u[j],f.lo,f.hi); dn[j]=Math.abs(d)>1e-300?1/d:0; }
+  const An=new Float64Array(np*np); for(let a=0;a<np;a++) for(let b=0;b<np;b++) An[a*np+b]=A[a*np+b]*dn[a]*dn[b];
+  const why=p.map(()=>[]);
+  map.free.forEach((f,j)=>{ const L=isFinite(f.lo), H=isFinite(f.hi);
+    const dist=Math.min(L?p[j]-f.lo:Infinity,H?f.hi-p[j]:Infinity), ref=L&&H?f.hi-f.lo:Math.abs(p[j])+1;
+    if(dist<1e-3*ref) why[j].push("bound");
+    const span=L&&H?f.hi-f.lo:Math.abs(p[j])+0.1; if(!(An[j*np+j]*span*span>=0.01*phi)) why[j].push("flat"); });
+  const act=[]; for(let j=0;j<np;j++) if(!why[j].length&&An[j*np+j]>0) act.push(j);
+  const k=act.length;
+  if(k>1){ const d=act.map(j=>Math.sqrt(An[j*np+j])); const R=new Float64Array(k*k); for(let a=0;a<k;a++) for(let b=0;b<k;b++) R[a*k+b]=An[act[a]*np+act[b]]/(d[a]*d[b]);
+    const e=eigSym(R,k); for(let m=0;m<k;m++) if(e.w[m]<1e-9) for(let a=0;a<k;a++){ const v=e.V[a*k+m]; if(v*v>0.2&&why[act[a]].indexOf("degenerate")<0) why[act[a]].push("degenerate"); } }
+  map.free.forEach((f,j)=>{ if(why[j].length) out.push({id:f.id,ci:f.ci,k:f.k,p:p[j],lo:f.lo,hi:f.hi,why:why[j]}); });
+  return out;
+}
+/* LM 한 번. prob 은 제자리에서 바뀐다. v: 분산 배열.
+   정지 이유(stop): "converged" (상대 χ² 변화 < 1e-10 이 3 번 연속 · 어떤 감쇠로도 χ² 가 줄지 않음 · kick 뒤 감소 < ε_c·φ̂), "stalled" (§3.3b), "maxIter" */
 function lmFit(prob,map,v,opt){
   opt=opt||{}; const maxit=opt.maxit||500; const E=prob.E, y=prob.y, n=E.length;
   const np=map.free.length; const ev=makeEvaluator(prob,map);
@@ -44090,10 +44130,13 @@ function lmFit(prob,map,v,opt){
   let u=p.map((x,i)=>toU(x,lo[i],hi[i]));
   const chi=mu=>{ let s=0; for(let i=0;i<n;i++){ const r=(y[i]-mu[i])*sw[i]; s+=r*r; } return s; };
   setVec(prob,map,p); let cur=ev.full(); let X=chi(cur.mu);
-  if(!np) return {chi2:X,iter:0,conv:true,mu:cur.mu,B:cur.B};
-  let lam=1e-3, nu=2, calm=0, it=0, conv=false;
+  if(!np) return {chi2:X,iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B};
+  let lam=1e-3, nu=2, calm=0, it=0, conv=false, stop=null;
+  const stall=opt.stall!==false&&FIT_HOOK.stall!==false, ST=opt.stallCfg?Object.assign({},LM_STALL,opt.stallCfg):LM_STALL; const hX=FIT_HOOK.lm?[X]:null, hL=hX?[]:null, hT=hX?[]:null; let nEff=0; for(let i=0;i<n;i++) if(sw[i]>1e-10) nEff++;
+  let damp=0, kicks=0, Xkick=X, kickNext=false, lastA=null, gainKick=null, probeLam=null; const rejW=[];
   const scale=map.free.map(f=>f.k==="be"||f.k==="dE"?1e-4:f.k==="area"?0:1e-5);
   for(;it<maxit;it++){
+    if(kickNext){ lam=1e-3; nu=2; kickNext=false; }
     // Jacobian (u 공간): ∂r/∂u = −sw·∂μ/∂p · dp/du
     const J=new Array(np);
     for(let j=0;j<np;j++){
@@ -44107,8 +44150,9 @@ function lmFit(prob,map,v,opt){
     const r=new Float64Array(n); for(let i=0;i<n;i++) r[i]=(y[i]-cur.mu[i])*sw[i];
     const A=new Float64Array(np*np), g=new Float64Array(np);
     for(let a=0;a<np;a++){ const Ja=J[a]; let s=0; for(let i=0;i<n;i++) s+=Ja[i]*r[i]; g[a]=-s; for(let b=0;b<=a;b++){ const Jb=J[b]; let t=0; for(let i=0;i<n;i++) t+=Ja[i]*Jb[i]; A[a*np+b]=t; A[b*np+a]=t; } }
+    lastA=A;
     const D=new Float64Array(np); for(let a=0;a<np;a++) D[a]=Math.max(A[a*np+a],1e-30);
-    let accepted=false, tries=0;
+    let accepted=false, tries=0, lamUsed=lam;
     while(!accepted&&tries++<30){
       const M=A.slice(); for(let a=0;a<np;a++) M[a*np+a]+=lam*D[a];
       let dlt=cholSolve(M,g,np);
@@ -44119,16 +44163,34 @@ function lmFit(prob,map,v,opt){
       const rho=pred>0?(X-Xn)/pred:-1;
       if(rho>0&&isFinite(Xn)){
         const rel=(X-Xn)/Math.max(X,1e-300);
-        u=un; p=pn; cur=tr; X=Xn; accepted=true;
+        u=un; p=pn; cur=tr; X=Xn; accepted=true; lamUsed=lam;
         lam*=Math.max(1/3,1-Math.pow(2*rho-1,3)); nu=2;
         if(rel<1e-10) calm++; else calm=0; if(opt.onIter) opt.onIter(it,X);   // 진행 표시 (Worker → 화면)
+        if(hX){ hX.push(X); hL.push(lamUsed); hT.push(tries); }
       } else { setVec(prob,map,p); lam*=nu; nu*=2; if(lam>1e16) break; }
     }
-    if(!accepted){ setVec(prob,map,p); cur=ev.full(); conv=true; break; }
-    if(calm>=3){ conv=true; break; }
+    if(!accepted){ setVec(prob,map,p); cur=ev.full(); conv=true; stop="converged"; break; }
+    if(calm>=3){ conv=true; stop="converged"; break; }
+    // 멈춤 규칙 (SPEC §3.3b): 감쇠 지배 걸음이 W 번 이어지면 → kick 또는 정지
+    if(stall){
+      if(probeLam==null) probeLam=lamUsed;   // kick(또는 시작) 뒤 첫 걸음의 λ: < 1 이면 Gauss–Newton 에 가까운 걸음이 받아들여짐
+      damp=lamUsed>=ST.lam&&lamUsed<=ST.lamHi?damp+1:0;   // λ > 1e6: 걸음이 GN 의 1e-6 미만 = 수치 잡음 한계(수렴 막바지) — 1e-10 기준에 맡김
+      rejW.push(tries>1?1:0); if(rejW.length>ST.W) rejW.shift();
+      if(damp>=ST.W&&rejW.reduce((a,b)=>a+b,0)>=ST.rej){   // 감쇠 지배 + 걸음이 자꾸 넘침(거절) = 갇힘. 거절 없이 λ 가 줄어 가는 고원은 기다린다
+        const phi=X/Math.max(1,nEff-np), gain=Xkick-X;
+        const probed=kicks>0||opt.afterStall;   // kick 뒤(또는 1차가 멈춘 뒤의 2차: 첫 λ = 1e-3 이 곧 Gauss–Newton 시도)
+        if(probed&&gain<ST.conv*phi&&probeLam<ST.lam){ conv=true; stop="converged"; gainKick=gain/phi; break; }   // GN 걸음이 통했는데도 더 줄 것이 없음 = 최솟값
+        if(probed&&gain<ST.tau*phi){ stop="stalled"; gainKick=gain/phi; break; }
+        kicks++; kickNext=true; Xkick=X; damp=0; rejW.length=0; probeLam=null;
+      }
+    }
   }
+  if(!stop) stop="maxIter";
   setVec(prob,map,p); cur=ev.full();
-  return {chi2:X,iter:it,conv,mu:cur.mu,B:cur.B,comps:ev.comps()};
+  if(hX) FIT_HOOK.lm({X:hX,lam:hL,tries:hT,n:nEff,np,stop,kicks});
+  const out={chi2:X,iter:it,conv,stop,kicks,mu:cur.mu,B:cur.B,comps:ev.comps()};
+  if((stop==="stalled"||stop==="maxIter")&&lastA){ const phi=X/Math.max(1,nEff-np); out.stall={gain:gainKick,phi,flags:illDetermined(map,p,lastA,u,phi)}; }
+  return out;
 }
 /* 한 번의 완전한 피팅: (넓이 초기화) → LM(평활 분산) → LM(모형 분산) */
 function fitOnce(prob,opt){
@@ -44139,9 +44201,13 @@ function fitOnce(prob,opt){
   let v=dataVar(prob,ys);
   if(opt.initAreas!==false){ initAreas(prob,map,v); if(prob.bg.type==="active"){ map=buildMap(prob); applyLinks(prob,map); } }   // k 상한 반영
   const fitter=(opt.optimizer||prob.optimizer)==="simplex"?nmFit:lmFit;   // SPEC §3.3 (Simplex: §14)
-  let r=fitter(prob,map,v,opt); const chi2p1=r.chi2;
-  if(opt.irls!==false&&prob.weight!=="const"&&prob.weight!=="casa"){ v=varianceFrom(r.mu,prob.c); r=fitter(prob,map,v,opt); }
-  r.v=v; r.map=map; r.chi2p1=chi2p1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
+  let r=fitter(prob,map,v,opt); const chi2p1=r.chi2, it1=r.iter;
+  const r1=r;
+  if(opt.irls!==false&&prob.weight!=="const"&&prob.weight!=="casa"){ v=varianceFrom(r.mu,prob.c); r=fitter(prob,map,v,r.stop==="stalled"?Object.assign({},opt,{afterStall:true}):opt); }   // 1차가 멈췄으면 2차의 시작(λ = 1e-3)을 Gauss–Newton 시도로 셈 (SPEC §3.3b)
+  // 정지 이유: 두 번 중 하나라도 멈췄으면(stalled) 그것을, 아니면 마지막 것을 (SPEC §3.3b)
+  if(r!==r1){ r.stop1=r1.stop; r.kicks=(r.kicks||0)+(r1.kicks||0); if(r1.stop==="stalled"&&r.stop!=="stalled"){ r.stop="stalled"; if(!r.stall) r.stall=r1.stall; } }
+  r.v=v; r.map=map; r.chi2p1=chi2p1; r.iter1=it1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
+  if(FIT_HOOK.fit) FIT_HOOK.fit(prob,r,opt);   // 시험용 기록 고리 (test/fitlog_hook.js; 화면에서는 비어 있음)
   return r;
 }
 /* 다중 시작: 비선형 free 매개변수를 Latin hypercube 로 */
@@ -44218,8 +44284,12 @@ function fitStats(prob,res){
   let runs=1, np_=0, nn=0; for(let i=0;i<n;i++){ if(r[i]>=0) np_++; else nn++; if(i&&((r[i]>=0)!==(r[i-1]>=0))) runs++; }
   const mR=1+2*np_*nn/n, vR=2*np_*nn*(2*np_*nn-n)/(n*n*(n-1)); const zR=vR>0?(runs-mR)/Math.sqrt(vR):0;
   const dof=Math.max(1,n-p);
-  // CasaXPS 'RMS'·DoF (weight = "casa"; SPEC_casa_v2 §1): √Σ(y − μ)² 과 (N − 2) − p, 채널 i0+1 … i1−1
-  let casa=null; if(prob.weight==="casa"){ let s2=0; for(let i=1;i<n-1;i++) s2+=(y[i]-mu[i])*(y[i]-mu[i]); casa={rms:Math.sqrt(s2),dof:Math.max(1,n-2-p),n:n-2}; }
+  // CasaXPS 'RMS'·DoF (weight = "casa"; SPEC_casa_v2 §1, SPEC_casa_v3 §2 실측): √Σ(y − μ)² over channels i0+1 … i1−1;
+  // DoF = #{i0+1 … i1−1 : y_i ≠ B_i} − p (B = region background; channels where the data equal the background exactly are not counted:
+  // GL(30,100) 154−3 = 151, GL(30) 159−3 = 156, GL(30)T(2) 340−3 = 337). Active (in-fit) background: all channels counted.
+  let casa=null; if(prob.weight==="casa"){ const Bc=prob.bg&&prob.bg.type!=="active"?(prob._Bst||bgStatic(prob.E,y,prob.bg)):null; let s2=0, ne=0;
+    for(let i=1;i<n-1;i++){ const d=y[i]-mu[i]; s2+=d*d; if(!Bc||Math.abs(y[i]-Bc[i])>1e-12*Math.max(1,Math.abs(y[i]))) ne++; }
+    casa={rms:Math.sqrt(s2),dof:Math.max(1,ne-p),n:ne}; }
   // 모형 비교용 χ²_d: 데이터만으로 정한 분산(평활 데이터) — 모형마다 같은 가중 (SPEC 3.5 v1.1)
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
@@ -44909,7 +44979,7 @@ function nmFit(prob,map,v,opt){
   const u0=p0.map((x,i)=>toU(x,lo[i],hi[i]));
   const chi=mu=>{ let s=0; for(let i=0;i<n;i++){ const r=(y[i]-mu[i])*sw[i]; s+=r*r; } return s; };
   setVec(prob,map,p0); let cur=ev.full();
-  if(!np) return {chi2:chi(cur.mu),iter:0,conv:true,mu:cur.mu,B:cur.B,comps:ev.comps()};
+  if(!np) return {chi2:chi(cur.mu),iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B,comps:ev.comps()};
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const s=map.free.map((f,j)=>{ const p=p0[j]; let dp;
     if(f.k==="be"||f.k==="dE") dp=0.1; else if(Math.abs(p)>1e-8) dp=0.1*Math.abs(p); else if(isFinite(lo[j])&&isFinite(hi[j])) dp=0.05*(hi[j]-lo[j]); else dp=1e-3*Math.max(1,ymax);
@@ -44943,7 +45013,7 @@ function nmFit(prob,map,v,opt){
     if(!ok) break;
   }
   const p=best.map((zi,j)=>fromU(u0[j]+s[j]*zi,lo[j],hi[j])); setVec(prob,map,p); cur=ev.full();
-  return {chi2:chi(cur.mu),iter:nfev,conv,mu:cur.mu,B:cur.B,comps:ev.comps(),optimizer:"simplex"};
+  return {chi2:chi(cur.mu),iter:nfev,conv,stop:nfev>=maxfev?"maxIter":"converged",mu:cur.mu,B:cur.B,comps:ev.comps(),optimizer:"simplex"};
 }
 
 /* ============================================================
@@ -45027,8 +45097,8 @@ function areaSumSigma(prob,map,cov,idxs){
 function finalize(P,r){
   const cov=covariance(P,r); const st=fitStats(P,r); const summ=compSummary(P,r,cov);
   const map=r.map; const E=P.E, n=E.length, ctx={emin:E[0],emax:E[n-1]};
-  return {comps:P.comps,bg:P.bg,chi2:r.chi2,iter:r.iter,conv:r.conv,mu:Array.from(r.mu),B:Array.from(r.B),v:Array.from(r.v),
-    stats:Object.assign({},st,{resid:Array.from(st.resid)}),
+  return {comps:P.comps,bg:P.bg,chi2:r.chi2,iter:r.iter,conv:r.conv,stop:r.stop||null,stall:r.stall||null,mu:Array.from(r.mu),B:Array.from(r.B),v:Array.from(r.v),
+    stats:Object.assign({},st,{resid:Array.from(st.resid),stop:r.stop||null,stall:r.stall||null}),   // stop: "converged" | "stalled" | "maxIter" (SPEC §3.3b)
     cov:{sig:cov.sig,corr:Array.from(cov.corr),C:Array.from(cov.C),atB:cov.atB,phi:cov.phi,dof:cov.dof,singular:cov.singular,names:cov.names,np:cov.np},
     summ,multi:r.multi||null,free:map.free.map(f=>({id:f.id,k:f.k,lo:f.lo,hi:f.hi})),
     sumSig:{all:areaSumSigma(P,map,cov,P.comps.map((c,i)=>i))},
@@ -45039,7 +45109,7 @@ function fitJob(prob,starts,opt){
   let best=null; const chis=[];
   (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,iter:best.r.iter};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null};   // chi2 = 1차 χ² (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){
@@ -45064,6 +45134,40 @@ function sglToGLS(p){ const h=Math.min(1,Math.max(0,p/100)); return h*CASA_AL/(h
 function glsToSGL(m){ m=Math.min(1,Math.max(0,m)); const a=m/CASA_AL, b=(1-m)/CASA_AG; return a+b>0?100*a/(a+b):0; }
 /* F = 1 일 때의 실제 FWHM (척도 불변 모양의 폭 인자) */
 function casaWidthFactor(shape,o){ const c=newComp(shape,0,Object.assign({F:1},o)); c.F=1; if(o.wG!=null) c.wG=o.wG; if(o.casaN!=null) c.casaN=o.casaN; return trueFWHM(shape,shapeParams(c,1)).fwhm; }
+/* CasaXPS 'fwhm' 숫자와 비대칭 지수 (SPEC_casa_v3 §3, CasaXPS 2.3.27 Round-3 실측): x̂ = 봉우리 최댓값, a < x̂ < b 반높이 점 (a = 낮은 BE 쪽),
+   L = x̂ − a, H = b − x̂ → fwhm = 2(L + δ), asym = 1 − (L + δ)/(H − δ). 대칭 모양: 실제 FWHM, 0.
+   δ = 0 — 꼭대기가 매끈한 모양 (TLA, DS, LA with n > 0, GL/SGL(m,n) without tail): 실측과 fwhm ≤ 4.4e-4, asym ≤ 5e-4 → exact.
+   꺾인/평평한 꼭대기: CasaXPS 의 최댓값이 꼬리 쪽으로 δ 만큼 — 실측에서 읽은 경험값 (규칙 아님), exact:false:
+   LA(α≠β, n = 0) δ = 0.0025·F (LA(2,3,0), LA(1.53,2.43,0) F 1·2); GL/SGL T(k)/PHI(j,k) 와 AGT(tu 'fwhm') δ = 0.011·F (GL(30)T(1), GL(30)T(2), GL(0)T(2)).
+   ST(μ): 미정 — fwhm = 수식어 붙인 모양의 실제 FWHM (ST(1.7)LA(1,1,200) 에서 −0.37 %), asym 은 δ = 0.0054·F (판독 1 개).
+   모든 시험 모양의 꼬리가 높은 BE 쪽이라 '낮은 BE 쪽' = '가파른 쪽' — 꼬리가 낮은 BE 쪽인 모양은 판독 R3 대기 (낮은 BE 쪽 그대로 씀). */
+const CASA_DELTA_LA=0.0025, CASA_DELTA_TAIL=0.011, CASA_DELTA_ST=0.0054, CWA=new Map();
+/* 격자 FWHM(trueFWHM 일반 경로: 간격 0.005·폭, 선형 보간)의 최댓값·반높이 점을 다듬음 — 비대칭 지수가 L/H 에 민감해서 (LA(1.53,2.43): H 오차 1e-4 → asym 4e-4).
+   같은 창(ctx)에서 값을 매기므로 창 정규화 상수는 상쇄된다 */
+function refineHalfMax(shape,p,w){
+  if(w.fwhm==null||w.lo==null||w.hi==null) return w; const W=w.fwhm, ctx={lo:-60*W,hi:60*W};
+  const ev=x=>shapeUnit(shape,Float64Array.of(x),p,ctx)[0], gr=(Math.sqrt(5)-1)/2;
+  let a=w.xmax-0.02*W, b=w.xmax+0.02*W, x1=b-gr*(b-a), x2=a+gr*(b-a), f1=ev(x1), f2=ev(x2);
+  for(let k=0;k<60&&b-a>1e-12*W;k++){ if(f1>=f2){ b=x2; x2=x1; f2=f1; x1=b-gr*(b-a); f1=ev(x1); } else { a=x1; x1=x2; f1=f2; x2=a+gr*(b-a); f2=ev(x2); } }
+  let xm=(a+b)/2, ym=ev(xm); const y0=ev(w.xmax); if(y0>ym){ xm=w.xmax; ym=y0; }
+  const half=ym/2, cross=(u,v)=>{ let fu=ev(u)-half, fv=ev(v)-half; if(!(fu*fv<0)) return null; for(let k=0;k<60&&Math.abs(v-u)>1e-12*W;k++){ const m=(u+v)/2, fm=ev(m)-half; if(fu*fm<=0){ v=m; fv=fm; } else { u=m; fu=fm; } } return (u+v)/2; };
+  const lo=cross(w.lo-0.02*W,Math.min(w.lo+0.02*W,xm)), hi=cross(Math.max(w.hi-0.02*W,xm),w.hi+0.02*W);
+  return lo!=null&&hi!=null?{fwhm:hi-lo,xmax:xm,ymax:ym,lo,hi}:w; }
+function casaWidthAsym(c){ const key=c.shape+"|"+JSON.stringify(shapeParams(c,1)); const hit=CWA.get(key); if(hit) return Object.assign({},hit);
+  const res=casaWidthAsym0(c); if(CWA.size>256) CWA.clear(); CWA.set(key,res); return Object.assign({},res); }
+function casaWidthAsym0(c){
+  const sp=shapeParams(c,1), s2=sp.mod||["TLA","GLN","SGLN","TP","DS"].includes(c.shape), w0=trueFWHM(c.shape,sp), w=s2?w0:refineHalfMax(c.shape,sp,w0);
+  if(w.fwhm==null||w.lo==null||w.hi==null) return {fwhm:null,asym:null,exact:false,lo:null,hi:null,xmax:null,note:"no half-maximum points (CasaXPS fwhm not defined here)"};
+  const F=c.shape==="DS"?sp.wL:sp.F, L=w.xmax-w.lo, H=w.hi-w.xmax, md=compMod(c);
+  const flatTail=!!compTail(c)||(c.shape==="AGT"&&c.tu==="fwhm"), laKink=c.shape==="LA"&&Math.abs(c.alpha-c.beta)>1e-9&&!(sp.wG>1e-6);
+  const d=(md==="ST"?CASA_DELTA_ST:flatTail?CASA_DELTA_TAIL:laKink?CASA_DELTA_LA:0)*(F||0);
+  const sym=Math.abs(H-L)<=1e-7*(H+L);
+  const fwhm=md==="ST"||sym?w.fwhm:2*(L+d), asym=sym?0:1-(L+d)/(H-d);
+  const note=md==="ST"?"ST: CasaXPS fwhm ≈ true FWHM of the ST shape (−0.4 % for ST(1.7)LA(1,1,200)), asym from an empirical peak offset (one reading) — not pinned"
+    :flatTail||laKink?`CasaXPS fwhm = 2·(x̂ − a) with an empirical peak offset δ = ${flatTail?CASA_DELTA_TAIL:CASA_DELTA_LA}·F (${flatTail?"flat-top tail":"kinked LA top"}; measured ≈ 1e-3) — empirical`
+    :sym?"CasaXPS fwhm = true FWHM":"CasaXPS fwhm = 2 × (maximum − low-BE half-maximum point), asym = 1 − L/H (measured: TLA, DS, smooth tops)";
+  return {fwhm,asym,exact:!(md||flatTail||laKink),lo:w.lo,hi:w.hi,xmax:w.xmax,note};
+}
 /* INNO 성분 → CasaXPS 표기 + CasaXPS 'fwhm' 칸에 들어갈 수. exact = 실측으로 같은 수가 확인된 경우만 */
 function compToCasa0(c){
   const sp=shapeParams(c,1), r=(v,d)=>+(+v).toFixed(d);
@@ -45071,16 +45175,17 @@ function compToCasa0(c){
   if(c.shape==="GLS") return {notation:`SGL(${r(glsToSGL(c.m),2)})`,fwhm:c.F,exact:true,note:"CasaXPS SGL(p) = height mix with one F = GLS with m = sglToGLS(p); fwhm = F (= true FWHM)"};
   if(c.shape==="LA"){ const sym=Math.abs(c.alpha-c.beta)<1e-9; const n=c.casaN!=null?+c.casaN:(sp.wG>1e-9?sp.wG/(CASA_LA_RHO*sp.F):0), ni=Math.round(n);
     const not=`LA(${r(c.alpha,3)},${r(c.beta,3)},${ni})`;
-    if(!sym) return {notation:not,fwhm:null,n,exact:false,note:"asymmetric LA: CasaXPS's width number is not the true FWHM (LA(1.53,2.43,0), F 1 → 0.580056, true FWHM 0.66569) — rule not pinned; shape and tail side are the same"};
+    if(!sym){ const cw=casaWidthAsym(c); return {notation:not,fwhm:cw.fwhm,asym:cw.asym,fwhmExact:cw.exact,n,exact:false,note:"asymmetric LA: shape and tail side measured; "+cw.note+(ni>0?" (n > 0 asymmetric LA not read yet)":"")}; }
     return {notation:not,fwhm:trueFWHM("LA",sp).fwhm,n,exact:Math.abs(n-ni)<0.05&&(c.alpha===1||ni===0),note:"symmetric LA: CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (measured for α = β = 1 only)"}; }
-  if(c.shape==="AGT"&&c.tu==="fwhm"&&!(c.TM>0)) return {notation:`GL(${r(100*c.m,2)})T(${r(c.ET,4)})`,fwhm:null,exact:false,note:"same shape as CasaXPS GL(p)T(k) (area/position match); CasaXPS's fwhm number (1.18051 for F 1.2, p 30, k 2) is neither F nor the true FWHM (1.3413) — not pinned"};
+  if(c.shape==="AGT"&&c.tu==="fwhm"&&!(c.TM>0)){ const cw=casaWidthAsym(c); return {notation:`GL(${r(100*c.m,2)})T(${r(c.ET,4)})`,fwhm:cw.fwhm,asym:cw.asym,fwhmExact:false,exact:false,note:"same shape as CasaXPS GL(p)T(k) (area/position measured); "+cw.note+" (GL(30)T(2), F 1.2: 1.18051 read)"}; }
   return {notation:null,fwhm:null,exact:false,note:"no CasaXPS line shape with the same definition"};
 }
 /* CasaXPS 표기('GL(30)', 'SGL(30)', 'LA(1.53,2.43,0)', 'LA(1,250)', 'LA(50)', 'GL(30)T(2)') + CasaXPS fwhm → INNO 성분 */
 function casaToComp0(str,o){
   o=o||{}; const s=String(str||"").replace(/\s+/g,""), be=o.be!=null?+o.be:0, area=o.area!=null?+o.area:1, fw=o.fwhm>0?+o.fwhm:1.2; let m;
   const mk=(shape,q)=>{ const c=newComp(shape,be,Object.assign({area},q)); if(o.id) c.id=o.id; return c; };
-  if((m=s.match(/^GL\(([\d.]+)\)T\(([\d.]+)\)$/i))){ const c=mk("AGT",{F:fw,m:+m[1]/100,ET:+m[2],TM:0,CT:0,tu:"fwhm"}); return {comp:c,exact:false,note:"F set to the CasaXPS fwhm number — CasaXPS's fwhm for GL(p)T(k) is not F (measured 1.18051 for F 1.2); refit the width"}; }
+  if((m=s.match(/^GL\(([\d.]+)\)T\(([\d.]+)\)$/i))){ const c=mk("AGT",{F:1,m:+m[1]/100,ET:+m[2],TM:0,CT:0,tu:"fwhm"}); const u=o.innoUnits?trueFWHM("AGT",shapeParams(c,1)).fwhm:casaWidthAsym(c).fwhm; c.F=u>0?fw/u:fw;
+    return {comp:c,exact:false,note:"F from the CasaXPS fwhm number via an empirical peak offset (SPEC_casa_v3 §3: CasaXPS fwhm ≈ 0.984·F for GL(30)T(2)) — refit the width"}; }
   if((m=s.match(/^SGL\(([\d.]+)\)$/i))){ const c=mk("GLS",{F:fw,m:sglToGLS(+m[1])}); return {comp:c,exact:true,note:"SGL(p) = GLS with m = "+c.m.toFixed(4)}; }
   if((m=s.match(/^GL\(([\d.]+)\)$/i))){ const mm=+m[1]/100, c=mk("GLP",{F:1,m:mm}); c.F=fw/casaWidthFactor("GLP",{m:mm}); return {comp:c,exact:true,note:"GL(p) = GLP; F from the true FWHM"}; }
   let al,bt,n;
@@ -45088,8 +45193,8 @@ function casaToComp0(str,o){
   else if((m=s.match(/^LA\(([\d.]+),([\d.]+)\)$/i))){ if(+m[2]>=20&&Number.isInteger(+m[2])){ al=bt=+m[1]; n=+m[2]; } else { al=+m[1]; bt=+m[2]; n=0; } }   // 'LA(1,1283)' (CasaXPS 2.3.25 review) = LA(α=β, n); 'LA(1.53,2.43)' = LA(α,β,0) — 해석(미확인)
   else if((m=s.match(/^LA\(([\d.]+),([\d.]+),([\d.]+)\)$/i))){ al=+m[1]; bt=+m[2]; n=+m[3]; }
   if(al!=null){ const c=mk("LA",{F:1,alpha:al,beta:bt,wG:0}); c.casaN=n; const sym=Math.abs(al-bt)<1e-9;
-    c.F=fw/casaWidthFactor("LA",{alpha:al,beta:bt,casaN:n,wG:0})||fw;
-    return {comp:c,exact:sym&&(al===1||n===0),note:sym?"CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (wG fixed by n)":"asymmetric LA: CasaXPS width number → F not pinned; F set from the true FWHM — refit the width"}; }
+    let cw=null; if(sym||o.innoUnits) c.F=fw/casaWidthFactor("LA",{alpha:al,beta:bt,casaN:n,wG:0})||fw; else { const u0=clone(c); u0.F=1; cw=casaWidthAsym(u0); c.F=cw.fwhm>0?fw/cw.fwhm:fw; }
+    return {comp:c,exact:sym&&(al===1||n===0),note:sym?"CasaXPS fwhm = true FWHM; Gaussian FWHM = n·F/144.87 (wG fixed by n)":o.innoUnits?"asymmetric LA: width kept (true FWHM)":"asymmetric LA: F from the CasaXPS fwhm number, "+cw.note+(n>0?" (n > 0 asymmetric LA not read yet)":"")+" — refit the width"}; }
   return null;
 }
 /* ---- CasaXPS Cookbook 2026 표기 (SPEC_shapes2 §4): [ST(μ[,γ]) | SB(a)] 바탕 [T(k) | PHI(j,k)]
@@ -45113,38 +45218,45 @@ function casaToComp(str,o){
   const bad=()=>fail(`'${raw}': wrong number or range of arguments for ${b.n}(${b.a.join(",")}) — supported: ${CASA_SHAPES_HELP}`);
   if((b.n==="GL"||b.n==="SGL")&&(b.a.length===2||tl)){ const p=b.a[0], n=b.a.length===2?b.a[1]:0; if(!(p>=0&&p<=100&&n>=0)||b.a.length>2) return bad();
     const q={F:1,m:p/100,casaN:n}; if(tl){ q.tail=tl.n; if(tl.n==="T") q.tk=tl.a[0]; else { q.tj=tl.a[0]; q.tk=tl.a[1]; } }
-    r={comp:mk(b.n==="GL"?"GLN":"SGLN",q),exact:false,note:(n>0?"Gaussian FWHM = n·F/144.87 assumed (LA rule, measured for LA(1,1,n) only)":"n = 0")+(tl?"; tail per Cookbook p. 67; F set to the CasaXPS fwhm number (measured GL(30)T(2): CasaXPS fwhm = 0.984 F, SPEC_casa_v2 §2.2) — refit the width":"")};
-    if(tl){ r.comp.F=fw; r.keepF=true; } }
+    r={comp:mk(b.n==="GL"?"GLN":"SGLN",q),exact:!tl,note:(n>0?"Gaussian FWHM = n·F/144.87 (measured: LA(1,1,n), GL(30,100), SGL(30,100))":"n = 0")+(tl?"; tail per Cookbook p. 67 (shape measured, GL(30)T(2))":"; CasaXPS fwhm = true FWHM")}; }
   else if(b.n==="TLA"){ const [al,mu,n]=[b.a[0],b.a[1],b.a[2]!=null?b.a[2]:0]; if(!(b.a.length===2||b.a.length===3)||!(al>0.5&&mu>0&&n>=0)) return fail(`'${raw}': TLA(α,μ[,n]) needs α > 0.5 (normalisable), μ > 0, n ≥ 0`);
-    r={comp:mk("TLA",{F:1,alpha:al,mu,wG:0,casaN:n}),exact:false,note:"TLA(α,μ,n) notation assumed by analogy with LA(α,β,n) (Cookbook p. 66 gives TLA(x:α,μ,w)); Gaussian FWHM = n·F/144.87 assumed"}; }
+    r={comp:mk("TLA",{F:1,alpha:al,mu,wG:0,casaN:n}),exact:true,note:"TLA(α,μ,n) notation accepted by CasaXPS 2.3.27; shape, tail side (high BE, +π/μ) and n rule (Gaussian FWHM = n·F/144.87) measured (TLA(1.2,3,0), TLA(1.2,3,100))"}; }
   else if(b.n==="DS"){ const [al,n,l]=b.a; if(!(b.a.length===2||b.a.length===3)||!(al>=0&&al<1&&n>=0)||(l!=null&&!(l>0))) return fail(`'${raw}': DS(α,n[,l]) needs 0 ≤ α < 1, n ≥ 0, l > 0`);
-    r={comp:mk("DS",{alpha:al,wL:1,wG:0,casaN:n,dsl:l}),exact:false,note:"DS area = area inside the fit window (Cookbook DS is not integrable for α > 0); Gaussian FWHM = n·wL/144.87 assumed"+(l?"; Shirley-cut variant Q(x,α,n,l), Cookbook pp. 66–67":"")}; }
+    r={comp:mk("DS",{alpha:al,wL:1,wG:0,casaN:n,dsl:l}),exact:false,note:"DS(α,n): shape, tail side and n rule (Gaussian FWHM = n·wL/144.87) measured (DS(0.1,100)); CasaXPS area normalisation not pinned — INNO area = area inside the fit window (CasaXPS area ≈ 1.43 × for DS(0.1,100)) — refit the area"+(l?"; Shirley-cut variant Q(x,α,n,l), Cookbook pp. 66–67 (not read)":"")}; }
   else if(b.n==="TP"){ const [ta,tb,n]=[b.a[0],b.a[1],b.a[2]!=null?b.a[2]:0]; if(!(b.a.length===2||b.a.length===3)||!(ta>=0&&tb>=0&&ta+tb>0&&n>=0)) return fail(`'${raw}': TP(α,β[,n]) needs α, β ≥ 0 (not both 0), n ≥ 0`);
     r={comp:mk("TP",{F:fw,ta,tb,wL:0,casaN:n}),exact:false,note:"TP width F = CasaXPS fwhm (assumed); Lorentzian FWHM = n·F/144.87 assumed"}; r.keepF=true; }
   if(!r){ if(tl) return bad(); const r0=casaToComp0(b.n+"("+b.a.join(",")+")",Object.assign({},o,{strict:false})); if(!r0) return fail(); r=r0; r.keepF=true; if(mod) r.comp=clone(r.comp); }
   const c=r.comp;
-  if(!r.keepF){ const u=unitFWHM(c); if(c.shape==="DS") c.wL=u>0?fw/u:fw; else c.F=u>0?fw/u:fw;
-    const asym=(c.shape==="GLN"||c.shape==="SGLN")&&compTail(c)||c.shape==="TLA"||c.shape==="DS"; if(asym) r.note+="; CasaXPS fwhm taken as the true FWHM (not verified for asymmetric shapes) — refit the width"; }
+  // 수식어를 먼저 붙인다 — ST 의 폭은 수식어 붙인 모양으로 (SPEC_casa_v3 §5; 바탕 폭으로 F 를 정하면 ST(1.7)LA(1,1,200) 에서 4.5 % 작음)
   if(mod){ if(!S2_MODBASE[c.shape]) return fail(`'${raw}': ${mod.n} applies to GL, SGL, LA, TLA (here: ${c.shape})`);
     c.mod=mod.n; if(mod.n==="ST"){ c.stMu=mod.a[0]; c.stN=mod.a[1]!=null?mod.a[1]:0; c.stG=0; } else c.sbArg=mod.a[0]!=null?mod.a[0]:0;
-    r.exact=false; r.note=(mod.n==="ST"?"ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66; γ → FWHM γ·F/144.87 assumed; ":"SB(0)F = ∫_x^∞F (Shirley step), Cookbook p. 68 — area = area inside the fit window; ")+r.note; }
-  return r; }
+    r.exact=false; r.note=(mod.n==="ST"?"ST(μ,γ): S(μ)F = N·F·[∫_x^∞F + A/μ] ⊗ G(γ), Cookbook p. 66 — shape measured (ST(1.7)LA(1,1,200): S after ⊗G, step on the high-BE side); γ → FWHM γ·F/144.87 assumed; CasaXPS position and fwhm number not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV) — refit position and width; ":"SB(0)F = ∫_x^∞F (Shirley step), Cookbook p. 68 — area = area inside the fit window; ")+r.note; }
+  // 폭: CasaXPS fwhm 숫자 → INNO F (또는 DS wL) — casaWidthAsym 을 거꾸로 (척도 불변: 단위 폭에서의 CasaXPS fwhm 으로 나눔). o.innoUnits: fw 는 실제 FWHM (화면에서 모양만 바꿀 때)
+  if(!r.keepF||(mod&&mod.n==="ST")){ const sk=c.shape==="DS"?"wL":"F", u0=clone(c); u0[sk]=1;
+    const cw=o.innoUnits?null:casaWidthAsym(u0), u=cw&&cw.fwhm>0?cw.fwhm:(trueFWHM(u0.shape,shapeParams(u0,1)).fwhm||unitFWHM(u0));
+    c[sk]=u>0?fw/u:fw; if(cw&&!cw.exact&&!mod&&!r.keepF) r.note+="; "+cw.note+" — refit the width"; }
+  // DS 위치: CasaXPS 위치 = INNO 원점 + wL·|cot(π/(2−α))| (높은 BE 쪽; DS(0.1,100) 판독 1 개, SPEC_casa_v3 §4)
+  if(c.shape==="DS"&&c.alpha>0&&!o.innoUnits){ c.be=be+c.wL/Math.tan(PI/(2-c.alpha)); r.posShift=be-c.be; r.note+="; position: INNO origin = CasaXPS position − wL·|cot(π/(2−α))| (measured, one reading DS(0.1,100))"+(c.dsl>0?"; same shift assumed for the Shirley-cut variant":""); }
+  else r.posShift=mod&&mod.n==="ST"?null:0;
+  delete r.keepF; return r; }
 function compToCasa(c){
   const md=compMod(c), sp=shapeParams(c,1), r=(v,d)=>+(+v).toFixed(d);
   const nOf=(w,F)=>c.casaN!=null?+c.casaN:(w>1e-9&&F>0?w/(CASA_LA_RHO*F):0);
   const nTxt=n=>{ const ni=Math.round(n); return {t:String(ni),ok:Math.abs(n-ni)<0.05}; };
   let base=null;
-  if(c.shape==="GLN"||c.shape==="SGLN"){ const n=nTxt(nOf(sp.wG,sp.F)), t=compTail(c);
-    base={notation:`${c.shape==="GLN"?"GL":"SGL"}(${r(100*c.m,2)}${t&&n.t==="0"?"":","+n.t})${t==="T"?`T(${r(c.tk,4)})`:t==="PHI"?`PHI(${r(c.tj,4)},${r(c.tk,4)})`:""}`,fwhm:t?null:s2FWHM(c.shape,sp).fwhm,exact:false,
-      note:(c.shape==="SGLN"?"SGL(m,n): m = height fraction × 100":"GL(m,n): GL product")+"; Gaussian FWHM = n·F/144.87 assumed (LA rule)"+(t?"; tail per Cookbook p. 67; CasaXPS fwhm number for tails not pinned":"; fwhm = true FWHM")+(n.ok?"":" — n not an integer")}; }
-  else if(c.shape==="TLA"){ const n=nTxt(nOf(sp.wG,sp.F)); base={notation:`TLA(${r(c.alpha,3)},${r(c.mu,3)},${n.t})`,fwhm:null,exact:false,note:"TLA(α,μ,n) notation assumed (Cookbook p. 66 defines TLA(x:α,μ,w)); Gaussian FWHM = n·F/144.87 assumed; CasaXPS fwhm number for asymmetric shapes not pinned"}; }
-  else if(c.shape==="DS"){ const n=nTxt(nOf(sp.wG,sp.wL)); base={notation:`DS(${r(c.alpha,3)},${n.t}${c.dsl>0?","+r(c.dsl,3):""})`,fwhm:null,exact:false,note:"DS(α,n"+(c.dsl>0?",l":"")+"), Cookbook p. 66: Lorentzian FWHM = wL; Gaussian FWHM = n·wL/144.87 assumed; area = area inside the fit window"}; }
+  if(c.shape==="GLN"||c.shape==="SGLN"){ const n=nTxt(nOf(sp.wG,sp.F)), t=compTail(c), cw=t?casaWidthAsym(c):null;
+    base={notation:`${c.shape==="GLN"?"GL":"SGL"}(${r(100*c.m,2)}${t&&n.t==="0"?"":","+n.t})${t==="T"?`T(${r(c.tk,4)})`:t==="PHI"?`PHI(${r(c.tj,4)},${r(c.tk,4)})`:""}`,fwhm:t?cw.fwhm:s2FWHM(c.shape,sp).fwhm,asym:t?cw.asym:0,fwhmExact:!t,exact:!t&&n.ok,
+      note:(c.shape==="SGLN"?"SGL(m,n): m = height fraction × 100":"GL(m,n): GL product")+"; Gaussian FWHM = n·F/144.87 (measured: LA(1,1,n), GL(30,100), SGL(30,100))"+(t?"; tail per Cookbook p. 67 (shape measured, GL(30)T(2)); "+cw.note:"; fwhm = true FWHM")+(n.ok?"":" — n not an integer")}; }
+  else if(c.shape==="TLA"){ const n=nTxt(nOf(sp.wG,sp.F)), cw=casaWidthAsym(c); base={notation:`TLA(${r(c.alpha,3)},${r(c.mu,3)},${n.t})`,fwhm:cw.fwhm,asym:cw.asym,fwhmExact:cw.exact,exact:n.ok&&cw.exact,note:"TLA(α,μ,n), Cookbook p. 66 — notation, tail side and n rule measured (TLA(1.2,3,0), TLA(1.2,3,100)); "+cw.note}; }
+  else if(c.shape==="DS"){ const n=nTxt(nOf(sp.wG,sp.wL)), cw=casaWidthAsym(c), sh=c.alpha>0?sp.wL*Math.abs(1/Math.tan(PI/(2-c.alpha))):0;
+    base={notation:`DS(${r(c.alpha,3)},${n.t}${c.dsl>0?","+r(c.dsl,3):""})`,fwhm:cw.fwhm,asym:cw.asym,fwhmExact:cw.exact,posShift:sh,exact:false,note:"DS(α,n"+(c.dsl>0?",l":"")+"), Cookbook p. 66: Lorentzian FWHM = wL; shape, tail side and n rule measured (DS(0.1,100)); "+cw.note+"; CasaXPS position = INNO origin + wL·|cot(π/(2−α))| (measured, one reading)"+(c.dsl>0?" — assumed for the cut variant":"")+"; CasaXPS area normalisation not pinned (INNO area = area inside the fit window)"}; }
   else if(c.shape==="TP"){ const n=nTxt(nOf(sp.wL,sp.F)); base={notation:`TP(${r(c.ta,3)},${r(c.tb,3)},${n.t})`,fwhm:c.F,exact:false,note:"TP(α,β,n), Cookbook p. 68: trapezium of width F (α at the high-BE end) ⊗ Lorentzian FWHM n·F/144.87 (assumed)"}; }
   else base=compToCasa0(md?Object.assign({},c,{mod:null}):c);
-  if(!md||!base.notation) return md&&!base.notation?{notation:null,fwhm:null,exact:false,note:"no CasaXPS notation for this base shape with "+md}:base;
-  if(md==="ST"){ const g=nTxt(c.stN!=null?+c.stN:(c.stG>1e-9?c.stG/(CASA_LA_RHO*(c.shape==="V"?sp.wL:sp.F)):0));
-    return {notation:`ST(${r(c.stMu,4)}${g.t!=="0"?","+g.t:""})${base.notation}`,fwhm:null,exact:false,note:"ST(μ,γ) modifier, Cookbook p. 66; γ → Gaussian FWHM γ·F/144.87 assumed; "+base.note}; }
-  return {notation:`SB(${r(c.sbArg||0,3)})${base.notation}`,fwhm:null,exact:false,note:"SB(0) Shirley profile ∫_x^∞F, Cookbook p. 68; area = area inside the fit window; "+base.note}; }
+  const dflt=o=>Object.assign({asym:o.fwhm!=null?0:null,posShift:0,fwhmExact:!!o.exact},o);   // 기본: 대칭(asym 0), 위치 같음
+  if(!md||!base.notation) return dflt(md&&!base.notation?{notation:null,fwhm:null,exact:false,note:"no CasaXPS notation for this base shape with "+md}:base);
+  if(md==="ST"){ const g=nTxt(c.stN!=null?+c.stN:(c.stG>1e-9?c.stG/(CASA_LA_RHO*(c.shape==="V"?sp.wL:sp.F)):0)), cw=casaWidthAsym(c);
+    return {notation:`ST(${r(c.stMu,4)}${g.t!=="0"?","+g.t:""})${base.notation}`,fwhm:cw.fwhm,asym:cw.asym,fwhmExact:false,posShift:null,exact:false,note:"ST(μ,γ) modifier, Cookbook p. 66 (shape measured, ST(1.7)LA(1,1,200)); γ → Gaussian FWHM γ·F/144.87 assumed; "+cw.note+"; CasaXPS position offset not pinned (ST(1.7)LA(1,1,200): CasaXPS pos − INNO origin = +0.0984 eV); "+base.note}; }
+  return {notation:`SB(${r(c.sbArg||0,3)})${base.notation}`,fwhm:null,asym:null,fwhmExact:false,posShift:0,exact:false,note:"SB(0) Shirley profile ∫_x^∞F, Cookbook p. 68; area = area inside the fit window; "+base.note}; }
 /* CasaXPS 배경 이름 + Cross Section 칸("B, C, D, T0") → INNO bg. U 2/U 3 Tougaard 에서 B = 0 (U 3 기본값 "0, 551, 436, 3") 이면 CasaXPS 는 Linear 를 그린다(실측) */
 function casaBg(name,cross,aw){
   const nm=String(name||"").trim(), w=aw!=null?+aw:1;
@@ -45172,26 +45284,29 @@ function casaModelToINNO(cm,hv,o){
   const g=casaBg(R.bg,R.cross&&R.cross.length?R.cross.join(","):null,aw); let bg;
   if(g){ bg=g.bg; if(!g.exact) notes.push("background: "+g.note); } else { bg={type:"shirley",conv:"casa",aw}; notes.push(`background '${R.bg}' has no INNO equivalent — Shirley (CasaXPS convention) used`); }
   if((R.startOffset||0)!==0||(R.endOffset||0)!==0) notes.push("region Start/End Offset ≠ 0 is not applied (INNO has no offset term)");
-  const comps=[], cons={}, ids=cm.comps.map((c,i)=>"casa"+i), wf=[];
+  const comps=[], cons={}, ids=cm.comps.map((c,i)=>"casa"+i), wf=[], psh=[];   // psh: CasaXPS 위치 − INNO 원점 (DS ≠ 0, ST 미정 = null)
   cm.comps.forEach((c,i)=>{ const r=casaToComp(c.shape,{be:c.pos?be(c.pos.v):0,area:c.area?c.area.v:1,fwhm:c.fwhm?c.fwhm.v:1.2,id:ids[i]});
     if(!r){ notes.push(`${c.name}: line shape '${c.shape}' not supported — skipped`); comps.push(null); wf.push(null); return; }
-    r.comp.name=c.name; comps.push(r.comp); if(!r.exact) notes.push(`${c.name}: ${r.note}`);
-    const k=c.fwhm&&c.fwhm.v>0&&r.comp.F>0?r.comp.F/c.fwhm.v:1; wf.push(k); });
+    r.comp.name=c.name; comps.push(r.comp); if(!r.exact) notes.push(`${c.name}: ${r.note}`); psh.push(r.posShift);
+    const W=r.comp.shape==="DS"?r.comp.wL:r.comp.F; const k=c.fwhm&&c.fwhm.v>0&&W>0?W/c.fwhm.v:1; wf.push(k); });
   cm.comps.forEach((c,i)=>{ const C=comps[i]; if(!C) return; const q=cons[C.id]={};
     if(c.area){ if(c.area.link>=0&&comps[c.area.link]) q.area={mode:"link",ref:ids[c.area.link],k:c.area.k,b:0}; else q.area={mode:"free",lo:Math.max(0,c.area.lo),hi:c.area.hi}; }
-    if(c.fwhm&&C.F!=null){ const j=c.fwhm.link;
-      if(j>=0&&comps[j]){ if(comps[j].shape===C.shape&&Math.abs((C.m||0)-(comps[j].m||0))<1e-12&&C.casaN===comps[j].casaN) q.F={mode:"link",ref:ids[j],k:c.fwhm.k,b:0}; else notes.push(`${c.name}: FWHM link to a different line shape not reproduced (fit independently)`); }
-      else q.F={mode:"free",lo:c.fwhm.lo*wf[i],hi:c.fwhm.hi*wf[i]}; }
-    if(c.pos){ if(c.pos.link>=0) notes.push(`${c.name}: position link not reproduced (CasaXPS offset notation not verified)`); q.be={mode:"free",lo:be(c.pos.hi),hi:be(c.pos.lo)}; }
+    if(c.fwhm&&(C.F!=null||C.shape==="DS")){ const j=c.fwhm.link, wk=C.shape==="DS"?"wL":"F";
+      if(j>=0&&comps[j]){ const P=comps[j]; if(P.shape===C.shape&&Math.abs((C.m||0)-(P.m||0))<1e-12&&C.casaN===P.casaN) q[wk]={mode:"link",ref:ids[j],k:c.fwhm.k,b:0}; else notes.push(`${c.name}: FWHM link to a different line shape not reproduced (fit independently)`); }
+      else q[wk]={mode:"free",lo:c.fwhm.lo*wf[i],hi:c.fwhm.hi*wf[i]}; }
+    // 위치: CasaXPS 위치 한계·오프셋은 CasaXPS 위치에 걸린다 → INNO 원점 = CasaXPS 위치 − posShift (DS: wL·|cot(π/(2−α))|; ST: 미정 → 0 으로 두고 알림)
+    if(c.pos){ const s0=psh[i]||0;
+      if(c.pos.link>=0){ const sj=comps[c.pos.link]?psh[c.pos.link]:0; notes.push(`${c.name}: position link not reproduced (CasaXPS offset notation not verified)`+((psh[i]==null||sj==null||Math.abs((sj||0)-s0)>1e-9)?`; note: CasaXPS offsets apply to CasaXPS positions, and this component's CasaXPS-position − INNO-origin shift (${psh[i]==null?"not pinned":s0.toFixed(4)+" eV"}) differs from its partner's (${sj==null?"not pinned":(sj||0).toFixed(4)+" eV"}) — an INNO offset = CasaXPS offset − (shift difference)`:"")); }
+      q.be={mode:"free",lo:be(c.pos.hi)-s0,hi:be(c.pos.lo)-s0}; if(psh[i]==null) notes.push(`${c.name}: ST position offset not pinned — position bounds taken as CasaXPS positions`); }
     // Cookbook 2026 모양(SPEC_shapes2): CasaXPS 처럼 표기 안의 모양 매개변수는 고정 (LA·GL·SGL 은 이전 동작 그대로)
     if(compMod(C)||["TLA","GLN","SGLN","TP","DS"].includes(C.shape)) paramNames(C).forEach(k=>{ if(["be","area","F"].includes(k)||(C.shape==="DS"&&k==="wL")||q[k]||derivedParam(C,k)) return; q[k]={mode:"fixed"}; }); });
   return {lo,hi,bg,comps:comps.filter(Boolean),cons,weight:"casa",shift:cm.shift||0,notes,region:R.name};
 }
-const XPS_CORE={areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
+const XPS_CORE={_hook:FIT_HOOK,LM_STALL,areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
-  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,compToCasa,casaToComp,casaBg,casaModelToINNO,
+  tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_DELTA_LA,CASA_DELTA_TAIL,CASA_DELTA_ST,compToCasa,casaToComp,casaBg,casaModelToINNO,
   s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
@@ -47323,10 +47438,11 @@ async function runFit(kind,spArg){
     fin.multi=N>1?{N,chis,near,frac:near/N}:null;
     if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
     fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
+    if(best.stop==="stalled"&&fin.stop!=="stalled"){ fin.stop="stalled"; fin.stall=best.stall||fin.stall||null; }   // 시작점 피팅에서 멈췄으면 그것을 알림 (SPEC §3.3b)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
-    const st=fin.stats; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv?"ok":"warn");
+    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn");
   }catch(e){ hideProg(); RUN=null; note("피팅 중단: "+(e.message||e),"warn"); }
 }
 async function runMC(){
@@ -47493,8 +47609,10 @@ function avEqTxt(c,sm){
 function chOf(sp){ return sp&&sp.n>1?Math.abs((sp.be[sp.n-1]-sp.be[0])/(sp.n-1)):0.05; }
 function casaEq1(c,sm){ let q; try{ q=C.compToCasa(c); }catch(e){ return ""; }
   if(!q||!q.notation) return "";
-  const fw=c.shape==="GLP"&&sm&&sm.fwhm?sm.fwhm:q.fwhm;
-  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${f(fw,4)}`:""}${q.exact?"":" ≈"}</div>`; }
+  // CasaXPS fwhm·asym (SPEC_casa_v3 §3): 실측으로 정한 경우(fwhmExact) 그대로, 경험값·미정이면 '≈'. posShift: CasaXPS 위치 − INNO 원점 (DS; ST 는 미정)
+  const fw=c.shape==="GLP"&&sm&&sm.fwhm?sm.fwhm:q.fwhm, ax=q.fwhmExact?"":"≈ ";
+  const as=q.asym!=null&&Math.abs(q.asym)>5e-5?`, asym ${ax}${f(q.asym,4)}`:"", ps=q.posShift>1e-6?`, pos INNO + ${f(q.posShift,4)} eV`:q.posShift===null&&q.fwhm!=null?", pos ≈ (offset not pinned)":"";
+  return `<div class="muted xs" style="margin-top:4px" title="${esc(q.note+(q.exact?"":" — approximate"))}" data-casaeq="${esc(c.id)}">CasaXPS: ${esc(q.notation)}${fw!=null?`, fwhm ${ax}${f(fw,4)}`:""}${as}${ps}${q.exact||(!q.fwhmExact&&fw!=null)?"":" ≈"}</div>`; }
 /* ============================================================
    화면 뼈대
    ============================================================ */
@@ -47804,6 +47922,13 @@ function bgHelp(t){
     active:"배경 = c₀ + k·∫(성분 합) (+ 기울기). 배경과 봉우리를 함께 피팅 — 겹친 영역에서 가장 일관된 방법.",
     none:"배경 없음 (서베이·이미 뺀 데이터)."}[t]||"";
 }
+/* 멈춘 피팅 알림 한 줄 (SPEC §3.3b): 잘 정해지지 않는 매개변수 이름만, 자세한 것은 title */
+function stallNote(r,nm,sh){
+  const why={bound:"한계 근처",flat:"전 범위를 움직여도 χ² 가 거의 그대로",degenerate:"다른 매개변수와 구별되지 않음"};
+  const fl=(r.stall&&r.stall.flags)||[]; const lab=q=>`${nm(q.id)} ${(C.PDEF[q.k]||{lab:q.k}).lab}`;
+  const tip=(fl.length?fl.map(q=>`${lab(q)} = ${g(q.p+(q.k==="be"?sh||0:0),4)} — ${q.why.map(w=>why[w]||w).join(", ")}`).join("\n")+"\n":"")+"감쇠가 큰 걸음만 이어지고 새 Gauss–Newton 시도 뒤에도 χ² 감소가 χ²ν 보다 작아 멈췄습니다. 이 매개변수를 고정하거나 한계를 좁힌 뒤 다시 피팅하세요. (SPEC §3.3b)";
+  return `<div class="note warn" style="margin-top:4px" title="${esc(tip)}">진전 멈춤(일찍 끝냄)${fl.length?` — 잘 정해지지 않음: ${esc(fl.slice(0,3).map(lab).join(", "))}${fl.length>3?` 외 ${fl.length-3}개`:""}`:""} ⓘ</div>`;
+}
 function fitStrip(r,sp){
   const st=r.stats; const at=(r.cov&&r.cov.atB||[]).map((b,i)=>b?r.free[i]:null).filter(Boolean);
   // 이름은 그 피팅 당시의 성분 목록(r.comps)에서 — 피팅 뒤 성분을 바꿨으면 지금 목록에 없을 수 있다
@@ -47818,6 +47943,7 @@ function fitStrip(r,sp){
     `<div class="${Math.abs(st.rho1)>0.3?"warn":""}" title="Neighbour correlation of the normalized residuals">Residual ρ₁<b>${f(st.rho1,2)}</b></div>`,
     `<div class="${Math.abs(st.runsZ)>3?"warn":""}" title="Runs-test z of the residual signs (|z|>3 = structured residual)">runs z<b>${f(st.runsZ,1)}</b></div>`,
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
+    r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
   if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="Fraction of starts reaching the minimum (Δχ²<1)">Same minimum<b>${r.multi.near}/${r.multi.N}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
@@ -47825,6 +47951,7 @@ function fitStrip(r,sp){
   let w="";
   // 피팅 뒤 모형을 바꿨으면(stale) 위 숫자와 경고는 이전 모형의 것 — 경고는 숨기고 다시 피팅하라고만 한다
   if(r.stale){ w+=`<div class="note warn" style="margin-top:4px">피팅 뒤 성분·영역을 바꿨습니다 — 위 숫자는 <b>이전 모형</b>의 값입니다. <b>Fit</b> 을 다시 누르세요.</div>`; return `<div class="strip stale">${parts.join("")}</div>${w}`; }
+  if(r.stop==="stalled") w+=stallNote(r,nm,shOf(sp));
   if(at.length) w+=`<div class="note warn" style="margin-top:4px"><b>한계에 닿은 매개변수</b>: ${at.map(a=>esc(atTxt(a))).join(", ")}<br>이 값은 데이터가 아니라 한계가 정한 값이라 σ 를 계산하지 않습니다. 넓이가 하한 0 이면 그 성분을 빼고 다시 피팅하세요. Δ·FWHM·BE 등이 물리적 한계에 붙었다면 모형(성분 수·배경·모양)이 데이터와 맞지 않는다는 신호입니다.</div>`;
   if(r.lcf&&r.lcf.warn) w+=`<div class="note warn" style="margin-top:4px">기준 스펙트럼끼리 너무 닮았습니다(κ ${f(r.lcf.cond,0)}) — 분율의 불확도가 큽니다. 기준을 줄이거나 Monte Carlo 로 구간을 확인하세요.</div>`;
   if(st.chi2nu>3) w+=`<div class="note warn" style="margin-top:4px">χ²ν 가 큽니다 — 성분이 부족하거나 배경·모양이 맞지 않을 수 있습니다(잔차 그림 확인).</div>`;
@@ -47886,7 +48013,7 @@ function bindS2(card,sp,p,c){
   const dl=$q(card,"[data-dsl]"); if(dl) dl.onchange=()=>{ pushHist(p,"DS l"); const v=+dl.value; if(dl.value!==""&&v>0) c.dsl=v; else delete c.dsl; done(); };
   const cn=$q(card,"[data-cn]"); if(cn) cn.onchange=()=>{ pushHist(p,"Casa n"); const v=+cn.value; if(cn.value!==""&&v>=0&&isFinite(v)) c.casaN=v; else { const k=C.casaNKey(c); if(k){ const sp1=C.shapeParams(c,1); c[k]=sp1[k]; } delete c.casaN; } done(); };
   const ca=$q(card,"[data-casa]"); if(ca) ca.onchange=()=>{ const str=ca.value.trim(); if(!str) return; let r;
-    try{ const tf=C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm||1.2; r=C.casaToComp(str,{strict:true,be:c.be,area:c.area,fwhm:tf,id:c.id}); }catch(e){ note(e.message,"warn"); ca.value=""; ca.focus(); return; }
+    try{ const tf=C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm||1.2; r=C.casaToComp(str,{strict:true,be:c.be,area:c.area,fwhm:tf,id:c.id,innoUnits:true}); }catch(e){ note(e.message,"warn"); ca.value=""; ca.focus(); return; }
     pushHist(p,"CasaXPS 표기"); s2Swap(p,c,r.comp); if(!r.exact) note("CasaXPS "+str+": "+r.note,"info"); done(); };
 }
 function consEditor(p,c,k){
