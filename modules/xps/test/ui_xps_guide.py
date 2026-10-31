@@ -6,7 +6,9 @@ usage: python3 test/ui_xps_guide.py <injected html> <figure folder>
 4 C 1s with a left-out line → Fit → 'Missing intensity' + 'Add a line' → click → one more component → Fit → finding gone
 5 Fit check line count stays short (labels < 90 characters); 390 px: no horizontal overflow; no console errors
 6 v1.9.6 Ni 2p3/2 envelopes (synthetic NiO 60 % + Ni(OH)₂ 40 %): species tick boxes (defaults Ni · NiO · Ni(OH)₂), PE select, untick Ni →
-  Recipe → 11 peaks (5 + 6) → Staged fit → NiO / Ni(OH)₂ fractions ±3 %; Cu 2p / Fe 2p recipe tooltips carry the citation and pitfalls"""
+  Recipe → 11 peaks (5 + 6) → Staged fit → NiO / Ni(OH)₂ fractions ±3 %; Cu 2p / Fe 2p recipe tooltips carry the citation and pitfalls
+7 v1.9.7 La 3d (Sunding, synthetic La(OH)₃ c4f¹L 57 % + MNN Auger): species / flag row, Recipe → 3 pairs + Auger line → Staged fit →
+  c4f¹L ±2 %; Ba 3d + Co 2p in one sample: one-line overlap banner (details in title) and a Fit check overlap warning after a fit"""
 import sys, os, json, tempfile, math, random, re
 from playwright.sync_api import sync_playwright
 
@@ -97,6 +99,21 @@ f_cu = write('[GuideU] Cu2p.txt', bcu, [pois(2000 + 20000 * gls(e - 932.6, 1.0))
 bfe = [700 + 0.1 * i for i in range(251)]
 f_fe = write('[GuideF] Fe2p.txt', bfe, [pois(2000 + 20000 * gls(e - 710.8, 1.6)) for e in bfe])
 
+# v1.9.7 La 3d (Sunding recipe lines, La(OH)₃): c4f⁰ 835.1, bonding +3.9, antibonding +2.0 (equal areas), ΔE 16.8, 3d area ratio 2/3; MNN Auger 864.2 eV
+LA = [(835.1, 1.6, 43000), (839.0, 2.0, 28500), (841.0, 2.0, 28500)]
+bl = [822 + 0.05 * i for i in range(1081)]
+Pl = [sum(A * (0.6 * gls(e - b0, F) + 0.4 * gls(e - b0 - 16.8, F)) for b0, F, A in LA) + 8000 * gls(e - 864.2, 4.0) for e in bl]
+Ql, acc = [], 0.0
+for i, p_ in enumerate(Pl):
+    if i:
+        acc += 0.5 * (p_ + Pl[i - 1]) * 0.05
+    Ql.append(acc)
+f_la = write('[GuideL] La3d.txt', bl, [pois(3000 + 0.08 * q + p_) for p_, q in zip(Pl, Ql)])
+bb = [772 + 0.05 * i for i in range(401)]
+f_co = write('[GuideB] Co2p.txt', bb, [pois(2500 + 20000 * gls(e - 779.8, 1.6) + 9000 * gls(e - 785.5, 4.0)) for e in bb])
+bb3 = [772 + 0.05 * i for i in range(581)]
+f_ba = write('[GuideB] Ba3d.txt', bb3, [pois(2500 + 20000 * (0.6 * gls(e - 779.8, 1.6) + 0.4 * gls(e - 795.0, 1.6))) for e in bb3])
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     pg = b.new_page(viewport={'width': 1500, 'height': 950})
@@ -116,8 +133,8 @@ with sync_playwright() as p:
         J("(r)=>{ const st=XPS_UI._state(); const x=st.specs.find(q=>q.region===r); st.sel=x.uid; st.ui.tab='fit'; st.ui.selComp=null; XPS_UI.rerender(); }", region)
         pg.wait_for_timeout(200)
 
-    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe])
-    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=5', timeout=20000)
+    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe, f_la, f_co, f_ba])
+    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=8', timeout=20000)
     regs = J("XPS_UI._state().specs.map(s=>s.region)")
     ce = [r for r in regs if 'Ce' in r][0]
     c1 = [r for r in regs if 'C 1s' in r or 'C1s' in r][0]
@@ -193,6 +210,36 @@ with sync_playwright() as p:
     st_ = J("!!document.querySelector('#xpsRcpS')")
     check('6d Cu 2p / Fe 2p: recipe tooltips carry citation and pitfalls (Auger parameter 1851.24 vs 1849.17, X-ray reduction, differential charging; Fe³⁺ satellite buried under Fe²⁺ 2p1/2); Fe₃O₄ 1:2 box',
           'Biesinger' in tcu and '1851.24' in tcu and '1849.17' in tcu and 'reduced by X-rays' in tcu and 'ifferential charging' in tcu and nbox == 4 and 'buried' in tfe and 'Fe²⁺ 2p1/2' in tfe and st_, [len(tcu), len(tfe), nbox])
+    # 7 v1.9.7 La 3d (Sunding) + overlap rules
+    la = [r for r in regs if 'La' in r][0]
+    select(la)
+    s10 = J("(()=>{ const r=document.querySelector('#xpsRcpPar'); if(!r) return null; return {sp:Array.from(r.querySelectorAll('[data-rsp]')).map(b=>[b.dataset.rsp,b.checked]), fl:Array.from(r.querySelectorAll('[data-rfl]')).map(b=>[b.dataset.rfl,b.checked,b.parentElement.title.length]), row:r.textContent, at:(document.querySelector('#xpsRcpA')||{}).title||'', banner:(document.querySelector('.xps-rcp-b')||{}).textContent}; })()")
+    check('7a La 3d: species boxes (La(OH)₃ on, La₂O₃ off), flags Fix ratio / Plasmon / MNN Auger (on) with tooltips; Recipe title: Sunding, pitfalls, 864 eV Auger; terse row',
+          s10 and s10['sp'] == [['LaOH3', True], ['La2O3', False]] and [x[:2] for x in s10['fl']] == [['fixR', False], ['plasmon', False], ['auger', True]] and all(x[2] > 60 for x in s10['fl']) and 'Sunding' in s10['at'] and 'Pitfalls' in s10['at'] and '864' in s10['at'] and len(s10['row']) < 90 and 'satellite' in (s10['banner'] or ''),
+          s10 and {'sp': s10['sp'], 'row': s10['row']})
+    J("document.querySelector('#xpsRcpA').click()"); pg.wait_for_timeout(300)
+    s11 = J("(()=>{ const p=XPS_UI._pr(); return {n:p.comps.length, dbl:p.comps.filter(c=>c.doublet).length, aug:p.comps.filter(c=>c.rrole==='aug').length, lo:p.lo, hi:p.hi, bg:p.bg.type, msg:(document.querySelector('#xpsMsg .cur .tx')||{}).textContent}; })()")
+    check('7b Recipe → 3 spin–orbit pairs (c4f⁰, c4f¹L b, ab) + 1 Auger line, window 826–872 eV, in-fit Shirley, note with Staged fit',
+          s11['n'] == 4 and s11['dbl'] == 3 and s11['aug'] == 1 and abs(s11['lo'] - 826) < 0.06 and abs(s11['hi'] - 872) < 0.06 and s11['bg'] == 'active' and 'Staged fit' in J("(document.querySelector('#xpsMsgA')||{}).textContent||''"), s11)
+    J("document.querySelector('#xpsStaged').click()"); idle()
+    s12 = J("(()=>{ const c=document.querySelector('#xpsChk'); const d=c&&Array.from(c.querySelectorAll('[data-der]')).map(x=>({id:x.dataset.der, t:x.textContent, tip:x.title})); return {d, chi:XPS_UI._pr().result.stats.chi2nu, labels:c?Array.from(c.querySelectorAll('li .tx')).map(x=>x.textContent):[], warn:c?c.querySelectorAll('li.warn').length:-1}; })()")
+    ct = None
+    for d in (s12['d'] or []):
+        m_ = re.search(r'(-?\d+(?:\.\d+)?)', d['t'].replace('c4f¹L', ''))
+        if d['id'] == 'ct' and m_:
+            ct = float(m_.group(1))
+    check('7c Staged fit → c4f¹L share ≈ 57 % (±2; truth 57), tooltip cites Sunding Table 5; no Fit check warning',
+          ct is not None and abs(ct - 57) <= 2 and any('Table 5' in d['tip'] for d in s12['d']) and s12['warn'] == 0, {'ct': ct, 'chi2nu': s12['chi'], 'items': s12['labels']})
+    pg.screenshot(path=os.path.join(out, 'guide_05_la3d.png'), full_page=False)
+    co = [r for r in regs if 'Co' in r][0]
+    select(co)
+    s13 = J("(()=>{ const b=document.querySelector('.xps-ovl-b'); return b?{t:b.textContent, tip:b.title}:null; })()")
+    J("XPS_UI._auto()"); idle()
+    J("XPS_UI._fit('one')"); idle()
+    s14 = J("(()=>{ const it=Array.from(document.querySelectorAll('#xpsChk li')); const m=it.find(l=>/overlaps/.test(l.textContent)); return m?{label:m.querySelector('.tx').textContent, tip:m.querySelector('.tx').title, warn:m.classList.contains('warn')}:null; })()")
+    check('7d Co 2p with Ba 3d in the same sample: one-line overlap banner (title: Ba 4d / joint model) and a Fit check overlap warning after the fit',
+          s13 and len(s13['t']) < 90 and 'Ba 3d5/2' in s13['t'] and 'Ba 4d' in s13['tip'] and s14 and s14['warn'] and 'Ba 3d5/2' in s14['label'] and len(s14['label']) < 90 and 'Ba 4d' in s14['tip'], [s13 and s13['t'], s14 and s14['label']])
+    pg.screenshot(path=os.path.join(out, 'guide_06_overlap.png'), full_page=False)
     # 5 terse labels · 390 px · console
     labs = J("Array.from(document.querySelectorAll('#xpsChk li .tx')).map(x=>x.textContent)")
     select(ce)

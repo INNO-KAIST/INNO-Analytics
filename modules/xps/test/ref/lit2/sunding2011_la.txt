@@ -1,0 +1,21 @@
+# Sunding, Hadidi, Diplas, Løvvik, Norby, Gunnæs, J. Electron Spectrosc. Relat. Phenom. 184 (2011) 399–409 (copied from journal HTML 2026-11-01)
+# Method (Sect. 2.4.2): each core level = main c4f0 + two charge-transfer satellites c4f1L (bonding, antibonding) [+ plasmon];
+#  1 SO area ratio = degeneracy ratio for all peaks; 2 equal FWHM for both SO components of every peak; 3 satellite–main separation same for both SO comps;
+#  4 bonding and antibonding satellites equal area; 5 plasmon separation constant per sample; 6 plasmon/component area ratio constant per orbital.
+#  Voigt functions, Shirley background. Charge reference: tailored (Au). Uncertainty BE ±0.2 eV.
+# Table 3 (BE, eV): La(OH)3 | La2O3
+La 3d3/2 c4f0|851.9|851.7
+La 3d5/2 c4f0|835.1|834.9
+La 4d3/2 c4f0|106.0|105.8
+La 4d5/2 c4f0|102.8|102.6
+La M45N45N45 (KE)|622.4|623.1
+O 1s|531.4 (OH)|530.5 (lattice); 529.2 (b) | 532.4 (b)
+# Table 4 (relative positions, eV): La(OH)3 | La2O3
+La 3d c4f0 -> c4f1L bonding|3.9|4.9
+La 3d bonding -> antibonding|2.0|3.7
+La 4d c4f0 -> bonding|3.5|4.1
+La 4d bonding -> antibonding|1.6|2.6
+photoelectron -> plasmon|12.3|12.5
+# Table 5 (relative intensity c4f0 : c4f1L, ±5 %): La(OH)3 | La2O3
+La 3d|43:57|10:90
+La 4d|71:29|42:58

@@ -515,7 +515,8 @@ ST = 계단을 (바탕 FWHM)/80 늦춘 S(μ)F, CasaXPS 위치 = 원점 + 표의 
 | R6 창 끝 | (a) 맞춘 성분 합이 창 끝(0.3 eV 평균)에서 최댓값의 5 % 넘음, 또는 (b) 평활 자료가 끝에서 안쪽 1 eV 의 최솟값보다 순 봉우리 높이의 10 % 넘게 높음(바깥으로 신호가 이어짐) | 그 쪽 창을 max(2 eV, 2·FWHM) 넓히기(스펙트럼 안에서) |
 | R7 배경이 자료 위 | 배경이 평활 자료 + max(1 σ, 봉우리 높이의 3 %) 보다 높은 점이 창의 20 % 넘음 (σ = √(κ·평활값), §6) | Smart 로 |
 | R8 잔차 구조 | 정규화 잔차를 ±0.6 eV 로 합한 z ≥ 5 **그리고** 그 창 평균 잔차 ≥ 봉우리 높이의 3 %. 잡음 분산과 이웃 상관은 **모형과 무관하게** 자료의 2차 차분에서(§17.6) | 양(빠진 세기): 그 자리에 선 더하기; 음: 모양·배경 확인(설명만) |
-| R9 복잡 영역 | `complexInfo(el, orb)`: §9 `multipletInfo` 준위 + 위성 많은 준위(Cr–Cu 2p, Ce·Pr·Nd 3d) + 레시피가 있는 준위. 레시피 모형이 아니면 info | 레시피 있으면 Apply recipe, 없으면 '봉우리 합 넓이 또는 기준 스펙트럼 LCF(§12)' 안내 |
+| R9 복잡 영역 | `complexInfo(el, orb)`: §9 `multipletInfo` 준위 + 위성 많은 준위(Cr–Cu 2p, Ce·Pr·Nd 3d; v1.9.7 La 3d·4d, Sm–Yb 3d — 표 없는 원소는 `note` 로 LCF 안내, §17.8) + 레시피가 있는 준위. 레시피 모형이 아니면 info | 레시피 있으면 Apply recipe, 없으면 '봉우리 합 넓이 또는 기준 스펙트럼 LCF(§12)' 안내 |
+| R10 겹침 (v1.9.7) | 영역이 `OVERLAPS` 규칙의 한쪽이고 상대 원소가 같은 시료(survey·영역)에 있고 상대 에너지가 창 안(Auger 는 Al Kα 만) — §17.8 | 없음(설명: Ba 4d · 한 모형 · Mg Kα 등) |
 
 주의: §9 `multipletInfo` 는 Ce 3d 를 다중항으로 표시하지 않는다(3s·3p·4s–5p 만). `suggestModel` 동작을 바꾸지 않으려고(기존 피팅 비트 동일) 그대로 두고, 위성 영역 판정은 `complexInfo` 에 따로 두었다.
 문턱의 근거: R8 의 3 % 진폭 조건이 없으면 정적 Shirley 끝점 평균의 잡음(5 점 평균의 ~1.7 σ)이 넓은 창 전체에 ~1 % 의 매끈한 잔차를 만들어 z ≥ 5 로 잡혔다(§17.5 표 (b) 의 개발 중 값 102/540). R7 의 3 % 도 같은 까닭.
@@ -605,3 +606,65 @@ FWHM 열: 화면 'PE 10 / PE 20'(기본: 스펙트럼 pass energy ≤ 15 eV → 
 **검증**(test_guide §8): 합성 = 레시피 그 자체(묶음마다 ±0.1 eV 이동, 넓이 6 만, 바탕 3000 + 0.08·∫P, Poisson), 원소마다 2–3 화학종 혼합 3 개(Ni·Co·Fe·Mn·Cr·Cu = 18), 피팅 = 기본 화학종 ∪ 참 화학종 + 단계 피팅.
  결과: 화학종 분율 최대 |Δ| — Ni 1.21 · Co 1.81 · Fe 0.22 · Mn 1.17 · Cr 0.42 · Cu 1.56 %p(허용 2.5), χ²ν 0.96–1.17, 있는 화학종의 Δ/σ rms 1.15(42 개), cons 연결로 낸 σ = 메타자료로 낸 σ. Cu(II) shake-up(식 2)은 참 넓이로 계산한 식 값과 ≤ 0.3 %p(52.8/52.9 · 52.4/52.2 · 62.8/63.1), 화학종 참값보다는 +2.4–2.8 %p(위 표 불일치). Fit check: 합쳐짐 0, 묶음 단위 판정; 없는 Ni(OH)₂ 'Remove' → 21 → 15 봉우리, FWHM× 유지, 다시 피팅 Ni 50.1 · NiO 49.9 %(참 50/50), χ²ν 0.98. 순진한 Ni 2p 피팅 → 'Apply recipe'.
  기존 피팅 영향 없음: fitlog_compare 8 시험 24 457 피팅 비트 동일(test_guide 기존 704 포함). 화면(ui_xps_guide §6): Ni 2p 체크 기본값 · Ni 끔 → 11 봉우리 · Staged fit → NiO 59.8 · Ni(OH)₂ 40.2 %(참 60/40) · Cu·Fe 함정 title.
+
+### 17.8 Ba · Y · 란타넘족 레시피와 겹침 규칙 (v1.9.7) (`RECIPES_PAR`, `HAASCH`, `parModel`, `parDerived`, `OVERLAPS`, `overlapFindings`)
+**자료**: 원문에서 옮긴 `test/ref/lit2/*.txt` 의 숫자만 씀(test_guide §9 가 137 값을 하나씩 대조). 표에 없는 것은 넣지 않음 — 반치폭 범위·출발 폭(Sunding)은 '피팅 범위'로 표기(문헌 값 아님).
+- Sunding, Hadidi, Diplas, Løvvik, Norby, Gunnæs, *J. Electron Spectrosc. Relat. Phenom.* 184, 399–409 (2011): La 3d·4d, La(OH)₃·La₂O₃, 표 3(BE; 대전 기준 Au, ±0.2 eV) · 표 4(간격) · 표 5(c4f⁰ : c4f¹L, ±5 %) · 절 2.4.2(방법·제약 6 개).
+- Cole, Kirk, Thorpe, *Surf. Sci. Spectra* 27, 024010 · 024007 (2020): Y 3d — Y 금속 · Y₂O₃ · Y(OH)₃ · YCl₃ 의 BE · FWHM · 넓이(C 1s 284.8, K-Alpha·Avantage).
+- Karslıoğlu, Trotochaud, Zegkinoglou, Bluhm, *J. Electron Spectrosc. Relat. Phenom.* 225 (2018) 표 1: Ba 4d — BaO · Ba(OH)₂ · BaCO₃ · Ba(NO₃)₂, ΔE 2.6 eV, **Pt Fermi 끝 기준**(C 1s 기준 아님). Schmitz, *Surf. Sci. Spectra* 8, 190 (2001): BaCO₃ Ba 3d5/2 779.4 (FWHM 1.56), C 1s 284.6 · 탄산염 289.1.
+- Haasch, Breckenfeld, Martin, *Surf. Sci. Spectra* 21, 131/140/149/157/165 (2014): 단결정 PrScO₃·NdScO₃·GdScO₃·TbScO₃·DyScO₃(110) 의 Pr·Nd·Gd·Tb·Dy 3d·4d 성분(BE | FWHM, 넓이 없음; C 1s 285.0, Tougaard U4, Kratos).
+
+| 레시피 | 종류 | 화학종(기본 ✓) | 방법 | 정렬 · 위치 |
+|---|---|---|---|---|
+| La 3d (Sunding) | par | La(OH)₃ ✓ · La₂O₃ | 화합물마다 c4f⁰ + c4f¹L 결합·반결합 위성, 모두 doublet(ΔE 16.8 = 851.9 − 835.1, 자유 16.6–17.0; 넓이비 2/3; 짝 폭 같음), 위성 간격 고정(La(OH)₃ 3.9 · 2.0, La₂O₃ 4.9 · 3.7), 결합 = 반결합 넓이, GL 합 m 공유(Voigt ≈ GL) · 선택 Fix ratio · Plasmon · MNN Auger(기본 켬, Al Kα 만) | ±3 eV 정렬 뒤 ± 0.6 |
+| La 4d (Sunding) | par | 같음 | ΔE 3.2 (106.0 − 102.8, 자유 3.0–3.4), 간격 3.5 · 1.6 / 4.1 · 2.6 | ±3 · ± 0.6 |
+| Y 3d (Cole) | par | Y ✓ · Y₂O₃ ✓ · Y(OH)₃ · YCl₃ | 화학종마다 doublet: 넓이비 0.689(그들 넓이 3d3/2/3d5/2, 네 화학종 모두 0.689 — Avantage SF 비 2.742/3.978), ΔE 공유(그들 2.0–2.1; 자유 1.9–2.2), FWHM 출발 = 그들 값, 0.6–1.6× | 정렬 없음(같은 C 1s 284.8), 화학종마다 ± 0.3 |
+| Ba 4d (Karslıoğlu) | par | BaO ✓ · Ba(OH)₂ · BaCO₃ ✓ · Ba(NO₃)₂ | ΔE 2.6(자유 2.5–2.7), 2/3, **상대 위치만**: 화학종을 발표된 간격(BaO → +1.2 · +1.3 · +2.2 eV)으로 묶고 집합 전체를 정렬, 위치 하나 자유. 출발 = 그들 BE − 0.6 eV(그들 BaCO₃ 탄산염 C 1s 289.9 vs Schmitz 289.1 @ 284.6 → 289.3 @ 284.8 — 한 점 추정, 정렬이 정함) | ±1 eV 정렬 뒤 ± 0.3 |
+| Ba 3d (generic) | par | Ba | doublet 하나: ΔE = Booklet 795.7 − 780.5 = 15.2 eV 고정, 2/3, 출발 Schmitz 779.4 → 779.6 (C 1s 284.6 → 284.8), FWHM 1.56. 표면/격자 성분 없음(출처 없음) | ±3 · ± 0.6 |
+| Pr·Nd·Gd·Tb·Dy 3d·4d (Haasch) | emp | 그 화합물 포락선 | **경험적 포락선(단결정, 넓이 자유)**: 그들 성분의 BE·FWHM 그대로(모양은 논문에 없어 GL(30) = CasaXPS 기본), 간격 고정, 공통 위치 하나 + 성분마다 넓이 자유, 폭 고정(선택 FWHM× 0.6–1.6). doublet 제약 없음(넓이 미발표). 창 = 성분 ± 2.5 FWHM | ±3 eV 정렬(285.0 → 284.8, −0.2) 뒤 ± 0.3 |
+
+**Sunding 의 제약 6 개 → 구현**: (1) 모든 봉우리 SO 넓이비 = 축퇴비 → doublet r = 2/3(3d·4d) 고정; (2) 모든 봉우리의 두 SO 성분 FWHM 같음 → q = 1 고정; (3) 위성–주선 간격이 두 SO 성분에 같음 → 위성 위치를 주선에 연결(b = 표 4) + 모든 짝이 ΔE 하나를 공유(위성의 3d3/2 짝 = 위성 + ΔE); (4) 결합·반결합 위성 넓이 같음 → 넓이 연결 k = 1; (5) 플라스몬 간격은 시료마다 일정 → 주선에 연결(b = 표 4: 12.3 / 12.5); (6) 플라스몬/성분 넓이비가 궤도마다 일정 → 플라스몬 = 궤도마다 doublet 하나(넓이비 2/3 = 두 SO 성분에 같은 비, 넓이·폭 자유). (5)–(6)은 '궤도마다 플라스몬 하나'로 읽음(전사에 플라스몬 폭·넓이 없음 — 해석, 함정에 적음).
+화합물 하나: 주선·위성 넓이 자유 → 파생 **c4f¹L share** = (결합 + 반결합)/(주선 + 위성)(플라스몬·Auger 제외; `c.rx`) — 표 5 와 비교(La 3d: La(OH)₃ 57 · La₂O₃ 90 %; 4d: 29 · 58 %). 두 화합물(또는 Fix ratio): 표 5 비 고정(결합 위성 넓이 = 주선 × (위성 %/2)/주선 %: La(OH)₃ 3d 0.6628, La₂O₃ 4.5) + 화합물끼리 발표된 상대 위치(835.1 vs 834.9)로 묶음 → **La(OH)₃ 분율**. 비를 풀면 두 화합물(주선 0.2 eV 차)을 가를 수 없음.
+**La MNN Auger**: 표 3 KE 622.4 (La(OH)₃) · 623.1 (La₂O₃) → Al Kα 에서 BE ≈ 864.2 · 863.5 eV, La 3d3/2 위성 구역 안. Sunding 은 이를 측정(표 3)하고 겹침을 다룸 → 레시피 선택 'MNN Auger'(기본 켬, hν 가 Al Kα ±2 eV 일 때만): 자유 단일선 하나(위치 hν − KE ± 1 eV, 폭 1.5–10). Mg Kα 등에서는 넣지 않음(Auger KE 는 hν 와 무관 → 다른 BE 로 이동). Plasmon 을 켜면 3d3/2 플라스몬(≈ 864 eV)이 Auger 와 겹침(함정).
+**Y**: Y₂O₃(157.5)–Y(OH)₃(157.9) 0.4 eV — 폭만 다름, 분할은 약하게 정해짐(합 Y³⁺ 를 파생에 둠; Fit check R4 '합쳐짐'은 같은 레시피의 문헌 화학종 위치끼리는 판정하지 않음 — 포락선과 같은 까닭).
+**Ba 4d**: 정렬은 전체 이동과 화학종 변화(BaO → Ba(OH)₂ +1.2 eV)를 가르지 못함 → 정렬 범위 ±1 eV, O 1s(BaO 527.8 · Ba(OH)₂ 530.8 · BaCO₃ 531.7 · Ba(NO₃)₂ 533.6, 같은 눈금)·C 1s·N 1s 로 확인(함정). Ba(OH)₂–BaCO₃ 0.1 eV → 합 'Ba(OH)₂+BaCO₃'. 손실 봉우리(BaO 폭 3.2, Ba(OH)₂ ≈ 6 eV; 위치 미발표)는 모형에 없음.
+**Ba 3d**: Booklet ΔE 의 일반 doublet 만. 함정·Fit check: Ba 3d5/2(≈ 780) ↔ Co 2p3/2(778.1), Ba 3d3/2(795.7) ↔ Co 2p1/2(793.2) — Ba–Co 페로브스카이트(BCFZY 등)에서는 Ba 4d 를 쓰거나 Co 2p + Ba 3d 를 한 모형으로.
+**표 없는 란타넘족**(Sm, Eu²⁺/³⁺, Ho, Er, Tm, Yb, Lu): 레시피 없음. `complexInfo` 가 3d 를 위성 영역으로, 4d 는 §9 다중항으로 알리고 `note` 로 기준 스펙트럼 LCF(§12)를 안내 — Eu 3d 혼합 원자가는 shake-up 이 아니라 원자가별 다중항의 겹침(Phys. Rev. B 51, 10146 (1995)) → 원자가마다 기준 하나, LCF 무게비 = 원자가 비. Yb²⁺ · Lu(4f¹⁴) 4d 는 단순 doublet → 보통 Auto suggest(Lu 4d·3d 는 복잡 영역 아님, Yb 4d 는 닫힌 껍질 예외로 표시). Haasch 포락선이 있는 원소도 화학 상태는 LCF 로(note).
+**파생** `parDerived`: 화합물 하나 → c4f¹L share; 둘 이상 → 화학종 분율; 합(Y³⁺ = Y₂O₃ + Y(OH)₃ + YCl₃, Ba(OH)₂ + BaCO₃; 둘 이상이고 전부가 아닐 때). σ = §17.7 의 델타 방법(연결 넓이를 뿌리까지). emp 는 파생 없음(넓이에 화학적 뜻 없음).
+**겹침 규칙(R10, Fit check)** `OVERLAPS`: 짧은 일반 표, 에너지는 라이브러리(Booklet BE, Avantage Auger KE) 또는 위 출처. 영역(el, orb)이 규칙의 한쪽이고 상대 원소가 **같은 시료의 survey 채택 원소 또는 다른 영역**에 있고 상대 에너지가 피팅 창(± 1 eV) 안이면 한 줄(설명은 title). Auger 규칙은 Al Kα 만. 화면: 성분 머리의 한 줄 'Overlap: …' + Fit check 항목(조치 없음).
+
+| 규칙 | 에너지 (eV) | 출처 | 심각도 |
+|---|---|---|---|
+| Ba 3d5/2 / Co 2p3/2 (3d3/2 / 2p1/2) | 780.5 / 778.1 (795.7 / 793.2) | Booklet | warn — Ba 4d 또는 한 모형 |
+| La 3d3/2 / Ni 2p3/2 | 853.0 / 852.7 | Booklet | warn |
+| La M45N45N45 Auger in La 3d | KE 622.4 / 623.1 → BE 864.2 / 863.5 (Al) | Sunding 표 3 | info |
+| Nd 3d / O KLL | 980.4, 1003.3 / KE 511 · 492 · 477 → 975.6 · 994.6 · 1009.6 (Al) | Booklet; 라이브러리 Auger; Haasch 주의 | warn |
+| Pr 3d5/2 위성 / Cu 2p3/2 | 932.8 (Haasch 성분; 주선 928.8) / 932.7 | Booklet; Haasch | warn |
+| Fe L3VV Auger in Ba 3d5/2 | KE 703 → 783.6 (Al) / 780.5 | 라이브러리 Auger | info |
+| Co L3VV Auger in Fe 2p3/2 | KE 774 → 712.6 (Al) / 706.8 | 라이브러리 Auger | info |
+| Ni L3VV Auger in Mn 2p3/2 | KE 846 → 640.6 (Al) / 638.7 | 라이브러리 Auger | info |
+| Ru 3d3/2 / C 1s | 284.2 / 284.2 | Booklet | warn |
+| Bi 4f5/2 / S 2p3/2 | 162.3 / 162.5 | Booklet | warn |
+| Sr 3d5/2 / P 2p | 134.2 / 135 | Booklet | info |
+
+(라이브러리 Auger KE 는 Avantage 표 — 라이브러리 메타의 NIST SRD 20 대조: Fe L3VV 702.70 · Co 773.40 · Ni 846.10 vs 라이브러리 703 · 774 · 846, 차 ≤ 0.6 eV.) 정량 표의 기존 '창 안의 다른 원소 주선' 경고(`interferences`)는 그대로.
+**검증**(test_guide §9): 숫자 대조 137 값(Sunding 표 3–5 · Cole · Karslıoğlu 표 1 + Schmitz · Haasch 10 포락선; Ba 3d ΔE = 라이브러리 Booklet 15.2; Ba 4d −0.6 eV 를 탄산염 C 1s 에서 다시 계산). 구조: La 3d 제약 1–4(2/3, q 고정, 간격 연결 3.9 · 2.0, ΔE 공유, 결합 = 반결합, 자유 위치 1), Mixed(k 0.6628 · 4.5, 위치 1 · 넓이 2), 플라스몬 +12.3, Auger 864.20 eV(Mg Kα 에서는 없음), Ba 4d 상대 간격 1.2 · 1.3 · 2.2, Y 위치 4 · ΔE 1, Haasch(위치 1, 넓이 모두, 폭 고정, FWHM× 로 폭 1).
+ 합성(레시피로 만든 참값, 전체 이동 ±0.2 eV, 바탕 3000 + 4·(E − E₀) + 0.08·∫P, Poisson; 레시피 + 단계 피팅):
+ | 경우 | 참 | 맞춤 |
+ |---|---|---|
+ | La 3d La(OH)₃ (+ Auger) | c4f¹L 57.00 | 57.09 ± 0.08 |
+ | La 3d La₂O₃ | 90.00 | 90.02 ± 0.06 |
+ | La 3d 두 화합물 (비 고정) | La(OH)₃ 49.92 | 49.73 ± 0.15 |
+ | La 3d La(OH)₃ + 플라스몬 | 57.00 | 57.08 ± 0.08 |
+ | La 4d La(OH)₃ · La₂O₃ | 28.57 · 57.14 | 28.35 ± 0.23 · 57.28 ± 0.11 |
+ | La 4d 두 화합물 | La(OH)₃ 47.01 | 47.06 ± 0.42 |
+ | Y 금속 + Y₂O₃ | 30 / 70 | 29.03 / 70.97 ± 0.73 |
+ | Y₂O₃ + Y(OH)₃ (0.4 eV) | 60 / 40 | 59.16 / 40.84 ± 3.70 |
+ | Y 금속 + Y₂O₃ + YCl₃ | 20 / 50 / 30 | 17.8 / 32.2 / 50.0 (σ 1.3 / 8.2 / 9.3 — 넓은 Y₂O₃·YCl₃ 가 1.3 eV 차로 잘 갈리지 않음; 보고만) |
+ | Ba 4d BaO + BaCO₃ | 40 / 60 | 40.24 / 59.76 ± 1.20 |
+ | Ba 4d BaO + Ba(OH)₂ + Ba(NO₃)₂ | 44.44 / 33.33 / 22.22 | 44.12 / 33.08 / 22.81 (σ 1.09 / 0.63 / 0.73) |
+ 판정: c4f¹L 최대 |Δ| 0.23 %p(허용 1), 분율 최대 |Δ| 0.97 %p(허용 2.5; 3 화학종 Y 와 단일 화학종 Ba 4d·Ba 3d 는 보고만), χ²ν 0.83–1.07, 한계 닿음 0, Fit check warn 0, Δ/σ rms 1.09(21 값).
+ Haasch 포락선(연기 시험): 포락선 자체 + 무작위 넓이(0.5–1.5 ×) → 10 영역 × 폭 고정/FWHM× 20 피팅 모두 수렴, 한계 닿음 0, χ²ν 0.93–1.03, warn 0.
+ 겹침: Co 2p + Ba → warn(title: Ba 4d · 한 모형), Ba 없으면 없음, Ba 3d + Co·Fe → Ba/Co + Fe Auger(Mg Kα 면 Ba/Co 만), La 3d + Ni → La/Ni + La MNN, Nd 3d + O → O KLL, 창 밖이면 없음, 이름 < 90 자; 라이브러리 값 대조(Booklet 16 · Auger KE 6 · Sunding KE 2). 순진한 La 3d 피팅 → 'Apply recipe'.
+ 기존 피팅 영향 없음: fitlog_compare 8 시험 24 532 피팅 비트 동일(test_guide 의 기존 779 포함; §9 의 새 피팅은 뒤에 붙음).
+ 화면(ui_xps_guide §7): La 3d 화학종·선택 줄 → Recipe 3 쌍 + Auger → Staged fit → c4f¹L ≈ 57 % · Ba 3d 와 같은 시료의 Co 2p: 한 줄 겹침 안내 + 피팅 뒤 Fit check 겹침 warn.

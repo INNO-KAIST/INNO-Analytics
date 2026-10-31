@@ -926,7 +926,7 @@ function panelFit(el,sp){
      ${bg.type==="spline"?`<span class="xps-f" title="Knots = the two window ends (endpoint averages) + your knots. A knot's height is the mean of ±2 data points unless you drag it. Natural cubic spline through the knots">Knots <b id="xpsKnN">${(bg.knots||[]).length}</b>+2</span><button class="btn xs ${S.ui.knotMode?"primary":""}" id="xpsKnA" title="Then click the graph where the background is (outside peaks). Drag a knot to move it; double-click a knot to remove it">${S.ui.knotMode?"Click the graph…":"+ Knot"}</button><button class="btn xs" id="xpsKnR" title="Return dragged knot heights to the local data mean">Auto heights</button><button class="btn xs" id="xpsKnC" title="Remove all knots (straight line between the window ends)">Clear</button>`:""}</div>
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
-   <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}${recipeBanner(sp,p)}
+   <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}${recipeBanner(sp,p)}${ovlBanner(sp,p)}
    <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>${recipeEnvRow(sp,p)}
    <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>Auto suggest</b> 또는 그래프 위 <b>+ Add component</b> 로 직접 놓으세요.</div>`}</div>
    ${refHTML(sp,p)}
@@ -1068,29 +1068,41 @@ function fitStrip(r,sp){
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=1;
-const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions. Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
+const CHECK_V=2;   // v1.9.7: overlap rules (R10)
+const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
+  if(R.kind==="par"||R.kind==="emp") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe. "+R.how+" Window "+R.window[0]+"–"+R.window[1]+" eV, in-fit Shirley + slope. Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
   if(R.kind==="env") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" envelopes of the species ticked below: each species = its published peaks at fixed spacing, area % and FWHM; free per species: one position (± "+R.beTol+" eV around the charge-corrected literature BE) and one area. Window "+R.window[0]+"–"+R.window[1]+" eV (2p3/2), Shirley fitted with the envelopes. Species fractions appear in Fit check after the fit. Pitfalls: "+R.pitfalls+" "+TM_PIT+" Source: "+R.cite)}">Recipe</button>`;
   return `<select class="xps-sel" id="xpsRcpO" title="${esc(R.name+" — literature starting model with doublet links (ΔE shared, u/v area 2/3, equal widths), window and background. "+R.cite)}">${R.options.map(o=>`<option value="${o.id}" ${o.id===cur_?"selected":""}>${esc(o.label)}</option>`).join("")}</select><button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe (anchored to the charge correction; lines aligned to the data within ±3 eV). Pitfalls: "+R.pitfalls)}">Recipe</button>`; }
 /* v1.9.6 envelope recipes (SPEC §17.7): species tick boxes · PE column · width scale · Fe₃O₄ 1:2 */
 const TM_PIT="Each species is fitted as one envelope (Biesinger's method). Report species fractions, not single peaks; overlapping species are better reported as their sum (shown with the fractions).";
 function envOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD().envDefaults(R); const pe0=sp&&sp.meta&&sp.meta.passEnergy>0?(sp.meta.passEnergy<=15?10:20):20;
   return {species:sel.slice(),pe:(ui.rcpPE&&ui.rcpPE[R.id])||pe0,wscale:!!(ui.rcpW&&ui.rcpW[R.id]),stoich:!(ui.rcpSt&&ui.rcpSt[R.id]===false)}; }
-function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
+/* v1.9.7 parametric / empirical recipes (SPEC §17.8): species tick boxes · flags (Fix ratio, Plasmon, MNN Auger, FWHM×) */
+function parOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD().parDefaults(R); const fl={}; (R.flags||[]).forEach(q=>{ const v=ui.rcpFl&&ui.rcpFl[R.id]&&ui.rcpFl[R.id][q.id]; fl[q.id]=v!=null?!!v:!!q.def; });
+  return {species:sel.slice(),flags:fl,hv:sp&&sp.hv}; }
+function rcpOpts(sp,R,fallback){ return R.kind==="env"?envOpts(sp,R):(R.kind==="par"||R.kind==="emp")?parOpts(sp,R):(fallback||S.ui.rcpOpt||"mix"); }
+function recipeParRow(sp,R){ const o=parOpts(sp,R); const multi=R.species.length>1;
+  const box=s=>{ const l0=s.lines[0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+s.lines.length+" "+(R.dE?"spin–orbit pair":"line")+(s.lines.length>1?"s":"")+", main line "+l0.be+" eV ("+(R.c1s!=null?"C 1s "+R.c1s+" eV":R.off?"Fermi-edge scale":"source scale")+")"+(s.ratio?", c4f⁰ : c4f¹L = "+s.ratio.join(":")+" (Sunding Table 5)":"")+". Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
+  const fls=(R.flags||[]).filter(q=>!q.al||!sp||Math.abs((sp.hv||1486.6)-1486.6)<2);
+  if(!multi&&!fls.length) return "";
+  return `<div class="xps-row xps-rcp-env" id="xpsRcpPar">${multi?R.species.map(box).join(""):`<span class="muted xs" title="${esc(R.how)}">${esc(R.kind==="emp"?"Empirical envelope (single crystal, areas free)":R.species[0].label)} ⓘ</span>`}${fls.map(q=>`<label class="xps-rcp-sp" title="${esc(q.tip)}"><input type="checkbox" data-rfl="${q.id}" ${o.flags[q.id]?"checked":""}>${esc(q.label)}</label>`).join("")}</div>`; }
+function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(R&&(R.kind==="par"||R.kind==="emp")) return recipeParRow(sp,R); if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
   const has10=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[2]!=null))), has20=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[3]!=null)));
   const box=s=>{ const t=(s.sets||[s]).map(x=>x.peaks.length).reduce((a,b)=>a+b,0); const be=(s.sets?s.sets[0]:s).peaks[0][0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+t+" peaks"+(s.sets?" in "+s.sets.length+" sets ("+s.sets.map(x=>x.label).join(", ")+")":"")+", main line "+be+" eV (charge-corrected). Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
   return `<div class="xps-row xps-rcp-env" id="xpsRcpEnv">${R.species.map(box).join("")}<select class="xps-sel" id="xpsRcpPE" title="${esc("Pass energy column of the published FWHMs (Biesinger: PE 10 and/or PE 20 eV). "+(has10&&has20?"Where only one column exists for a peak, that one is used.":"This table has PE "+(has10?"10":"20")+" widths only.")+" Default from the spectrum's pass energy (≤ 15 eV → 10).")}"><option value="10" ${o.pe===10?"selected":""}>PE 10</option><option value="20" ${o.pe===20?"selected":""}>PE 20</option></select><label class="xps-rcp-sp" title="One common FWHM scale (0.6–1.6×) for all envelope peaks — Biesinger notes the widths can be adjusted for other instruments or pass energies. Off: widths fixed at the table values."><input type="checkbox" id="xpsRcpW" ${o.wscale?"checked":""}>FWHM×</label>${R.stoich?`<label class="xps-rcp-sp" title="Fe₃O₄: tie the Fe³⁺ set to the Fe²⁺ set — area 2 : 1 (stoichiometric) and fixed separation (literature 1.8 eV). Off: the two sets are free (the table itself has 68.5 : 31.4)."><input type="checkbox" id="xpsRcpS" ${o.stoich?"checked":""}>Fe₃O₄ 1:2</label>`:""}</div>`; }
 function recipeBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!r.el) return ""; const ci=G_.complexInfo(r.el,r.orb); if(!ci||(ci.kind==="multiplet"&&!ci.recipes.length)) return "";
   const rc=ci.recipes.length?G_.recipeById(ci.recipes[0]):null; const inUse=rc&&p.comps.some(c=>c.recipe===rc.id);
   if(inUse){ const m=p.recipe||{}; return `<div class="muted xs" style="margin:2px 0 4px" title="${esc(rc.pitfalls+"\n"+rc.cite)}">Recipe model: ${esc(rc.name)}${m.label?" · "+esc(m.label):""}${m.align!=null&&Math.abs(m.align)>0.05?` · aligned ${m.align>0?"+":""}${f(m.align,2)} eV`:""} ⓘ</div>`; }
-  return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?" — literature recipe available (Recipe)":""} ⓘ</div>`; }
+  return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":"")+(ci.note?" "+ci.note:""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?(rc.kind==="emp"?" — empirical envelope available (Recipe)":" — literature recipe available (Recipe)"):""} ⓘ</div>`; }
 function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&GD().recipeById(id); if(!R) return; let M;
-  const env=R.kind==="env"; const eo=env?(opt&&typeof opt==="object"?opt:envOpts(sp,R)):null;
-  try{ M=GD().recipeModel(id,env?Object.assign({shift:shOf(sp),be:sp.be,y:sp.y},eo):{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
+  const env=R.kind==="env", par=R.kind==="par"||R.kind==="emp"; const eo=env||par?(opt&&typeof opt==="object"?opt:rcpOpts(sp,R)):null;
+  try{ M=GD().recipeModel(id,env||par?Object.assign({shift:shOf(sp),be:sp.be,y:sp.y},eo):{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
   pushHist(p,"Recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
-  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; if(!env) S.ui.rcpOpt=M.recipe.opt; touch(p); rerender();
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; if(!env&&!par) S.ui.rcpOpt=M.recipe.opt; touch(p); rerender();
+  if(par){ const a=M.recipe.align, far=Math.abs(a)>0.5; const nP=M.comps.filter(c=>c.doublet).length, nS=M.comps.length-nP;
+    note(`${R.name} · ${M.recipe.label}: ${nP?nP+" pairs":""}${nP&&nS?" + ":""}${nS?nS+(nS>1?" lines":" line"):""}, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the literature positions — ${R.c1s===284.8?"check the charge correction (differential charging?)":"expected when the source used another energy reference; check the charge correction"}.`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); return; }
   if(env){ note(`${R.name}: ${M.recipe.species.length} species, ${M.comps.length} peaks, window ${f(M.lo+shOf(sp),1)}–${f(M.hi+shOf(sp),1)} eV, Shirley in fit, FWHM PE ${M.recipe.pe}${M.recipe.wscale?" ×scale":""}.`+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.","ok",{label:"Staged fit",fn:()=>runStaged(sp)}); return; }
   const a=M.recipe.align, far=Math.abs(a)>0.5;
   note(`${R.name} · ${M.recipe.label}: ${M.comps.length} pairs, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the charge-corrected literature positions — check the charge correction (differential charging?).`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); }
@@ -1110,12 +1122,17 @@ async function runStaged(spArg){
     const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn");
   }catch(e){ hideProg(); RUN=null; note("Staged fit stopped: "+(e.message||e),"warn"); }
 }
-function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free) return null; const sh=shOf(sp);
-  if(r.check&&r.check.sh===sh&&r.check.v===CHECK_V) return r.check.items;
+/* elements present for the overlap rules (SPEC §17.8): regions of the same sample + elements accepted in its survey */
+function presentEls(sp){ const els=new Set(); sampleSpecs(SK(sp)).forEach(s=>{ if(s.reg&&s.reg.el) els.add(s.reg.el); const st=S.ui.survey[s.uid]; if(st&&st.acc) Object.keys(st.acc).forEach(e=>{ if(st.acc[e]) els.add(e); }); }); return els; }
+function ovlBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!G_.overlapFindings||!r.el) return ""; const sh=shOf(sp);
+  const it=G_.overlapFindings(r.el,r.orb,presentEls(sp),{hv:sp.hv,lo:p.lo+sh,hi:p.hi+sh}); if(!it.length) return "";
+  return `<div class="note xps-ovl-b" style="margin:4px 0 6px" title="${esc(it.map(x=>x.label+": "+x.tip).join("\n\n"))}">Overlap: ${esc(it.map(x=>x.label.replace(/ \([^)]*\)/,"")).join(" · ").slice(0,80))} ⓘ</div>`; }
+function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free) return null; const sh=shOf(sp); const pres=presentEls(sp), pk=[...pres].sort().join(",")+"|"+sp.hv;
+  if(r.check&&r.check.sh===sh&&r.check.v===CHECK_V&&r.check.pk===pk) return r.check.items;
   const R=C.sliceRegion(sp.be,sp.y,r.lo!=null?r.lo:p.lo,r.hi!=null?r.hi:p.hi); if(!R||R.E.length!==r.mu.length) return null;
   const rg=sp.reg||{}; const so=rg.el?soInfo(rg.el,rg.orb):null; const rc=(r.comps||[]).find(c=>c.recipe); let items=[];
-  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE}); }catch(e){ console.error(e); return null; }
-  r.check={sh,v:CHECK_V,items}; return items; }
+  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
+  r.check={sh,v:CHECK_V,items,pk}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
   const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null); if(!dv.length) return "";
   return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" title="${esc(d.tip)}">${esc(d.label)} <b>${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
@@ -1126,7 +1143,7 @@ function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const ite
   return `<div class="xps-chk" id="xpsChk"><div class="xps-chk-h"><span title="${esc(CHECK_HELP)}">Fit check ⓘ</span>${nW?`<span class="badge wr">${nW}</span>`:`<span class="badge ok">OK</span>`}${st}</div>${derivedHTML(p)}${rows?`<ul>${rows}</ul>`:`<div class="muted xs">No issues found.</div>`}</div>`; }
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
-  if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_&&R_.kind==="env"?envOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
+  if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_?rcpOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
   try{ msg=GD().applyAction(m,act,{be0:sp.be[0],be1:sp.be[sp.n-1]}); }catch(e){ note(e.message,"warn"); return; }
   if(msg==null){ p.hist.pop(); note("Could not apply: "+act.label,"warn"); return; }
@@ -1137,7 +1154,10 @@ function applyCheck(sp,p,act){ if(!act) return;
 function bindGuide(el,sp,p){
   const st=$q(el,"#xpsStaged"); if(st) st.onclick=()=>runStaged(sp);
   const ro=$q(el,"#xpsRcpO"); if(ro) ro.onchange=()=>{ S.ui.rcpOpt=ro.value; save(); };
-  const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>{ const R_=GD().recipeById(ra.dataset.rcp); applyRecipe(sp,ra.dataset.rcp,R_&&R_.kind==="env"?envOpts(sp,R_):(ro&&ro.value)||S.ui.rcpOpt||"mix"); };
+  const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>{ const R_=GD().recipeById(ra.dataset.rcp); applyRecipe(sp,ra.dataset.rcp,R_?rcpOpts(sp,R_,ro&&ro.value):(ro&&ro.value)||S.ui.rcpOpt||"mix"); };
+  const pv=$q(el,"#xpsRcpPar"); if(pv&&ra){ const id=ra.dataset.rcp; const put=(k,v)=>{ S.ui[k]=Object.assign({},S.ui[k]); S.ui[k][id]=v; save(); };
+    $a(pv,"[data-rsp]").forEach(b=>b.onchange=()=>{ put("rcpSp",$a(pv,"[data-rsp]").filter(x=>x.checked).map(x=>x.dataset.rsp)); });
+    $a(pv,"[data-rfl]").forEach(b=>b.onchange=()=>{ const cur=Object.assign({},(S.ui.rcpFl||{})[id]); cur[b.dataset.rfl]=b.checked; put("rcpFl",cur); }); }
   const ev=$q(el,"#xpsRcpEnv"); if(ev&&ra){ const id=ra.dataset.rcp; const put=(k,v)=>{ S.ui[k]=Object.assign({},S.ui[k]); S.ui[k][id]=v; save(); };
     $a(ev,"[data-rsp]").forEach(b=>b.onchange=()=>{ put("rcpSp",$a(ev,"[data-rsp]").filter(x=>x.checked).map(x=>x.dataset.rsp)); });
     const pe=$q(ev,"#xpsRcpPE"); if(pe) pe.onchange=()=>put("rcpPE",+pe.value);

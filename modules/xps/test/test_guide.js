@@ -10,7 +10,10 @@
    7 synthetic Ce 3d (truth from the recipe, Ce³⁺ fraction 0 · 0.2 · 0.5, Poisson noise, Shirley-type background + slope):
      recipe + staged fit recovers the Ce³⁺ and u‴ fractions; bound hits vs a naive suggestModel fit
    8 v1.9.6 transition-metal 2p3/2 envelope recipes (Biesinger 2011/2017): numbers = journal transcripts (test/ref/biesinger), shapes,
-     PE columns, constraint structure, Fe₃O₄ 1:2, synthetic 2–3-species mixtures (Ni Co Fe Mn Cr Cu) recovered, σ, Cu shake-up, fit check */
+     PE columns, constraint structure, Fe₃O₄ 1:2, synthetic 2–3-species mixtures (Ni Co Fe Mn Cr Cu) recovered, σ, Cu shake-up, fit check
+   9 v1.9.7 Ba · Y · lanthanide recipes (SPEC §17.8): numbers = journal transcripts (test/ref/lit2), constraint structure (Sunding's six
+     constraints, Cole ratio, Karslıoğlu relative shifts, Haasch envelopes), synthetic recovery (La 3d/4d, Y 3d, Ba 4d), empirical-envelope
+     smoke test (converges, no bound hits), complexInfo for Sm–Lu, overlap rules (library energies, presence, window, Al Kα only) */
 "use strict";
 const C=require("../src/xps_core.js"), G=require("../src/xps_guide.js"), L=require("../src/xps_lib.js"), U=require("./synth_util.js"), AE=require("./all_elements.js");
 const QUICK=!!process.env.QUICK;
@@ -303,6 +306,139 @@ const TM={};
     const d=G.diagnose({E:P.E,y:P.y,fin,el:"Ni",orb:"2p",bgType:"smart"}); const cx=d.find(x=>x.id==="complex");
     ok(cx&&cx.act&&cx.act.type==="recipe"&&cx.act.recipe==="ni2p3"&&/envelope/.test(cx.tip),"naive Ni 2p fit → Fit check 'Apply recipe' with the envelope recipe",cx&&cx.label); }
 }
+
+/* ---------- 9 v1.9.7 Ba · Y · lanthanide recipes ---------- */
+console.log("== 9 v1.9.7 Ba · Y · lanthanide recipes (Sunding 2011, Cole 2020, Karslıoğlu 2018, Haasch 2014) and overlap rules");
+const LT={};
+{ const fs=require("fs"), path=require("path"), RD=path.join(__dirname,"ref","lit2");
+  const rd=f=>fs.readFileSync(path.join(RD,f),"utf8").split("\n").filter(l=>l.trim()&&!l.startsWith("#"));
+  const num=x=>x==null||x===""?null:+x;
+  let bad=[], nVal=0; const eq=(a,b,what)=>{ nVal++; if(Math.abs(a-b)>1e-9) bad.push(`${what}: ${a} vs ${b}`); };
+  // Sunding: Table 3 BE, Table 4 separations, Table 5 ratios
+  const su={}; rd("sunding2011_la.txt").forEach(l=>{ const r=l.split("|"); if(r.length>=3) su[r[0]]=[r[1],r[2]]; });
+  const la3=G.recipeById("la3d"), la4=G.recipeById("la4d"); const col={LaOH3:0,La2O3:1};
+  [[la3,"3d"],[la4,"4d"]].forEach(([R,o])=>{ R.species.forEach(s=>{ const j=col[s.key]; const L=k=>s.lines.find(x=>x.key===k);
+    eq(L("m").be,num(su[`La ${o}5/2 c4f0`][j]),`${R.id} ${s.key} c4f0`);
+    eq(+(num(su[`La ${o}3/2 c4f0`][j])-num(su[`La ${o}5/2 c4f0`][j])).toFixed(3),R.dE.v,`${R.id} ${s.key} ΔE`);
+    eq(L("b").sep[1],num(su[`La ${o} c4f0 -> c4f1L bonding`]?su[`La ${o} c4f0 -> c4f1L bonding`][j]:su[`La ${o} c4f0 -> bonding`][j]),`${R.id} ${s.key} bonding sep`);
+    eq(L("a").sep[1],num(su[`La ${o} bonding -> antibonding`][j]),`${R.id} ${s.key} antibonding sep`);
+    eq(s.pl,num(su["photoelectron -> plasmon"][j]),`${R.id} ${s.key} plasmon`);
+    const t5=su[`La ${o}`][j].split(":").map(Number); eq(s.ratio[0],t5[0],`${R.id} ${s.key} T5 main`); eq(s.ratio[1],t5[1],`${R.id} ${s.key} T5 sat`);
+    if(o==="3d") eq(s.ke,num(su["La M45N45N45 (KE)"][j]),`${R.id} ${s.key} Auger KE`); }); });
+  // Cole: BE, FWHM, ΔE range, area ratio
+  const co={}; rd("cole2020_y.txt").forEach(l=>{ const r=l.split("|"); if(/^Y 3d/.test(r[0])) co[r[0]]=r.slice(1).map(Number); });
+  const y3=G.recipeById("y3d"), ynm={Y0:"Y metal",Y2O3:"Y2O3",YOH3:"Y(OH)3",YCl3:"YCl3"}; const rr=[], dd=[];
+  y3.species.forEach(s=>{ const a=co["Y 3d5/2 "+ynm[s.key]], b=co["Y 3d3/2 "+ynm[s.key]]; eq(s.lines[0].be,a[0],`y3d ${s.key} BE`); eq(s.lines[0].F,a[1],`y3d ${s.key} FWHM`); eq(a[1],b[1],`y3d ${s.key} equal FWHM in pair`); rr.push(b[2]/a[2]); dd.push(+(b[0]-a[0]).toFixed(3)); });
+  const rMean=rr.reduce((x,y)=>x+y,0)/rr.length; LT.yr=rr.map(x=>+x.toFixed(4)); LT.ydE=dd;
+  ok(Math.abs(rMean-y3.r)<0.001&&rr.every(x=>Math.abs(x-y3.r)<0.002)&&dd.every(d=>d>=y3.dE.lo&&d<=y3.dE.hi)&&y3.c1s===284.8,"Y 3d: area ratio 0.689 = Cole's 3d3/2/3d5/2 areas (all four species), their ΔE 2.0–2.1 inside the free range 1.9–2.2, C 1s 284.8",`ratios ${LT.yr.join(" ")} · ΔE ${dd.join(" ")}`);
+  // Karslıoğlu: BE, FWHM, ΔE; scale offset from carbonate C 1s (Karslıoğlu 289.9 vs Schmitz 289.1 at 284.6)
+  const ka={}; let sch=null, kco=null; fs.readFileSync(path.join(RD,"karslioglu2018_ba4d.txt"),"utf8").split("\n").forEach(l=>{ const r=l.split("|"); if(r[1]==="Ba 4d"){ const be=r[2].split("/").map(Number); ka[r[0]]={be,F:+r[3]}; if(r[0]==="BaCO3") kco=+(/C 1s ([\d.]+)/.exec(r[4])[1]); }
+    const m=/Ba 3d5\/2 ([\d.]+) \(FWHM ([\d.]+)\), C 1s adventitious ([\d.]+), carbonate ([\d.]+)/.exec(l); if(m) sch=m.slice(1).map(Number); });
+  const b4=G.recipeById("ba4d"), knm={BaO:"BaO",BaOH2:"Ba(OH)2",BaCO3:"BaCO3",BaNO32:"Ba(NO3)2"};
+  b4.species.forEach(s=>{ const k=ka[knm[s.key]]; eq(s.lines[0].be,k.be[0],`ba4d ${s.key} BE`); eq(s.lines[0].F,k.F,`ba4d ${s.key} FWHM`); eq(+(k.be[1]-k.be[0]).toFixed(3),b4.dE.v,`ba4d ${s.key} ΔE`); });
+  const offD=+(sch[3]+(284.8-sch[2])-kco).toFixed(3); eq(b4.off,offD,"ba4d scale offset (carbonate C 1s)");
+  const b3=G.recipeById("ba3d"); eq(b3.species[0].lines[0].be,sch[0],"ba3d Schmitz BE"); eq(b3.species[0].lines[0].F,sch[1],"ba3d Schmitz FWHM"); eq(b3.c1s,sch[2],"ba3d Schmitz C 1s");
+  const dB=C.doubletInfo(L,"Ba","3d"); eq(b3.dE.v,dB.alt.booklet,"ba3d ΔE = Booklet");
+  // Haasch: every component row
+  const ha={}; let cur=null; fs.readFileSync(path.join(RD,"haasch2014_scandates.txt"),"utf8").split("\n").forEach(l=>{ if(l.startsWith("## ")){ cur=/([A-Z][a-z])ScO3/.exec(l)[1]; return; } if(!cur||l.startsWith("#")||!l.trim()) return; const r=l.split("|"); const orb=r[0].split(" ")[1].slice(0,2); if(orb!=="3d"&&orb!=="4d") return; const id=cur.toLowerCase()+orb; (ha[id]=ha[id]||[]).push([+r[1],+r[2]]); });
+  Object.keys(ha).forEach(id=>{ const R=G.recipeById(id); if(!R){ bad.push("missing recipe "+id); return; } const ls=R.species[0].lines; if(ls.length!==ha[id].length) bad.push(`${id}: ${ls.length} vs ${ha[id].length}`); ha[id].forEach((r,j)=>{ eq(ls[j].be,r[0],`${id} c${j+1} BE`); eq(ls[j].F,r[1],`${id} c${j+1} FWHM`); }); if(R.c1s!==285.0) bad.push(id+" C 1s"); });
+  ok(!bad.length&&nVal>100&&Object.keys(ha).length===10,`recipe numbers = journal transcripts (test/ref/lit2: ${nVal} values — Sunding Tables 3–5, Cole, Karslıoğlu Table 1 + Schmitz, Haasch 10 envelopes; Ba 3d ΔE = Booklet ${dB.alt.booklet} eV; Ba 4d scale −0.6 eV from the carbonate C 1s)`,bad.slice(0,4).join(" | "));
+  LT.nVal=nVal;
+
+  // constraint structure
+  { const M=G.recipeModel("la3d",{species:["LaOH3"],flags:{auger:false},shift:0.5}); const P={comps:M.comps,cons:M.cons,bg:M.bg}; const map=C.buildMap(P); C.applyLinks(P,map);
+    const c=k=>M.comps.find(x=>x.rk===k); const m=c("LaOH3_m"), b=c("LaOH3_b"), a=c("LaOH3_a");
+    const s1=M.comps.every(x=>Math.abs(x.doublet.r-2/3)<1e-12&&M.cons[x.id].r.mode==="fixed"&&M.cons[x.id].q.mode==="fixed"&&x.doublet.q===1);   // 1 ratio · 2 equal FWHM in the pair
+    const s3=M.cons[b.id].be.mode==="link"&&Math.abs(M.cons[b.id].be.b-3.9)<1e-9&&M.cons[a.id].be.mode==="link"&&M.cons[a.id].be.ref===b.id&&Math.abs(M.cons[a.id].be.b-2.0)<1e-9;   // 3 separations (same for both SO halves: shared ΔE)
+    const dEs=M.comps.filter(x=>M.cons[x.id].dE.mode==="free").length===1&&M.comps.every(x=>M.cons[x.id].dE.mode!=="link"||M.cons[x.id].dE.ref);
+    const s4=M.cons[a.id].area.mode==="link"&&M.cons[a.id].area.ref===b.id&&M.cons[a.id].area.k===1&&M.cons[b.id].area.mode==="free";   // 4 bonding = antibonding
+    const win=Math.abs(M.lo-(826-0.5))<1e-9&&M.bg.type==="active";
+    ok(s1&&s3&&dEs&&s4&&win&&map.free.filter(f=>f.k==="be").length===1,"La 3d structure = Sunding's constraints: 2/3 area ratio and equal FWHM in every pair, satellite separations linked (3.9, 2.0 eV) and shared ΔE (same for both halves), bonding = antibonding area, one free position; window anchored to Δ",`free ${map.free.map(f=>f.k).join(",")}`);
+    const Mx=G.recipeModel("la3d",{species:["LaOH3","La2O3"],flags:{auger:false}}); const mp=C.buildMap({comps:Mx.comps,cons:Mx.cons,bg:Mx.bg});
+    const kb=Mx.comps.filter(x=>x.rk.endsWith("_b")).map(x=>+Mx.cons[x.id].area.k.toFixed(4));
+    ok(mp.free.filter(f=>f.k==="be").length===1&&mp.free.filter(f=>f.k==="area").length===2&&kb.join()==="0.6628,4.5","Mixed: main:satellite ratio fixed at Table 5 (k = 28.5/43, 45/10), compounds at their published relative position (one free position, two free areas)",kb.join(" · "));
+    const Mp=G.recipeModel("la3d",{species:["LaOH3"],flags:{plasmon:true,auger:true},hv:1486.6}); const pl=Mp.comps.find(x=>x.rrole==="pl"), au=Mp.comps.find(x=>x.rrole==="aug");
+    const Mg=G.recipeModel("la3d",{species:["LaOH3"],flags:{auger:true},hv:1253.6});
+    ok(pl&&pl.doublet&&Math.abs(Mp.cons[pl.id].be.b-12.3)<1e-9&&Mp.cons[pl.id].area.mode==="free"&&au&&!au.doublet&&Math.abs(au.be-(1486.6-622.4))<1e-6&&Math.abs(Mp.cons[au.id].be.hi-Mp.cons[au.id].be.lo-2)<1e-9&&!Mg.comps.some(x=>x.rrole==="aug"),"plasmon = one pair at +12.3 eV (Table 4; area, width free; 2/3 ratio — constraints 5–6); MNN Auger line at hν − KE = 864.2 eV (± 1 eV) only for Al Kα",au&&au.be.toFixed(2));
+    const Mb=G.recipeModel("ba4d",{species:["BaO","BaOH2","BaCO3","BaNO32"]}); const anc=Mb.comps.find(x=>Mb.cons[x.id].be.mode==="free");
+    const rel=Mb.comps.filter(x=>x!==anc).map(x=>+(x.be-anc.be).toFixed(3)), relOK=Mb.comps.every(x=>x===anc||(Mb.cons[x.id].be.mode==="link"&&Math.abs(Mb.cons[x.id].be.b-(x.be-anc.be))<1e-9));
+    ok(anc&&relOK&&Math.abs(anc.be-(88.8-0.6))<1e-9&&Mb.comps.every(x=>Math.abs(x.doublet.dE-2.6)<1e-12),"Ba 4d: species held at Karslıoğlu's relative shifts (BaO → +1.2 / +1.3 / +2.2 eV), one free position, start = BE − 0.6 eV, ΔE 2.6",rel.join(" "));
+    const My=G.recipeModel("y3d",{species:["Y0","Y2O3","YOH3","YCl3"]}); const my=C.buildMap({comps:My.comps,cons:My.cons,bg:My.bg});
+    ok(my.free.filter(f=>f.k==="be").length===4&&My.comps.every(x=>Math.abs(x.doublet.r-0.689)<1e-12)&&my.free.filter(f=>f.k==="dE").length===1&&My.recipe.align===0,"Y 3d: one free position per species (± 0.3 eV, no alignment — same C 1s 284.8 as Cole), shared ΔE, ratio 0.689");
+    let eo=true; const einfo=[]; Object.keys(G.HAASCH).forEach(id=>{ const M=G.recipeModel(id,{}); const mm=C.buildMap({comps:M.comps,cons:M.cons,bg:M.bg}); const nb=mm.free.filter(f=>f.k==="be").length, na=mm.free.filter(f=>f.k==="area").length, nf=mm.free.filter(f=>f.k==="F").length;
+      const Mw=G.recipeModel(id,{flags:{wscale:true}}); const nw=C.buildMap({comps:Mw.comps,cons:Mw.cons,bg:Mw.bg}).free.filter(f=>f.k==="F").length;
+      if(!(nb===1&&na===M.comps.length&&nf===0&&nw===1&&M.comps.every(c=>c.shape==="GLP"&&Math.abs(c.m-0.3)<1e-12&&!c.doublet))) { eo=false; einfo.push(id); } });
+    ok(eo,"empirical envelopes (Haasch): one common position, every area free, widths fixed (one free scale with FWHM×), GL(30), no doublet constraint",einfo.join(",")); }
+
+  // synthetic recovery (truth = the recipe with chosen parameters; offset ±0.2 eV, Shirley c0 + k∫P + slope, Poisson)
+  function synthR(id,o,seed){ const R=G.recipeById(id); const rg=U.rng(seed); const T=G.recipeModel(id,{species:o.species,flags:o.flags,hv:1486.6});
+    const w=(o.flags&&o.flags.plasmon&&R.flags.find(q=>q.id==="plasmon").win)||R.window; const lo=w[0]-4, hi=w[1]+4, step=0.05, n=Math.round((hi-lo)/step)+1, E=Float64Array.from({length:n},(_,i)=>lo+i*step), ctx={emin:E[0],emax:E[n-1]};
+    const P0={comps:C.clone(T.comps),cons:T.cons,bg:T.bg}; const map=C.buildMap(P0); const off=(rg.u()-0.5)*0.4, tr=o.truth||{};
+    P0.comps.forEach(c=>{ c.be+=off; if(tr.F&&tr.F[c.rk]) c.F=tr.F[c.rk]; if(c.doublet&&tr.dE) c.doublet.dE=tr.dE; if(tr.m!=null&&c.m!=null) c.m=tr.m; if(tr.area&&tr.area[c.rk]!=null) c.area=tr.area[c.rk]; });
+    C.applyLinks(P0,map); const P=new Float64Array(n); P0.comps.forEach(d=>{ const v=C.compEval(d,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const Q=C.cumtrapz(E,P);
+    const y=Float64Array.from(P,(p,i)=>rg.pois(3000+4*(E[i]-lo)+0.08*Q[i]+p)); return {E,y,truth:P0.comps}; }
+  function fitR(id,S,o){ const R=G.recipeById(id); const M=G.recipeModel(id,{shift:0,be:S.E,y:S.y,species:o.species,flags:o.flags,hv:1486.6}); const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const st=G.stagedFit(P,{}); const fin=C.finalize(st.P,st.r);
+    const dv=G.recipeDerived(fin,{id,cons:st.P.cons}); const atB=(fin.cov&&fin.cov.atB)||[]; const nb=fin.free.filter((f,j)=>atB[j]&&f.k!=="area").length;
+    const d=G.diagnose({E:st.P.E,y:st.P.y,fin,el:R.el,orb:R.orb,bgType:st.P.bg.type,recipe:R}); return {M,fin,dv,nb,warn:d.filter(x=>x.sev!=="info").map(x=>x.label)}; }
+  const truthOf=S=>{ const t={}, sp={}; let sat=0, tot=0; S.truth.forEach(c=>{ if(c.rx) return; tot+=c.area; if(c.rrole==="sat") sat+=c.area; sp[c.rsp]=(sp[c.rsp]||0)+c.area; }); Object.keys(sp).forEach(k=>t["sp_"+k]=100*sp[k]/tot); t.ct=100*sat/tot; return t; };
+  const CASES=[
+    {id:"la3d",species:["LaOH3"],seed:31,truth:{area:{LaOH3_m:43000,LaOH3_b:28500,aug:8000},dE:16.85,m:0.35,F:{LaOH3_m:1.5,LaOH3_b:2.1,LaOH3_a:2.3,aug:4}},tol:1.0},
+    {id:"la3d",species:["La2O3"],seed:32,truth:{area:{La2O3_m:10000,La2O3_b:45000,aug:8000},dE:16.75,F:{La2O3_m:1.5,La2O3_b:2.0,La2O3_a:2.4,aug:4}},tol:1.0},
+    {id:"la3d",species:["LaOH3","La2O3"],seed:33,truth:{area:{LaOH3_m:30000,La2O3_m:7000,aug:8000}},tol:2.5},
+    {id:"la3d",species:["LaOH3"],flags:{plasmon:true},seed:34,truth:{area:{LaOH3_m:43000,LaOH3_b:28500,LaOH3_pl:9000,aug:6000},F:{LaOH3_pl:3.5}},tol:1.0},
+    {id:"la4d",species:["LaOH3"],seed:35,truth:{area:{LaOH3_m:40000,LaOH3_b:8000},dE:3.25},tol:1.0},
+    {id:"la4d",species:["La2O3"],seed:36,truth:{area:{La2O3_m:30000,La2O3_b:20000},dE:3.15},tol:1.0},
+    {id:"la4d",species:["LaOH3","La2O3"],seed:37,truth:{area:{LaOH3_m:30000,La2O3_m:20000}},tol:2.5},
+    {id:"y3d",species:["Y0","Y2O3"],seed:41,truth:{area:{Y0_m:15000,Y2O3_m:35000},dE:2.03},tol:2.5},
+    {id:"y3d",species:["Y0","Y2O3","YCl3"],seed:44,truth:{area:{Y0_m:10000,Y2O3_m:25000,YCl3_m:15000}},tol:null},
+    {id:"y3d",species:["Y2O3","YOH3"],seed:42,truth:{area:{Y2O3_m:30000,YOH3_m:20000}},tol:null},
+    {id:"ba4d",species:["BaO","BaCO3"],seed:51,truth:{area:{BaO_m:20000,BaCO3_m:30000}},tol:2.5},
+    {id:"ba4d",species:["BaO","BaOH2","BaNO32"],seed:52,truth:{area:{BaO_m:20000,BaOH2_m:15000,BaNO32_m:10000}},tol:2.5},
+    {id:"ba4d",species:["BaCO3"],seed:53,truth:{area:{BaCO3_m:40000},dE:2.65},tol:null},
+    {id:"ba3d",seed:54,truth:{area:{Ba_m:50000}},tol:null}];
+  LT.syn=[]; const zs=[];
+  (QUICK?CASES.filter((c,i)=>i%2===0):CASES).forEach(cs=>{ const S=synthR(cs.id,cs,cs.seed); const F=fitR(cs.id,S,cs); const t=truthOf(S);
+    const dv=F.dv.filter(d=>d.id in t); const dev=dv.map(d=>d.v-t[d.id]); const mx=dev.length?Math.max(...dev.map(Math.abs)):0; dv.forEach((d,i)=>{ if(d.sig>0) zs.push(dev[i]/d.sig); });
+    const r={id:cs.id,species:(cs.species||["Ba"]).join("+")+(cs.flags&&cs.flags.plasmon?"+pl":""),fit:Object.fromEntries(dv.map(d=>[d.id,+d.v.toFixed(2)])),truth:Object.fromEntries(dv.map(d=>[d.id,+t[d.id].toFixed(2)])),maxDev:+mx.toFixed(2),sig:Object.fromEntries(dv.map(d=>[d.id,+(d.sig||0).toFixed(2)])),chi2nu:+F.fin.stats.chi2nu.toFixed(3),bounds:F.nb,warn:F.warn,align:F.M.recipe.align,tol:cs.tol};
+    LT.syn.push(r); console.log(`     ${cs.id} ${r.species}: ${dv.map((d,i)=>`${d.label} ${d.v.toFixed(2)}±${(d.sig||0).toFixed(2)} (true ${t[d.id].toFixed(2)})`).join(" · ")||"—"} | χ²ν ${r.chi2nu} · align ${r.align.toFixed(2)} · bounds ${r.bounds}${r.warn.length?" · warn: "+r.warn.join(" ; "):""}`); });
+  const tol=LT.syn.filter(r=>r.tol!=null); LT.zrms=Math.sqrt(zs.reduce((a,b)=>a+b*b,0)/zs.length);
+  ok(tol.every(r=>r.maxDev<=r.tol),"synthetic recovery: La c4f¹L share within ±1 %, compound / species fractions within ±2.5 % (La 3d, La 4d, Y 3d, Ba 4d)",tol.map(r=>`${r.id} ${r.species} ${r.maxDev}`).join(" · "));
+  ok(LT.syn.every(r=>r.chi2nu<1.3&&r.bounds===0&&!r.warn.length),"every synthetic fit: χ²ν < 1.3, no parameter at a bound, no Fit check warning (incl. the 0.4 eV Y₂O₃/Y(OH)₃ pair — literature positions are not a 'merge')",`χ²ν ${Math.min(...LT.syn.map(r=>r.chi2nu))}–${Math.max(...LT.syn.map(r=>r.chi2nu))}`);
+  ok(LT.zrms<3,"fraction σ of the right size (rms Δ/σ over all derived values < 3; the weakly determined Y₂O₃/Y(OH)₃ and three-species splits included)",`rms ${LT.zrms.toFixed(2)} over ${zs.length}`);
+
+  // empirical envelopes: smoke test — synthetic built from the envelope (random areas), fit converges, no bound hits
+  LT.emp=[]; Object.keys(G.HAASCH).forEach((id,ii)=>{ const R=G.recipeById(id); const rg=U.rng(200+ii); const area={}; R.species[0].lines.forEach(l=>{ area["env_"+l.key]=20000*(0.5+rg.u()); });
+    for(const ws of (QUICK?[false]:[false,true])){ const S=synthR(id,{truth:{area}},300+ii); const F=fitR(id,S,{flags:{wscale:ws}});
+      LT.emp.push({id,ws,conv:F.fin.conv&&F.fin.stop!=="stalled",chi2nu:+F.fin.stats.chi2nu.toFixed(3),bounds:F.nb,warn:F.warn.length}); } });
+  ok(LT.emp.every(r=>r.conv&&r.bounds===0&&r.chi2nu<1.3&&r.warn===0),`empirical envelopes (Haasch, 10 regions${QUICK?"":" × FWHM fixed / scaled"}): every fit converges, no bound hits, χ²ν < 1.3, no Fit check warning`,`χ²ν ${Math.min(...LT.emp.map(r=>r.chi2nu))}–${Math.max(...LT.emp.map(r=>r.chi2nu))}`);
+
+  // complexInfo: lanthanides without tabulated parametric sources → reference LCF; Yb²⁺/Lu 4d plain doublets
+  const ce=(e,o)=>G.complexInfo(e,o)||{};
+  const noRec=["Sm","Eu","Ho","Er","Tm","Yb"].every(e=>{ const a=ce(e,"3d"), b=ce(e,"4d"); return a.kind&&!a.recipes.length&&/LCF/.test(a.note||"")&&b.kind==="multiplet"&&!b.recipes.length&&/LCF/.test(b.note||""); });
+  ok(noRec&&/10146/.test(ce("Eu","3d").why)&&/not shake-up/.test(ce("Eu","3d").why)&&/Yb²⁺/.test(ce("Yb","4d").closed||"")&&!G.complexInfo("Lu","4d")&&!G.complexInfo("Lu","3d")&&!G.recipesFor("Eu","3d").length,"Sm, Eu, Ho, Er, Tm, Yb: no recipe, Fit check points to reference-spectrum LCF; Eu 3d mixed valence = multiplet, not shake-up (PRB 51, 10146); Yb²⁺ / Lu 4d plain doublets");
+  ok(ce("La","3d").recipes[0]==="la3d"&&ce("La","4d").recipes[0]==="la4d"&&ce("Y","3d").recipes[0]==="y3d"&&ce("Ba","4d").recipes[0]==="ba4d"&&ce("Ba","3d").recipes[0]==="ba3d"&&["Pr","Nd","Gd","Tb","Dy"].every(e=>ce(e,"3d").recipes[0]===e.toLowerCase()+"3d"&&ce(e,"4d").recipes[0]===e.toLowerCase()+"4d"&&/LCF/.test(ce(e,"4d").note||"")),"recipes attached: La 3d/4d, Y 3d, Ba 3d/4d, Pr/Nd/Gd/Tb/Dy 3d/4d (empirical, with the LCF note)");
+
+  // overlap rules: energies = library / sources; fire only with the partner present, inside the window, Auger only for Al Kα
+  const lv=(e,s)=>L.core[e].lv[s], ak=(e,ln)=>(L.auger.find(a=>a.el===e&&a.line===ln)||{}).ke;
+  const O=Object.fromEntries(G.OVERLAPS.map(r=>[r.id,r])); const eB=[];
+  [["BaCo","a","Ba","3d5/2"],["BaCo","b","Co","2p3/2"],["LaNi","a","La","3d3/2"],["LaNi","b","Ni","2p3/2"],["NdOKLL","a","Nd","3d5/2"],["PrCu","a","Pr","3d5/2"],["PrCu","b","Cu","2p3/2"],["FeBa","a","Ba","3d5/2"],["CoFe","a","Fe","2p3/2"],["NiMn","a","Mn","2p3/2"],["RuC","a","Ru","3d3/2"],["RuC","b","C","1s"],["BiS","a","Bi","4f5/2"],["BiS","b","S","2p3/2"],["SrP","a","Sr","3d5/2"],["SrP","b","P","2p3/2"]].forEach(([id,sd,e,s])=>{ if(Math.abs(O[id][sd].be-lv(e,s))>1e-9) eB.push(`${id} ${e} ${s} ${O[id][sd].be} vs ${lv(e,s)}`); });
+  [["NdOKLL",["KL1","KL2","KL3"],"O"],["FeBa",["LM2"],"Fe"],["CoFe",["LM2"],"Co"],["NiMn",["LM2"],"Ni"]].forEach(([id,lns,e])=>{ lns.forEach((ln,j)=>{ if(O[id].b.ke[j]!==ak(e,ln)) eB.push(`${id} ${e} ${ln} ${O[id].b.ke[j]} vs ${ak(e,ln)}`); }); });
+  if(O.LaMNN.b.ke.join()!==[num(su["La M45N45N45 (KE)"][0]),num(su["La M45N45N45 (KE)"][1])].join()) eB.push("LaMNN KE");
+  ok(!eB.length,`overlap table energies = library (Booklet BE 16 values, Avantage Auger KE 6) and Sunding Table 3 (La MNN KE)`,eB.join(" | "));
+  const f1=G.overlapFindings("Co","2p",["Ba","O"],{lo:775,hi:792}), f2=G.overlapFindings("Co","2p",["O"],{lo:775,hi:792}), f3=G.overlapFindings("Ba","3d",new Set(["Co","Fe"]),{lo:772,hi:801,hv:1486.6}), f4=G.overlapFindings("Ba","3d",["Co","Fe"],{lo:772,hi:801,hv:1253.6});
+  const f5=G.overlapFindings("La","3d",["Ni"],{lo:826,hi:872}), f6=G.overlapFindings("Nd","3d",["O"],{lo:968,hi:1016}), f7=G.overlapFindings("Co","2p",["Ba"],{lo:785,hi:800});
+  LT.ovl=[...f1,...f3,...f5,...f6].map(x=>x.label);
+  ok(f1.length===1&&f1[0].sev==="warn"&&/Ba 4d/.test(f1[0].tip)&&/joint|together/.test(f1[0].tip)&&!f2.length&&f3.map(x=>x.rule).sort().join()==="BaCo,FeBa"&&f4.map(x=>x.rule).join()==="BaCo"&&f5.map(x=>x.rule).sort().join()==="LaMNN,LaNi"&&f6.map(x=>x.rule).join()==="NdOKLL"&&!f7.length&&[...f1,...f3,...f5,...f6].every(x=>x.label.length<90),
+    "overlap rules: Co 2p + Ba present → warning (tooltip: Ba 4d or a joint model); none without Ba; Ba 3d + Co/Fe → Ba/Co + Fe Auger (Al Kα only); La 3d + Ni → La/Ni + La MNN; Nd 3d + O → O KLL; partner outside the window → none; labels < 90 characters",LT.ovl.join(" | "));
+  { const sp=spectrum([[778.5,30000,1.4]],{lo:772,hi:792,step:0.05}); const x=fitDiag(sp,{lo:772,hi:792,bg:{type:"shirley",n:5},comps:[comp(778.5,30000,1.4,"a")],cons:{}},{el:"Co",orb:"2p"});
+    const d1=G.diagnose({E:x.P.E,y:x.P.y,fin:x.fin,el:"Co",orb:"2p",bgType:"shirley",present:new Set(["Co","Ba"]),hv:1486.6}), d0=G.diagnose({E:x.P.E,y:x.P.y,fin:x.fin,el:"Co",orb:"2p",bgType:"shirley"});
+    ok(d1.some(f=>f.id==="overlap"&&f.sev==="warn")&&!d0.some(f=>f.id==="overlap"),"Fit check R10: the overlap finding appears only when the partner element is passed as present (survey / regions)",(d1.find(f=>f.id==="overlap")||{}).label); }
+  // naive La 3d fit → Fit check points to the recipe
+  { const S=synthR("la3d",{species:["LaOH3"],truth:{area:{LaOH3_m:43000,LaOH3_b:28500,aug:8000}}},61); const sg=C.suggestModel(S.E,S.y,{bg:{type:"smart",n:5},el:"La",orb:"3d",lib:L});
+    const P=C.makeProblem({be:S.E,y:S.y,c:1},{lo:S.E[0],hi:S.E[S.E.length-1],bg:{type:"smart",n:5},comps:sg.comps,cons:sg.cons}); const r=C.fitOnce(P,{}); const fin=C.finalize(P,r);
+    const d=G.diagnose({E:P.E,y:P.y,fin,el:"La",orb:"3d",bgType:"smart"}); const cx=d.find(x=>x.id==="complex");
+    ok(cx&&cx.act&&cx.act.recipe==="la3d"&&/Sunding/.test(cx.tip)&&/charge-transfer/.test(cx.tip),"naive La 3d fit → Fit check 'Apply recipe' (La 3d, Sunding)",cx&&cx.label); }
+}
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
 if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
-module.exports={FP,SYN,POS,TM};
+module.exports={FP,SYN,POS,TM,LT};

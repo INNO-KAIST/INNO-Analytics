@@ -4,6 +4,13 @@
 >
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
+## XPS v1.9.7 (2026-11-01) — Ba · Y · 란타넘족 레시피, 겹침 규칙
+- **자료**: test/ref/lit2 원문 전사만 — Sunding 2011(JESRP 184, 399; La 3d·4d 표 3–5, 제약 6 개) · Cole 2020(SSS 27; Y 3d 네 화학종) · Karslıoğlu 2018(JESRP 225; Ba 4d 표 1, Fermi 끝 기준) + Schmitz 2001(BaCO₃) · Haasch 2014(SSS 21; Pr·Nd·Gd·Tb·Dy 3d·4d 경험 성분). test_guide §9 가 137 값 대조.
+- **레시피**(SPEC §17.8): La 3d/4d(c4f⁰ + 결합·반결합 c4f¹L, 모두 doublet 2/3 · 짝 폭 같음 · ΔE 공유 16.8/3.2, 위성 간격 고정, 결합 = 반결합; 하나 → c4f¹L share, 둘/Fix ratio → 표 5 비 고정 + La(OH)₃ 분율; Plasmon · MNN Auger(Al Kα 864 eV) 선택) · Y 3d(넓이비 0.689, ΔE 1.9–2.2, 화학종 체크) · Ba 4d(ΔE 2.6, 상대 위치 묶음 + ±1 eV 정렬, 출발 −0.6 eV = 탄산염 C 1s 한 점 추정) · Ba 3d(Booklet ΔE 15.2 일반 doublet만) · Haasch 10 영역 '경험적 포락선(단결정, 넓이 자유)'(GL(30), 공통 위치 하나, FWHM× 선택, LCF 권고).
+- 표 없는 Sm · Eu²⁺/³⁺ · Ho · Er · Tm · Yb · Lu: 레시피 없음 — complexInfo/Fit check 가 기준 스펙트럼 LCF 안내(Eu 3d 혼합 원자가 = 다중항, PRB 51, 10146), Yb²⁺·Lu 4d 는 Auto suggest.
+- **Fit check R10 겹침**: Ba 3d/Co 2p(warn — Ba 4d 또는 한 모형; BCFZY) · La 3d3/2/Ni 2p3/2 · La MNN in La 3d · Nd 3d/O KLL · Pr 3d 위성/Cu 2p · Fe·Co·Ni L3VV Auger in Ba 3d · Fe 2p · Mn 2p · Ru 3d/C 1s · Bi 4f/S 2p · Sr 3d/P 2p. 같은 시료의 survey·영역에 상대 원소가 있고 창 안일 때 한 줄 + title, 성분 머리에도 'Overlap:' 한 줄. R4 합쳐짐은 같은 레시피의 문헌 화학종 위치끼리 판정 안 함.
+- 검증: 합성 c4f¹L 최대 |Δ| 0.23 %p, 분율 최대 |Δ| 0.97 %p(La·Y·Ba 4d), χ²ν 0.83–1.07, 한계 0, Δ/σ rms 1.09; Haasch 20 피팅 수렴·한계 0. 시험: guide 68 · xps 155 · casa 111 · casa_v3 117 · shapes2 77 · real_kara 44 · real_a2 23 · real_ce 9 · multi 50 · arxps 32 · proc 76 · image 23 · Chromium ui_xps_guide 17 · ui_xps · fixes 27 · casa 21 · shapes2 13 · multi 43 · fitlog_compare 24 532 피팅 비트 동일.
+
 ## XPS v1.9.6 (2026-10-31) — 전이금속 2p3/2 포락선 레시피 (Biesinger)
 - **레시피 6 종**(modules/xps/SPEC.md §17.7): Ni 2p3/2(Ni · NiO · Ni(OH)₂ · γ-NiOOH) · Co(Co · CoO · Co(OH)₂ · CoOOH · Co₃O₄) · Fe(Fe · FeO · Fe₂O₃ 평균 · FeOOH 평균 · Fe₃O₄ = Fe²⁺ 2 + Fe³⁺ 5, 1:2 선택) · Mn(Mn · MnO · Mn₂O₃ · MnOOH · MnO₂) · Cr(Cr · Cr₂O₃ · Cr(OH)₃ · Cr(VI)) · Cu(Cu(0) · Cu₂O · CuO · Cu(OH)₂). 숫자 = Biesinger 2011 표 1·3–6, 2017 표 4 원문 전사(test/ref/biesinger, 436 값 대조).
 - 방법: 화학종 = 포락선(간격·%·FWHM 고정), 자유 = 위치 하나(± 0.25 eV, Cu 0.2) + 넓이 하나, 선택 FWHM 배율 0.6–1.6×; PE 10/20 열 선택; 모양 Ni LA(1.1,2.2,10) · Fe LA(1.2,4.8,3) · Cu(0) GL(90) · Cu₂O GL(80) · 나머지 GL(30). 배경 = 피팅 안 Shirley(기울기 0) — 정적 Shirley 는 합성에서 최대 12.2 %p(Fe)·11.0 %p(Co) 틀림.

@@ -1,0 +1,53 @@
+# Haasch, Breckenfeld, Martin, Surf. Sci. Spectra 21 (2014) — single-crystal rare-earth scandates (110), Kratos Axis Ultra, mono Al Ka.
+# Tables copied from journal HTML 2026-11-01. BE referenced to C 1s = 285.0 eV. Background: Tougaard U4 (CasaXPS). Components are empirical envelopes (BE | FWHM); no component areas given.
+## 1. PrScO3(110), SSS 21, 131 (doi 10.1116/11.20140906)
+Pr 3d5/2|928.0|2.37
+Pr 3d5/2|932.8|4.70
+Pr 3d3/2|949.2|3.24
+Pr 3d3/2|953.5|3.56
+Pr 3d3/2|957.4|3.57
+Pr 4d5/2|109.6|1.00
+Pr 4d5/2|112.8|3.25
+Pr 4d5/2|116.4|3.66
+Pr 4d3/2|119.9|3.00
+Pr 4d3/2|122.6|2.63
+Pr 4p3/2|215.3|3.07
+Pr 4p3/2|218.8|4.11
+## 2. NdScO3(110), SSS 21, 140 (C 1s 285.0)  — note: Nd 3d overlaps the O KLL Auger with Al Ka
+Nd 3d5/2|977.8|3.92
+Nd 3d5/2|982.4|4.34
+Nd 3d3/2|1000.4|3.92
+Nd 3d3/2|1005.0|4.34
+Nd 4d|121.3|6.00
+Nd 4d|125.9|5.60
+Nd 4p3/2|226.7|4.28
+Nd 4p3/2|230.2|5.00
+## 3. GdScO3(110), SSS 21, 149 (C 1s 285.0)
+Gd 3d5/2|1186.9|5.34
+Gd 3d5/2|1196.6|3.67
+Gd 3d3/2|1219.0|5.76
+Gd 4d|142.0|3.99
+Gd 4d|147.2|3.99
+Gd 4p3/2|271.0|5.67
+Gd 4f7/2|7.8|1.24
+Gd 4f5/2|8.9|1.24
+## 4. TbScO3(110), SSS 21, 157 (C 1s 285.0)
+Tb 3d5/2|1243.6|7.58
+Tb 3d5/2|1247.1|4.15
+Tb 3d3/2|1281.1|6.09
+Tb 4d|145.7|2.03
+Tb 4d|148.4|3.48
+Tb 4d|151.3|3.80
+Tb 4d|155.0|3.38
+## 5. DyScO3(110), SSS 21, 165 (C 1s 285.0)
+Dy 3d5/2|1298.2|7.66
+Dy 3d3/2|1333.4|4.04
+Dy 3d3/2|1338.3|6.96
+Dy 4d|153.5|3.33
+Dy 4d|156.1|1.65
+Dy 4d|157.8|2.84
+Dy 4d|161.2|3.52
+Dy 4d|164.4|1.85
+Dy 4d|170.0|3.93
+Dy 4d|178.1|5.80
+Dy 4d|183.2|6.12

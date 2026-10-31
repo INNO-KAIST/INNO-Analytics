@@ -1,8 +1,8 @@
 /* ============================================================
-   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes): fit check (diagnosis), region recipes, staged fit
+   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes; v1.9.7 Ba · Y · lanthanide recipes, overlap rules): fit check (diagnosis), region recipes, staged fit
    DOM-free: browser main thread, Web Worker (load after xps_core.js) and node.
    Definitions, thresholds, citations and validation: modules/xps/SPEC.md §17 (if they disagree, fix SPEC first).
-   General rules only — nothing here is tuned to one data set; the Ce 3d recipe (SPEC §17.3) and the Biesinger envelopes (SPEC §17.7) are literature data.
+   General rules only — nothing here is tuned to one data set; the Ce 3d recipe (SPEC §17.3), the Biesinger envelopes (SPEC §17.7) and the Ba/Y/lanthanide recipes (SPEC §17.8) are literature data.
    ============================================================ */
 (function(root){
 "use strict";
@@ -37,12 +37,18 @@ const SEV_ORDER={bad:0,warn:1,info:2};
 const SAT_TM2P=["Cr","Mn","Fe","Co","Ni","Cu"], SAT_RE3D=["Ce","Pr","Nd"];
 function complexInfo(el,orb){
   const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).map(r=>r.id); const m=C.multipletInfo(el,orb);
-  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`,closed:m.closed||null,recipes:rc};
+  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — a plain doublet (Auto suggest)":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
   if(orb==="2p"&&SAT_TM2P.includes(el)) return {kind:"satellite",why:`${el} 2p: multiplet splitting and shake-up satellites of the open 3d shell (closed-shell states such as Cu⁺/Cu⁰ excepted) — one doublet per chemical state does not describe the envelope`,closed:el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null,recipes:rc};
-  if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc};
+  if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc,note:rc.length&&recipeById(rc[0]).kind==="emp"?RE_LCF:null};
+  if(el==="La"&&(orb==="3d"||orb==="4d")) return {kind:"satellite",why:`La ${orb}: charge-transfer (c4f¹L) satellites — a bonding and an antibonding satellite next to each c4f⁰ spin–orbit line (Sunding et al. 2011); their share differs between La(OH)₃ and La₂O₃`,closed:null,recipes:rc};
+  if(orb==="3d"&&RE3D_MORE.includes(el)) return {kind:"satellite",why:`${el} 3d: open-4f final-state multiplet and satellite structure — not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own 3d multiplet (mixed valence is a multiplet superposition, not shake-up — Phys. Rev. B 51, 10146 (1995))":el==="Yb"?" (Yb³⁺, 4f¹³; Yb²⁺ is 4f¹⁴)":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴)":null,recipes:rc,note:RE_NOTE(el,orb,rc)};
   if(rc.length) return {kind:"recipe",why:`${el} ${orb}: literature starting model available`,closed:null,recipes:rc};
   return null;
 }
+const RE3D_MORE=["Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb"];
+/* no tabulated parametric source (SPEC §17.8): Sm, Eu, Ho, Er, Tm, Yb → reference-spectrum LCF; Haasch envelopes (Pr, Nd, Gd, Tb, Dy) → also LCF for chemistry */
+function RE_NOTE(el,orb,rc){ if(rc.length) return RE_LCF;
+  return `No tabulated parametric source is built in for ${el} ${orb} (no recipe). `+RE_LCF+(el==="Eu"?" For Eu²⁺/Eu³⁺ use one reference per valence (e.g. EuO or EuS for Eu²⁺, Eu₂O₃ for Eu³⁺) — the valence ratio is the LCF weight ratio.":"")+(el==="Yb"?" Yb²⁺ (4f¹⁴) 4d — like Lu 4d — is a plain doublet: Auto suggest handles it.":""); }
 
 /* ------------------------------------------------------------
    2) Region recipes (SPEC §17.3) — data, not code. Positions are charge-corrected BE (C 1s C–C/C–H 284.8 eV).
@@ -143,9 +149,182 @@ const RECIPES_ENV=[
   cite:"M.C. Biesinger, Surf. Interface Anal. 49, 1325 (2017), Table 4 (PE 20 eV, Kratos; Cu(0) GL(90), Cu₂O GL(80)), Table 2 (modified Auger parameters), A1s/Bs ratios, Eq. 1–2",
   pitfalls:"Cu(0) and Cu₂O 2p3/2 lines are 0.45 eV apart (932.63 vs 932.18 eV) with no shake-up: their split from 2p3/2 alone is not reliable — use the modified Auger parameter α′ (Cu(0) 1851.24 vs Cu₂O 1849.17 eV; Table 2) and report Cu(0)+Cu(I). Cu(II) is reduced by X-rays and in UHV (acquire Cu 2p first and fast; watch the shake-up shrink over repeated scans). Differential charging shifts CuO/Cu(OH)₂ against Cu(0). Position tolerance ±0.2 eV (Biesinger 2017 for C 1s-referenced data) keeps Cu(0) and Cu₂O from swapping. Widths are PE 20 values only. Table 4 % give main/shake-up 1.73 (CuO) and 1.46 (Cu(OH)₂) vs the quoted A1s/Bs 1.89 and 1.57."})
 ];
+/* ------------------------------------------------------------
+   2c) v1.9.7 Ba · Y · lanthanide recipes (SPEC §17.8) — numbers copied from test/ref/lit2/*.txt (journal tables; test_guide §9 compares them).
+       kind "par": parametric spin–orbit pairs with literature links (La 3d/4d Sunding 2011, Y 3d Cole 2020, Ba 4d Karslıoğlu 2018, Ba 3d generic).
+       kind "emp": empirical envelope (Haasch 2014, single-crystal REScO₃): published BE/FWHM components, one common position, areas free.
+       Species lines: be = charge-corrected start (on C 1s 284.8 after 'c1s' or 'off'); sep:[key, Δ] = position linked to another line of the
+       species; aeq: area linked 1:1 (Sunding constraint 4). F/Flo/Fhi: start and free range (Sunding and Cole give no width limits — the
+       ranges are fit ranges, not literature values; Cole's FWHMs are the starts of Y).
+   ------------------------------------------------------------ */
+const PAR_BG={type:"active",n:5,c0:null,k:null,s:0,cons:{s:{mode:"free"}}};   // in-fit Shirley + slope (as the Ce 3d recipe)
+const LA_HOW="Sunding et al. (2011) model: per compound a c4f⁰ main line and two charge-transfer c4f¹L satellites (bonding, antibonding; equal areas), each a spin–orbit pair with the 3d (4d) area ratio 2/3 and equal FWHM in the pair; satellite separations fixed at the published values and the same for both spin–orbit components (pairs share ΔE); Voigt ≈ GL sum with one shared Lorentzian fraction. One compound: main and satellite areas free → 'c4f¹L share' (compare Table 5). Two compounds (or 'Fix ratio'): main:satellite ratio fixed at Table 5 and the compounds held at their published relative position → La(OH)₃ fraction. 'Plasmon' (one compound): one plasmon pair at the published separation from the main line, area and width free (constraints 5–6 read as one plasmon per orbital).";
+const RE_LCF="Measured reference spectra (Store as reference → LCF, SPEC §12) carry the multiplet and satellite structure; a component fit of this region is an envelope description, not a chemical-state analysis.";
+const RECIPES_PAR=[
+ {kind:"par", ct:true, id:"la3d", el:"La", orb:"3d", name:"La 3d (Sunding 2011)", window:[826,872], bg:PAR_BG, shape:"GLS", m:{v:0.3,lo:0,hi:1},
+  dE:{v:16.8,lo:16.6,hi:17.0}, r:2/3, beTol:0.6, align:3, relShift:true,
+  flags:[{id:"fixR",label:"Fix ratio",def:false,tip:"Fix the c4f⁰ : c4f¹L area ratio at Sunding Table 5 (La(OH)₃ 43:57, La₂O₃ 10:90, ±5 %). Always on when both compounds are ticked (otherwise the two compounds cannot be told apart)."},
+         {id:"plasmon",label:"Plasmon",def:false,tip:"One plasmon pair per orbital at the published separation from the c4f⁰ line (La(OH)₃ 12.3, La₂O₃ 12.5 eV; Sunding Table 4), area and width free; 2/3 area ratio and shared ΔE as all pairs. One compound only. Under Al Kα its 3d3/2 half (≈ 864 eV) coincides with the La MNN Auger."},
+         {id:"auger",label:"MNN Auger",def:true,al:true,tip:"La M45N45N45 Auger as one free line at BE = hν − KE (KE 622.4 La(OH)₃ / 623.1 La₂O₃ eV, Sunding Table 3 → ≈ 864 eV under Al Kα, inside the 3d3/2 satellite region); position ± 1 eV, width free. Only added for Al Kα (other sources move it: the Auger KE does not depend on hν)."}],
+  species:[
+   {key:"LaOH3", label:"La(OH)₃", short:"La(OH)₃", def:true, ratio:[43,57], pl:12.3, ke:622.4, lines:[
+     {key:"m", name:"c4f⁰", be:835.1, F:1.6, Flo:0.6, Fhi:4.5},
+     {key:"b", name:"c4f¹L b", sep:["m",3.9], F:2.0, Flo:0.6, Fhi:4.5, role:"sat"},
+     {key:"a", name:"c4f¹L ab", sep:["b",2.0], aeq:"b", F:2.0, Flo:0.6, Fhi:4.5, role:"sat"}]},
+   {key:"La2O3", label:"La₂O₃", short:"La₂O₃", def:false, ratio:[10,90], pl:12.5, ke:623.1, lines:[
+     {key:"m", name:"c4f⁰", be:834.9, F:1.6, Flo:0.6, Fhi:4.5},
+     {key:"b", name:"c4f¹L b", sep:["m",4.9], F:2.0, Flo:0.6, Fhi:4.5, role:"sat"},
+     {key:"a", name:"c4f¹L ab", sep:["b",3.7], aeq:"b", F:2.0, Flo:0.6, Fhi:4.5, role:"sat"}]}],
+  how:LA_HOW,
+  cite:"A. Sunding, K. Hadidi, S. Diplas, O.M. Løvvik, T.E. Norby, A.E. Gunnæs, J. Electron Spectrosc. Relat. Phenom. 184, 399–409 (2011), Sect. 2.4.2 (method, six constraints), Tables 3–5",
+  pitfalls:"Positions are Sunding's (charge reference tailored to Au, ±0.2 eV), not C 1s 284.8 — the lines are aligned to the data within ±3 eV; ΔE = 851.9 − 835.1 = 16.8 eV (Table 3), free 16.6–17.0. La M45N45N45 Auger: BE ≈ 1486.6 − 622.4 ≈ 864 eV under Al Kα, inside the 3d3/2 satellite region — Sunding measured it (Table 3) and treat the overlap; here 'MNN Auger' adds one free line for it (or use Mg Kα). La 3d3/2 (≈ 852 eV) overlaps Ni 2p3/2 (852.7 eV; LaNiO₃) — Fit check warns when Ni is present. La₂O₃ takes up water and CO₂ in air (La(OH)₃, carbonate): a pure-oxide ratio (10:90) is rarely met on air-exposed samples. Table 5 ratios are ±5 % and depend on Sunding's background and line shapes; the c4f¹L share is the observable to compare. FWHM ranges are fit ranges (the transcribed tables give no widths)."},
+ {kind:"par", ct:true, id:"la4d", el:"La", orb:"4d", name:"La 4d (Sunding 2011)", window:[96,117], bg:PAR_BG, shape:"GLS", m:{v:0.3,lo:0,hi:1},
+  dE:{v:3.2,lo:3.0,hi:3.4}, r:2/3, beTol:0.6, align:3, relShift:true,
+  flags:[{id:"fixR",label:"Fix ratio",def:false,tip:"Fix the c4f⁰ : c4f¹L area ratio at Sunding Table 5 (La 4d: La(OH)₃ 71:29, La₂O₃ 42:58, ±5 %). Always on when both compounds are ticked."},
+         {id:"plasmon",label:"Plasmon",def:false,win:[96,129],tip:"One plasmon pair at the published separation from the c4f⁰ line (12.3 / 12.5 eV, Sunding Table 4), area and width free; the window is extended to 129 eV. One compound only."}],
+  species:[
+   {key:"LaOH3", label:"La(OH)₃", short:"La(OH)₃", def:true, ratio:[71,29], pl:12.3, lines:[
+     {key:"m", name:"c4f⁰", be:102.8, F:1.4, Flo:0.5, Fhi:4.0},
+     {key:"b", name:"c4f¹L b", sep:["m",3.5], F:1.8, Flo:0.5, Fhi:4.0, role:"sat"},
+     {key:"a", name:"c4f¹L ab", sep:["b",1.6], aeq:"b", F:1.8, Flo:0.5, Fhi:4.0, role:"sat"}]},
+   {key:"La2O3", label:"La₂O₃", short:"La₂O₃", def:false, ratio:[42,58], pl:12.5, lines:[
+     {key:"m", name:"c4f⁰", be:102.6, F:1.4, Flo:0.5, Fhi:4.0},
+     {key:"b", name:"c4f¹L b", sep:["m",4.1], F:1.8, Flo:0.5, Fhi:4.0, role:"sat"},
+     {key:"a", name:"c4f¹L ab", sep:["b",2.6], aeq:"b", F:1.8, Flo:0.5, Fhi:4.0, role:"sat"}]}],
+  how:LA_HOW,
+  cite:"A. Sunding et al., J. Electron Spectrosc. Relat. Phenom. 184, 399–409 (2011), Sect. 2.4.2, Tables 3–5",
+  pitfalls:"ΔE = 106.0 − 102.8 = 3.2 eV (Table 3), free 3.0–3.4; the 4d5/2 bonding satellite (+3.5 / +4.1 eV) falls on the 4d3/2 main line, so single-line areas are strongly correlated — report the c4f¹L share or the compound fraction. Positions are Sunding's (Au reference), aligned to the data within ±3 eV. FWHM ranges are fit ranges (no widths in the transcribed tables)."},
+ {kind:"par", id:"y3d", el:"Y", orb:"3d", name:"Y 3d (Cole 2020)", window:[151,166], bg:PAR_BG, shape:"GLS", m:{v:0.3,lo:0,hi:1},
+  dE:{v:2.0,lo:1.9,hi:2.2}, r:0.689, beTol:0.3, align:0, c1s:284.8,
+  species:[
+   {key:"Y0", label:"Y metal", short:"Y", def:true, lines:[{key:"m", name:"3d", be:156.4, F:0.86, Flo:0.52, Fhi:1.38}]},
+   {key:"Y2O3", label:"Y₂O₃", short:"Y₂O₃", def:true, lines:[{key:"m", name:"3d", be:157.5, F:2.38, Flo:1.43, Fhi:3.81}]},
+   {key:"YOH3", label:"Y(OH)₃", short:"Y(OH)₃", def:false, lines:[{key:"m", name:"3d", be:157.9, F:1.52, Flo:0.91, Fhi:2.43}]},
+   {key:"YCl3", label:"YCl₃", short:"YCl₃", def:false, lines:[{key:"m", name:"3d", be:158.8, F:2.30, Flo:1.38, Fhi:3.68}]}],
+  sums:[{id:"Y3",label:"Y³⁺",keys:["Y2O3","YOH3","YCl3"],tip:"Y³⁺ = Y₂O₃ + Y(OH)₃ + YCl₃ (sum of the fitted Y³⁺ species). Better determined than the split: Y₂O₃ and Y(OH)₃ are only 0.4 eV apart (Cole 2020)."}],
+  how:"One spin–orbit pair per species (Cole, Kirk, Thorpe 2020): area ratio 3d3/2 : 3d5/2 = 0.689 (their areas, = Avantage SF ratio 2.742/3.978), shared ΔE (2.0–2.1 eV in their tables; free 1.9–2.2), equal FWHM in the pair; start BE and FWHM = their values (C 1s 284.8 eV, as here), position ± 0.3 eV, FWHM 0.6–1.6 × theirs; one shared Lorentzian fraction.",
+  cite:"S.L. Cole, K.A. Kirk, R.E. Thorpe, Surf. Sci. Spectra 27, 024010 (2020), doi:10.1116/6.0000475 (Y metal, Y₂O₃); 024007 (2020), doi:10.1116/6.0000317 (Y(OH)₃, YCl₃)",
+  pitfalls:"Y₂O₃ (157.5) and Y(OH)₃ (157.9 eV) are 0.4 eV apart with different widths only — their split is weakly determined (check σ; report Y³⁺ = their sum). Y metal is fitted symmetric here (no asymmetric shape in the transcribed data). The ΔE (2.0–2.1 eV) is unresolved at their oxide widths (2.4 eV): keep it inside its range. Positions are for C 1s = 284.8 eV (K-Alpha, Avantage) and are not aligned — a charge-correction error shows as a position at its limit (Fit check)."},
+ {kind:"par", id:"ba4d", el:"Ba", orb:"4d", name:"Ba 4d (Karslıoğlu 2018)", window:[84,96.5], bg:PAR_BG, shape:"GLS", m:{v:0.3,lo:0,hi:1},
+  dE:{v:2.6,lo:2.5,hi:2.7}, r:2/3, beTol:0.3, align:1.0, off:-0.6, relShift:true,
+  species:[
+   {key:"BaO", label:"BaO", short:"BaO", def:true, lines:[{key:"m", name:"4d", be:88.8, F:1.6, Flo:0.96, Fhi:2.56}]},
+   {key:"BaOH2", label:"Ba(OH)₂", short:"Ba(OH)₂", def:false, lines:[{key:"m", name:"4d", be:90.0, F:1.3, Flo:0.78, Fhi:2.08}]},
+   {key:"BaCO3", label:"BaCO₃", short:"BaCO₃", def:true, lines:[{key:"m", name:"4d", be:90.1, F:1.7, Flo:1.02, Fhi:2.72}]},
+   {key:"BaNO32", label:"Ba(NO₃)₂", short:"Ba(NO₃)₂", def:false, lines:[{key:"m", name:"4d", be:91.0, F:1.4, Flo:0.84, Fhi:2.24}]}],
+  sums:[{id:"BaOHCO",label:"Ba(OH)₂+BaCO₃",keys:["BaOH2","BaCO3"],tip:"Ba(OH)₂ + BaCO₃: their Ba 4d lines are 0.1 eV apart (90.0 / 90.1 eV, Karslıoğlu Table 1) — only the sum is determined; use C 1s (carbonate 289.9 eV) and O 1s (530.8 vs 531.7 eV, same scale) to tell them apart."}],
+  how:"One spin–orbit pair per species, ΔE 2.6 eV (all four compounds; free 2.5–2.7), 4d area ratio 2/3, equal FWHM in the pair. Karslıoğlu's BEs are referenced to the Pt Fermi edge, so only their relative shifts are used: the species are held at the published separations (BaO → Ba(OH)₂ +1.2, BaCO₃ +1.3, Ba(NO₃)₂ +2.2 eV) and the whole set is aligned to the data (±1 eV), then one position is free (± 0.3 eV). Start on the C 1s scale = their BE − 0.6 eV (their BaCO₃ carbonate C 1s 289.9 eV vs Schmitz 2001 BaCO₃ 289.1 eV at adventitious 284.6 eV, i.e. 289.3 eV at 284.8) — a one-point estimate; the alignment decides. FWHM start = theirs, free 0.6–1.6 ×.",
+  cite:"O. Karslıoğlu, L. Trotochaud, I. Zegkinoglou, H. Bluhm, J. Electron Spectrosc. Relat. Phenom. 225 (2018), doi:10.1016/j.elspec.2018.03.008, Table 1; P.J. Schmitz, Surf. Sci. Spectra 8, 190 (2001) (BaCO₃ C 1s, scale estimate)",
+  pitfalls:"BEs are Fermi-edge referenced (in-situ films on Pt, AP-XPS) — absolute values differ from C 1s-referenced data; the alignment (±1 eV) cannot tell a global offset from a change of species (BaO → Ba(OH)₂ is +1.2 eV), so confirm with O 1s (BaO 527.8, Ba(OH)₂ 530.8, BaCO₃ 531.7, Ba(NO₃)₂ 533.6 eV) and C 1s/N 1s on the same scale. Ba(OH)₂ and BaCO₃ are 0.1 eV apart (sum only). Loss features (BaO ≈ 3.2 eV wide, Ba(OH)₂ ≈ 6 eV wide; positions not given) are not modelled. Ba 4d is the Ba line to use when Co is present (Ba 3d5/2 overlaps Co 2p3/2)."},
+ {kind:"par", id:"ba3d", el:"Ba", orb:"3d", name:"Ba 3d (generic doublet)", window:[772,801], bg:PAR_BG, shape:"GLS", m:{v:0.3,lo:0,hi:1},
+  dE:{v:15.2,lo:15.2,hi:15.2,fix:true}, r:2/3, beTol:0.6, align:3, c1s:284.6,
+  species:[{key:"Ba", label:"Ba 3d", short:"Ba", def:true, lines:[{key:"m", name:"3d", be:779.4, F:1.56, Flo:0.8, Fhi:3.5}]}],
+  sums:[],
+  how:"One generic spin–orbit pair: ΔE fixed at the X-ray Data Booklet value 795.7 − 780.5 = 15.2 eV, area ratio 2/3, equal FWHM; start = Schmitz 2001 BaCO₃ Ba 3d5/2 779.4 eV (FWHM 1.56) at C 1s 284.6 → 779.6 eV at 284.8, aligned to the data within ±3 eV. Surface / lattice Ba components are not built in (no tabulated source).",
+  cite:"X-ray Data Booklet (Ba 3d5/2 780.5, 3d3/2 795.7 eV; library BE table); P.J. Schmitz, Surf. Sci. Spectra 8, 190 (2001) (BaCO₃ Ba 3d5/2 779.4 eV, FWHM 1.56)",
+  pitfalls:"Ba 3d5/2 (≈ 780 eV) lies on Co 2p3/2 (778.1 eV) and Ba 3d3/2 (795.7) on Co 2p1/2 (793.2 eV): in Ba–Co oxides (e.g. BaCo₀.₄Fe₀.₄Zr₀.₁Y₀.₁O₃, BCFZY) a Ba 3d fit takes up Co intensity and vice versa — use Ba 4d (recipe) for Ba, or fit Co 2p and Ba 3d in one model. The Fe L3VV Auger (≈ 784 eV under Al Kα, library KE 703 eV) also falls here when Fe is present. Two Ba 3d components (surface/lattice) are reported for perovskites, but no tabulated parameters are built in — add a line only if the residual (Fit check) asks for it."}
+];
+/* Haasch et al. (2014) empirical envelopes — rows [BE, FWHM] as printed (C 1s 285.0 eV) */
+const HAASCH={
+  pr3d:{el:"Pr",orb:"3d",doi:"10.1116/11.20140906",pg:131,rows:[[928.0,2.37],[932.8,4.70],[949.2,3.24],[953.5,3.56],[957.4,3.57]]},
+  pr4d:{el:"Pr",orb:"4d",doi:"10.1116/11.20140906",pg:131,rows:[[109.6,1.00],[112.8,3.25],[116.4,3.66],[119.9,3.00],[122.6,2.63]]},
+  nd3d:{el:"Nd",orb:"3d",pg:140,rows:[[977.8,3.92],[982.4,4.34],[1000.4,3.92],[1005.0,4.34]]},
+  nd4d:{el:"Nd",orb:"4d",pg:140,rows:[[121.3,6.00],[125.9,5.60]]},
+  gd3d:{el:"Gd",orb:"3d",pg:149,rows:[[1186.9,5.34],[1196.6,3.67],[1219.0,5.76]]},
+  gd4d:{el:"Gd",orb:"4d",pg:149,rows:[[142.0,3.99],[147.2,3.99]]},
+  tb3d:{el:"Tb",orb:"3d",pg:157,rows:[[1243.6,7.58],[1247.1,4.15],[1281.1,6.09]]},
+  tb4d:{el:"Tb",orb:"4d",pg:157,rows:[[145.7,2.03],[148.4,3.48],[151.3,3.80],[155.0,3.38]]},
+  dy3d:{el:"Dy",orb:"3d",pg:165,rows:[[1298.2,7.66],[1333.4,4.04],[1338.3,6.96]]},
+  dy4d:{el:"Dy",orb:"4d",pg:165,rows:[[153.5,3.33],[156.1,1.65],[157.8,2.84],[161.2,3.52],[164.4,1.85],[170.0,3.93],[178.1,5.80],[183.2,6.12]]}};
+const HAASCH_CMP={Pr:"PrScO₃",Nd:"NdScO₃",Gd:"GdScO₃",Tb:"TbScO₃",Dy:"DyScO₃"};
+Object.keys(HAASCH).forEach(id=>{ const h=HAASCH[id]; const lo=Math.floor(Math.min(...h.rows.map(r=>r[0]-2.5*r[1]))), hi=Math.ceil(Math.max(...h.rows.map(r=>r[0]+2.5*r[1])));   // window = components ± 2.5 FWHM
+  const cmp=HAASCH_CMP[h.el];
+  RECIPES_PAR.push({kind:"emp", id, el:h.el, orb:h.orb, name:`${h.el} ${h.orb} (Haasch 2014, empirical)`, window:[lo,hi], bg:PAR_BG, casa:"GL(30)", dE:null, beTol:0.3, align:3, c1s:285.0, relShift:true, wScale:[0.6,1.6],
+    flags:[{id:"wscale",label:"FWHM×",def:false,tip:"One common FWHM scale (0.6–1.6×) for all components — Haasch's widths are for a Kratos Axis Ultra on single crystals; off: widths fixed at their values."}],
+    species:[{key:"env", label:`${cmp} envelope`, short:cmp, def:true, lines:h.rows.map((r,j)=>({key:"c"+(j+1), name:`${h.orb} c${j+1}`, be:r[0], F:r[1], Ffix:true}))}], sums:[],
+    how:`Empirical envelope (single crystal ${cmp}(110), areas free): Haasch's ${h.rows.length} components with their BE and FWHM (CasaXPS, Tougaard background; shape not given — GL(30), the CasaXPS default, is used), held at the published spacings; the set is aligned to the data (±3 eV, positions converted from C 1s 285.0 to 284.8 eV), then one common position (± 0.3 eV) and every component area are free. The components are a description of the envelope of one compound, not chemical states — for chemical-state or valence analysis use reference-spectrum LCF.`,
+    cite:`R.T. Haasch, E. Breckenfeld, L.W. Martin, Surf. Sci. Spectra 21, ${h.pg} (2014)${h.doi?", doi:"+h.doi:""} (${cmp}(110), Kratos Axis Ultra, mono Al Kα, C 1s 285.0 eV)`,
+    pitfalls:`Empirical envelope (single crystal, areas free): no component areas were published, so no area ratio or doublet constraint is imposed and the areas carry no chemical meaning — use the summed area for quantification and measured reference spectra (Store as reference → LCF) for chemical states. Haasch used a Tougaard background; here the in-fit Shirley + slope is the default (change it in the background row if the window ends are not on background).`+(h.el==="Nd"&&h.orb==="3d"?" Nd 3d overlaps the O KLL Auger under Al Kα (O KLL KE ≈ 511 / 492 / 477 eV → BE ≈ 976 / 995 / 1010 eV): with oxygen present part of this envelope is O Auger intensity — use Nd 4d, or Mg Kα.":"")+(h.el==="Pr"&&h.orb==="3d"?" The Pr 3d5/2 satellite (932.8 eV) coincides with Cu 2p3/2 (932.7 eV).":"")}); });
 /* spin–orbit Δ per oxidation state (Bêche et al. 2008: ≈18.6 eV for Ce⁴⁺/CeO₂, ≈18.2 eV for Ce³⁺/CePO₄) */
 function dEof(R,state){ return (R.dEs&&R.dEs[state])||R.dE; }
 RECIPES_ENV.forEach(R=>{ R.options=[]; R.derived=[]; RECIPES.push(R); });
+RECIPES_PAR.forEach(R=>{ R.options=[]; R.derived=[]; R.flags=R.flags||[]; RECIPES.push(R); });
+/* ---- parametric / empirical recipes: species lines → absolute (charge-corrected, C 1s 284.8 eV) positions and links ---- */
+function parDefaults(R){ return R.species.filter(s=>s.def).map(s=>s.key); }
+function parFlags(R,o){ const f={}; (R.flags||[]).forEach(q=>{ f[q.id]=o&&o.flags&&o.flags[q.id]!=null?!!o.flags[q.id]:!!q.def; }); return f; }
+const isAl=hv=>hv==null||Math.abs(hv-1486.6)<2;
+function parLines(R,keys,fl,hv){
+  const off=R.c1s!=null?+(284.8-R.c1s).toFixed(4):(R.off||0), multi=keys.length>1, out=[];
+  keys.forEach(k=>{ const s=R.species.find(x=>x.key===k); if(!s) return; const be={};
+    s.lines.forEach(l=>{ const b=l.sep?be[l.sep[0]]+l.sep[1]:l.be+off; be[l.key]=b;
+      out.push({sp:k,key:k+"_"+l.key,lk:l.key,name:(R.species.length>1?(s.short||s.label)+" ":"")+l.name,be:+b.toFixed(4),F:l.F,Flo:l.Flo,Fhi:l.Fhi,Ffix:!!l.Ffix,dbl:!!R.dE,
+        sep:l.sep?k+"_"+l.sep[0]:null,sepB:l.sep?l.sep[1]:0,aRef:l.aeq?k+"_"+l.aeq:null,aK:1,role:l.role||"main"}); });
+    if(R.ct){ if((fl.fixR||multi)&&s.ratio){ const lb=out.find(x=>x.key===k+"_b"); lb.aRef=k+"_m"; lb.aK=(s.ratio[1]/2)/s.ratio[0]; }
+      if(fl.plasmon&&!multi&&s.pl) out.push({sp:k,key:k+"_pl",lk:"pl",name:"plasmon",be:+(be.m+s.pl).toFixed(4),F:3,Flo:1,Fhi:8,Ffix:false,dbl:true,sep:k+"_m",sepB:s.pl,aRef:null,aK:1,role:"pl",rx:true}); } });
+  if(R.ct&&fl.auger&&R.flags.some(q=>q.id==="auger")&&isAl(hv)){ const s=R.species.find(x=>x.key===keys[0]); const h=hv||1486.6;
+    if(s&&s.ke) out.push({sp:keys[0],key:"aug",lk:"aug",name:R.el+" MNN",be:+(h-s.ke).toFixed(4),F:4,Flo:1.5,Fhi:10,Ffix:false,dbl:false,sep:null,sepB:0,aRef:null,aK:1,role:"aug",rx:true,beTol:1.0}); }
+  return out; }
+/* Model (SPEC §17.8). o = {shift, be, y, species:[keys], flags:{id:bool}, hv, align (false: no search)} */
+function parModel(R,o){
+  const C=CORE(); const sh=o.shift||0; let keys=(o.species||[]).filter(k=>R.species.some(s=>s.key===k)); if(!keys.length) keys=parDefaults(R);
+  const fl=parFlags(R,o); const lines=parLines(R,keys,fl,o.hv);
+  const win=(fl.plasmon&&keys.length===1&&(R.flags.find(q=>q.id==="plasmon")||{}).win)||R.window;
+  let lo=win[0]-sh, hi=win[1]-sh; const clipped=[];
+  if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
+  const tag=Math.random().toString(36).slice(2,6);
+  const mk=ds=>lines.map(l=>{ const id="r"+R.id+"_"+l.key+"_"+tag; let c;
+    if(R.casa){ c=C.casaToComp(R.casa,{be:l.be-sh+ds,fwhm:l.F,area:1,id}).comp; } else c=C.newComp(R.shape,l.be-sh+ds,{F:l.F,m:R.m.v,el:R.el,line:R.orb,id});
+    c.name=l.name; c.el=R.el; c.line=R.orb; if(l.dbl) c.doublet={dE:R.dE.v,r:R.r,q:1};
+    c.recipe=R.id; c.rk=l.key; c.rsp=l.sp; c.rrole=l.role; if(l.rx) c.rx=1; c.area=1; return c; });
+  const rootOf=l=>{ let x=l, k=1, g=0; while(x.aRef&&g++<10){ k*=x.aK; x=lines.find(q=>q.key===x.aRef); } return {key:x.key,k}; };
+  let ds=0, score=null, areas=lines.map(l=>rootOf(l).k);
+  if(o.be&&o.y){ const reg=C.sliceRegion(o.be,o.y,lo,hi); if(reg&&reg.E.length>=8){
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), n=E.length, ctx={emin:E[0],emax:E[n-1]};
+    const B=C.bgStatic(E,y,{type:"smart",n:5}); const z=Float64Array.from(y,(v,i)=>v-B[i]);
+    const ys=C.smoothQ(E,y,C.smoothHW(E)); const w=Float64Array.from(ys,v=>1/Math.sqrt(Math.max(v,1e-9)));
+    // columns follow the area links (a linked line adds to its root's column), as the fit sees them
+    const roots=[...new Set(lines.map(l=>rootOf(l).key))];
+    const trial=d=>{ const cs=mk(d); const cols=roots.map(()=>new Float64Array(n));
+      cs.forEach((c,i)=>{ const rt=rootOf(lines[i]); const col=cols[roots.indexOf(rt.key)]; const u=C.compEval(c,E,ctx); for(let j=0;j<n;j++) col[j]+=rt.k*u[j]*w[j]; });
+      const rhs=Float64Array.from(z,(v,i)=>v*w[i]); const a=C.nnls(cols,rhs); let ss=0; for(let i=0;i<n;i++){ let m=0; for(let j=0;j<cols.length;j++) m+=a[j]*cols[j][i]; const r=rhs[i]-m; ss+=r*r; } return {ss,a}; };
+    let best=null; const st=0.05, K=o.align===false?0:Math.round((R.align||0)/st);
+    for(let k=-K;k<=K;k++){ const d=k*st, t=trial(d); if(!best||t.ss<best.ss-1e-12*Math.abs(t.ss)) best={d,ss:t.ss,a:t.a}; }
+    ds=best.d; score=best.ss; const amax=Math.max(...best.a,0)||1;
+    areas=lines.map(l=>{ const rt=rootOf(l); return rt.k*Math.max(best.a[roots.indexOf(rt.key)],0.02*amax,1e-6); }); } }
+  const comps=mk(ds); comps.forEach((c,i)=>{ c.area=areas[i]; });
+  const byKey={}; lines.forEach((l,i)=>byKey[l.key]=comps[i]);
+  const cons={}; comps.forEach(c=>{ cons[c.id]={}; });
+  if(R.casa) comps.forEach(c=>{ C.paramNames(c).forEach(k=>{ if(k!=="be"&&k!=="area"&&!C.derivedParam(c,k)) cons[c.id][k]={mode:"fixed"}; }); });
+  // positions: sep → linked; position roots (no sep) free ± tolerance, or (relShift/emp) linked to the largest root at the published separation
+  const rootsP=lines.map((l,i)=>i).filter(i=>!lines[i].sep), grpA=i=>comps.reduce((s,c,j)=>{ let x=lines[j]; let g=0; while(x.sep&&g++<10) x=lines.find(q=>q.key===x.sep); return x===lines[i]?s+c.area:s; },0);
+  const rigid=rootsP.filter(i=>lines[i].role!=="aug"); const ancP=R.relShift&&rigid.length>1?rigid.reduce((a,i)=>a==null||grpA(i)>grpA(a)?i:a,null):null;
+  lines.forEach((l,i)=>{ const c=comps[i], q=cons[c.id];
+    if(l.sep){ q.be={mode:"link",ref:byKey[l.sep].id,k:1,b:+(c.be-byKey[l.sep].be).toFixed(4)}; return; }
+    if(ancP!=null&&i!==ancP&&rigid.includes(i)){ q.be={mode:"link",ref:comps[ancP].id,k:1,b:+(c.be-comps[ancP].be).toFixed(4)}; return; }
+    const tol=l.beTol||R.beTol; q.be={mode:"free",lo:+(c.be-tol).toFixed(4),hi:+(c.be+tol).toFixed(4)}; });
+  // areas
+  lines.forEach((l,i)=>{ const c=comps[i], q=cons[c.id]; if(l.aRef){ q.area={mode:"link",ref:byKey[l.aRef].id,k:+l.aK.toFixed(10),b:0}; c.aref=byKey[l.aRef].id; c.amul=l.aK; } else { q.area={mode:"free"}; c.afloor=0.02; } });
+  // widths
+  const wscale=!!(fl.wscale&&R.wScale);
+  if(wscale){ const anc=comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); cons[anc.id].F={mode:"free",lo:+(anc.F*R.wScale[0]).toFixed(5),hi:+(anc.F*R.wScale[1]).toFixed(5)};
+    comps.forEach(c=>{ if(c!==anc) cons[c.id].F={mode:"link",ref:anc.id,k:+(c.F/anc.F).toFixed(8),b:0}; }); }
+  else lines.forEach((l,i)=>{ const c=comps[i]; cons[c.id].F=l.Ffix?{mode:"fixed"}:{mode:"free",lo:l.Flo,hi:l.Fhi}; });
+  // doublets: shared ΔE (largest pair free in its range, or fixed), r and q fixed; GLS: one shared m
+  const dbl=comps.filter(c=>c.doublet); if(dbl.length){ const a=dbl.reduce((x,c)=>!x||c.area>x.area?c:x,null);
+    dbl.forEach(c=>{ const q=cons[c.id]; q.r={mode:"fixed"}; q.q={mode:"fixed"}; q.dE=R.dE.fix?{mode:"fixed"}:c===a?{mode:"free",lo:R.dE.lo,hi:R.dE.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
+  if(!R.casa&&R.shape==="GLS"){ const a=comps.reduce((x,c)=>!x||c.area>x.area?c:x,null); comps.forEach(c=>{ cons[c.id].m=c===a?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
+  const lab=R.species.filter(s=>keys.includes(s.key)).map(s=>s.short||s.label).join(" + ")+(R.ct&&(fl.fixR||keys.length>1)?" · ratio fixed":"")+(lines.some(l=>l.role==="pl")?" · plasmon":"")+(lines.some(l=>l.role==="aug")?" · Auger":"")+(wscale?" · FWHM×":"");
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"par",kind:R.kind,species:keys,flags:fl,label:lab,align:ds,score,clipped,name:R.name}};
+}
+/* Derived outputs of parametric recipes (SPEC §17.8) → [{id,label,w(c),tip}]; plasmon and Auger lines (c.rx) are outside the total */
+function parDerived(R,cs){
+  const out=[]; const sp=[...new Set(cs.map(c=>c.rsp))];
+  if(R.ct&&sp.length===1){ const s=R.species.find(x=>x.key===sp[0]); const t=s&&s.ratio?s.ratio[1]:null;
+    out.push({id:"ct",label:"c4f¹L",w:c=>c.rrole==="sat"?1:0,tip:`c4f¹L share = (bonding + antibonding satellite areas) / (main + satellites) of ${R.el} ${R.orb}, plasmon and Auger lines excluded. Sunding Table 5: ${R.species.map(x=>x.label+" "+x.ratio[1]+" %").join(", ")} (±5 %; their background and shapes)${t!=null?"":""} — a higher share points to the oxide, a lower one to the hydroxide. ± = covariance σ (statistics only).`}); }
+  if(sp.length>1) R.species.forEach(s=>{ if(!sp.includes(s.key)) return; out.push({id:"sp_"+s.key,label:s.short||s.label,w:c=>c.rsp===s.key?1:0,
+    tip:`${s.label} fraction = its area / all ${R.el} ${R.orb} lines of the recipe`+(R.ct?" (main + satellites; ratios fixed at Sunding Table 5)":"")+(R.kind==="emp"?"":"")+". ± = covariance σ (delta method, statistics only; the literature separations and ratios are held fixed, so model error is not included)."}); });
+  (R.sums||[]).forEach(d=>{ const inS=c=>d.keys.includes(c.rsp); if(new Set(cs.filter(inS).map(c=>c.rsp)).size<2||cs.every(inS)) return; out.push({id:d.id,label:d.label,tip:d.tip,w:c=>inS(c)?1:0}); });
+  return out; }
 /* ---- envelope recipes: data → sets with absolute (charge-corrected) peak positions ---- */
 function envF(F10,F20,pe){ const a=pe<=15?F10:F20, b=pe<=15?F20:F10; return a!=null?{F:a,pe:pe<=15?10:20}:{F:b,pe:pe<=15?20:10}; }
 function envSpecies(R,s){ return s.sets?s.sets:[{key:s.key,label:s.label,peaks:s.peaks}]; }
@@ -212,6 +391,7 @@ function recipeById(id){ return RECIPES.find(r=>r.id===id)||null; }
 function recipeModel(id,o){
   const C=CORE(); const R=recipeById(id); if(!R) throw new Error("unknown recipe "+id);
   if(R.kind==="env") return envModel(R,o||{});
+  if(R.kind==="par"||R.kind==="emp") return parModel(R,o||{});
   o=o||{}; const sh=o.shift||0; const op=R.options.find(x=>x.id===o.opt)||R.options[R.options.length-1];
   const lines=R.lines.filter(l=>op.keys.includes(l.key));
   let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
@@ -245,7 +425,7 @@ function recipeModel(id,o){
    fin = finalize() output; returns [{id,label,v,sig,tip}] in % */
 function recipeDerived(fin,meta){
   const R=recipeById(meta&&meta.id); if(!R||!fin||!fin.comps) return [];
-  const cs=fin.comps.filter(c=>c.recipe===R.id); if(!cs.length) return [];
+  const cs=fin.comps.filter(c=>c.recipe===R.id&&!c.rx); if(!cs.length) return [];   // v1.9.7: plasmon / Auger lines (rx) are outside the totals
   const T=cs.reduce((s,c)=>s+Math.max(0,c.area),0); if(!(T>0)) return [];
   const names=(fin.cov&&fin.cov.names)||[], np=(fin.cov&&fin.cov.np)||names.length, Cm=(fin.cov&&fin.cov.C)||[];
   const aIdx={}; names.forEach((q,j)=>{ if(q.k==="area") aIdx[q.id]=j; });
@@ -255,7 +435,7 @@ function recipeDerived(fin,meta){
   const root=c=>{ if(cons){ let id=c.id, mul=1, g=0; for(;;){ const q=cons[id]&&cons[id].area; if(q&&q.mode==="link"&&q.ref!=null&&byId[q.ref]&&(q.rk==null||q.rk==="area")&&g++<20){ mul*=q.k!=null?+q.k:1; id=q.ref; } else break; } return {id,mul}; }
     if(c.aref&&byId[c.aref]) return {id:c.aref,mul:c.amul!=null?c.amul:1}; return {id:c.id,mul:1}; };
   const roots=cs.map(root);
-  const list=R.kind==="env"?envDerived(R,cs):R.derived;
+  const list=R.kind==="env"?envDerived(R,cs):(R.kind==="par"||R.kind==="emp")?parDerived(R,cs):R.derived;
   return list.map(d=>{
     const part=d.shake?(c=>c.rsat?1+(d.shake[c.rsp]||0):0):d.w?d.w:c=>{ if(d.state) return c.rstate===d.state?1:0; if(d.key) return c.rk===d.key?(d.part==="partner"?(c.doublet?c.doublet.r/(1+c.doublet.r):0):(c.doublet?1/(1+c.doublet.r):1)):0; return 0; };
     const num=cs.reduce((s,c)=>s+part(c)*Math.max(0,c.area),0), f=num/T;
@@ -379,7 +559,7 @@ function diagnose(ctx,th){
   });
   // R4 merging main lines (both positions free and not tied to each other)
   const freeBe=comps.map(c=>isFree(c.id,"be"));
-  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue;   // envelopes overlap by construction if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;
+  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue; if(comps[i].rsp&&comps[i].recipe&&comps[i].recipe===comps[j].recipe&&comps[i].rsp!==comps[j].rsp) continue;   // envelopes / literature species positions overlap by construction (v1.9.7) if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;
     const d=Math.abs(comps[i].be-comps[j].be), w=(fw(i)+fw(j))/2; if(!(d<th.merge*w)) continue;
     const sm=comps[i].area<=comps[j].area?comps[i]:comps[j], bg_=sm===comps[i]?comps[j]:comps[i];
     push({key:"merge|"+comps[i].id+"|"+comps[j].id,id:"merge",sev:"warn",ids:[comps[i].id,comps[j].id],label:`${nm(comps[i].id)} and ${nm(comps[j].id)} merge (ΔBE ${fmt(d,2)} eV)`,
@@ -419,11 +599,53 @@ function diagnose(ctx,th){
   const ci_=complexInfo(ctx.el,ctx.orb);
   if(ci_&&!(ctx.recipe&&ctx.recipe.id)){ const rc=ci_.recipes[0];
     push({key:"complex",id:"complex",sev:"info",ids:[],label:rc?`${ctx.el} ${ctx.orb}: use the region recipe`:`${ctx.el} ${ctx.orb}: multiplet/satellite region`,
-      tip:ci_.why+". "+(rc?(recipeById(rc)&&recipeById(rc).kind==="env"?"The recipe fits each chemical species as one literature envelope (Biesinger: fixed spacings, area % and FWHMs; one position ± tolerance and one area per species) on the 2p3/2 window with a Shirley background; species fractions are shown after the fit. Pick the species in the recipe row.":"The recipe sets literature lines with doublet links (ΔE, area ratio, equal widths), the window and the background; derived output (e.g. Ce³⁺ fraction) is shown after the fit."):"No literature recipe is built in for this region: fit only the envelope and use the summed area, or compare with measured reference spectra (Store as reference → LCF), which carry the multiplet structure.")+(ci_.closed?` Closed-shell exception: ${ci_.closed}.`:""),
+      tip:ci_.why+". "+(rc?(recipeById(rc)&&(recipeById(rc).kind==="par"||recipeById(rc).kind==="emp")?recipeById(rc).how+" "+(recipeById(rc).kind==="emp"?"":"Derived values are shown after the fit."):recipeById(rc)&&recipeById(rc).kind==="env"?"The recipe fits each chemical species as one literature envelope (Biesinger: fixed spacings, area % and FWHMs; one position ± tolerance and one area per species) on the 2p3/2 window with a Shirley background; species fractions are shown after the fit. Pick the species in the recipe row.":"The recipe sets literature lines with doublet links (ΔE, area ratio, equal widths), the window and the background; derived output (e.g. Ce³⁺ fraction) is shown after the fit."):"No literature recipe is built in for this region: fit only the envelope and use the summed area, or compare with measured reference spectra (Store as reference → LCF), which carry the multiplet structure.")+(ci_.closed?` Closed-shell exception: ${ci_.closed}.`:"")+(ci_.note?" "+ci_.note:""),
       act:rc?{type:"recipe",recipe:rc,label:"Apply recipe"}:null}); }
+  // R10 peak overlaps with other elements present (v1.9.7, SPEC §17.8)
+  if(ctx.present) overlapFindings(ctx.el,ctx.orb,ctx.present,{hv:ctx.hv,lo:E[0]+sh,hi:E[n-1]+sh}).forEach(push);
   out.sort((a,b)=>SEV_ORDER[a.sev]-SEV_ORDER[b.sev]);
   return out;
 }
+/* ------------------------------------------------------------
+   4b) Peak overlaps between elements (v1.9.7, SPEC §17.8) — a short generic table, energies from the library (X-ray Data Booklet BE;
+       Auger KE from the library's Avantage table) or the transcribed sources. A rule fires on region (el, orb) when the partner element is
+       present (survey / other regions of the sample) and the partner energy lies in the fit window; Auger rules only for Al Kα.
+       side = {el, orb (region), sub, be} or {el, auger, ke:[...]} (BE = hν − KE)
+   ------------------------------------------------------------ */
+const BKL="X-ray Data Booklet (library BE table)", AVK="library Auger KE (Avantage table)";
+const OVERLAPS=[
+ {id:"BaCo", sev:"warn", a:{el:"Ba",orb:"3d",sub:"3d5/2",be:780.5}, b:{el:"Co",orb:"2p",sub:"2p3/2",be:778.1}, src:BKL,
+  tip:"Ba 3d5/2 (780.5 eV) and Co 2p3/2 (778.1 eV) overlap, and so do Ba 3d3/2 (795.7) and Co 2p1/2 (793.2 eV) — in Ba–Co perovskites (e.g. BCFZY, BaCo₀.₄Fe₀.₄Zr₀.₁Y₀.₁O₃) each fit takes up the other element's intensity, which biases both areas, chemical-state splits and at%. Use Ba 4d for Ba (recipe 'Ba 4d', Karslıoğlu 2018), or fit Co 2p and Ba 3d together in one model (Ba doublet ΔE 15.2 eV, Co 2p envelopes)."},
+ {id:"LaNi", sev:"warn", a:{el:"La",orb:"3d",sub:"3d3/2",be:853.0}, b:{el:"Ni",orb:"2p",sub:"2p3/2",be:852.7}, src:BKL,
+  tip:"La 3d3/2 (853.0 eV) lies on Ni 2p3/2 (852.7 eV) — in La–Ni oxides (LaNiO₃, La₂NiO₄) Ni 2p3/2 cannot be fitted alone: fit La 3d (recipe, which fixes the 3d3/2 to the 3d5/2 by ΔE and area ratio) together with Ni 2p, or use Ni 3p for Ni."},
+ {id:"LaMNN", sev:"info", al:true, a:{el:"La",orb:"3d",sub:"3d3/2 satellites"}, b:{el:"La",auger:"M45N45N45",ke:[622.4,623.1]}, src:"Sunding et al. 2011, Table 3 (La(OH)₃ / La₂O₃)",
+  tip:"La M45N45N45 Auger (KE 622.4 / 623.1 eV, Sunding 2011 Table 3) sits at BE ≈ 1486.6 − 622.4 ≈ 864 eV under Al Kα, inside the La 3d3/2 satellite region. Sunding et al. treat this overlap in their La 3d analysis; the La 3d recipe adds one free line for it ('MNN Auger'). With Mg Kα the Auger moves out of the La 3d region (its KE does not depend on hν)."},
+ {id:"NdOKLL", sev:"warn", al:true, a:{el:"Nd",orb:"3d",sub:"3d",be:980.4}, b:{el:"O",auger:"KLL",ke:[511,492,477]}, src:AVK+"; Haasch et al. 2014 (NdScO₃ note)",
+  tip:"O KLL Auger (library KE 511 / 492 / 477 eV → BE ≈ 976 / 995 / 1010 eV under Al Kα) overlaps Nd 3d5/2 (980.4 eV) and 3d3/2 (1003.3 eV) — Haasch et al. (2014) note this for NdScO₃. With oxygen present part of the Nd 3d envelope is O Auger intensity: use Nd 4d, or Mg Kα."},
+ {id:"PrCu", sev:"warn", a:{el:"Pr",orb:"3d",sub:"3d5/2",be:928.8}, b:{el:"Cu",orb:"2p",sub:"2p3/2",be:932.7}, src:BKL+"; Haasch et al. 2014 (Pr 3d5/2 component 932.8 eV)",
+  tip:"Cu 2p3/2 (932.7 eV) coincides with the Pr 3d5/2 satellite (Haasch 2014 component at 932.8 eV; Pr 3d5/2 main 928.8 eV, Booklet) — with both present neither region can be fitted alone."},
+ {id:"FeBa", sev:"info", al:true, a:{el:"Ba",orb:"3d",sub:"3d5/2",be:780.5}, b:{el:"Fe",auger:"L3VV",ke:[703]}, src:AVK,
+  tip:"Fe L3VV Auger (library KE 703 eV → BE ≈ 784 eV under Al Kα) lies on the high-BE side of Ba 3d5/2 (780.5 eV) — relevant for Ba–Fe oxides (BCFZY): it adds intensity a Ba doublet cannot take up. Mg Kα moves it."},
+ {id:"CoFe", sev:"info", al:true, a:{el:"Fe",orb:"2p",sub:"2p3/2",be:706.8}, b:{el:"Co",auger:"L3VV",ke:[774]}, src:AVK,
+  tip:"Co L3VV Auger (library KE 774 eV → BE ≈ 713 eV under Al Kα) falls inside the Fe 2p3/2 region (706.8–720 eV) — with Co present the Fe 2p3/2 envelope fit takes up Auger intensity. Mg Kα moves it."},
+ {id:"NiMn", sev:"info", al:true, a:{el:"Mn",orb:"2p",sub:"2p3/2",be:638.7}, b:{el:"Ni",auger:"L3VV",ke:[846]}, src:AVK,
+  tip:"Ni L3VV Auger (library KE 846 eV → BE ≈ 641 eV under Al Kα) lies on Mn 2p3/2 (638.7 eV) — with Ni present the Mn 2p3/2 fit takes up Auger intensity. Mg Kα moves it."},
+ {id:"RuC", sev:"warn", a:{el:"Ru",orb:"3d",sub:"3d3/2",be:284.2}, b:{el:"C",orb:"1s",sub:"1s",be:284.2}, src:BKL,
+  tip:"Ru 3d3/2 (284.2 eV) coincides with C 1s (284.2 eV, Booklet) — C 1s charge referencing and the Ru 3d3/2 area are both affected; fit Ru 3d and C 1s in one model (Ru 3d5/2 at 280.0 eV is free of C) or use Ru 3p."},
+ {id:"BiS", sev:"warn", a:{el:"Bi",orb:"4f",sub:"4f5/2",be:162.3}, b:{el:"S",orb:"2p",sub:"2p3/2",be:162.5}, src:BKL,
+  tip:"Bi 4f5/2 (162.3 eV) lies on S 2p (2p3/2 162.5 eV, Booklet) — in Bi sulfides fit Bi 4f and S 2p together, or use S 2s for S."},
+ {id:"SrP", sev:"info", a:{el:"Sr",orb:"3d",sub:"3d5/2",be:134.2}, b:{el:"P",orb:"2p",sub:"2p",be:135.0}, src:BKL,
+  tip:"Sr 3d5/2 (134.2 eV) and P 2p (135 eV, Booklet) overlap — in Sr phosphates fit them together or use P 2s."}];
+function overlapFindings(el,orb,present,o){
+  o=o||{}; const out=[]; if(!el||!orb) return out; const P=present instanceof Set?present:new Set(present||[]); const hv=o.hv, al=isAl(hv), h=hv||1486.6;
+  const inWin=be=>o.lo==null||o.hi==null||(be>=o.lo-1&&be<=o.hi+1);
+  const fmt=v=>(+v).toFixed(1);
+  OVERLAPS.forEach(R=>{ if(R.al&&!al) return;
+    [[R.a,R.b],[R.b,R.a]].forEach(([me,ot])=>{ if(me.auger||me.el!==el||me.orb!==orb) return; if(ot.el!==el&&!P.has(ot.el)) return;
+      let be, what; if(ot.auger){ const bes=ot.ke.map(k=>h-k).filter(inWin); if(!bes.length) return; be=bes; what=`${ot.el} ${ot.auger} Auger`; }
+      else { if(!inWin(ot.be)) return; be=[ot.be]; what=`${ot.el} ${ot.sub}`; }
+      out.push({key:"ovl|"+R.id,id:"overlap",sev:R.sev,ids:[],rule:R.id,label:`${what} (${be.map(fmt).join("/")} eV) overlaps ${el} ${me.sub}`,tip:R.tip+(ot.auger&&hv==null?" (Al Kα assumed.)":"")+" Source: "+R.src+".",act:null}); }); });
+  return out; }
 /* Diagnosis straight from a problem + fitOnce result (tests and Worker) */
 function diagnoseFit(P,r,o){ const C=CORE(); o=o||{}; const fin=o.fin||C.finalize(P,r); return diagnose(Object.assign({E:P.E,y:P.y,fin,bgType:P.bg&&P.bg.type},o),o.th); }
 
@@ -502,6 +724,6 @@ function stagedFit(prob,opt){
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }
 
-const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPES_ENV,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
+const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_GUIDE; else root.XPS_GUIDE=XPS_GUIDE;
 })(typeof self!=="undefined"?self:this);

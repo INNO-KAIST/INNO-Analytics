@@ -1,0 +1,15 @@
+# Cole, Kirk, Thorpe, Surf. Sci. Spectra 27 (2020) — Thermo K-Alpha-class, Avantage 5, C 1s = 284.8 eV. Copied from journal HTML 2026-11-01.
+## "Surface Y2O3 layer formed on air exposed Y powder", SSS 27, 024010 (doi 10.1116/6.0000475): component|BE|FWHM|area
+Y 3d5/2 Y metal|156.4|0.86|1088
+Y 3d3/2 Y metal|158.4|0.86|750
+Y 3d5/2 Y2O3|157.5|2.38|25209
+Y 3d3/2 Y2O3|159.5|2.38|17376
+O 1s Y2O3 lattice|529.2|1.45
+O 1s OH/C-O|531.5|2.01
+## "Y(OH)3 powder", SSS 27, 024007 (doi 10.1116/6.0000317)
+Y 3d5/2 Y(OH)3|157.9|1.52|14138
+Y 3d3/2 Y(OH)3|160.0|1.52|9745
+Y 3d5/2 YCl3|158.8|2.30|5483
+Y 3d3/2 YCl3|160.8|2.30|3780
+O 1s hydroxide|531.4|1.72
+# Y 3d SO splitting 2.0–2.1 eV; area 3d3/2/3d5/2 = 0.69 (from areas, Avantage SF ratio 2.742/3.978 = 0.689)

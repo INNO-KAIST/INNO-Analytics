@@ -11,7 +11,7 @@ XPS 읽기·배경·피팅·불확도·정량·survey 판별 탭. **배포본(HT
 | `src/xps_ui.js`, `src/xps.css` | 화면. v1.8: 위쪽 작업 공간 전환 **Spectra · Series · ARXPS · Imaging** + Peak Fit 옆 **Process** 탭 (SPEC.md §16) |
 | `SPEC_multi.md`, `src/xps_multi.js` · `xps_arxps.js` · `xps_image.js` | series·다변량(PCA·MLPCA·TFA·MCR-ALS·기준 NNLS) · ARXPS · 분광 영상 엔진. DOM 없음 |
 | `SPEC_proc.md`, `src/xps_proc.js` | 디컨볼루션 · 다시 표본화 · 평활/미분 · Fermi edge · 기준 봉우리 PSF 엔진. DOM 없음 |
-| `src/xps_guide.js` | v1.9.3 피팅 안내(SPEC.md §17) — Fit check(피팅 뒤 진단 R1–R9 · 한 번 누르기 조치), 영역 레시피(Ce 3d Burroughs v/u · v1.9.6 Ni·Co·Fe·Mn·Cr·Cu 2p3/2 Biesinger 포락선 — 화학종 체크, PE 열, FWHM×, Fe₃O₄ 1:2, 화학종 분율 ± σ, Cu(II) shake-up 식 1–2; §17.7), 단계 피팅(stagedFit · 보통 피팅보다 나빠지지 않음). DOM 없음, core 다음에 주입(`xps-guide-src`, Worker 에도) |
+| `src/xps_guide.js` | v1.9.3 피팅 안내(SPEC.md §17) — Fit check(피팅 뒤 진단 R1–R9 · 한 번 누르기 조치), 영역 레시피(Ce 3d Burroughs v/u · v1.9.6 Ni·Co·Fe·Mn·Cr·Cu 2p3/2 Biesinger 포락선 — 화학종 체크, PE 열, FWHM×, Fe₃O₄ 1:2, 화학종 분율 ± σ, Cu(II) shake-up 식 1–2; §17.7), v1.9.7 Ba·Y·란타넘족 레시피 — La 3d/4d Sunding 2011(c4f⁰ + 결합·반결합 위성, 제약 6 개, c4f¹L share · La(OH)₃ 분율, 플라스몬·MNN Auger 선택), Y 3d Cole 2020, Ba 4d Karslıoğlu 2018(상대 위치 + 정렬), Ba 3d 일반 doublet, Pr·Nd·Gd·Tb·Dy 3d/4d Haasch 2014 경험적 포락선(넓이 자유), Sm–Yb 는 레시피 없이 LCF 안내, 겹침 규칙 R10(Ba 3d/Co 2p · La 3d/Ni 2p · La MNN · Nd 3d/O KLL 등; §17.8), 단계 피팅(stagedFit · 보통 피팅보다 나빠지지 않음). DOM 없음, core 다음에 주입(`xps-guide-src`, Worker 에도) |
 | `src/xps_lib.js` | 원소 라이브러리 — **생성물**(`build/build_lib.py`). 직접 고치지 말 것 |
 | `build/build_lib.py` | `data/` → `src/xps_lib.js`. 검사(Scofield 논문 대조·doublet 합·Auger 대조·순서 역전)가 어긋나면 중단 |
 | `build/assemble_core.py`, `build/extract_kherve.py` | 원자료 정리(X-ray Data Booklet 전사 · KherveFitting 수치 추출) |
@@ -33,6 +33,7 @@ XPS 읽기·배경·피팅·불확도·정량·survey 판별 탭. **배포본(HT
 | `test/test_real_a2.js` | K-Alpha 실측 a2(비공개 `test/data/real/a2`, 없으면 건너뜀): Avantage 규약 v1.9.2 Smart·Shirley 배경 · Area(P) · at% · VGD prop 415 (TF 제거) — SPEC §2c·§4. src 에 avantage_a2 패치가 들어 있는지 먼저 확인 |
 | `test/ref/ref_casa.py` → `ref_casa.json` | 위 기능의 독립 기준 구현(PchipInterpolator·quad·nnls·least_squares·CubicSpline·Nelder–Mead·numpy MC) |
 | `test/ref/biesinger/*.txt` | Biesinger 2011 표 1·3–6 · 2017 표 4(·A1s/Bs·α′) 원문 전사 — v1.9.6 포락선 레시피의 숫자 출처, test_guide §8 이 대조 |
+| `test/ref/lit2/*.txt` | Sunding 2011(La 3d·4d 표 3–5, 방법) · Cole 2020(Y 3d) · Karslıoğlu 2018(Ba 4d 표 1) + Schmitz 2001(BaCO₃) · Haasch 2014(REScO₃ 3d·4d 성분) 원문 전사 — v1.9.7 레시피의 숫자 출처, test_guide §9 가 대조 |
 | `test/ref/casa_readings.json`, `test/data/casaval/` | CasaXPS 2.3.27 화면 실측값과 그 자료(합성 + BCT C1s) — CasaXPS 코드·자료 아님 |
 | `test/ref/make_casaval2.py` | CasaXPS 추가 판독용 무잡음 합성 VAMAS(`test/data/casaval/V2_*.vms`: LA 폭 환산·f_G(n)·SGL 가설) |
 | `test/ui_xps_casa.py` | 브라우저 실측: 기준 저장 → LCF → MC → 일괄 피팅·CSV → 측정 선모양 → spline 매듭(클릭·끌기·두 번 누르기)·민감도 → Simplex → at% MC → CasaXPS 규약 → 390 px |

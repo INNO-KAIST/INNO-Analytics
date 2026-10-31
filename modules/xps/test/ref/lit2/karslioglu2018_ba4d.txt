@@ -1,0 +1,8 @@
+# Karslıoğlu, Trotochaud, Zegkinoglou, Bluhm, J. Electron Spectrosc. Relat. Phenom. 225 (2018), doi 10.1016/j.elspec.2018.03.008 (open access eScholarship PDF, read 2026-11-01)
+# Table 1: BE (eV) / FWHM (eV). BE referenced to the Pt substrate Fermi edge (in situ films, AP-XPS) — absolute values are NOT C 1s-referenced.
+BaO|Ba 4d|88.8/91.4|1.6|O 1s 527.8 (1.2)
+Ba(OH)2|Ba 4d|90.0/92.6|1.3|O 1s 530.8 (1.3)
+BaCO3|Ba 4d|90.1/92.7|1.7|O 1s 531.7 (1.6); C 1s 289.9 (1.3)
+Ba(NO3)2|Ba 4d|91.0/93.6|1.4|O 1s 533.6 (1.3); N 1s 407.9 (1.1)
+# Ba 4d spin-orbit splitting 2.6 eV in all four. Loss feature: BaO Gaussian doublet FWHM 3.2 eV; Ba(OH)2 ~6.0 eV.
+# Schmitz, SSS 8, 190 (2001), BaCO3 powder: Ba 3d5/2 779.4 (FWHM 1.56), C 1s adventitious 284.6, carbonate 289.1 (1.13)
