@@ -51,7 +51,7 @@ function complexInfo(el,orb){
 const RECIPES=[{
   id:"ce3d", el:"Ce", orb:"3d", name:"Ce 3d (Burroughs v/u)",
   window:[875,925], bg:{type:"active",n:5,c0:null,k:null,s:0,cons:{s:{mode:"free"}}}, shape:"GLS", m:{v:0.3,lo:0,hi:1},
-  dE:{v:18.5,lo:18.1,hi:18.9}, r:2/3, beTol:0.6, align:3,
+  dE:{v:18.6,lo:18.3,hi:18.9}, dEs:{"Ce3+":{v:18.2,lo:17.9,hi:18.5}}, r:2/3, beTol:0.6, align:3,
   states:{"Ce4+":"Ce⁴⁺","Ce3+":"Ce³⁺"},
   lines:[
     {key:"v0", name:"v0/u0", state:"Ce3+", be:880.5, F:2.4, Flo:1.2, Fhi:3.5},
@@ -65,10 +65,12 @@ const RECIPES=[{
     {id:"mix", label:"Mixed (10)", keys:["v0","v","v1","v2","v3"]}],
   derived:[
     {id:"ce3", label:"Ce³⁺", state:"Ce3+", tip:"Ce³⁺ fraction = (v0 + v′ + u0 + u′) / (all ten lines), areas from the fit (each pair = v + u). ± = covariance σ (statistics only). The fraction depends on the background and on the line shapes; beam reduction under X-rays raises it during the measurement (Isaacs et al. 2023; Morgan 2023)."},
-    {id:"u3", label:"u‴", key:"v3", part:"partner", tip:"u‴ fraction = u‴ area / (all ten lines). u‴ (≈ 916.7 eV) has no Ce³⁺ counterpart, so it falls as Ce⁴⁺ is reduced; its value for fully oxidised CeO₂ depends on background and fit model (SPEC §17.3), so compare it only between spectra treated the same way."}],
-  cite:"Burroughs et al., J. Chem. Soc. Dalton Trans. 1976, 1686 (v/u notation); Romeo et al., Surf. Interface Anal. 20, 508 (1993); Bêche et al., Surf. Interface Anal. 40, 264 (2008); Morgan, Surf. Interface Anal. 55 (2023), doi:10.1002/sia.7254; Isaacs et al., Appl. Surf. Sci. Adv. 18, 100469 (2023); Paparazzo, Mater. Res. Bull. 46, 323 (2011)",
-  pitfalls:"Five spin–orbit pairs overlap (v‴ ≈ 898 eV lies under u0 ≈ 899 eV, u ≈ 901 eV under u′), so single-line areas are strongly correlated — report the Ce³⁺ fraction, not single peaks. Symmetric lines cannot follow the asymmetric Ce⁴⁺ peaks; the leftover intensity near 885–888 eV is then taken by v′ (Ce³⁺), so 10-line fits tend to overestimate Ce³⁺ — cross-check with the u‴ fraction, which has no Ce³⁺ counterpart. The Ce³⁺ fraction depends on the background (here in-fit Shirley + slope over 875–925 eV; a static Shirley on a sloping baseline biased it by +5 % on synthetic spectra), the u‴ fraction hardly does. X-rays and UHV reduce CeO₂ during acquisition (measure Ce 3d first, low flux). Positions are for C 1s = 284.8 eV and may sit off by charging; u‴ ≈ 916.7 eV is an internal reference. Lines start within ±0.6 eV, ΔE shared and free in 18.1–18.9 eV, u/v area = 2/3, equal widths within a pair."
+    {id:"u3", label:"u‴", key:"v3", part:"partner", tip:"u‴ fraction = u‴ area / (all ten lines). u‴ (≈ 916.7 eV) has no Ce³⁺ counterpart, so it falls as Ce⁴⁺ is reduced; for fully oxidised CeO₂ Shyu et al. (J. Catal. 114, 23, 1988, Fig. 2; nonlinear Shirley) found ≈13–14 % of the Ce 3d region (read from the graph; ±10 % relative), but the value depends on background and fit model, so compare it only between spectra treated the same way."}],
+  cite:"Burroughs et al., J. Chem. Soc. Dalton Trans. 1976, 1686 (v/u notation); Romeo et al., Surf. Interface Anal. 20, 508 (1993); Bêche et al., Surf. Interface Anal. 40, 264 (2008); Morgan, Surf. Interface Anal. 55 (2023), doi:10.1002/sia.7254; Isaacs et al., Appl. Surf. Sci. Adv. 18, 100469 (2023); Paparazzo, Mater. Res. Bull. 46, 323 (2011); Shyu et al., J. Catal. 114, 23 (1988) (u‴ fraction)",
+  pitfalls:"Five spin–orbit pairs overlap (v‴ ≈ 898 eV lies under u0 ≈ 899 eV, u ≈ 901 eV under u′), so single-line areas are strongly correlated — report the Ce³⁺ fraction, not single peaks. Symmetric lines cannot follow the asymmetric Ce⁴⁺ peaks; the leftover intensity near 885–888 eV is then taken by v′ (Ce³⁺), so 10-line fits tend to overestimate Ce³⁺ — cross-check with the u‴ fraction, which has no Ce³⁺ counterpart. The Ce³⁺ fraction depends on the background (here in-fit Shirley + slope over 875–925 eV; a static Shirley on a sloping baseline biased it by +5 % on synthetic spectra), the u‴ fraction hardly does. X-rays and UHV reduce CeO₂ during acquisition (measure Ce 3d first, low flux). Positions are for C 1s = 284.8 eV and may sit off by charging; u‴ ≈ 916.7 eV is an internal reference. Lines start within ±0.6 eV; ΔE free per state (Ce⁴⁺ 18.6, 18.3–18.9 eV; Ce³⁺ 18.2, 17.9–18.5 eV; Bêche 2008), u/v area = 2/3 (Bêche: I3d5/2/I3d3/2 = 1.5), equal widths within a pair."
 }];
+/* spin–orbit Δ per oxidation state (Bêche et al. 2008: ≈18.6 eV for Ce⁴⁺/CeO₂, ≈18.2 eV for Ce³⁺/CePO₄) */
+function dEof(R,state){ return (R.dEs&&R.dEs[state])||R.dE; }
 function recipesFor(el,orb){ return RECIPES.filter(r=>r.el===el&&r.orb===orb); }
 function recipeById(id){ return RECIPES.find(r=>r.id===id)||null; }
 /* Build a recipe model on raw (uncorrected) BE: shift = charge correction Δ (BE_corr = BE_raw + Δ).
@@ -82,7 +84,7 @@ function recipeModel(id,o){
   if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
   const mk=ds=>lines.map((l,i)=>{ const id="r"+R.id+"_"+l.key+"_"+Math.random().toString(36).slice(2,6);
     const c=C.newComp(R.shape,l.be-sh+ds,{F:l.F,m:R.m.v,el:R.el,line:R.orb,id,name:l.name});
-    c.doublet={dE:R.dE.v,r:R.r,q:1}; c.rk=l.key; c.rstate=l.state; c.recipe=R.id; c.area=1; return c; });
+    c.doublet={dE:dEof(R,l.state).v,r:R.r,q:1}; c.rk=l.key; c.rstate=l.state; c.recipe=R.id; c.area=1; return c; });
   let ds=0, score=null, areas=null;
   if(o.be&&o.y&&o.align!==false){
     const reg=C.sliceRegion(o.be,o.y,lo,hi); if(reg&&reg.E.length>=8){
@@ -96,11 +98,12 @@ function recipeModel(id,o){
       ds=best.d; score=best.ss; areas=best.a; } }
   const comps=mk(ds); if(areas) comps.forEach((c,i)=>{ c.area=Math.max(areas[i],1e-6); });
   const anc=comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const cons={};
+  const ancS={}; comps.forEach(c=>{ const a=ancS[c.rstate]; if(!a||c.area>a.area) ancS[c.rstate]=c; });
   comps.forEach((c,i)=>{ const l=lines[i]; const q=cons[c.id]={};
     q.be={mode:"free",lo:+(c.be-R.beTol).toFixed(4),hi:+(c.be+R.beTol).toFixed(4)};
     q.F={mode:"free",lo:l.Flo,hi:l.Fhi};
     q.r={mode:"fixed"}; q.q={mode:"fixed"};
-    q.dE=c===anc?{mode:"free",lo:R.dE.lo,hi:R.dE.hi}:{mode:"link",ref:anc.id,k:1,b:0};
+    const dS=dEof(R,l.state), aS=ancS[c.rstate]; q.dE=c===aS?{mode:"free",lo:dS.lo,hi:dS.hi}:{mode:"link",ref:aS.id,k:1,b:0};
     q.m=c===anc?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:anc.id,k:1,b:0}; });
   return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:op.id,label:op.label,align:ds,score,clipped,name:R.name}};
 }
@@ -172,7 +175,7 @@ function diagnose(ctx,th){
       const ci=byId[f.id], others=comps.filter((c,i)=>i!==ci&&c[f.k]!=null&&isFree(c.id,f.k));
       const anc=others.reduce((a,c)=>!a||c.area>a.area?c:a,null);
       const rc=ctx.recipe?ctx.recipe.lines&&ctx.recipe.lines.find(l=>l.key===comps[ci].rk):null;
-      if(rc&&f.k==="F"&&side==="upper"&&p>=rc.Fhi-1e-9){ act=null; hint=" The recipe range is the literature span — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
+      if(rc&&f.k==="F"&&side==="upper"&&p>=rc.Fhi-1e-9){ act=null; hint=" The recipe width range is a typical span (not a literature limit) — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
       else if(anc){ act={type:"link",id:f.id,k:f.k,ref:anc.id,label:`Link ${lab(f.k)} to ${nm(anc.id)}`}; hint=` Linking it to ${nm(anc.id)} (same ratio as now) removes one free width; if the line should be broader (e.g. a satellite), fix it at a literature value instead.`; }
       else if(side==="lower"){ act={type:"fix",id:f.id,k:f.k,v:p,label:`Fix ${lab(f.k)}`}; hint=" A width at its lower limit is narrower than the instrument resolution allows — fix it at the width of a well-resolved line in the same spectrum."; }
     } else if(f.k==="be"){
@@ -180,7 +183,7 @@ function diagnose(ctx,th){
       if(edge){ act=dropAct(f.id); hint=" The line drifted to the window edge — it is not supported by the data inside the window. Remove it, or widen the window if the line is really outside."; }
       else { act={type:"widen",id:f.id,k:"be",by:0.3,label:"Widen range ±0.3 eV"}; hint=" Widen the range only if the literature allows a larger shift (charge-reference error is ±0.2–0.3 eV); otherwise the model is missing a line or the line belongs to another state."; }
     } else if(f.k==="dE"){
-      const ref=ctx.recipe&&ctx.recipe.dE?ctx.recipe.dE.v:ctx.dEref;
+      const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[f.id]]||{}).rstate).v:ctx.dEref;
       if(ref!=null){ act={type:"fix",id:f.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=` Fix the spin–orbit splitting at the literature value (${fmt(ref,2)} eV) unless the doublet is well resolved and isolated.`; }
     } else if(f.k==="r"||f.k==="q"){
       const ref=f.k==="q"?1:null; if(ref!=null) act={type:"fix",id:f.id,k:f.k,v:ref,label:`Fix ${lab(f.k)} at 1`};
@@ -203,7 +206,7 @@ function diagnose(ctx,th){
       else if(fa.k==="be"&&fb.k==="be"){ const ia=byId[fa.id], ib=byId[fb.id]; const big=comps[ia].area>=comps[ib].area?fa:fb, sm=big===fa?fb:fa;
         act={type:"offset",id:sm.id,ref:big.id,label:"Fix separation"}; hint=" Fixing the separation at the current (or literature) value leaves one position free."; }
       else if((()=>{ const unres=id=>{ const c=comps[byId[id]]; return !!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE); }; return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
-        const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?ctx.recipe.dE.v:ctx.dEref;
+        const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[q.id]]||{}).rstate).v:ctx.dEref;
         if(ref!=null&&isFree(q.id,"dE")) act={type:"fix",id:q.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=" The doublet is not resolved (Δ < 1.2 eV), so its two halves trade off against position and width; fix Δ at the literature value and keep the area ratio fixed."; sevOv="info"; }
       else if(fa.k==="area"&&fb.k==="area") hint=" The two areas trade off against each other — their sum is well determined, each alone is not. Report the sum, or constrain widths/positions from literature.";
       else hint=" One of the two parameters should be fixed or linked (literature value) — the data cannot separate them.";

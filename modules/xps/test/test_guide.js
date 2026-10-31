@@ -35,12 +35,13 @@ console.log("== 1 Ce 3d recipe: data, anchoring to the charge correction, alignm
   ok(R&&R.lines.length===5&&R.lines.filter(l=>l.state==="Ce3+").length===2&&R.options.map(o=>o.keys.length*2).join()==="6,4,10","5 spin–orbit pairs (Ce⁴⁺ 3 · Ce³⁺ 2), options 6 · 4 · 10 lines",R.options.map(o=>o.label).join(" · "));
   // literature values reachable from the start ranges (SPEC §17.3 table): v-line positions and ΔE of every accessible source lie inside start ± beTol / the ΔE range
   const lit={v0:[880.2,880.6,880.7],v:[882.2,882.4,882.5],v1:[884.5,884.7,885.6],v2:[888.7,888.8,889.2],v3:[898.1,898.2,898.3]}, dEs=[18.3,18.4,18.5,18.6,18.7];
-  const inR=R.lines.every(l=>lit[l.key].every(b=>Math.abs(b-l.be)<=R.beTol+1e-9)), dOK=dEs.every(d=>d>=R.dE.lo&&d<=R.dE.hi);
+  const inR=R.lines.every(l=>lit[l.key].every(b=>Math.abs(b-l.be)<=R.beTol+1e-9)), dOK=dEs.every(d=>d>=Math.min(R.dE.lo,(R.dEs&&R.dEs["Ce3+"]||R.dE).lo)&&d<=R.dE.hi);
   ok(inR&&dOK&&Math.abs(R.r-2/3)<1e-12,"literature positions within start ± 0.6 eV, ΔE 18.3–18.7 eV inside the free range, u/v area 2/3",`ΔE ${R.dE.lo}–${R.dE.hi}`);
   const M=G.recipeModel("ce3d",{shift:1.3,opt:"mix",align:false}); const c0=M.comps.find(c=>c.rk==="v3");
   ok(Math.abs(c0.be-(898.2-1.3))<1e-9&&Math.abs(M.lo-(875-1.3))<1e-9&&Math.abs(M.hi-(925-1.3))<1e-9,"anchors to the charge correction: raw BE = literature − Δ (positions and window)",`v‴ ${c0.be.toFixed(2)} · window ${M.lo.toFixed(1)}–${M.hi.toFixed(1)}`);
-  const anc=M.comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const links=M.comps.filter(c=>c!==anc).every(c=>M.cons[c.id].dE.mode==="link"&&M.cons[c.id].dE.ref===anc.id&&M.cons[c.id].m.mode==="link");
-  ok(links&&M.comps.every(c=>c.doublet&&c.doublet.r===R.r&&M.cons[c.id].r.mode==="fixed"&&M.cons[c.id].q.mode==="fixed"&&M.cons[c.id].be.hi-M.cons[c.id].be.lo>1.19&&M.cons[c.id].be.hi-M.cons[c.id].be.lo<1.21),"pairs: shared ΔE (linked), area ratio and width factor fixed, BE free ± 0.6 eV");
+  const anc=M.comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const ancS={}; M.comps.forEach(c=>{ const x=ancS[c.rstate]; if(!x||c.area>x.area) ancS[c.rstate]=c; });
+  const links=M.comps.every(c=>{ const q=M.cons[c.id].dE, aS=ancS[c.rstate], d=G.dEof?null:null; return c===aS?(q.mode==="free"&&Math.abs(c.doublet.dE-(c.rstate==="Ce3+"?18.2:18.6))<1e-9):(q.mode==="link"&&q.ref===aS.id); })&&M.comps.filter(c=>c!==anc).every(c=>M.cons[c.id].m.mode==="link");
+  ok(links&&M.comps.every(c=>c.doublet&&c.doublet.r===R.r&&M.cons[c.id].r.mode==="fixed"&&M.cons[c.id].q.mode==="fixed"&&M.cons[c.id].be.hi-M.cons[c.id].be.lo>1.19&&M.cons[c.id].be.hi-M.cons[c.id].be.lo<1.21),"pairs: ΔE per oxidation state (Ce⁴⁺ 18.6, Ce³⁺ 18.2 eV — Bêche 2008; linked within a state), area ratio and width factor fixed, BE free ± 0.6 eV");
   ok(M.bg.type==="active"&&M.bg.cons.s.mode==="free","background = in-fit Shirley + slope (SPEC §17.3)");
   // alignment: synthetic recipe spectrum shifted by a known amount relative to the charge-corrected positions
   const rg=U.rng(3); const n=601, E=Float64Array.from({length:n},(_,i)=>870+i*0.1), ctx={emin:E[0],emax:E[n-1]};
