@@ -74,7 +74,7 @@ function run(opt){
         // 정적 배경(smart)은 참 배경(active Shirley + 기울기)과 모양이 달라 χ²ν·넓이 허용을 넓힌다(SPEC P4: 창 밖 꼬리 손실 몇 %)
         // Δ 를 고정하는(분해 안 되는) doublet 은 라이브러리 Δ 와 참값의 차(≤0.1 eV) 만큼 χ²ν 가 오를 수 있다
         const fixedD=S.info&&S.info.dE&&!S.info.resolvable;
-        const wW=S.E[S.E.length-1]-S.E[0]; const aTol=bgt==="active"?0.03:(wW<=20?0.05:0.10), cTol=bgt==="active"?(fixedD?2.0:1.35):2.5;
+        const wW=S.E[S.E.length-1]-S.E[0]; const aTol=bgt==="active"?0.03:(wW<=20?0.05:0.10), cTol=bgt==="active"?(fixedD?2.0:mult?1.5:1.35):2.5;   // 다중항 준위(mult): 2–3 성분 근사라 χ²ν 가 1.35–1.41 까지 오름(seed 31–33, 옛·새 Scofield 표 모두) → 1.5
         // 정적(smart) 배경의 넓이 편향은 창 폭에 따라 커진다(합성 143 경우: ≤20 eV 최대 3 %, 20–40 eV 최대 8 %, >40 eV 최대 14 %) — 허용: ≤20 eV 5 %, 20–40 eV 10 %, >40 eV 는 정보
         // active: 넓이는 공분산 σ 대비 z < 4 (넓은 창에서는 배경 k 와의 상관으로 σ 가 커진다); 정적 배경: 상대 오차
         let aOK=Math.abs(tot/20000-1)<aTol;

@@ -1186,7 +1186,7 @@ function tpp2m(E,mat){
 }
 function imfpValue(o,KE){
   if(!o||o.model==="none") return 1;
-  if(o.model==="power") return Math.pow(KE,o.n!=null?o.n:0.6);
+  if(o.model==="power") return Math.pow(KE,o.n!=null?o.n:0.7);
   if(o.model==="tpp2m") return tpp2m(KE,o.mat);
   return 1;
 }
@@ -1391,8 +1391,13 @@ function doubletInfo(lib,el,orb){
   const av=(idp[el+" "+orb+J[0]]!=null&&idp[el+" "+orb+J[1]]!=null&&idp[el+" "+orb+J[1]]>idp[el+" "+orb+J[0]])?+(idp[el+" "+orb+J[1]]-idp[el+" "+orb+J[0]]).toFixed(3):null;
   const bkOK=bk!=null&&bk>0;
   let dE=null, src="";
-  if(av!=null){ dE=av; src="Avantage 원소표 "+el+" "+orb+J[1]+" − "+orb+J[0]; }
-  else if(bkOK){ dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  /* v1.9.5: Booklet 먼저 (원자 준위 편집값; Bearden & Burr 1967, Fuggle & Mårtensson 1980 등 원측정 — xraydb 와 칸별 대조됨).
+     Avantage 원소표 위치는 화학 상태 표지라 정수로 반올림된 것이 많아(예: Ce 3d 18 vs 18.6, Xe 3d 15 vs 12.6, Ge 2p 26.5 vs 31.1)
+     둘 다 있을 때 357 개 중 78 개가 ≥ 0.3 eV 달랐다 → Booklet 이 없거나 soWarn 일 때만 Avantage 를 씀. */
+  /* 단, Δ < 2 eV 에서는 Booklet 의 0.1 eV 반올림이 상대 오차로 커서(Si 2p 0.4 vs 고분해능 문헌 ≈0.6, S 2p 1.1 vs ≈1.2) 둘 다 정밀하지 않다 —
+     이 범위는 v1.9.4 까지와 같이 Avantage 먼저(시험으로 검증된 동작 유지), Δ 제약 범위(±max(0.3, 5 %, 두 출처 차+0.1))가 차이를 흡수. */
+  if(bkOK&&(bk>=2||av==null)){ dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  else if(av!=null){ dE=av; src="Avantage 원소표 "+el+" "+orb+J[1]+" − "+orb+J[0]+(bkOK?" (Δ < 2 eV: Booklet 반올림 정밀도 부족)":" (Booklet 값 없음)"); }
   return {dE,r:ORB_RR[l],J,src:dE!=null?src:"라이브러리에 쓸 수 있는 값 없음",alt:{avantage:av,booklet:bkOK?bk:null},
     spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE, multiplet:multipletInfo(el,orb)};
 }
