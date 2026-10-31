@@ -8,7 +8,9 @@
    5 one-click actions (applyAction) and that the finding disappears after the action + refit
    6 staged fit: never worse than the normal fit (χ²_d), normal path inside = fitOnce bit for bit
    7 synthetic Ce 3d (truth from the recipe, Ce³⁺ fraction 0 · 0.2 · 0.5, Poisson noise, Shirley-type background + slope):
-     recipe + staged fit recovers the Ce³⁺ and u‴ fractions; bound hits vs a naive suggestModel fit */
+     recipe + staged fit recovers the Ce³⁺ and u‴ fractions; bound hits vs a naive suggestModel fit
+   8 v1.9.6 transition-metal 2p3/2 envelope recipes (Biesinger 2011/2017): numbers = journal transcripts (test/ref/biesinger), shapes,
+     PE columns, constraint structure, Fe₃O₄ 1:2, synthetic 2–3-species mixtures (Ni Co Fe Mn Cr Cu) recovered, σ, Cu shake-up, fit check */
 "use strict";
 const C=require("../src/xps_core.js"), G=require("../src/xps_guide.js"), L=require("../src/xps_lib.js"), U=require("./synth_util.js"), AE=require("./all_elements.js");
 const QUICK=!!process.env.QUICK;
@@ -187,6 +189,120 @@ const SYN={};
   ok(SYN.bR<SYN.bN,"bound hits (non-area parameters) recipe + staged < naive Auto suggest",`recipe ${SYN.bR} vs naive ${SYN.bN} over ${res.length} spectra`);
   ok(res.every(r=>r.naiveRecipe),"fit check on every naive fit points to the recipe");
 }
+
+/* ---------- 8 transition-metal 2p3/2 envelope recipes (v1.9.6, SPEC §17.7) ---------- */
+console.log("== 8 TM 2p3/2 envelope recipes (Biesinger 2011/2017): data = journal transcripts, constraints, synthetic recovery, fit check");
+const TM={};
+{ const fs=require("fs"), path=require("path"), RD=path.join(__dirname,"ref","biesinger");
+  const rows=f=>fs.readFileSync(path.join(RD,f),"utf8").split("\n").filter(l=>l.trim()&&!l.startsWith("#")&&!/^Compound\|/.test(l)).map(l=>l.split("|"));
+  const num=x=>x===""||x==null?null:+x;
+  /* parse each journal table into {name: [{be|d, pct, F10, F20}]} (column layouts as in the transcript headers) */
+  const T={};
+  rows("b2011_ni.txt").forEach(r=>{ const pk=[]; pk.push({be:num(r[1]),pct:num(r[2]),F10:num(r[3]),F20:num(r[4])}); for(let i=5;i+4<r.length;i+=5){ if(r[i]==="") break; pk.push({be:num(r[i]),d:num(r[i+1]),pct:num(r[i+2]),F10:num(r[i+3]),F20:num(r[i+4])}); } T["ni|"+r[0]]=pk; });
+  rows("b2011_co.txt").forEach(r=>{ const pk=[]; pk.push({be:num(r[1]),pct:num(r[2]),F10:num(r[3]),F20:num(r[4])}); for(let i=5;i+4<r.length;i+=5){ if(r[i]==="") break; pk.push({be:num(r[i]),d:num(r[i+1]),pct:num(r[i+2]),F10:num(r[i+3]),F20:num(r[i+4])}); } T["co|"+r[0]]=pk; });
+  rows("b2011_fe.txt").forEach(r=>{ const pk=[]; pk.push({be:num(r[1]),F10:num(r[2]),pct:num(r[3]),F20:null}); for(let i=4;i+3<r.length;i+=4){ if(r[i]==="") break; pk.push({be:num(r[i]),d:num(r[i+1]),F10:num(r[i+2]),pct:num(r[i+3]),F20:null}); } T["fe|"+r[0]]=pk; });
+  { const L=fs.readFileSync(path.join(RD,"b2011_cr_mn.txt"),"utf8").split("\n"); let tb="cr";
+    L.forEach(l=>{ if(/Table 3/.test(l)) tb="mn"; if(!l.trim()||l.startsWith("#")||/^Compound\|/.test(l)) return; const r=l.split("|"); const nP=tb==="cr"?5:6, F10=num(r[1+3*nP-1]), F20=num(r[1+3*nP]);
+      const pk=[{be:num(r[1]),pct:num(r[2]),F10,F20}]; for(let k=1;k<nP;k++){ const i=3+3*(k-1); if(r[i]===""||r[i]==null) break; pk.push({be:num(r[i]),d:num(r[i+1]),pct:num(r[i+2]),F10,F20}); } T[tb+"|"+r[0]]=pk; }); }
+  rows("b2017_cu.txt").forEach(r=>{ const pk=[{be:num(r[1]),pct:num(r[2]),F10:null,F20:num(r[3]),gl:num(r[4])}]; for(let i=5;i+3<r.length;i+=4) pk.push({be:num(r[i]),pct:num(r[i+1]),d:num(r[i+2]),F10:null,F20:num(r[i+3])}); T["cu|"+r[0]]=pk; });
+  const MAP={ni2p3:{Ni0:"Ni Metal (new line shape)",NiO:"NiO",NiOH2:"Ni(OH)2",NiOOH:"Gamma NiOOH"},co2p3:{Co0:"Co(0)",CoO:"CoO",CoOH2:"Co(OH)2",CoOOH:"CoOOH",Co3O4:"Co3O4"},
+    fe2p3:{Fe0:"Fe(0)",FeO:"FeO",Fe2O3:"Ave. Fe2O3",FeOOH:"Ave. FeOOH",Fe3O4_2:"Fe3O4 2+",Fe3O4_3:"Fe3O4 3+"},mn2p3:{Mn0:"Mn(0)",MnO:"Mn(II) MnO",Mn2O3:"Mn(III) Mn2O3",MnOOH:"Mn(III) Manganite (MnOOH)",MnO2:"Mn(IV) MnO2"},
+    cr2p3:{Cr0:"Cr(0)",Cr2O3:"Cr(III) Oxide",CrOH3:"Cr(III) hydroxide",Cr6:"Cr(VI) oxide"},cu2p3:{Cu0:"Cu(0)",Cu2O:"Cu2O",CuO:"CuO",CuOH2:"Cu(OH)2"}};
+  const ENV=G.RECIPES.filter(r=>r.kind==="env"); let nVal=0, bad=[]; const incons=[], stepDev={n:0,max:0,at:""};
+  ENV.forEach(R=>{ R.species.forEach(s=>(s.sets||[s]).forEach(st=>{ const key=R.id.slice(0,2)+"|"+MAP[R.id][st.key]; const t=T[key]; if(!t){ bad.push("missing "+key); return; }
+      if(t.length!==st.peaks.length) bad.push(`${key}: ${st.peaks.length} vs ${t.length} peaks`);
+      st.peaks.forEach((r,j)=>{ const q=t[j]; if(!q) return; const pos=(R.abs||j===0)?q.be:q.d; const cmp=[[r[0],pos],[r[1],q.pct],[r[2],q.F10],[r[3],q.F20]];
+        cmp.forEach(([a,b])=>{ nVal++; if(!(a===b||(a==null&&b==null))) bad.push(`${key} P${j+1}: ${a} vs ${b}`); });
+        if(j>0&&q.be!=null&&t[j-1].be!=null&&q.d!=null){ const dd=Math.abs(+(q.be-t[j-1].be).toFixed(3)-q.d); stepDev.n++; if(dd>stepDev.max){ stepDev.max=+dd.toFixed(3); stepDev.at=`${key} P${j+1}`; } if(dd>0.1+1e-9) incons.push(`${key} P${j+1}: BE step ${+(q.be-t[j-1].be).toFixed(3)} vs printed spacing ${q.d} (beyond 0.1 eV rounding)`); } });
+      const sum=t.reduce((a,q)=>a+q.pct,0); if(!st.key.startsWith("Fe3O4")&&Math.abs(sum-100)>0.35) incons.push(`${key}: % sum ${+sum.toFixed(1)}`); })); });
+  { const py=T["mn|Mn(IV) Pyrolusite (MnO2)"]; const sm=py.reduce((a,q)=>a+q.pct,0); if(Math.abs(sm-100)>0.35) incons.push(`mn|Mn(IV) Pyrolusite (MnO2): % sum ${+sm.toFixed(1)} (not used)`); }
+  const f34=T["fe|Fe3O4 2+"].reduce((a,q)=>a+q.pct,0), f33=T["fe|Fe3O4 3+"].reduce((a,q)=>a+q.pct,0); incons.push(`fe|Fe3O4: Fe²⁺ : Fe³⁺ = ${+f34.toFixed(1)} : ${+f33.toFixed(1)} (stoichiometric 33.3 : 66.7)`);
+  [["CuO",1.89],["Cu(OH)2",1.57]].forEach(([n,r])=>{ const t=T["cu|"+n]; const sat=t.filter(q=>q.be>=938).reduce((a,q)=>a+q.pct,0), main=t.filter(q=>q.be<938).reduce((a,q)=>a+q.pct,0); incons.push(`cu|${n}: Table 4 main/shake-up ${(main/sat).toFixed(2)} vs quoted A1s/Bs ${r}`); });
+  incons.unshift(`BE steps vs printed spacings: max |Δ| ${stepDev.max} eV (${stepDev.at}) over ${stepDev.n} — within the 0.1 eV rounding of the BEs`); TM.incons=incons; TM.stepDev=stepDev; incons.forEach(x=>console.log("     table note: "+x));
+  ok(!bad.length&&nVal>300,`recipe numbers = journal transcripts (test/ref/biesinger, ${nVal} values: BE/spacing · % · FWHM PE10 · PE20)`,bad.slice(0,4).join(" | "));
+  // shapes and positions
+  const sh=(id,k)=>{ const M=G.recipeModel(id,{species:[k],pe:20}); return M.comps; };
+  const ni=sh("ni2p3","Ni0")[0], fe=sh("fe2p3","Fe0")[0], cu0=sh("cu2p3","Cu0")[0], cu1=sh("cu2p3","Cu2O")[0], no=sh("ni2p3","NiO")[0];
+  ok(ni.shape==="LA"&&ni.alpha===1.1&&ni.beta===2.2&&ni.casaN===10&&fe.shape==="LA"&&fe.alpha===1.2&&fe.beta===4.8&&fe.casaN===3&&cu0.shape==="GLP"&&Math.abs(cu0.m-0.9)<1e-12&&cu1.shape==="GLP"&&Math.abs(cu1.m-0.8)<1e-12&&no.shape==="GLP"&&Math.abs(no.m-0.3)<1e-12,
+    "line shapes: Ni metal LA(1.1,2.2,10) · Fe metal LA(1.2,4.8,3) · Cu(0) GL(90) · Cu₂O GL(80) · others GL(30) (casaToComp)");
+  const cw=c=>{ const r=C.compToCasa(c); return r.fwhm; };
+  ok(Math.abs(cw(ni)-0.95)<2e-3&&Math.abs(cw(no)-1.02)<1e-3&&Math.abs(cw(cu0)-0.83)<1e-3,"FWHMs as CasaXPS 'fwhm' numbers (asymmetric LA: Casa width rule) — Ni metal 0.95 · NiO P1 1.02 · Cu(0) 0.83 (PE 20)",`${cw(ni).toFixed(4)} · ${cw(no).toFixed(4)} · ${cw(cu0).toFixed(4)}`);
+  const M10=G.recipeModel("ni2p3",{species:["NiO","NiOOH"],pe:10}), M20=G.recipeModel("ni2p3",{species:["NiO","NiOOH"],pe:20});
+  const w=(M,k)=>cw(M.comps.find(c=>c.rk===k));
+  ok(Math.abs(w(M10,"NiO_1")-2.04)<1e-3&&Math.abs(w(M20,"NiO_1")-3.25)<1e-3&&Math.abs(w(M20,"NiOOH_1")-6.50)<1e-3&&M20.recipe.pe==="10/20","pass energy picks the FWHM column (NiO P2: PE 10 2.04 · PE 20 3.25); a peak with one column uses it (γ-NiOOH, PE 10 only)",`PE used ${M20.recipe.pe}`);
+  const pos=G.recipeModel("ni2p3",{species:["NiOH2"],pe:20}).comps.map(c=>+c.be.toFixed(2)).join(" ");
+  ok(pos==="854.9 855.67 857.69 860.48 861.48 866.44","positions = first BE + published spacings (Ni(OH)₂; BEs significant to 0.1 eV, spacings to 0.01 — Biesinger)",pos);
+  // constraint structure
+  let structOK=true; const info=[];
+  ENV.forEach(R=>{ const all=R.species.map(s=>s.key); const M=G.recipeModel(R.id,{species:all,pe:20,shift:0.4}); const P={comps:M.comps,cons:M.cons,bg:M.bg};
+    const map=C.buildMap(P); const sets=new Set(M.comps.map(c=>c.rset)); const fr=map.free.filter(f=>f.ci>=0);
+    const per={}; fr.forEach(f=>{ const c=M.comps[f.ci]; (per[c.rset]=per[c.rset]||[]).push(f.k); });
+    const okSets=[...sets].every(k=>{ const v=(per[k]||[]).sort().join(); return v==="area,be"||(R.stoich&&k==="Fe3O4_3"&&v===""); });
+    C.applyLinks(P,map); const rel=M.comps.every(c=>{ const A=M.comps.find(q=>q.rset===c.rset&&q.ranc); const S=envSet(R,c.rset); const j=+c.rk.split("_").pop(); return Math.abs((c.be-A.be)-(S.be[j]-S.be[S.jA]))<1e-6&&Math.abs(c.area/A.area-S.pct[j]/S.pct[S.jA])<1e-9; });
+    const win=M.comps.filter(c=>c.ranc&&!(R.stoich&&c.rset==="Fe3O4_3")).every(c=>{ const q=M.cons[c.id].be; return Math.abs(q.hi-q.lo-2*R.beTol)<1e-6&&Math.abs((q.lo+q.hi)/2-c.be)<1e-6; });
+    const fixedW=fr.every(f=>f.k!=="F");
+    const Mw=G.recipeModel(R.id,{species:all,pe:20,wscale:true}); const mw=C.buildMap({comps:Mw.comps,cons:Mw.cons,bg:Mw.bg}); const nF=mw.free.filter(f=>f.k==="F").length;
+    if(!(okSets&&rel&&win&&fixedW&&nF===1&&Math.abs(M.lo-(R.window[0]-0.4))<1e-9)) { structOK=false; info.push(R.id); } info.push(`${R.el} ${sets.size} sets/${M.comps.length} peaks/${fr.length} free`); });
+  function envSet(R,key){ const st=G.envSets(R,R.species.map(s=>s.key),20).find(s=>s.key===key); const jA=st.peaks.reduce((a,p,j)=>p.pct>st.peaks[a].pct?j:a,0); return {be:st.peaks.map(p=>p.be),pct:st.peaks.map(p=>p.pct),jA}; }
+  ok(structOK,"per set exactly one free position (± tolerance, centred on literature − Δ) and one free area; spacings and area ratios held by links; widths fixed, one free width with 'FWHM×'; window anchored to Δ",info.join(" · "));
+  { const M=G.recipeModel("fe2p3",{species:["Fe3O4"],stoich:true}); const P={comps:M.comps,cons:M.cons,bg:M.bg}; const map=C.buildMap(P); M.comps.find(c=>c.rset==="Fe3O4_2"&&c.ranc).area=777; C.applyLinks(P,map);
+    const t2=M.comps.filter(c=>c.rset==="Fe3O4_2").reduce((a,c)=>a+c.area,0), t3=M.comps.filter(c=>c.rset==="Fe3O4_3").reduce((a,c)=>a+c.area,0);
+    const a2=M.comps.find(c=>c.rset==="Fe3O4_2"&&c.ranc), a3=M.comps.find(c=>c.rset==="Fe3O4_3"&&c.ranc);
+    const nfc=map.free.filter(q=>q.ci>=0).length; ok(Math.abs(t3/t2-2)<1e-9&&Math.abs(a3.be-a2.be-1.8)<1e-9&&nfc===2,"Fe₃O₄ option 1:2: Fe³⁺ set total = 2 × Fe²⁺ set total, separation 1.8 eV, one position + one area for the compound",`ratio ${(t3/t2).toFixed(6)}, free ${nfc}`); }
+  ok(["Ni","Co","Fe","Mn","Cr","Cu"].every(el=>{ const ci=G.complexInfo(el,"2p"); return ci&&ci.kind==="satellite"&&ci.recipes[0]===el.toLowerCase()+"2p3"; }),"complexInfo: Cr–Cu 2p → satellite region with the envelope recipe attached (Fit check R9 points to it)");
+
+  /* synthetic mixtures built from the recipe itself (per-set offsets ±0.1 eV, Shirley c0 + k∫P, Poisson), fitted with the recipe (defaults ∪ truth species) + staged fit */
+  const MIX={ni2p3:[{Ni0:.5,NiO:.3,NiOH2:.2},{NiO:.6,NiOH2:.4},{Ni0:.6,NiOOH:.4}],
+    co2p3:[{Co0:.5,Co3O4:.3,CoOH2:.2},{Co0:.6,CoO:.4},{Co3O4:.7,CoOOH:.3}],
+    fe2p3:[{Fe0:.5,Fe2O3:.5},{Fe0:.4,FeO:.3,Fe2O3:.3},{Fe0:.5,Fe3O4:.5}],
+    mn2p3:[{Mn0:.5,MnO:.5},{MnO:.6,MnO2:.4},{Mn0:.4,Mn2O3:.3,MnO2:.3}],
+    cr2p3:[{Cr0:.5,Cr2O3:.5},{Cr0:.4,Cr2O3:.3,CrOH3:.3},{Cr2O3:.7,Cr6:.3}],
+    cu2p3:[{Cu0:.5,CuO:.5},{Cu2O:.5,CuOH2:.5},{Cu0:.4,CuO:.3,CuOH2:.3}]};
+  const TOL=2.5, res=[]; TM.syn={};
+  function synthTM(R,mix,seed,o){ o=o||{}; const keys=Object.keys(mix), rg=U.rng(seed); const T0=G.recipeModel(R.id,{species:keys,pe:20,stoich:true});
+    const lo=R.window[0], hi=R.window[1], step=0.05, n=Math.round((hi-lo)/step)+1, E=Float64Array.from({length:n},(_,i)=>lo+i*step), ctx={emin:E[0],emax:E[n-1]};
+    const off={}; T0.comps.forEach(c=>{ if(!(c.rset in off)) off[c.rset]=(rg.u()-0.5)*0.2; }); if(off.Fe3O4_3!=null) off.Fe3O4_3=off.Fe3O4_2;
+    const tot={}; T0.comps.forEach(c=>{ tot[c.rsp]=(tot[c.rsp]||0)+c.area; }); const truth=T0.comps.map(c=>{ const d=C.clone(c); d.be+=off[c.rset]; d.area=60000*mix[c.rsp]*c.area/tot[c.rsp]; return d; });
+    const P=new Float64Array(n); truth.forEach(d=>{ const v=C.compEval(d,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const Q=C.cumtrapz(E,P); const y=Float64Array.from(P,(p,i)=>rg.pois(3000+0.08*Q[i]+p));
+    return {E,y,truth}; }
+  const ids=Object.keys(MIX);
+  ids.forEach(id=>{ const R=G.recipeById(id); TM.syn[id]=[]; MIX[id].slice(0,QUICK?2:3).forEach((mix,mi)=>{ const S=synthTM(R,mix,100+mi); const keys=Object.keys(mix);
+      const sp=[...new Set(G.envDefaults(R).concat(keys))]; const M=G.recipeModel(id,{shift:0,be:S.E,y:S.y,species:sp,pe:20,stoich:true});
+      const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const st=G.stagedFit(P,{}); const fin=C.finalize(st.P,st.r); const dv=G.recipeDerived(fin,{id,cons:st.P.cons});
+      const dvM=G.recipeDerived(fin,{id});   // build-time link metadata instead of cons → same σ
+      const spd=dv.filter(d=>d.id.startsWith("sp_")); const dev=spd.map(d=>d.v-100*(mix[d.id.slice(3)]||0)); const mx=Math.max(...dev.map(Math.abs));
+      const z=spd.map((d,i)=>(mix[d.id.slice(3)]||0)>0&&d.sig>0?dev[i]/d.sig:NaN);   /* present species only: an absent one sits at area 0 (a bound) where σ is not defined */ const sigSame=dv.every((d,i)=>Math.abs((d.sig||0)-(dvM[i].sig||0))<1e-9*(1+(d.sig||0)));
+      let shk=null; if(id==="cu2p3"){ const tsum=S.truth.reduce((a,c)=>a+c.area,0), rOf={CuO:1.89,CuOH2:1.57}; const exp=100*S.truth.reduce((a,c)=>a+(c.rsat?(1+rOf[c.rsp])*c.area:0),0)/tsum; const d=dv.find(x=>x.id==="CuShk"); shk={v:d.v,exp,tr:100*(mix.CuO||0)+100*(mix.CuOH2||0)}; }
+      const diag=G.diagnose({E:P.E,y:P.y,fin,el:R.el,orb:"2p",bgType:P.bg.type,recipe:R});
+      const r={id,mi,mx,chi:fin.stats.chi2nu,z,sigSame,shk,merge:diag.filter(x=>x.id==="merge").length,perPeak:diag.filter(x=>["ill","dead","neg"].includes(x.id)&&x.act&&x.act.type!=="dropSet").length,used:st.staged.used};
+      res.push(r); TM.syn[id].push({mix,fit:Object.fromEntries(spd.map(d=>[d.id.slice(3),+d.v.toFixed(2)])),maxDev:+mx.toFixed(2),chi2nu:+r.chi.toFixed(2)});
+      console.log(`     ${R.el} #${mi} ${keys.map(k=>k+" "+100*mix[k]).join(" + ")}: ${spd.map((d,i)=>`${d.label} ${d.v.toFixed(1)}±${d.sig.toFixed(1)}`).join(" · ")} | max |Δ| ${mx.toFixed(2)} % · χ²ν ${r.chi.toFixed(2)} · ${r.used}`+(shk?` · shake-up Cu(II) ${shk.v.toFixed(1)} % (formula on truth ${shk.exp.toFixed(1)}, species truth ${shk.tr})`:"")); }); });
+  const MX=Math.max(...res.map(r=>r.mx)); TM.maxDev=MX; TM.chi=[Math.min(...res.map(r=>r.chi)),Math.max(...res.map(r=>r.chi))];
+  TM.byEl=Object.fromEntries(ids.map(id=>[id,Math.max(...res.filter(r=>r.id===id).map(r=>r.mx))]));
+  ok(MX<=TOL,`species fractions recovered within ±${TOL} % (absolute) on ${res.length} synthetic mixtures of 2–3 species (6 elements)`,ids.map(id=>id.slice(0,2)+" "+TM.byEl[id].toFixed(2)).join(" · "));
+  ok(res.every(r=>r.chi<1.3),"every fit reaches the noise floor (χ²ν < 1.3; true model family)",`χ²ν ${TM.chi.map(x=>x.toFixed(2)).join("–")}`);
+  const zs=res.flatMap(r=>r.z).filter(isFinite), zr=Math.sqrt(zs.reduce((a,b)=>a+b*b,0)/zs.length); TM.zrms=zr;
+  ok(zr<3,"covariance σ of the fractions is of the right size (rms of Δ/σ over the present species < 3)",`rms z ${zr.toFixed(2)} over ${zs.length}`);
+  ok(res.every(r=>r.sigSame),"fraction σ from the cons links = σ from the build-time link metadata (delta method through linked areas)");
+  const cu=res.filter(r=>r.shk); TM.shk=cu.map(r=>r.shk);
+  ok(cu.every(r=>Math.abs(r.shk.v-r.shk.exp)<=TOL),"Cu(II) shake-up estimate (Biesinger 2017 Eq. 2) = the formula on the true areas within ±2.5 % (it reads high vs the species truth by the Table-4 ratio mismatch)",cu.map(r=>`${r.shk.v.toFixed(1)}/${r.shk.exp.toFixed(1)}/${r.shk.tr}`).join(" · "));
+  ok(res.every(r=>r.merge===0&&r.perPeak===0),"fit check on envelope fits: no line-merge findings, area findings once per species (not per peak)");
+  // drop an absent species via the fit check action → links re-anchored exactly → refit keeps the fractions
+  { const R=G.recipeById("ni2p3"), mix={Ni0:.5,NiO:.5}; const S=synthTM(R,mix,321); const M=G.recipeModel("ni2p3",{shift:0,be:S.E,y:S.y,species:["Ni0","NiO","NiOH2","NiOOH"],pe:20,wscale:true});
+    let P=C.makeProblem({be:S.E,y:S.y,c:1},M); let r=C.fitOnce(P,{}); let fin=C.finalize(P,r); const d=G.diagnose({E:P.E,y:P.y,fin,el:"Ni",orb:"2p",bgType:P.bg.type,recipe:R});
+    const f=d.find(x=>x.act&&x.act.type==="dropSet"); let msg="no dropSet finding";
+    if(f){ const mm={lo:M.lo,hi:M.hi,bg:M.bg,comps:fin.comps,cons:P.cons}; const nb=mm.comps.length; G.applyAction(mm,f.act); const map=C.buildMap({comps:mm.comps,cons:mm.cons,bg:mm.bg});
+      const P2=C.makeProblem({be:S.E,y:S.y,c:1},mm); const r2=C.fitOnce(P2,{}); const fin2=C.finalize(P2,r2); const dv=G.recipeDerived(fin2,{id:"ni2p3",cons:P2.cons});
+      const ni0=dv.find(x=>x.id==="sp_Ni0"), nio=dv.find(x=>x.id==="sp_NiO"); const nF=map.free.filter(q=>q.k==="F").length;
+      msg=`${f.label}: ${nb} → ${mm.comps.length} peaks, free F ${nF}, Ni ${ni0.v.toFixed(1)} · NiO ${nio.v.toFixed(1)} %, χ²ν ${fin2.stats.chi2nu.toFixed(2)}`;
+      ok(mm.comps.length<nb&&nF===1&&Math.abs(ni0.v-50)<TOL&&Math.abs(nio.v-50)<TOL&&fin2.stats.chi2nu<1.3,"'Remove <species>' (dropSet) removes the whole envelope, re-anchors links (common FWHM scale kept) → refit unchanged",msg); }
+    else ok(false,"'Remove <species>' (dropSet) expected on an absent species",d.map(x=>x.label).join(" | ")); }
+  // naive fit of a Ni 2p3/2 envelope → fit check points to the recipe
+  { const R=G.recipeById("ni2p3"); const S=synthTM(R,{Ni0:.5,NiO:.5},55); const sg=C.suggestModel(S.E,S.y,{bg:{type:"smart",n:5},el:"Ni",orb:"2p",lib:L});
+    const P=C.makeProblem({be:S.E,y:S.y,c:1},{lo:S.E[0],hi:S.E[S.E.length-1],bg:{type:"smart",n:5},comps:sg.comps,cons:sg.cons}); const r=C.fitOnce(P,{}); const fin=C.finalize(P,r);
+    const d=G.diagnose({E:P.E,y:P.y,fin,el:"Ni",orb:"2p",bgType:"smart"}); const cx=d.find(x=>x.id==="complex");
+    ok(cx&&cx.act&&cx.act.type==="recipe"&&cx.act.recipe==="ni2p3"&&/envelope/.test(cx.tip),"naive Ni 2p fit → Fit check 'Apply recipe' with the envelope recipe",cx&&cx.label); }
+}
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
 if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
-module.exports={FP,SYN,POS};
+module.exports={FP,SYN,POS,TM};

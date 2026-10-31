@@ -927,7 +927,7 @@ function panelFit(el,sp){
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
    <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}${recipeBanner(sp,p)}
-   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>
+   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>${recipeEnvRow(sp,p)}
    <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>Auto suggest</b> 또는 그래프 위 <b>+ Add component</b> 로 직접 놓으세요.</div>`}</div>
    ${refHTML(sp,p)}
    <hr class="xps-hr">
@@ -1072,15 +1072,26 @@ const CHECK_V=1;
 const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions. Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
+  if(R.kind==="env") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" envelopes of the species ticked below: each species = its published peaks at fixed spacing, area % and FWHM; free per species: one position (± "+R.beTol+" eV around the charge-corrected literature BE) and one area. Window "+R.window[0]+"–"+R.window[1]+" eV (2p3/2), Shirley fitted with the envelopes. Species fractions appear in Fit check after the fit. Pitfalls: "+R.pitfalls+" "+TM_PIT+" Source: "+R.cite)}">Recipe</button>`;
   return `<select class="xps-sel" id="xpsRcpO" title="${esc(R.name+" — literature starting model with doublet links (ΔE shared, u/v area 2/3, equal widths), window and background. "+R.cite)}">${R.options.map(o=>`<option value="${o.id}" ${o.id===cur_?"selected":""}>${esc(o.label)}</option>`).join("")}</select><button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe (anchored to the charge correction; lines aligned to the data within ±3 eV). Pitfalls: "+R.pitfalls)}">Recipe</button>`; }
+/* v1.9.6 envelope recipes (SPEC §17.7): species tick boxes · PE column · width scale · Fe₃O₄ 1:2 */
+const TM_PIT="Each species is fitted as one envelope (Biesinger's method). Report species fractions, not single peaks; overlapping species are better reported as their sum (shown with the fractions).";
+function envOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD().envDefaults(R); const pe0=sp&&sp.meta&&sp.meta.passEnergy>0?(sp.meta.passEnergy<=15?10:20):20;
+  return {species:sel.slice(),pe:(ui.rcpPE&&ui.rcpPE[R.id])||pe0,wscale:!!(ui.rcpW&&ui.rcpW[R.id]),stoich:!(ui.rcpSt&&ui.rcpSt[R.id]===false)}; }
+function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
+  const has10=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[2]!=null))), has20=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[3]!=null)));
+  const box=s=>{ const t=(s.sets||[s]).map(x=>x.peaks.length).reduce((a,b)=>a+b,0); const be=(s.sets?s.sets[0]:s).peaks[0][0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+t+" peaks"+(s.sets?" in "+s.sets.length+" sets ("+s.sets.map(x=>x.label).join(", ")+")":"")+", main line "+be+" eV (charge-corrected). Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
+  return `<div class="xps-row xps-rcp-env" id="xpsRcpEnv">${R.species.map(box).join("")}<select class="xps-sel" id="xpsRcpPE" title="${esc("Pass energy column of the published FWHMs (Biesinger: PE 10 and/or PE 20 eV). "+(has10&&has20?"Where only one column exists for a peak, that one is used.":"This table has PE "+(has10?"10":"20")+" widths only.")+" Default from the spectrum's pass energy (≤ 15 eV → 10).")}"><option value="10" ${o.pe===10?"selected":""}>PE 10</option><option value="20" ${o.pe===20?"selected":""}>PE 20</option></select><label class="xps-rcp-sp" title="One common FWHM scale (0.6–1.6×) for all envelope peaks — Biesinger notes the widths can be adjusted for other instruments or pass energies. Off: widths fixed at the table values."><input type="checkbox" id="xpsRcpW" ${o.wscale?"checked":""}>FWHM×</label>${R.stoich?`<label class="xps-rcp-sp" title="Fe₃O₄: tie the Fe³⁺ set to the Fe²⁺ set — area 2 : 1 (stoichiometric) and fixed separation (literature 1.8 eV). Off: the two sets are free (the table itself has 68.5 : 31.4)."><input type="checkbox" id="xpsRcpS" ${o.stoich?"checked":""}>Fe₃O₄ 1:2</label>`:""}</div>`; }
 function recipeBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!r.el) return ""; const ci=G_.complexInfo(r.el,r.orb); if(!ci||(ci.kind==="multiplet"&&!ci.recipes.length)) return "";
   const rc=ci.recipes.length?G_.recipeById(ci.recipes[0]):null; const inUse=rc&&p.comps.some(c=>c.recipe===rc.id);
   if(inUse){ const m=p.recipe||{}; return `<div class="muted xs" style="margin:2px 0 4px" title="${esc(rc.pitfalls+"\n"+rc.cite)}">Recipe model: ${esc(rc.name)}${m.label?" · "+esc(m.label):""}${m.align!=null&&Math.abs(m.align)>0.05?` · aligned ${m.align>0?"+":""}${f(m.align,2)} eV`:""} ⓘ</div>`; }
   return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?" — literature recipe available (Recipe)":""} ⓘ</div>`; }
 function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&GD().recipeById(id); if(!R) return; let M;
-  try{ M=GD().recipeModel(id,{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
+  const env=R.kind==="env"; const eo=env?(opt&&typeof opt==="object"?opt:envOpts(sp,R)):null;
+  try{ M=GD().recipeModel(id,env?Object.assign({shift:shOf(sp),be:sp.be,y:sp.y},eo):{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
   pushHist(p,"Recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
-  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; S.ui.rcpOpt=M.recipe.opt; touch(p); rerender();
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; if(!env) S.ui.rcpOpt=M.recipe.opt; touch(p); rerender();
+  if(env){ note(`${R.name}: ${M.recipe.species.length} species, ${M.comps.length} peaks, window ${f(M.lo+shOf(sp),1)}–${f(M.hi+shOf(sp),1)} eV, Shirley in fit, FWHM PE ${M.recipe.pe}${M.recipe.wscale?" ×scale":""}.`+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.","ok",{label:"Staged fit",fn:()=>runStaged(sp)}); return; }
   const a=M.recipe.align, far=Math.abs(a)>0.5;
   note(`${R.name} · ${M.recipe.label}: ${M.comps.length} pairs, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the charge-corrected literature positions — check the charge correction (differential charging?).`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); }
 async function runStaged(spArg){
@@ -1106,7 +1117,7 @@ function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free)
   try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE}); }catch(e){ console.error(e); return null; }
   r.check={sh,v:CHECK_V,items}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
-  const dv=GD().recipeDerived(r,{id:R.id}).filter(d=>d.v!=null); if(!dv.length) return "";
+  const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null); if(!dv.length) return "";
   return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" title="${esc(d.tip)}">${esc(d.label)} <b>${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
 function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
   const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
@@ -1115,7 +1126,7 @@ function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const ite
   return `<div class="xps-chk" id="xpsChk"><div class="xps-chk-h"><span title="${esc(CHECK_HELP)}">Fit check ⓘ</span>${nW?`<span class="badge wr">${nW}</span>`:`<span class="badge ok">OK</span>`}${st}</div>${derivedHTML(p)}${rows?`<ul>${rows}</ul>`:`<div class="muted xs">No issues found.</div>`}</div>`; }
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
-  if(act.type==="recipe"){ applyRecipe(sp,act.recipe,S.ui.rcpOpt||"mix"); return; }
+  if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_&&R_.kind==="env"?envOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
   try{ msg=GD().applyAction(m,act,{be0:sp.be[0],be1:sp.be[sp.n-1]}); }catch(e){ note(e.message,"warn"); return; }
   if(msg==null){ p.hist.pop(); note("Could not apply: "+act.label,"warn"); return; }
@@ -1126,7 +1137,12 @@ function applyCheck(sp,p,act){ if(!act) return;
 function bindGuide(el,sp,p){
   const st=$q(el,"#xpsStaged"); if(st) st.onclick=()=>runStaged(sp);
   const ro=$q(el,"#xpsRcpO"); if(ro) ro.onchange=()=>{ S.ui.rcpOpt=ro.value; save(); };
-  const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>applyRecipe(sp,ra.dataset.rcp,(ro&&ro.value)||S.ui.rcpOpt||"mix");
+  const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>{ const R_=GD().recipeById(ra.dataset.rcp); applyRecipe(sp,ra.dataset.rcp,R_&&R_.kind==="env"?envOpts(sp,R_):(ro&&ro.value)||S.ui.rcpOpt||"mix"); };
+  const ev=$q(el,"#xpsRcpEnv"); if(ev&&ra){ const id=ra.dataset.rcp; const put=(k,v)=>{ S.ui[k]=Object.assign({},S.ui[k]); S.ui[k][id]=v; save(); };
+    $a(ev,"[data-rsp]").forEach(b=>b.onchange=()=>{ put("rcpSp",$a(ev,"[data-rsp]").filter(x=>x.checked).map(x=>x.dataset.rsp)); });
+    const pe=$q(ev,"#xpsRcpPE"); if(pe) pe.onchange=()=>put("rcpPE",+pe.value);
+    const w=$q(ev,"#xpsRcpW"); if(w) w.onchange=()=>put("rcpW",w.checked);
+    const s_=$q(ev,"#xpsRcpS"); if(s_) s_.onchange=()=>put("rcpSt",s_.checked); }
   const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.act); });
 }
 function compCard(sp,p,c,ci){

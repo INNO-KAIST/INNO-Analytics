@@ -4,6 +4,15 @@
 >
 > 이 파일 하나에 이 앱의 작업 이력·교훈·문서 색인을 모았다. 자세한 근거는 색인의 문서(claude.ai 프로젝트 ‘유원정’)에 있다.
 
+## XPS v1.9.6 (2026-10-31) — 전이금속 2p3/2 포락선 레시피 (Biesinger)
+- **레시피 6 종**(modules/xps/SPEC.md §17.7): Ni 2p3/2(Ni · NiO · Ni(OH)₂ · γ-NiOOH) · Co(Co · CoO · Co(OH)₂ · CoOOH · Co₃O₄) · Fe(Fe · FeO · Fe₂O₃ 평균 · FeOOH 평균 · Fe₃O₄ = Fe²⁺ 2 + Fe³⁺ 5, 1:2 선택) · Mn(Mn · MnO · Mn₂O₃ · MnOOH · MnO₂) · Cr(Cr · Cr₂O₃ · Cr(OH)₃ · Cr(VI)) · Cu(Cu(0) · Cu₂O · CuO · Cu(OH)₂). 숫자 = Biesinger 2011 표 1·3–6, 2017 표 4 원문 전사(test/ref/biesinger, 436 값 대조).
+- 방법: 화학종 = 포락선(간격·%·FWHM 고정), 자유 = 위치 하나(± 0.25 eV, Cu 0.2) + 넓이 하나, 선택 FWHM 배율 0.6–1.6×; PE 10/20 열 선택; 모양 Ni LA(1.1,2.2,10) · Fe LA(1.2,4.8,3) · Cu(0) GL(90) · Cu₂O GL(80) · 나머지 GL(30). 배경 = 피팅 안 Shirley(기울기 0) — 정적 Shirley 는 합성에서 최대 12.2 %p(Fe)·11.0 %p(Co) 틀림.
+- 파생: 화학종 분율 ± σ(연결 넓이를 따라가는 델타 방법), 합(Ni²⁺ · Co²⁺ · Fe³⁺ · Fe²⁺ · Mn³⁺ · Cr³⁺ · Cu(0)+Cu(I) · Cu(II)), Cu(II) shake-up 식 1–2(정의에서 유도: %Cu(II) = B(1 + A1s/Bs)/(A + B), CuO 1.89 · Cu(OH)₂ 1.57).
+- 표 불일치: Cu 표 4 % 의 주선/위성 1.73 · 1.46 vs A1s/Bs 1.89 · 1.57(식 2 가 +2.4–2.8 %p), Cr₂O₃ % 합 103, Mn pyrolusite % 합 80.1(안 씀), Fe₃O₄ 31.4 : 68.5, BE 차 vs 간격 ≤ 0.1 eV(반올림).
+- 화면: 화학종 체크(기본 금속 + 산화물 + 수산화물) · PE · FWHM× · Fe₃O₄ 1:2, 설명은 title. Fit check: 묶음 단위 판정, 'Remove <화학종>'(연결 정확히 다시 걸기), 포락선끼리 합쳐짐 판정 안 함, 2p 위성 영역 → Apply recipe.
+- 코어: 넓이 초기화에 `afloor`(표시된 성분만, 출발 ≥ 2 % — 0 출발이 위치를 얼려 χ²ν 18–57 이던 결함). 기존 피팅 24 457 비트 동일.
+- 검증: 합성 혼합 18(원소마다 3) 분율 최대 |Δ| Ni 1.21 · Co 1.81 · Fe 0.22 · Mn 1.17 · Cr 0.42 · Cu 1.56 %p, χ²ν 0.96–1.17, Δ/σ rms 1.15. 시험: guide 50 · xps 155 · casa 111 · casa_v3 117 · shapes2 77 · real_kara 44 · real_a2 23 · real_ce 9 · multi 50 · arxps 32 · proc 76 · image 23 · Chromium ui_xps_guide 13 · ui_xps · fixes 27 · casa 21 · shapes2 13 · multi 43 · fitlog_compare 24 457 피팅 비트 동일.
+
 ## XPS v1.9.5 (2026-10-31) — 문헌 값 원문 대조 ①–③
 - **Scofield 단면적 전면 교체**: J.H. Scofield, J. Electron Spectrosc. Relat. Phenom. 8, 129 (1976) 표 1(1254 eV)·표 2(1487 eV)를 원문 PDF 에서 한 쪽씩 전부 옮겨 적음(Al 1066 · Mg 1030 아껍질). 이전 표(KherveFitting 디지털화)의 오류 수정 — 10 배 자릿수 오류: Mg Na 2s 3.9→0.390, Mg Ti 3s 4.08→0.408, Mg Zr 4s 3.05→0.305, Mg Zr 4p 3.666→0.903, Al K 3p 0.037→0.362; 칸 밀림: Mg Pr 3p3/2 30.72→9.75, Mg Au 4s 1.115→1.45; 비율로 쪼갠 값: Al 2p1/2 0.179→0.1811, 2p3/2 0.358→0.356 외; 빠진 아껍질 약 590 개 추가. 검사: 이전 표와 일치 여부, Z 에 대한 매끄러움, Al/Mg 비의 매끄러움. 전사본 test/ref/scofield1976_transcription.json.
 - **스핀–궤도 Δ 출처 순서**: Δ ≥ 2 eV 는 X-ray Data Booklet(원자 준위 편집값) 먼저 — Avantage 원소표 위치는 정수 반올림이 많아 78/357 이 ≥ 0.3 eV 다름(Ce 3d 18 vs 18.6, Xe 3d 15 vs 12.6, Ge 2p 26.5 vs 31.1). Δ < 2 eV 는 Booklet 0.1 eV 반올림이 상대 오차로 커서(Si 2p 0.4 vs ≈0.6) 이전처럼 Avantage 먼저.

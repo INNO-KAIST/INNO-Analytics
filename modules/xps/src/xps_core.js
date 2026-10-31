@@ -781,7 +781,10 @@ function initAreas(prob,map,v){
   prob.comps.forEach((c,ci)=>{ if(freeArea.some(fi=>map.free[fi].ci===ci)) return; if(map.links.some(l=>l.ci===ci&&l.k==="area")) return; const u=compEval(c,E,ctx); for(let i=0;i<n;i++) rhs[i]-=u[i]; });
   for(let i=0;i<n;i++) rhs[i]*=sw[i];
   const a=nnls(cols,rhs);
-  freeArea.forEach((fi,j)=>{ const f=map.free[fi]; const val=Math.max(a[j],1e-9*(Math.abs(prob.y[0])+1)); setP(prob.comps[f.ci],"area",Math.min(val,f.hi)); });
+  // v1.9.6: an area flagged c.afloor (envelope recipe anchors, SPEC §17.7) starts at ≥ afloor × the largest NNLS area — a zero start leaves the
+  // envelope's position column ≈ 0 and LM stops with the other positions frozen. Unflagged areas: unchanged (bit-identical fits)
+  let amax=0; freeArea.forEach((fi,j)=>{ if(prob.comps[map.free[fi].ci].afloor>0&&a[j]>amax) amax=a[j]; });
+  freeArea.forEach((fi,j)=>{ const f=map.free[fi]; let val=Math.max(a[j],1e-9*(Math.abs(prob.y[0])+1)); const fl=prob.comps[f.ci].afloor; if(fl>0&&amax>0) val=Math.max(val,fl*amax); setP(prob.comps[f.ci],"area",Math.min(val,f.hi)); });
   applyLinks(prob,map);
   if(prob.bg.type==="active"){
     const p=endpoints(E,prob.y,prob.bg.n||5); const P=new Float64Array(n); prob.comps.forEach(c=>{ const u=compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=u[i]; });

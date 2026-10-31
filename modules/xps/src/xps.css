@@ -239,3 +239,6 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .xps-chk-d{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin:4px 0 2px}
 .xps .xps-chk-d b{font-size:13px;font-variant-numeric:tabular-nums}
 .xps .xps-chk-d>span{cursor:help}
+.xps .xps-rcp-env{gap:2px 10px;font-size:12px;margin-top:0}
+.xps .xps-rcp-sp{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;cursor:help}
+.xps .xps-rcp-sp input{margin:0}
