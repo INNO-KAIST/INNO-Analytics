@@ -125,7 +125,8 @@ Gm = 0.7 + 0.3 * cosd(thm)
 Im = Itrue * Gm[None, :]
 sIm = 0.01 * Im
 Im = Im + sIm * rng.normal(size=Im.shape)
-a0 = int(np.argmin(thm)); m0 = Im[:, a0] / Im[:, a0].sum()
+# default model: the uniform composition that reproduces the most-normal-angle intensities through the kernel (Σ_j W_kaj = L_k cosθ_a)
+a0 = int(np.argmin(thm)); m0 = Im[:, a0] / np.asarray(Lm); m0 = m0 / m0.sum()
 mdef = np.tile(np.maximum(m0, 1e-6)[:, None], (1, J_)); mdef = mdef / mdef.sum(0)
 
 def softmax(u):

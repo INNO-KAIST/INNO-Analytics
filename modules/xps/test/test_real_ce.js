@@ -9,7 +9,7 @@
 "use strict";
 const path=require("path"), fs=require("fs");
 const ROOT=path.join(__dirname,"data","real","ce");
-if(!fs.existsSync(path.join(ROOT,"Ce3d Scan.VGD"))){ console.log("test/data/real/ce absent — real-data case S3 skipped (skip)"); process.exit(0); }
+if(!fs.existsSync(path.join(ROOT,"Ce3d Scan.VGD"))){ console.log("\nSKIPPED (data absent): test_real_ce — test/data/real/ce/Ce3d Scan.VGD not found (private data, not in the public backup); 0 checks run"); process.exit(0); }
 const IO=require("../src/xps_io.js"), C=require("../src/xps_core.js"), G=require("../src/xps_guide.js"), L=require("../src/xps_lib.js");
 let pass=0, fail=0; const fails=[];
 function ok(cond,name,info){ if(cond) pass++; else { fail++; fails.push(name+(info?" — "+info:"")); } console.log((cond?"  ok  ":"  FAIL")+" "+name+(info!=null&&info!==""?"  ("+info+")":"")); }
@@ -53,6 +53,6 @@ const show=d=>d.map(x=>`[${x.sev}] ${x.label}`).join(" | ");
   const R1=C.sliceRegion(o1.be,o1.y,527,531); const ys=C.smoothQ(Float64Array.from(R1.E),Float64Array.from(R1.y),3); let best=null;
   for(let i=2;i<ys.length-2;i++){ const d2=ys[i+1]-2*ys[i]+ys[i-1]; if(!best||d2<best.d2) best={be:R1.E[i],d2}; }
   info("O 1s lattice shoulder (raw, max curvature)",`${best.be.toFixed(2)} eV`);
-  console.log(`\ntest_real_ce: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
+  console.log(`\ntest_real_ce: ${pass} passed, ${fail} failed, 0 skipped (${((Date.now()-t0)/1000).toFixed(0)} s)`);
   if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
 })().catch(e=>{ console.error(e); process.exitCode=1; });

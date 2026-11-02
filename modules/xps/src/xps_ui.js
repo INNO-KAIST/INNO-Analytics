@@ -32,7 +32,8 @@ const ACCEPT=".vgd,.vms,.npl,.xls,.xlsx,.txt,.csv,.dat,.xy,.avg,.json";
 const ORB_J={s:null,p:["3/2","1/2"],d:["5/2","3/2"],f:["7/2","5/2"]};
 
 /* ---------------- 상태 ---------------- */
-function defState(){ return {v:1,specs:[],sel:null,proc:{},samples:{},quant:{lib:"scofield",imfp:{model:"power",n:0.7,mat:{rho:5,Nv:24,M:150,Eg:3}},tf:{model:"auto",x:1},custom:{},rows:{}},ui:{tab:"fit",showRef:true,resid:"norm",overlay:[],ovNorm:"max",ovOffset:0,selComp:null,addMode:false,survey:{},ws:"spectra"}}; }
+const STATE_SV=2;   // v1.9.8 state schema version (see migrateState)
+function defState(){ return {v:1,sv:STATE_SV,specs:[],sel:null,proc:{},samples:{},quant:{lib:"scofield",imfp:{model:"power",n:0.7,mat:{rho:5,Nv:24,M:150,Eg:3}},tf:{model:"auto",x:1},custom:{},rows:{}},ui:{tab:"fit",showRef:true,resid:"norm",overlay:[],ovNorm:"max",ovOffset:0,selComp:null,addMode:false,survey:{},ws:"spectra"}}; }
 let S=defState(), ROOT=null, PV={}, LOADED=false, WORK=null, RUN=null;
 const DBN="innoanalytics_xps", DBS="proj";
 function idb(){ return new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,1); q.onupgradeneeded=()=>q.result.createObjectStore(DBS); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }catch(e){ rej(e); } }); }
@@ -45,6 +46,22 @@ function save(){ clearTimeout(_svT); _svT=setTimeout(()=>{ _svT=null; dbPut(_sna
 function flushSave(){ if(_svT){ clearTimeout(_svT); _svT=null; dbPut(_snap()); } }
 try{ window.addEventListener("pagehide",flushSave); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushSave(); }); }catch(e){}
 function revive(o){ return JSON.parse(JSON.stringify(o),(k,v)=>v&&typeof v==="object"&&Array.isArray(v.__f64)?Float64Array.from(v.__f64):v); }
+/* v1.9.8 — saved-state migration (project file and IndexedDB). S.sv = state schema version (S.v stays 1: the stored-state marker).
+   Defaults are deep-merged (a saved quant.imfp without mat used to crash the Quantification panel); nothing that changes a result is altered
+   silently — differences are reported (notes) and shown in the Quantification panel until the user acts. SPEC §17.9. */
+const isPlain=v=>!!v&&typeof v==="object"&&!Array.isArray(v)&&!ArrayBuffer.isView(v);
+function deepDefaults(def,v){ if(!isPlain(def)) return v===undefined?def:v; if(!isPlain(v)) return v===undefined||v===null?def:v;
+  const o=Object.assign({},v); Object.keys(def).forEach(k=>{ o[k]=deepDefaults(def[k],v[k]); }); return o; }
+const vgdTfUnknown=s=>!!(s&&s.format==="VGD"&&s.meta&&s.meta.tf&&!("tfRemoved" in s.meta));   // read before v1.9.2: prop 415 (TXF removed?) not recorded
+function migrateState(r){ const D=defState(), notes=[]; const sv=+(r&&r.sv)||1;
+  const st=deepDefaults(D,r||{}); st.sv=STATE_SV;
+  const nTf=(st.specs||[]).filter(vgdTfUnknown).length;
+  if(nTf) notes.push(`${nTf} VGD spectra were saved before the 'TF removed at acquisition' flag existed: if their transmission function was already removed, Quantification may apply it twice — re-read the original .VGD files (Open files) to refresh the flag; results are unchanged until then.`);
+  const im=st.quant&&st.quant.imfp, n0=D.quant.imfp.n; if(im&&im.n!=null&&+im.n!==n0&&sv<STATE_SV&&!st.quant.imfpOld) st.quant.imfpOld=+im.n;
+  if(st.quant&&st.quant.imfpOld!=null) notes.push(`IMFP exponent n = ${st.quant.imfpOld} kept from the saved project (the default is now ${n0}, v1.9.5) — at% use the saved value until you change it.`);
+  return {st,notes,from:sv}; }
+function migNotesHTML(){ const n=(S.specs||[]).filter(vgdTfUnknown).length, im=S.quant&&S.quant.imfpOld; if(!n&&im==null) return "";
+  return `<div class="xps-mig" id="xqMig">${n?`<div class="warn" data-mig="tf">${n} VGD spectra from an older project: TF-removed flag unknown — the TF may be applied twice. <button class="btn xs" id="xqMigRe" title="Pick the original .VGD files: only the transmission metadata of the matching spectra is refreshed (data and fits are kept)">Re-read VGD files</button></div>`:""}${im!=null?`<div class="muted xs" data-mig="imfp">IMFP n = ${esc(String(S.quant.imfp.n))} from the saved project (default now 0.7). <button class="btn xs" id="xqMigN">Use 0.7</button> <button class="btn xs" id="xqMigK">Keep</button></div>`:""}</div>`; }
 
 /* ---------------- 접근자 ---------------- */
 const cur=()=>S.specs.find(s=>s.uid===S.sel)||null;
@@ -75,6 +92,9 @@ async function loadFiles(list,lopt){
   // 이미 열린 같은 스펙트럼(같은 시료·영역·파일·형식·점 수·첫 BE·첫 세기 · VAMAS 블록 번호 · 여러 열 텍스트의 열 번호)은 다시 넣지 않는다
   const sig=s=>[SK(s),s.region,s.file,s.format,s.n,(+s.be[0]).toFixed(4),(+s.y[0]).toPrecision(8),s.meta&&s.meta.vamas?s.meta.vamas.blockIndex:"",s.meta&&s.meta.mcol?s.meta.mcol.col:""].join("|");
   const have=new Set(S.specs.map(sig)); const isDup=s=>{ const k=sig(s); if(have.has(k)) return true; have.add(k); return false; };
+  // v1.9.8: re-reading a VGD that an older project holds refreshes only its transmission metadata (TF-removed flag, prop 415) — data and fits are kept
+  const bySig=new Map(S.specs.map(s=>[sig(s),s])); let nTfFix=0;
+  const refreshTf=sp=>{ const o=bySig.get(sig(sp)); if(!o||!vgdTfUnknown(o)||!sp.meta||!("tfRemoved" in sp.meta)) return; o.meta.tf=sp.meta.tf; o.meta.tfRemoved=sp.meta.tfRemoved; o.meta.tfMode=sp.meta.tfMode; nTfFix++; };
   for(const file of arr){
     try{
       const u8=new Uint8Array(await file.arrayBuffer());
@@ -85,7 +105,7 @@ async function loadFiles(list,lopt){
       const r=await IO.readFile(file.name,u8,{});
       if(r.vamas&&/^(MAP|SEM)/i.test(r.vamas.mode||"")){ const pos=r.spectra.filter(s=>s.meta&&s.meta.vamas&&s.meta.vamas.x!=null&&s.meta.vamas.y!=null);
         if(pos.length>=4){ await imgLoadDB(); nImg+=stacksFromVamas(pos,file.name).length; r.spectra=r.spectra.filter(s=>!pos.includes(s)); if(!r.spectra.length) continue; } }
-      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++;
+      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; refreshTf(sp); return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++;
         const ac=axisCheck(sp); if(ac){ sp.warn.push(ac.msg); if(ac.fits&&isText(sp)) axq.push(sp); }
         if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
       if(r.tables&&r.tables.length) r.tables.forEach(t=>{ if(/peak/i.test(t.name)&&t.rows.length>1) warns.push(file.name+": Avantage '"+t.name+"' 표가 있습니다(Info 탭)"); });
@@ -96,6 +116,7 @@ async function loadFiles(list,lopt){
   else if(nNew>=2&&S.ui.ws==="spectra"&&S.specs.slice(-nNew).some(s=>s.meta&&(s.meta.mcol||(s.meta.vamas&&s.meta.vamas.expVars&&s.meta.vamas.expVars.length)))) note("여러 단계(깊이·각도) 자료입니다 — 위의 Series · ARXPS 에서 묶어 볼 수 있습니다","",{label:"Open Series",fn:()=>{ S.ui.ws=(S.specs.slice(-1)[0].meta.vamas&&/angle/i.test(((S.specs.slice(-1)[0].meta.vamas.expVars||[])[0]||{}).label||""))?"arxps":"series"; save(); rerender(); }});
   save(); rerender();
   if(nNew) note(`스펙트럼 ${nNew}개를 읽었습니다`+(nDup?` (이미 열린 ${nDup}개는 건너뜀)`:"")+(warns.length?` — 확인할 점 ${warns.length}건(Info 탭)`:""),"ok");
+  else if(nTfFix) note(`Transmission metadata refreshed for ${nTfFix} VGD spectra (TF-removed flag read from the file) — Quantification now uses it`,"ok");
   else if(nDup) note(`이미 열려 있는 스펙트럼입니다 (${nDup}개) — 새로 넣지 않았습니다`);
   errs.forEach(e=>note(e,"warn"));
   axq.forEach(sp=>{ const ac=axisCheck(sp); if(ac) note(`${sp.name}: ${ac.msg}`,"warn",{label:`Read as ${ac.other}`,fn:()=>applyAxis(sp,ac.other,sp.hv)}); });
@@ -688,7 +709,7 @@ function casaEq1(c,sm,win){ let q; try{ q=C.compToCasa(c,win||undefined); }catch
    ============================================================ */
 function render(root){
   ROOT=root;
-  if(!LOADED){ LOADED=true; root.innerHTML=`<div class="card"><div class="xps-empty">XPS 작업을 불러오는 중…</div></div>`; dbGet().then(o=>{ if(o&&o.v===1){ const r=revive(o); S=Object.assign(defState(),r); S.ui=Object.assign(defState().ui,r.ui||{}); S.quant=Object.assign(defState().quant,r.quant||{}); } if(ROOT===root) build(root); }); return; }
+  if(!LOADED){ LOADED=true; root.innerHTML=`<div class="card"><div class="xps-empty">XPS 작업을 불러오는 중…</div></div>`; dbGet().then(o=>{ if(o&&o.v===1){ const M=migrateState(revive(o)); S=M.st; if(M.from<STATE_SV&&M.notes.length) setTimeout(()=>note(M.notes.join(" "),"warn"),0); } if(ROOT===root) build(root); }); return; }
   build(root);
 }
 function build(root){
@@ -1068,7 +1089,7 @@ function fitStrip(r,sp){
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=2;   // v1.9.7: overlap rules (R10)
+const CHECK_V=3;   // v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
 const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
@@ -1131,11 +1152,11 @@ function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free)
   if(r.check&&r.check.sh===sh&&r.check.v===CHECK_V&&r.check.pk===pk) return r.check.items;
   const R=C.sliceRegion(sp.be,sp.y,r.lo!=null?r.lo:p.lo,r.hi!=null?r.hi:p.hi); if(!R||R.E.length!==r.mu.length) return null;
   const rg=sp.reg||{}; const so=rg.el?soInfo(rg.el,rg.orb):null; const rc=(r.comps||[]).find(c=>c.recipe); let items=[];
-  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
+  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,recipeMeta:rc&&p.recipe&&p.recipe.id===rc.recipe?p.recipe:null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
   r.check={sh,v:CHECK_V,items,pk}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
-  const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null); if(!dv.length) return "";
-  return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" title="${esc(d.tip)}">${esc(d.label)} <b>${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
+  const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null||d.flag); if(!dv.length) return "";
+  return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" class="${d.fixed?"fx":d.flag?"fl":""}" title="${esc(d.tip)}">${esc(d.label)} <b>${d.flag&&d.v>=100?"≥ ":""}${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %${d.fixed?` <span class="muted xs">fixed</span>`:""}${d.flag?` <span class="badge wr" title="${esc(d.flag)}">!</span>`:""}</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
 function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
   const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
   const st=s?`<span class="muted xs" title="${esc(`Staged fit (SPEC §17.4): stage χ² ${s.stages.map(q=>g(q.chi2,5)).join(" → ")}; data-variance χ²_d staged ${g(s.chi2dStaged,6)} vs normal fit ${g(s.chi2dNormal,6)} — the lower one is kept`)}">staged: kept ${esc(s.used)} ⓘ</span>`:"";
@@ -1432,19 +1453,28 @@ function rsfLookup(el,line,src,hv){
   if(src==="althermo1"){ if(s!=="al") return null; return L.althermo1&&L.althermo1[key]!=null?{v:L.althermo1[key],src:"ALTHERMO1"}:null; }
   if(!s) return null; const t=(L.scofield&&L.scofield[s])||{}; return t[key]!=null?{v:t[key],src:"Scofield "+(s==="al"?"Al":"Mg")}:null;
 }
-/* 이 원소에서 감도계수가 있는 선 전부(궤도 합 먼저, Scofield 큰 순) — 어떤 원소든 */
-function lineChoices(el,orb){
-  const t=(LIB().scofield||{}).al||{}; const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")).map(k=>k.slice(el.length+1));
+/* v1.9.8 — lines by X-ray source (SPEC §17.9): the Scofield table of the spectrum's source (Al Kα / Mg Kα; other hν → Al table as before) and only
+   lines that can be measured with it: BE < hν − 100 eV (KE ≥ 100 eV — e.g. Se 2p, Er/Tm 3d lie above hν − 100 under Al Kα, Ho 3d under Mg Kα). */
+function srcTab(hv){ const s=srcOf(hv||1486.6)||"al"; return {s,t:((LIB().scofield||{})[s])||{},h:s==="mg"?1253.6:1486.6}; }
+const KE_MIN=100;
+/* every line with a sensitivity factor for this element (orbital totals first, larger S first), for the row's source */
+function lineChoices(el,orb,hv){
+  const {t,h}=srcTab(hv), lv=((LIB().core||{})[el]||{}).lv||{}; const beOf=k=>{ const o=k.replace(/(1\/2|3\/2|5\/2|7\/2)$/,""); const v=Object.entries(lv).filter(([q])=>q===k||q.startsWith(o)).map(([,x])=>x); return v.length?Math.max(...v):null; };
+  const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")).map(k=>k.slice(el.length+1)).filter(k=>{ const be=beOf(k); return be==null||be<h; });
   const tot=ks.filter(k=>k.length===2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]), sub=ks.filter(k=>k.length>2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]);
   const out=[]; if(orb) out.push(orb); tot.concat(sub).forEach(k=>{ if(!out.includes(k)) out.push(k); }); return out.length?out:[orb||""];
 }
-/* 한 원소의 '주선'(Scofield Al 이 가장 큰 궤도 합 — 예: Ba 3d, Co 2p) 과 그 subshell 라이브러리 BE */
-function mainLine(el){ const L=LIB(), t=(L.scofield||{}).al||{}, lv=((L.core||{})[el]||{}).lv||{};
-  const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")&&k.length-el.length-1===2).map(k=>k.slice(el.length+1)).filter(o=>Object.keys(lv).some(q=>q.startsWith(o)));
-  if(!ks.length) return null; ks.sort((a,b)=>t[el+" "+b]-t[el+" "+a]); const o=ks[0];
-  return {orb:o,key:el+" "+o,bes:Object.entries(lv).filter(([q])=>q.startsWith(o)).map(([q,v])=>({sub:q,be:v}))}; }
-/* 같은 원소의 여러 선(예: Co 2p·Co 3p) 중 '센 선' 순위 값: 행의 선 이름으로 Scofield Al */
-function lineStrength(el,line){ const t=((LIB().scofield||{}).al)||{}; const v=t[el+" "+line]; if(v!=null) return v;
+/* measurable orbital totals of an element for the source, strongest first: [{orb,key,S,bes:[{sub,be}]}] */
+function practicalLines(el,hv){ const {t,h}=srcTab(hv), lv=((LIB().core||{})[el]||{}).lv||{};
+  return Object.keys(t).filter(k=>k.startsWith(el+" ")&&k.length-el.length-1===2).map(k=>k.slice(el.length+1)).map(o=>({orb:o,key:el+" "+o,S:t[el+" "+o],bes:Object.entries(lv).filter(([q])=>q.startsWith(o)).map(([q,v])=>({sub:q,be:v}))}))
+    .filter(x=>x.S>0&&x.bes.length&&Math.max(...x.bes.map(b=>b.be))<h-KE_MIN).sort((a,b)=>b.S-a.S); }
+/* an element's 'main line': the strongest measurable orbital total (e.g. Ba 3d, Co 2p; Se 3p, not 2p, under Al Kα) */
+function mainLine(el,hv){ const L=practicalLines(el,hv); return L.length?L[0]:null; }
+/* lines strong enough to disturb another region: measurable and S ≥ 25 % of the main line (Si 2p and 2s, Pt 4d·4f·4p) */
+const STRONG_FR=0.25;
+function strongLines(el,hv){ const L=practicalLines(el,hv); if(!L.length) return []; return L.filter(x=>x.S>=STRONG_FR*L[0].S); }
+/* rank of a line among the lines of the same element (Co 2p vs Co 3p): S of the row's source */
+function lineStrength(el,line,hv){ const {t}=srcTab(hv); const v=t[el+" "+line]; if(v!=null) return v;
   const o=(line||"").replace(/(1\/2|3\/2|5\/2|7\/2)$/,""); return t[el+" "+o]!=null?t[el+" "+o]:0; }
 function quantRows(sample){
   const rows=[]; const skipped=[];
@@ -1471,21 +1501,21 @@ function quantRows(sample){
     });
   });
   // 기본 포함: 원소마다 가장 센 선(Scofield) 하나만 — 같은 원소의 다른 선(Co 2p 와 Co 3p)이 둘 다 Σ 에 들어가지 않게. 사용자가 체크한 것은 그대로
-  const best={}; rows.forEach(r=>{ const v=lineStrength(r.el,r.line); if(!best[r.el]||v>best[r.el].v) best[r.el]={v,id:r.id}; });
+  const best={}; rows.forEach(r=>{ const v=lineStrength(r.el,r.line,r.hv); if(!best[r.el]||v>best[r.el].v) best[r.el]={v,id:r.id}; });
   rows.forEach(r=>{ r.weaker=best[r.el].id!==r.id; r.inc=r.incSet!=null?r.incSet!==false:!r.weaker; });
   rows.skipped=skipped;
   return rows;
 }
-/* 창 안에 다른 원소의 주선: 포함된 원소 + 이 시료 survey 에서 채택한 원소의 주선 BE(라이브러리, 원소 상태)가 행의 피팅 창(보정 BE) 안이면 경고.
-   예: Co 2p 창(775–810 eV) 안의 Ba 3d5/2 780 eV — 넓이에 Ba 가 섞인다 */
+/* 창 안에 다른 원소의 센 선: 포함된 원소 + 이 시료 survey 에서 채택한 원소의 센 선(v1.9.8: 그 스펙트럼의 X 선원에서 측정 가능한 선 중 S ≥ 주선의 25 %,
+   라이브러리 BE)이 행의 피팅 창(보정 BE) 안이면 경고. 예: Co 2p 창(775–810 eV) 안의 Ba 3d5/2 780 eV — 넓이에 Ba 가 섞인다 */
 function interferences(sample,rows){
   const els=new Set(rows.filter(r=>r.inc).map(r=>r.el));
   sampleSpecs(sample).forEach(s=>{ const st=S.ui.survey[s.uid]; if(st&&st.acc) Object.keys(st.acc).forEach(e=>{ if(st.acc[e]) els.add(e); }); });
   const out=[], seen=new Set();
   rows.filter(r=>r.inc).forEach(r=>{ const p=pr(r.sp), lo=p.lo+r.sh, hi=p.hi+r.sh;
-    els.forEach(e=>{ if(e===r.el) return; const m=mainLine(e); if(!m) return; const hit=m.bes.filter(b=>b.be>=lo&&b.be<=hi); if(!hit.length) return;
-      const k=r.id+"|"+e; if(seen.has(k)) return; seen.add(k);
-      out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 주선(${hit.map(b=>f(b.be,1)).join(", ")} eV) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); });
+    els.forEach(e=>{ if(e===r.el) return; const SL=strongLines(e,r.hv); SL.forEach(m=>{ const hit=m.bes.filter(b=>b.be>=lo&&b.be<=hi); if(!hit.length) return;
+      const k=r.id+"|"+e+"|"+m.orb; if(seen.has(k)) return; seen.add(k);
+      out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 선(${hit.map(b=>f(b.be,1)).join(", ")} eV${m===SL[0]?", 주선":""}) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); }); });
   return out;
 }
 /* VGD prop 415 (Acq_TXFN_Correction) = true: transmission 은 측정 때 이미 제거됨 → 'auto'·'profile' 에서 TF 를 다시 나누지 않는다 (이중 보정 — K-Alpha 실측에서 at% 최대 9.8 차, SPEC §4).
@@ -1527,9 +1557,10 @@ function panelQuant(el,sp){
    <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">From file (VGD/avg), else none</option><option value="power">(PE/KE)^x</option><option value="none">None</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}${nRm?`<span class="badge inf" data-tfrm="panel" title="${esc(TF_RM_TIP)}">TF already removed at acquisition (${nRm})</span>`:""}${pwRm?`<span class="badge wr" data-tfrm="power" title="${esc(TF_RM_TIP)} (PE/KE)^x is applied anyway because you chose it — this corrects twice.">TF applied twice?</span>`:""}${tq.model==="auto"&&anyVgdTF?`<label class="xps-f" title="Read the VGD/avg transmission coefficients as in the Avantage manual: log10[A/(PE·XSF)] = a + b·x + c·x² + d·x³, x = log10(KE/PE) → T = PE·10^poly. Off = earlier natural-log reading (SPEC §4)"><input type="checkbox" id="xqTfAv" ${S.quant.tfAv?"checked":""}> Avantage form (log10)</label>`:""}</div>
    <div class="xps-row"><span class="xps-f">IMFP <select class="xps-sel" id="xqIm"><option value="power">KE^n</option><option value="tpp2m">TPP-2M (enter material)</option><option value="none">None</option></select></span>${im.model==="power"?`<span class="xps-f" title="λ ∝ KE^n. TPP-2M (Tanuma, Powell &amp; Penn, Surf. Interface Anal. 21, 165 (1994), Eq. 3–8) gives an effective n of 0.64–0.77 between 200 and 1500 eV for C, Si, SiO₂, CeO₂ and Au (computed in INNO) → default 0.7 (v1.9.5; was 0.6, uncited). For the most faithful value choose TPP-2M and enter the material.">n <input type="number" class="w56" step="0.05" id="xqImn" value="${im.n}"></span>`:""}
      ${im.model==="tpp2m"?`<span class="xps-f" title="Density (g/cm³)">ρ <input type="number" class="w56" step="0.1" id="xqR" value="${im.mat.rho}"></span><span class="xps-f" title="Valence electrons per molecule (or atom)">Nv <input type="number" class="w56" id="xqNv" value="${im.mat.Nv}"></span><span class="xps-f" title="Molar mass (g/mol)">M <input type="number" class="w64" id="xqM" value="${im.mat.M}"></span><span class="xps-f" title="Band gap (eV)">Eg <input type="number" class="w56" step="0.1" id="xqEg" value="${im.mat.Eg}"></span>`:""}</div>
+   ${migNotesHTML()}
    <div class="tw" style="margin-top:6px"><table class="xps-tbl xq-tbl"><thead><tr><th></th><th>Element · line</th><th class="num">at %</th><th class="num">BE</th><th class="num">Area</th><th class="num">RSF (S)</th><th class="num">T</th><th class="num">λ</th></tr></thead><tbody>
    ${rows.map(r=>{ const q=qi.get(r.id); const atC=`<td class="num xq-at">${q&&q.nd?`<span class="badge wr" title="Area ≤ 0 or below 2σ — not detected; excluded from the sum">n.d.</span>`:`<b>${q?f(q.at,2):"—"}</b>${q&&q.sAt?`<div class="muted xs">± ${f(q.sAt,2)}</div>`:""}${q&&q.sAt&&qmi.get(r.id)?`<div class="muted xs xq-mc" title="Monte Carlo 95 % interval: 2000 draws of every area within its σ (CasaXPS-style). Differs from ±σ when area errors are large">${f(qmi.get(r.id).lo,2)}–${f(qmi.get(r.id).hi,2)}</div>`:""}`}</td>`;
-     return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
+     return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line,r.hv).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
      <td class="num">${f(r.BE+r.sh,2)}</td><td class="num">${g(r.area,5)}${r.sArea?`<div class="muted xs">± ${g(r.sArea,3)}</div>`:""}</td>
      <td class="num"><input type="number" class="w56" step="any" data-qrsf="${esc(r.id)}" value="${r.S!=null?+(+r.S).toPrecision(5):""}" placeholder="?"><div class="muted xs">${esc(r.Ssrc)}</div></td>
      <td class="num">${q?g(q.T,4):"—"}${r.tf&&r.tf.removed?`<div class="muted xs" data-tfrm="${esc(r.id)}" title="${esc(TF_RM_TIP)}">removed ⓘ</div>`:""}</td><td class="num">${q?g(q.L,4):"—"}</td></tr>`; }).join("")}
@@ -1554,7 +1585,10 @@ function panelQuant(el,sp){
   const tav=$q(el,"#xqTfAv"); if(tav) tav.onchange=()=>{ S.quant.tfAv=tav.checked; save(); renderPanel(); };
   const tx=$q(el,"#xqTfx"); if(tx) tx.onchange=()=>{ S.quant.tf.x=+tx.value; save(); renderPanel(); };
   $q(el,"#xqIm").onchange=e=>{ S.quant.imfp.model=e.target.value; save(); renderPanel(); };
-  const imn=$q(el,"#xqImn"); if(imn) imn.onchange=()=>{ S.quant.imfp.n=+imn.value; save(); renderPanel(); };
+  const imn=$q(el,"#xqImn"); if(imn) imn.onchange=()=>{ S.quant.imfp.n=+imn.value; delete S.quant.imfpOld; save(); renderPanel(); };
+  const mR=$q(el,"#xqMigRe"); if(mR) mR.onclick=()=>{ const fi=ROOT&&ROOT.querySelector("#xpsFin"); if(fi) fi.click(); };
+  const mN=$q(el,"#xqMigN"); if(mN) mN.onclick=()=>{ S.quant.imfp.n=0.7; delete S.quant.imfpOld; save(); renderPanel(); };
+  const mK=$q(el,"#xqMigK"); if(mK) mK.onclick=()=>{ delete S.quant.imfpOld; save(); renderPanel(); };
   [["xqR","rho"],["xqNv","Nv"],["xqM","M"],["xqEg","Eg"]].forEach(([id,k])=>{ const i=$q(el,"#"+id); if(i) i.onchange=()=>{ S.quant.imfp.mat[k]=+i.value; save(); renderPanel(); }; });
   $a(el,"[data-qinc]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qinc]=S.quant.rows[i.dataset.qinc]||{}); o.inc=i.checked; save(); renderPanel(); });
   $a(el,"[data-qline]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qline]=S.quant.rows[i.dataset.qline]||{}); o.line=i.value; delete o.rsf; save(); renderPanel(); });
@@ -1854,7 +1888,7 @@ function exportFig(kind){ const sp=cur(); const s=figSVG(); if(!s){ note("그림
   const img=new Image(); img.onload=()=>{ const k=3; const cv=document.createElement("canvas"); cv.width=PW*k; cv.height=(PH+RH)*k; const ctx=cv.getContext("2d"); ctx.scale(k,k); ctx.drawImage(img,0,0); cv.toBlob(b=>download(nm+".png",b),"image/png"); }; img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(s); }
 function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니다","warn"); return; } const o=JSON.stringify({app:"INNO Analytics XPS",v:1,saved:new Date().toISOString(),state:S},(k,v)=>ArrayBuffer.isView(v)?{__f64:Array.from(v)}:v);
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
-function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
+function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); const M=migrateState(o.state); S=M.st; PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)"+(M.notes.length?" — "+M.notes.join(" "):""),M.notes.length?"warn":"ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
 
 /* ============================================================
@@ -2580,7 +2614,7 @@ function drawWS(){ if(!ROOT) return; const ws=S.ui.ws||"spectra"; const main=$q(
   else box.innerHTML="";
   placeShared(); drawMsg(); }
 
-window.XPS_UI={_staged:sp=>runStaged(sp||cur()),_recipe:(id,opt)=>applyRecipe(cur(),id,opt),_check:()=>{ const sp=cur(); return sp?checkOf(sp,pr(sp)):null; },_applyCheck:i=>{ const sp=cur(), p=pr(sp); const it=checkOf(sp,p); if(it&&it[i]) applyCheck(sp,p,it[i].act); },render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
+window.XPS_UI={_lines:{mainLine,strongLines,practicalLines,lineChoices,lineStrength},_interferences:(k,rows)=>interferences(k,rows),_migrate:o=>migrateState(o),_importProject:t=>importProject(t),_staged:sp=>runStaged(sp||cur()),_recipe:(id,opt)=>applyRecipe(cur(),id,opt),_check:()=>{ const sp=cur(); return sp?checkOf(sp,pr(sp)):null; },_applyCheck:i=>{ const sp=cur(), p=pr(sp); const it=checkOf(sp,p); if(it&&it[i]) applyCheck(sp,p,it[i].act); },render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
   /* v1.8 Series · ARXPS · Imaging · Processing (시험용 손잡이) */
   _res:()=>RES,_pres:()=>PRES,_ims:()=>IMS,_drawWS:()=>drawWS(),_ser:{compute:q=>serCompute(q),pca:()=>serPCA(),resolve:()=>serResolve(),build:()=>buildSet(SER()),tt:()=>ttRows(),profiles:()=>resolveProfiles(),applyFit:r=>{ const D=buildSet(SER()); const rs=D&&D.regions.find(x=>x.region===r); return rs?serApplyFit(rs):null; }},
   _arx:{get:()=>arxIntensities(),ov:()=>arxFitOv(),ml:()=>arxFitMl(),rdp:()=>arxRDP(),me:()=>arxMaxent(),al:k=>arxAL(arxKE(k))},

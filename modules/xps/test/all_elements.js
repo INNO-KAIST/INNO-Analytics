@@ -121,5 +121,22 @@ function run(opt){
   rep.times=(Date.now()-t0)/1000;
   return rep;
 }
-module.exports={cases,run,synth};
-if(require.main===module){ const r=run(); console.log(JSON.stringify({n:r.n,parse:r.parse.length,rsf:r.rsf.length,mgGap:r.mgGap,dbl:r.dbl,sug:r.sug.length,two:r.two.length,s:r.times},null,0)); console.log("다중항 준위:",r.mult.length,r.mult.join(", ")); console.log("두 상태 자동:",r.nAuto2-r.auto2.length,"/",r.nAuto2); r.auto2.forEach(x=>console.log("  auto2",x)); console.log("r 양성 대조:",r.nRpos-r.rpos.length,"/",r.nRpos); r.rpos.forEach(x=>console.log("  rpos",x)); console.log("r·q 를 잘못 푼 경우(참은 통계 값):",r.relaxed.length,r.relaxed.join(", ")); console.log("잔차로 더한 성분(참 모형은 1 성분):",r.added.length,r.added.join(", ")); console.log("smart 넓은 창(정보):",r.sugWideSmart.length,"Δ고정 두 상태(정보):",r.twoFixed.length,"/",r.nTwoFixed); ["parse","rsf","sug","two","sugWideSmart","twoFixed"].forEach(k=>r[k].slice(0,40).forEach(x=>console.log(k,x))); }
+/* pass/fail verdict — the same nine criteria test/test_xps.js §7 applies to run({seed:31}) (keep the two in step).
+   Standalone: node test/all_elements.js [seed]  → exit 1 if any criterion fails. */
+function checks(r){
+  return [
+    [r.parse.length===0,`file-name parsing, ${r.n} orbitals × 5 forms`,r.parse.slice(0,3).join("; ")],
+    [r.rsf.length===0,`sensitivity factors (Scofield Al · ALTHERMO1) present for all ${r.n} orbitals`,r.rsf.slice(0,5).join(", ")],
+    [r.dbl.length<=3&&r.dbl.every(x=>/^(Ho|Er|Tm) 4d$/.test(x)),"doublet Δ for p·d·f orbitals (only multiplet-dominated Ho·Er·Tm 4d may lack it)",r.dbl.join(", ")],
+    [r.sug.length===0,`single chemical state, ${r.nSug} cases: suggest → fit → truth recovered`,r.sug.slice(0,4).join(" | ")],
+    [r.two.length===0,`two chemical states, ${r.nTwo-r.nTwoFixed} cases: perturbed start → fit → z < 4`,r.two.slice(0,4).join(" | ")],
+    [r.added.length===0,`refineByResidual adds no spurious component (${r.nSug} one-component cases)`,r.added.slice(0,4).join(" | ")],
+    [r.auto2.length===0,`two states by suggest + refine only, ${r.nAuto2} cases`,r.auto2.slice(0,4).join(" | ")],
+    [r.relaxed.length===0,`r·q not relaxed when the truth is statistical (${r.nSug} cases)`,r.relaxed.slice(0,4).join(" | ")],
+    [r.rpos.length<=Math.floor(0.05*r.nRpos),`positive control r = 1.2× statistical: ≥ 95 % of ${r.nRpos} recovered`,`${r.rpos.length} outside: `+r.rpos.slice(0,4).join(" | ")],
+  ].map(([ok,name,info])=>({ok:!!ok,name,info}));
+}
+module.exports={cases,run,synth,checks};
+if(require.main===module){ const seed=+(process.argv[2]||31)||31; const r=run({seed}); console.log(JSON.stringify({n:r.n,parse:r.parse.length,rsf:r.rsf.length,mgGap:r.mgGap,dbl:r.dbl,sug:r.sug.length,two:r.two.length,s:r.times},null,0)); console.log("다중항 준위:",r.mult.length,r.mult.join(", ")); console.log("두 상태 자동:",r.nAuto2-r.auto2.length,"/",r.nAuto2); r.auto2.forEach(x=>console.log("  auto2",x)); console.log("r 양성 대조:",r.nRpos-r.rpos.length,"/",r.nRpos); r.rpos.forEach(x=>console.log("  rpos",x)); console.log("r·q 를 잘못 푼 경우(참은 통계 값):",r.relaxed.length,r.relaxed.join(", ")); console.log("잔차로 더한 성분(참 모형은 1 성분):",r.added.length,r.added.join(", ")); console.log("smart 넓은 창(정보):",r.sugWideSmart.length,"Δ고정 두 상태(정보):",r.twoFixed.length,"/",r.nTwoFixed); ["parse","rsf","sug","two","sugWideSmart","twoFixed"].forEach(k=>r[k].slice(0,40).forEach(x=>console.log(k,x)));
+  const cs=checks(r); console.log(`== verdict (seed ${seed}; criteria of test_xps §7)`); cs.forEach(c=>console.log((c.ok?"  ok   ":"  FAIL ")+c.name+(!c.ok&&c.info?"  ("+c.info+")":"")));
+  const nf=cs.filter(c=>!c.ok).length; console.log(`\nall_elements: ${cs.length-nf} passed, ${nf} failed`); process.exitCode=nf?1:0; }

@@ -17,7 +17,8 @@ const mx=a=>a.reduce((m,v)=>Math.max(m,v),-Infinity);
 const e1=v=>v.toExponential(1), p3=v=>(100*v).toFixed(3)+" %";
 const rd=f=>new Uint8Array(fs.readFileSync(f));
 
-if(!fs.existsSync(ROOT)){ console.log("test/data/real/a2 없음 — 실측 대조를 건너뜀 (skip)"); process.exit(0); }
+if(!fs.existsSync(ROOT)){ console.log("\nSKIPPED (data absent): test_real_a2 — test/data/real/a2 not found (private data, not in the public backup); 0 checks run"); process.exit(0); }
+let skipped=0;   // sections skipped because optional private data are absent
 
 /* ---- 코어: src (패치가 합쳐져 있어야 함) ---- */
 function liveCore(){
@@ -137,7 +138,7 @@ const atErr=(k,tf,areaOf)=>{ const rows=tables[k]; const q=C.quantify(rows.map(r
 
 console.log("== A7 Kratos 자료(test/data/real/kara, 있을 때): v1.8 규약 vs v1.9.2 규약(h = 4, bg.ah 4) — Smart Area(P)");
 { const AV=path.join(__dirname,"data","real","kara","avantage_231107");
-  if(!fs.existsSync(AV)) info("kara 자료 없음 — 건너뜀");
+  if(!fs.existsSync(AV)){ info("kara 자료 없음 — 건너뜀"); skipped++; }
   else { const res={v18:[],v19:[]};
     for(const f of ["1","2","3","4"]){ const X=await IO.readFile(f+".xls",rd(path.join(AV,f+".xls")));
       const pt=X.tables.find(t=>/peak\s*table/i.test(t.name)); const hi=pt.rows.findIndex(r=>r.some(v=>/^name$/i.test(String(v).trim()))); const H=pt.rows[hi].map(v=>String(v).trim()); const col=n=>H.indexOf(n);
@@ -150,6 +151,7 @@ console.log("== A7 Kratos 자료(test/data/real/kara, 있을 때): v1.8 규약 v
     info("v1.8 |ΔA| 중앙 · 최대",`${p3(med(res.v18))} · ${p3(mx(res.v18))}`); info("v1.9.2 (ah 4) |ΔA| 중앙 · 최대",`${p3(med(res.v19))} · ${p3(mx(res.v19))}`);
     ok(res.v19.length===26&&med(res.v19)<med(res.v18)/3&&mx(res.v19)<0.05,"Kratos 26 영역: v1.9.2 규약(h = 4)이 v1.8 보다 중앙값 3 배 이상 작고 최대 < 5 %",`${p3(med(res.v19))} vs ${p3(med(res.v18))}`); } }
 
-console.log(`\n${pass} 통과 · ${fail} 실패`);
+console.log(`\n${pass} 통과 · ${fail} 실패`+(skipped?` · ${skipped} 건너뜀`:""));
+console.log(`test_real_a2: ${pass} passed, ${fail} failed, ${skipped} skipped`+(skipped?" (SKIPPED (data absent): A7 needs test/data/real/kara)":""));
 if(fail){ console.log("실패:\n  "+fails.join("\n  ")); process.exit(1); }
 })().catch(e=>{ console.error(e); process.exit(1); });

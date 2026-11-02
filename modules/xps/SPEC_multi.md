@@ -82,6 +82,8 @@ The Avantage-style "fit within the noise" idea, made statistically exact for Poi
 alternating weighted least squares (B column-wise, then A row-wise), start = rank-n reconstruction of the Poisson-scaled SVD, stop when
 |Δχ²| ≤ 1e-10 χ² (max 300 sweeps). `χ²ₙ` is the converged weighted residual, `dofₙ = (r − n)(c − n)`;
 **n_noise = smallest n with χ²ₙ ≤ dofₙ + 2√(2 dofₙ)**. n = 0 uses the data as variance.
+Being a sequential test at about the 2σ point, it returns K+2 in a few % of realizations even at high counts (≈ 3 % at 30 000 counts in
+the test_multi B1 mixtures) — expected, not a defect; test_multi B1 therefore tests the correct-count rate with a binomial test (≥ 80 % at 1e-3).
 Method `pca` (unweighted reconstruction, Pearson χ²) is kept for speed but is biased high when the dynamic range is large: unweighted
 factors leak high-variance noise into low-count channels (observed χ²/dof = 1.13–1.20 at the true rank for 30 000-count peaks on a
 100-count background).
@@ -183,26 +185,40 @@ angle factor shifts every RDP equally (only order/differences matter). Public de
 Layers j = 0 … J−1 with tops `z_j = j·z_max/(J − 1)` (last semi-infinite), default `z_max = 3·max L·max cosθ`, J = 20.
 Composition `c_kj = softmax_k(u_kj)` (closure Σ_k c = 1, positivity). Kernel `W_kaj = L_k cosθ_a (e^{−z_j/(L_k cosθ_a)} − e^{−z_{j+1}/(L_k cosθ_a)})`,
 model `M_ka = Σ_j c_kj W_kaj`, `χ² = Σ ((I_ka − G_a M_ka)/σ_ka)²` with G_a profiled as in 4.3,
-entropy `S = Σ (c − m − c ln(c/m))` (Skilling form; c floored at 1e-300 inside the logarithm), default model m = composition at the most
-normal angle, constant with depth. Minimize `Q = χ²/2 − αS` over u with L-BFGS (memory 12, Armijo backtracking, analytic gradient
+entropy `S = Σ (c − m − c ln(c/m))` (Skilling form; c floored at 1e-300 inside the logarithm), default model m = the uniform
+composition that reproduces the most-normal-angle intensities through the kernel, constant with depth: Σ_j W_kaj = L_k cosθ_a ⇒
+`m_k ∝ I_k(θ_min)/L_k` (v1.9.8; before, raw I_k(θ_min) normalized — inconsistent with the kernel whenever the L_k differ, e.g. 0.26 instead of
+0.30 for a uniform 30/70 film with L = 2.5/3.0 nm). Minimize `Q = χ²/2 − αS` over u with L-BFGS (memory 12, Armijo backtracking, analytic gradient
 `∂Q/∂u_lj = c_lj (g_lj − Σ_k c_kj g_kj)`, `g = ∂Q/∂c = −Σ_a r_ka G_a W_kaj/σ_ka + α ln(c/m)`; envelope theorem for G).
-**α**: discrepancy ("historic MaxEnt") criterion χ²(α) = N = K·A − A, found by continuation from α = 1e6 down by half-decades (each solve
-warm-started from the previous), then 40 bisection steps in ln α warm-started from the larger-α end. Below the discrepancy α the problem is
-ill-posed (solutions depend on the start); those solutions are never used as starts. If χ² = N is not reached the result is flagged
-`notReached` (model error or σ underestimated).
+**α**: discrepancy ("historic MaxEnt") criterion χ²(α) = N = K·A − A, **guarded against the flat part of χ²(α)** (v1.9.8):
+target `T = max(N, χ²_min + τ·√(2N))`, τ = `chi2Tol` (default 1), α = the largest α with χ²(α) ≤ T. χ²_min is the best attainable fit
+(smallest χ² on the continuation path and one extra solve at α_min, warm-started from the last path solution and never used as a start).
+Reason: the χ² of the true profile is distributed χ²_N (sd √(2N)), so the plateau of χ²(α) lies above or just below N in a sizeable fraction
+of realizations; χ² = N then puts α on the plateau, where the poorly determined deep layers swing to 0/1 (uniform 30/70 film, 1 % noise:
+6 of 20 seeds failed, |Δc| up to 0.70). The guard is Morozov's principle with a safety factor (Engl, Hanke & Neubauer, Regularization of
+Inverse Problems, 1996, §4.3); when χ²_min ≤ N − τ√(2N) (most realizations) T = N exactly. Continuation from α = 1e6 down by half-decades
+(each solve warm-started from the previous) until χ² ≤ N, then ≤ 40 bisection steps in ln α (to 1e-4) for χ² = T, warm-started from the
+larger-α end. `notReached` when χ²_min exceeds the 99 % point of χ²_N (Wilson–Hilferty; model error or σ underestimated) — the guarded α
+(the χ²(α) corner) is returned, not the ill-posed α_min solution. `chi2Tol: 0` restores the unguarded rule exactly (used for the
+reference comparison). Result fields add `target` (T) and `chi2min`.
 
 ### 4.6 Validation (test/test_arxps.js)
 Reference agreement: Seah–Dench exact; overlayer solution vs brentq ≤ 4e-15; angle fits vs scipy least_squares (d, σ, R∞, χ²) ≤ 4e-9;
 multilayer forward ≤ 6e-16, fit d ≤ 2e-11, σ ≤ 3e-8; RDP exact; MaxEnt objective ≤ 1e-12, gradient ≤ 1e-11, fixed-α solutions
-(α = 10, 30, 300) |Δc| ≤ 5e-7, discrepancy α 4.2999 vs 4.2999.
+(α = 10, 30, 300) |Δc| ≤ 5e-7, discrepancy α (chi2Tol 0) 4.2271 vs 4.2271 (reference regenerated with the L-corrected default model).
 Synthetic truth (Poisson counts, 300 realizations): overlayer 0.5 / 1.8 / 5 nm — mean 0.5000 / 1.7999 / 4.9995 nm, ±1.96σ coverage
 94.7 / 95.7 / 94.3 %; end-to-end from the synthetic
 VAMAS angle series (Shirley subtraction → reference fit → R(θ) → fit) d = 1.800 ± 0.001 nm (true 1.8); Hill plot gives 1.90 nm because
-L_o ≠ L_s (use the exact fit). Multilayer (contamination 0.6 nm / oxide 1.5 nm, unknown angle factor, 150 realizations) coverage 95.3 / 94.0 %, mean z −0.05 / −0.15.
-MaxEnt (1 % noise, 10 angles 0–70°, 10 realizations): uniform composition stays within 0.03; A overlayer on B, t = 0.8 / 1.5 / 3 nm →
-equivalent thickness 0.91 ± 0.09 / 1.63 ± 0.11 / 3.12 ± 0.11 nm, 50 % crossing 0.60 / 1.33 / 2.84 nm (interfaces are smeared and the crossing is pulled toward the surface by ≈ 0.2 nm);
+L_o ≠ L_s (use the exact fit). Multilayer (contamination 0.6 nm / oxide 1.5 nm, unknown angle factor, 150 realizations QUICK, 600 full) coverage 95.3 / 94.0 % at 150 (3000 realizations: 95.2 / 94.4 %, mean z −0.03 / −0.00 — calibrated).
+MaxEnt (1 % noise, 10 angles 0–70°, guarded α): uniform 30/70 composition within 0.007 of 0.30 for 20 of 20 seeds (with the old
+raw-I default 0.026–0.038; the unguarded χ² = N rule fails 6/20 with either default, |Δc| up to 0.70); A overlayer on B, t = 0.8 / 1.5 / 3 nm
+(20 realizations) → equivalent thickness within 2·max L = 6 nm 0.815 ± 0.009 / 1.517 ± 0.009 / 3.010 ± 0.006 nm; below 6 nm the profile
+reverts toward the default model and adds a data-independent tail (+0.14–0.24 nm; integrated to z_max: 0.97 / 1.73 / 3.21 nm);
+50 % crossing 0.60 / 1.33 / 2.82 nm (interfaces are smeared and the crossing is pulled toward the surface by ≈ 0.2 nm);
 buried Gaussian layer (centre 2.2 nm) recovered amount +8 %, centroid 2.65 nm (+0.45 nm). Failure modes: a 1 nm layer at 7–8 nm
-(> 2.3 L) is not located (the amount appears spread toward the default); σ underestimated 20× is flagged `notReached`.
+(> 2.3 L) is not located (the amount appears spread toward the default); σ underestimated 20× is flagged `notReached` (α at the
+χ²(α) corner, ≈ 56, not 1e-4). Monte-Carlo checks use exact binomial / 99.9 % acceptance bounds; `SEED_OFFSET=n` shifts every noise seed
+(`test/run_all.sh --seeds 0-9`).
 
 ---
 

@@ -4,11 +4,19 @@
 "use strict";
 const path=require("path"), fs=require("fs");
 const M=require("../src/xps_multi.js"), C=require("../src/xps_core.js");
-const {rng,reporter,maxRel,F64,gl,trapz,stat}=require("./synth_util.js");
+const {rng:rng0,reporter,maxRel,F64,gl,trapz,stat}=require("./synth_util.js");
+/* SEED_OFFSET=n shifts every synthetic-noise seed by n (seed-robustness runs: test/run_all.sh SEEDS=0-9) */
+const SEED_OFFSET=+(process.env.SEED_OFFSET||0)|0; const rng=s=>rng0(s+SEED_OFFSET);
 const REF=JSON.parse(fs.readFileSync(path.join(__dirname,"ref/ref_multi.json"),"utf8"));
 const R=reporter("XPS_MULTI");
 const ok=R.ok;
 const QUICK=!!process.env.QUICK;
+/* statistical acceptance rules for the Monte-Carlo checks (B1, B3, B5): each fails a correct engine for ≤ 0.1 % of seed choices */
+const lgam=x=>{ const g=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5]; let y=x, t=x+5.5; t-=(x+0.5)*Math.log(t); let s=1.000000000190015; for(let j=0;j<6;j++) s+=g[j]/++y; return -t+Math.log(2.5066282746310005*s/x); };
+const binLe=(k,n,p)=>{ let s=0; for(let i=0;i<=k;i++) s+=Math.exp(lgam(n+1)-lgam(i+1)-lgam(n-i+1)+i*Math.log(p)+(n-i)*Math.log(1-p)); return Math.min(1,s); };   // P(X ≤ k)
+const binGe=(k,n,p)=>k<=0?1:1-binLe(k-1,n,p);
+const binomP=(k,n,p)=>Math.min(1,2*Math.min(binLe(k,n,p),binGe(k,n,p)));      // exact two-sided binomial test
+const Z999=3.29;                                                                    // two-sided 99.9 % normal quantile
 
 console.log("== A1 SVD (one-sided Jacobi) vs numpy.linalg.svd");
 REF.svd.forEach((c,ci)=>{ const cols=c.cols.map(F64); const S=M.svdCols(cols); const s0=c.s[0];
@@ -87,8 +95,12 @@ const CASES=[
 ];
 
 console.log("== B1 number of components (K states + level-dependent background ⇒ K+1 factors), 3 count levels × 3 cases × "+(QUICK?3:10)+" Poisson realizations");
+/* acceptance: the noise criterion (the one the engine recommends) must be consistent with a success rate ≥ 80 % whenever the weakest
+   factor is ≥ 2× the noise edge — one-sided exact binomial test at 1e-3, per case and pooled over the detectable cases. (It is a sequential
+   5 % test, so K+2 is returned in a few % of realizations even at 30 000 counts; a hard 'all 3 of 3' made QUICK fail at most seed offsets.) */
+const B1nR=QUICK?5:10, B1pool={k:0,n:0};
 for(const scale of [300,3000,30000]){
-  for(const cs of CASES){ const tally={IND:0,F:0,noise:0}; const nR=QUICK?3:10; const got={IND:[],F:[],noise:[]};
+  for(const cs of CASES){ const tally={IND:0,F:0,noise:0}; const nR=B1nR; const got={IND:[],F:[],noise:[]};
     for(let s=0;s<nR;s++){ const G=rng(1000*cs.K+s+scale); const d=mixture(G,Object.assign({scale},cs)); const P=M.pca(d.cols,{}); const nf=M.noiseFactors(d.cols,P,1,{nMax:cs.K+3});
       const truth=cs.K+1; if(P.malinowski.nIND===truth) tally.IND++; if(P.malinowski.nF===truth) tally.F++; if(nf.nNoise===truth) tally.noise++;
       got.IND.push(P.malinowski.nIND); got.F.push(P.malinowski.nF); got.noise.push(nf.nNoise); }
@@ -96,10 +108,11 @@ for(const scale of [300,3000,30000]){
     const d0=mixture(rng(1),Object.assign({scale},cs)); const P0=M.pca(d0.mu,{scale:"poisson"}); const pp=P0.pp; let vs=0, nv=0; d0.mu.forEach((m,j)=>{ for(let i=0;i<m.length;i++){ vs+=m[i]*pp.rowW[i]*pp.rowW[i]*pp.colW[j]*pp.colW[j]; nv++; } });
     const edge=Math.sqrt(vs/nv)*(Math.sqrt(d0.mu[0].length)+Math.sqrt(d0.mu.length)); const snr=P0.s[cs.K]/edge;
     const info=`σ_${cs.K+1}/edge ${snr.toFixed(1)}; IND ${tally.IND}/${nR} [${got.IND.join("")}], F(5%) ${tally.F}/${nR} [${got.F.join("")}], noise ${tally.noise}/${nR} [${got.noise.join("")}]`;
-    // the noise criterion is the one the engine recommends: correct in ≥ 80 % whenever the weakest factor is above 2× the noise edge
-    ok(snr<2||tally.noise>=Math.ceil(0.8*nR),`K=${cs.K}, peak height ≈ ${scale} counts`+(snr<2?" (weakest factor below detectability — info only)":""),info);
+    if(snr>=2){ B1pool.k+=tally.noise; B1pool.n+=nR; }
+    ok(snr<2||binLe(tally.noise,nR,0.8)>=1e-3,`K=${cs.K}, peak height ≈ ${scale} counts`+(snr<2?" (weakest factor below detectability — info only)":""),info+(snr<2?"":`; P(X ≤ ${tally.noise} | p = 0.8) ${binLe(tally.noise,nR,0.8).toPrecision(2)}`));
   }
 }
+ok(binLe(B1pool.k,B1pool.n,0.8)>=1e-3,"noise criterion pooled over the detectable cases: consistent with ≥ 80 % correct",`${B1pool.k}/${B1pool.n} correct, P(X ≤ ${B1pool.k} | p = 0.8) ${binLe(B1pool.k,B1pool.n,0.8).toPrecision(2)}`);
 { // documented failure mode: a level-INDEPENDENT constant background is nearly a combination of the concentration profiles → not a separate factor
   const cs=Object.assign({},CASES[0],{bgConst:true}); const G=rng(42); const d=mixture(G,Object.assign({scale:3000},cs)); const P=M.pca(d.cols,{}); const nf=M.noiseFactors(d.cols,P,1,{nMax:5});
   const P0=M.pca(d.mu,{}); ok(true,"(info) constant background: noise-free σ_"+(cs.K+1)+" = "+P0.s[cs.K].toFixed(0)+" vs noise ≈ "+P.s[cs.K+2].toFixed(0)+" → n_noise = "+nf.nNoise+" (K+1 = "+(cs.K+1)+" not resolvable)"); }
@@ -122,7 +135,9 @@ console.log("== B3 reference NNLS fit: coverage of ±1.96σ with the true refere
 { const cs=CASES[1]; const z=[]; let inside=0, n=0;
   for(let s=0;s<(QUICK?4:20);s++){ const G=rng(500+s); const d=mixture(G,Object.assign({scale:3000},cs)); const res=M.fitReferences(d.cols,d.S,{E:d.E,weight:"poisson",cfac:1,bg:1});
     res.forEach((r,j)=>{ for(let k=0;k<cs.K;k++){ const t=3000*d.Ct[k][j]; if(t<50) continue; const zz=(r.coef[k]-t)/r.sig[k]; z.push(zz); n++; if(Math.abs(zz)<1.96) inside++; } }); }
-  const st=stat(z); ok(inside/n>0.92&&inside/n<0.98&&Math.abs(st.m)<0.15&&Math.abs(st.sd-1)<0.1,"coefficient z-scores",`coverage ${(100*inside/n).toFixed(1)} % of ${n}, mean z ${st.m.toFixed(3)}, sd z ${st.sd.toFixed(3)}`); }
+  // 99.9 % acceptance: exact binomial test of the coverage vs 0.95; |mean z| < 3.29/√n; |sd z − 1| < 3.29/√(2n) (normal-theory sd of a sample sd)
+  const st=stat(z), bp=binomP(inside,n,0.95), lm=Z999/Math.sqrt(n), ls=Z999/Math.sqrt(2*n);
+  ok(bp>=1e-3&&Math.abs(st.m)<lm&&Math.abs(st.sd-1)<ls,"coefficient z-scores",`coverage ${(100*inside/n).toFixed(1)} % of ${n} (binomial p ${bp.toPrecision(2)}), mean z ${st.m.toFixed(3)} (±${lm.toFixed(3)}), sd z ${st.sd.toFixed(3)} (1 ± ${ls.toFixed(3)})`); }
 
 console.log("== B4 reference fit with an energy shift (charging drift between levels)");
 { const cs=CASES[0]; const G=rng(9); const d=mixture(G,Object.assign({scale:4000},cs)); const shifts=[0.23,-0.31,0.05]; let e=0;
@@ -132,8 +147,11 @@ console.log("== B4 reference fit with an energy shift (charging drift between le
 console.log("== B5 integration σ vs Monte Carlo spread (linear and Shirley)");
 { const nE=241, E2=F64(Array.from({length:nE},(_,i)=>280+i*0.05)); const pk=gl(E2,286,1.2); const step=F64(Array.from(E2,e=>1/(1+Math.exp(-(e-286)/0.4))));
   const mu=F64(Array.from(E2,(e,i)=>400+3000*pk[i]+150*step[i])); const cf=0.5; const G=rng(4);
-  for(const bg of ["linear","shirley"]){ const As=[], Ss=[]; for(let s=0;s<(QUICK?100:400);s++){ const y=F64(Array.from(mu,v=>G.pois(v*cf)/cf)); const r=M.integrateSeries(E2,[y],{bg:{type:bg,n:5},cfac:cf})[0]; As.push(r.area); Ss.push(r.sArea); }
-    const a=stat(As), sm=stat(Ss).m; ok(Math.abs(sm/a.sd-1)<0.12,`${bg}: mean predicted σ vs MC sd of the area`,`σ ${sm.toFixed(1)} vs sd ${a.sd.toFixed(1)} (ratio ${(sm/a.sd).toFixed(3)})`); }
+  // acceptance: predicted σ / MC sd within the 99.9 % interval of a sample sd from n draws, ±3.29/√(2(n−1)) (≈ ±0.12 at n = 400; the
+  // QUICK run used n = 100 with a fixed ±0.12, i.e. ±1.7 sd of the MC estimate, and failed at 3 of 10 seed offsets)
+  const nMC=400;
+  for(const bg of ["linear","shirley"]){ const As=[], Ss=[]; for(let s=0;s<nMC;s++){ const y=F64(Array.from(mu,v=>G.pois(v*cf)/cf)); const r=M.integrateSeries(E2,[y],{bg:{type:bg,n:5},cfac:cf})[0]; As.push(r.area); Ss.push(r.sArea); }
+    const a=stat(As), sm=stat(Ss).m, lim=Z999/Math.sqrt(2*(nMC-1)); ok(Math.abs(sm/a.sd-1)<lim,`${bg}: mean predicted σ vs MC sd of the area`,`σ ${sm.toFixed(1)} vs sd ${a.sd.toFixed(1)} (ratio ${(sm/a.sd).toFixed(3)}, limit 1 ± ${lim.toFixed(3)}, ${nMC} draws)`); }
   const trueA=3000*trapz(E2,pk); const r=M.integrateSeries(E2,[mu],{bg:{type:"shirley",n:5}})[0]; ok(Math.abs(r.area/trueA-1)<0.03,"Shirley area of a peak on a Shirley-like step (noise-free)",`${(100*(r.area/trueA-1)).toFixed(2)} % vs true`); }
 
 console.log("== B6 information-depth correction with noise (two elements, different λ)");

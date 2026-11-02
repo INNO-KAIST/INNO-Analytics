@@ -181,14 +181,15 @@ function lbfgs(fg,x0,o){
   return {x,F,iter:it};
 }
 /* setup: th (deg), L[k] (nm, attenuation length of species k photoelectrons in the film), I[k][a] intensities ÷ sensitivity, sI σ.
-   o = {J (layers, default 20), zmax (default 3·max L·cos θ_min), m (default model: 'normal' = apparent composition at smallest θ, or array K), alpha|'auto'} */
+   o = {J (layers, default 20), zmax (default 3·max L·cos θ_min), m (default model: uniform composition fitting the smallest-θ intensities, I_k/L_k normalized; or array K), alpha|'auto'} */
 function maxentSetup(th,L,I,sI,o){
   o=o||{}; const K=L.length, A=th.length, J=o.J||20; const cmin=Math.min(...th.map(cosd)), cmax=Math.max(...th.map(cosd));
   const zmax=o.zmax||3*Math.max(...L)*cmax; const z=Float64Array.from({length:J},(_,j)=>j*zmax/(J-1));
   sI=sI||I.map(r=>r.map(v=>0.01*Math.abs(v)));
   let m0;
   if(Array.isArray(o.m)) m0=o.m;
-  else { const a0=th.indexOf(Math.min(...th)); const tot=I.reduce((s,r)=>s+r[a0],0); m0=I.map(r=>r[a0]/tot); }
+  else { // uniform composition that reproduces the most-normal-angle intensities through the kernel: Σ_j W_kaj = L_k cosθ_a ⇒ m_k ∝ I_ka0 / L_k
+    const a0=th.indexOf(Math.min(...th)); const q=I.map((r,k)=>r[a0]/L[k]); const tot=q.reduce((s,v)=>s+v,0); m0=q.map(v=>v/tot); }
   const m=new Float64Array(K*J); for(let k=0;k<K;k++) for(let j=0;j<J;j++) m[k*J+j]=Math.max(m0[k],1e-6);
   for(let j=0;j<J;j++){ let s=0; for(let k=0;k<K;k++) s+=m[k*J+j]; for(let k=0;k<K;k++) m[k*J+j]/=s; }
   return {K,J,A,th,L,I,sI,z,W:kernel(th,L,z),m,cmin};
@@ -198,24 +199,44 @@ function maxentSolve(P,alpha,u0){
   const r=lbfgs(x=>meObjective(x,P,alpha),u,{maxIter:20000,gtol:1e-10});
   return {alpha,u:r.x,c:r.F.c,chi2:r.F.chi2,S:r.F.S,Q:r.F.f,G:r.F.G,M:r.F.M,iter:r.iter};
 }
-/* α by the discrepancy ('historic MaxEnt') criterion χ²(α) = N, N = K·A − A (data minus profiled per-angle scales).
-   Continuation (SPEC_multi §4.5): α_k = α_max·10^(−k/2) from α_max = 1e6 down to α_min = 1e−4, each solve warm-started from the previous
-   (large α = unique, near the default model); the first α_k with χ² ≤ N brackets the root with α_{k−1}; then 40 bisection steps in ln α,
-   always warm-started from the larger-α end of the bracket (deterministic path). Small-α solutions are ill-posed — never used as starts. */
+/* α by the discrepancy ('historic MaxEnt') criterion χ²(α) = N, N = K·A − A (data minus profiled per-angle scales), guarded against the
+   flat part of χ²(α) (SPEC_multi §4.5).
+   Why the guard: χ²(α) falls steeply from the default model and then flattens at χ²_min (the best attainable fit; the corner between the
+   two is the L-curve corner). The χ² of the TRUE profile is distributed χ²_N (mean N, sd √(2N)), so χ²_min — and the plateau — lies
+   above or just below N in a sizeable fraction of realizations. χ² = N then puts α on the plateau, where χ² hardly depends on α and the
+   poorly determined (deep) layers swing to 0/1 (seen: 6 of 20 seeds of a uniform film, |Δc| up to 0.70). The guard keeps the target at
+   least one sampling sd above the best attainable fit — Morozov's discrepancy principle with a safety factor (Engl, Hanke & Neubauer,
+   Regularization of Inverse Problems, 1996, §4.3):   T = max(N, χ²_min + τ·√(2N)),  τ = o.chi2Tol (default 1),
+   and α is the largest α (maximum entropy) with χ²(α) ≤ T. When χ²_min ≤ N − τ√(2N) (most realizations) T = N exactly (classic rule).
+   χ²_min = smallest χ² on the continuation path and at α_min (one extra solve, warm-started from the last path solution, never used as a
+   start). notReached: χ²_min above the 99 % point of χ²_N (Wilson–Hilferty) — the data are not fitted within noise (model error or σ
+   underestimated); the guarded α is still returned (the corner), not the ill-posed α_min solution.
+   Continuation: α_k = α_max·10^(−k/2) from α_max = 1e6 down to α_min = 1e−4, each solve warm-started from the previous (large α = unique,
+   near the default model); the first α_k with χ² ≤ T brackets the root with α_{k−1}; then bisection in ln α (≤ 40 steps, to 1e-4 in
+   ln α), always warm-started from the larger-α end of the bracket (deterministic path). Small-α solutions are ill-posed — never used as starts.
+   chi2Tol = 0 restores the unguarded classic rule exactly (χ² = N; the α_min solution, flagged notReached, when N is not reached). */
 function maxentProfile(th,L,I,sI,o){
   o=o||{}; const P=maxentSetup(th,L,I,sI,o); const N=o.target||(P.K*P.A-P.A); const curve=[]; let sol;
+  const tol=o.chi2Tol!=null?+o.chi2Tol:1, sdChi=Math.sqrt(2*N); let target=N, notReached=false, chi2min=null;
+  const h=2/(9*N), q99=N*Math.pow(1-h+2.3263*Math.sqrt(h),3);   // Wilson–Hilferty 99 % point of χ²_N
+  const bisect=(prev,cur,T)=>{ let hi=Math.log(prev.alpha), lo=Math.log(cur.alpha), sHi=prev, best=cur;
+    for(let i=0;i<40;i++){ const mid=0.5*(lo+hi); const s=maxentSolve(P,Math.exp(mid),sHi.u); curve.push({alpha:s.alpha,chi2:s.chi2,S:s.S}); if(s.chi2>T){ hi=mid; sHi=s; } else { lo=mid; best=s; } if(hi-lo<1e-4) break; }
+    return best; };
   if(typeof o.alpha==="number") sol=maxentSolve(P,o.alpha);
   else {
-    const aMax=o.alphaMax||1e6, aMin=o.alphaMin||1e-4; let prev=null, cur=null;
-    for(let k=0;;k++){ const a=aMax*Math.pow(10,-k/2); if(a<aMin*0.999) break; cur=maxentSolve(P,a,prev?prev.u:null); curve.push({alpha:a,chi2:cur.chi2,S:cur.S}); if(cur.chi2<=N) break; prev=cur; }
-    if(!prev&&cur.chi2<=N) sol=cur;                       // the default-like solution already fits within noise
-    else if(cur.chi2>N){ sol=cur; sol.notReached=true; }  // noise level never reached (model error or underestimated σ)
-    else { let hi=Math.log(prev.alpha), lo=Math.log(cur.alpha), sHi=prev; sol=cur;
-      for(let i=0;i<40;i++){ const mid=0.5*(lo+hi); const s=maxentSolve(P,Math.exp(mid),sHi.u); curve.push({alpha:s.alpha,chi2:s.chi2,S:s.S}); if(s.chi2>N){ hi=mid; sHi=s; } else { lo=mid; sol=s; } if(hi-lo<1e-4) break; } }
+    const aMax=o.alphaMax||1e6, aMin=o.alphaMin||1e-4; let prev=null, cur=null; const path=[];
+    for(let k=0;;k++){ const a=aMax*Math.pow(10,-k/2); if(a<aMin*0.999) break; cur=maxentSolve(P,a,prev?prev.u:null); path.push(cur); curve.push({alpha:a,chi2:cur.chi2,S:cur.S}); if(cur.chi2<=N) break; prev=cur; }
+    if(tol>0){
+      chi2min=Math.min(...path.map(s=>s.chi2));
+      if(cur.alpha>aMin*1.001){ const f=maxentSolve(P,aMin,cur.u); curve.push({alpha:f.alpha,chi2:f.chi2,S:f.S,floor:true}); chi2min=Math.min(chi2min,f.chi2); }
+      target=Math.max(N,chi2min+tol*sdChi); notReached=chi2min>q99;
+      let i=path.findIndex(s=>s.chi2<=target); if(i<0) i=path.length-1;
+      sol=i>0?bisect(path[i-1],path[i],target):path[i];          // i = 0: the default-like solution already fits within noise
+    } else { notReached=cur.chi2>N; sol=!notReached&&prev?bisect(prev,cur,N):cur; }   // classic unguarded rule
   }
   const K=P.K, J=P.J; const c=Array.from({length:K},(_,k)=>Float64Array.from({length:J},(_,j)=>sol.c[k*J+j]));
   const dz=P.z[1]-P.z[0];
-  return {z:P.z,dz,c,alpha:sol.alpha,chi2:sol.chi2,N,S:sol.S,G:sol.G,iter:sol.iter,curve,notReached:!!sol.notReached,setup:P,
+  return {z:P.z,dz,c,alpha:sol.alpha,chi2:sol.chi2,N,target:typeof o.alpha==="number"?null:target,chi2min,S:sol.S,G:sol.G,iter:sol.iter,curve,notReached,setup:P,
     model:Array.from({length:K},(_,k)=>Float64Array.from({length:P.A},(_,a)=>sol.G[a]*sol.M[k*P.A+a])),
     warn:["ARXPS carries only a few independent depth parameters (Cumpson 1995): the MaxEnt profile is the smoothest one consistent with the data, not a unique profile",
           "below ≈ "+(3*Math.max(...L)*P.cmin).toFixed(2)+"–"+(3*Math.max(...L)).toFixed(2)+" nm the profile reverts to the default model (no information)",

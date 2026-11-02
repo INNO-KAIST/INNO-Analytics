@@ -19,6 +19,11 @@ function utf8(u8){ return TDU?TDU.decode(u8):latin1(u8); }
 function dv(u8){ return new DataView(u8.buffer,u8.byteOffset,u8.byteLength); }
 const NULLV=1e37;                          // VAMAS 의 '값 없음'
 const isNullV=v=>!isFinite(v)||Math.abs(v)>=0.99e37;
+/* 엄격한 숫자 읽기: 칸 전체가 십진수여야 함. parseFloat 는 Windows 의 "1.#QNAN"·"1.#INF" 를 1 로, "12abc" 를 12 로 읽는다 → NaN 으로 */
+const NUMRE=/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+function numStrict(t){ t=String(t==null?"":t).trim(); return NUMRE.test(t)?Number(t):NaN; }
+/* 맨 앞 [ … ] (안에 괄호가 겹쳐 있어도 짝이 맞는 ] 까지): "[D.I. [600'C] 5h] Ta4f" → "D.I. [600'C] 5h" */
+function leadBracket(s){ s=String(s||""); if(s[0]!=="[") return null; let d=0; for(let i=0;i<s.length;i++){ if(s[i]==="[") d++; else if(s[i]==="]"&&--d===0) return {inner:s.slice(1,i),rest:s.slice(i+1)}; } return null; }
 
 /* 영역 이름 → 원소·궤도 ("Co2p", "Ta 4f7/2", "O1s Scan", "fe2p", "Survey")
    원소 기호는 주기율표(Z = 1–92 + 몇 개)에 있는 것만 인정한다 — "Peak 2p" 같은 이름을 원소로 오인하지 않게. */
@@ -41,7 +46,7 @@ function parseRegionName(s){
 /* 파일 이름에서 시료 이름: "[D.I. on BCT (600'C 5h)] Ta4f.txt" → "D.I. on BCT (600'C 5h)" */
 function sampleFromName(fn){
   const b=String(fn||"").replace(/^.*[\\/]/,"");
-  const m=/^\[(.+?)\]/.exec(b); if(m) return m[1].trim();
+  const lb=leadBracket(b); if(lb&&lb.inner.trim()) return lb.inner.trim();
   const r=parseRegionName(b);
   let s=b.replace(/(\.(txt|vms|npl|csv|dat|xy|vgd|avg|xlsx?))+$/i,"");
   s=s.replace(/(Survey|Scan|Snap|Region)/ig,"");
@@ -70,15 +75,18 @@ function pathSample(p){
 /* 스펙트럼 객체: be 는 오름차순 Float64Array, y 는 CPS. c = 1 CPS 당 count (모르면 null) */
 let _uid=0;
 function mkSpec(o){
-  const n=o.be.length; let be=Float64Array.from(o.be), y=Float64Array.from(o.y), yr=o.yRaw?Float64Array.from(o.yRaw):null, tf=o.tfArr?Float64Array.from(o.tfArr):null;
+  const n=o.be.length; let be=Float64Array.from(o.be), y=Float64Array.from(o.y), warn=(o.warn||[]).slice(), meta=o.meta||{}, yr=o.yRaw?Float64Array.from(o.yRaw):null, tf=o.tfArr?Float64Array.from(o.tfArr):null;
   if(n>1&&be[0]>be[n-1]){ be.reverse(); y.reverse(); if(yr) yr.reverse(); if(tf) tf.reverse(); }
   for(let i=1;i<n;i++) if(!(be[i]>be[i-1])) throw new Error("에너지 축이 단조롭지 않습니다 ("+o.name+")");
   const step=n>1?(be[n-1]-be[0])/(n-1):0;
+  // 숫자가 아닌 세기(NaN·∞): 조용히 두지 않고 표시 — 피팅은 그 채널이 영역 안에 있으면 거절한다(xps_core makeProblem)
+  let bad=0, first=-1; for(let i=0;i<n;i++) if(!isFinite(y[i])){ bad++; if(first<0) first=i; }
+  if(bad){ meta=Object.assign({},meta,{nonFinite:bad}); warn.push(`숫자가 아닌 세기 ${bad} 채널 (NaN/∞, 첫 BE ${be[first].toFixed(2)} eV) — 그 채널을 포함한 영역은 피팅할 수 없습니다`); }
   const reg=parseRegionName(o.region||o.name);
   const region=reg.el||reg.kind==="survey"?reg.label:(o.region||reg.label);
   return {uid:"x"+(++_uid)+"_"+Date.now().toString(36), name:o.name, region, reg, sample:o.sample||"", file:o.file||"", format:o.format,
     hv:o.hv||1486.6, hvSrc:o.hvSrc||"기본값(Al Kα 1486.6)", be, y, yRaw:yr, c:o.c||null, cSrc:o.cSrc||null, step, n,
-    tfArr:tf, meta:o.meta||{}, warn:o.warn||[], extra:o.extra||null};
+    tfArr:tf, meta, warn, extra:o.extra||null};
 }
 
 /* ============================================================
@@ -89,6 +97,7 @@ function cfbOpen(u8){
   if(!cfbIs(u8)) throw new Error("OLE2(Compound File) 형식이 아닙니다");
   const D=dv(u8);
   const ss=1<<D.getUint16(30,true), mss=1<<D.getUint16(32,true);
+  if(ss!==512&&ss!==4096) throw new Error("OLE2 머리가 손상되었습니다(섹터 크기 "+ss+")");
   const nFat=D.getUint32(44,true), dir0=D.getUint32(48,true), cutoff=D.getUint32(56,true)||4096;
   const mf0=D.getUint32(60,true), nMf=D.getUint32(64,true), df0=D.getUint32(68,true), nDf=D.getUint32(72,true);
   const off=s=>(s+1)*ss;
@@ -96,29 +105,49 @@ function cfbOpen(u8){
   // DIFAT → FAT 섹터 목록
   const fatSecs=[];
   for(let i=0;i<109&&fatSecs.length<nFat;i++){ const s=D.getUint32(76+4*i,true); if(s!==FREE) fatSecs.push(s); }
-  let ds=df0, guard=0;
+  let ds=df0, guard=0; const dseen=new Set();
   while(fatSecs.length<nFat&&ds!==ENDC&&ds!==FREE&&guard++<nDf+2){
-    const o=off(ds); for(let i=0;i<ss/4-1&&fatSecs.length<nFat;i++){ const s=D.getUint32(o+4*i,true); if(s!==FREE) fatSecs.push(s); }
+    if(dseen.has(ds)) throw new Error("OLE2 DIFAT 사슬이 순환합니다 (손상된 파일)"); dseen.add(ds);
+    const o=off(ds); if(o+ss>u8.length) throw new Error("파일이 잘렸습니다(file truncated) — OLE2 DIFAT 섹터가 파일 길이를 넘습니다"); for(let i=0;i<ss/4-1&&fatSecs.length<nFat;i++){ const s=D.getUint32(o+4*i,true); if(s!==FREE) fatSecs.push(s); }
     ds=D.getUint32(o+ss-4,true);
   }
   const per=ss/4, fat=new Uint32Array(fatSecs.length*per);
-  fatSecs.forEach((s,k)=>{ const o=off(s); for(let i=0;i<per;i++) fat[k*per+i]=o+4*i+4<=u8.length?D.getUint32(o+4*i,true):FREE; });
-  const chain=(s,maxN)=>{ const out=[]; let g=0; while(s!==ENDC&&s!==FREE&&s<fat.length&&g++<(maxN||1e7)){ out.push(s); s=fat[s]; } return out; };
-  const readChain=(s,size)=>{ const cs=chain(s); const buf=new Uint8Array(cs.length*ss); cs.forEach((c,i)=>{ const o=off(c); buf.set(u8.subarray(o,Math.min(o+ss,u8.length)),i*ss); }); return size!=null?buf.subarray(0,size):buf; };
+  const nSec=Math.ceil((u8.length-ss)/ss);   // 파일 안에 (적어도 일부라도) 있는 섹터 수 (머리 섹터 다음부터)
+  const TRUNC="파일이 잘렸습니다(file truncated) — OLE2 섹터가 파일 길이를 넘습니다";
+  fatSecs.forEach((s,k)=>{ if(s>=nSec) throw new Error(TRUNC+" (FAT 섹터 "+s+")"); const o=off(s); for(let i=0;i<per;i++) fat[k*per+i]=o+4*i+4<=u8.length?D.getUint32(o+4*i,true):FREE; });
+  // 사슬: 방문 집합(순환 → 오류) · 섹터 번호 범위 검사 · 파일 밖 섹터 → 잘림 오류
+  const chain=s=>{ const out=[], seen=new Set(); while(s!==ENDC){
+      if(s===FREE) break;
+      if(s>=fat.length||s>=nSec) throw new Error(TRUNC+" (섹터 "+s+")");
+      if(seen.has(s)) throw new Error("OLE2 섹터 사슬이 순환합니다 (손상된 파일, 섹터 "+s+")");
+      seen.add(s); out.push(s); s=fat[s]; }
+    return out; };
+  // readChain: 사슬이 밝힌 스트림 크기를 덮는지 확인(못 덮으면 잘림 — 0 으로 채운 채 조용히 읽지 않음)
+  const readChain=(s,size)=>{ const cs=chain(s); const buf=new Uint8Array(cs.length*ss); let have=0;
+    let gap=cs.length*ss; cs.forEach((c,i)=>{ const o=off(c), m=Math.max(0,Math.min(ss,u8.length-o)); if(m>0) buf.set(u8.subarray(o,o+m),i*ss); if(m<ss) gap=Math.min(gap,i*ss+m); }); have=gap;
+    if(size!=null&&have<size) throw new Error(TRUNC+" (스트림 "+size+" 바이트 중 "+have+" 바이트만 있음)");
+    return size!=null?buf.subarray(0,size):buf; };
   // 디렉터리
   const dbuf=readChain(dir0); const DD=dv(dbuf); const ents=[];
   for(let o=0;o+128<=dbuf.length;o+=128){
-    const nl=DD.getUint16(o+64,true); const type=dbuf[o+66];
+    const nl=Math.min(64,DD.getUint16(o+64,true)); const type=dbuf[o+66];
     const name=nl>=2?utf16(dbuf.subarray(o,o+nl-2)):"";
     ents.push({name,type,left:DD.getUint32(o+68,true),right:DD.getUint32(o+72,true),child:DD.getUint32(o+76,true),start:DD.getUint32(o+116,true),size:DD.getUint32(o+120,true)+(ss===4096?DD.getUint32(o+124,true)*4294967296:0)});
   }
+  if(!ents.length||ents[0].type!==5) throw new Error("OLE2 디렉터리가 손상되었습니다(뿌리 항목 없음) — 파일이 잘렸거나 0 으로 채워졌을 수 있습니다");
   const rootE=ents[0];
   let mini=null, mfat=null;
   const getMini=()=>{ if(mini) return; mini=readChain(rootE.start,rootE.size); const mb=readChain(mf0); const MD=dv(mb); mfat=new Uint32Array(Math.min(nMf*per,mb.length/4)); for(let i=0;i<mfat.length;i++) mfat[i]=MD.getUint32(4*i,true); };
-  const readMini=(s,size)=>{ getMini(); const out=new Uint8Array(size); let p=0,g=0; while(s!==ENDC&&s!==FREE&&p<size&&g++<1e7){ const o=s*mss; const n=Math.min(mss,size-p); out.set(mini.subarray(o,o+n),p); p+=n; s=mfat[s]; } return out; };
-  // 경로 목록 (트리 순회)
-  const paths={};
-  const walk=(id,pre,depth)=>{ if(id===FREE||id>=ents.length||depth>64) return; const e=ents[id]; walk(e.left,pre,depth+1); const p=pre?pre+"/"+e.name:e.name; paths[p]=id; if(e.type===1||e.type===5) walk(e.child,p,depth+1); walk(e.right,pre,depth+1); };
+  const readMini=(s,size)=>{ getMini(); const out=new Uint8Array(size); let p=0; const seen=new Set();
+    while(s!==ENDC&&s!==FREE&&p<size){
+      if(s>=mfat.length||s*mss>=mini.length) throw new Error(TRUNC+" (미니 섹터 "+s+")");
+      if(seen.has(s)) throw new Error("OLE2 미니 섹터 사슬이 순환합니다 (손상된 파일)"); seen.add(s);
+      const o=s*mss; const n=Math.min(mss,size-p, mini.length-o); if(n<=0) break; out.set(mini.subarray(o,o+n),p); p+=n; s=mfat[s]; }
+    if(p<size) throw new Error(TRUNC+" (미니 스트림 "+size+" 바이트 중 "+p+" 바이트만 있음)");
+    return out; };
+  // 경로 목록 (트리 순회): 방문 집합 — 손상된(0 으로 채운) 디렉터리의 left/right = 0 이 같은 항목을 되풀이해 지수적으로 도는 것을 막는다
+  const paths={}, visited=new Set([0]);
+  const walk=(id,pre,depth)=>{ if(id===FREE||id>=ents.length||depth>64||visited.has(id)) return; visited.add(id); const e=ents[id]; walk(e.left,pre,depth+1); const p=pre?pre+"/"+e.name:e.name; if(!(p in paths)) paths[p]=id; if(e.type===1||e.type===5) walk(e.child,p,depth+1); walk(e.right,pre,depth+1); };
   walk(rootE.child,"",0);
   return {
     list:()=>Object.keys(paths),
@@ -279,7 +308,8 @@ function vamasParse(text,fileName){
     const nord=nxi();
     const nv=H.scan==="REGULAR"?nvar:nvar+1;
     for(let i=0;i<nv;i++){ nxt(); nxt(); }      // 각 변수 최소·최대
-    const raw=new Float64Array(nord); for(let i=0;i<nord;i++) raw[i]=parseFloat(nxt());
+    if(!(nord>=0)||nord>5e7) throw new Error("VAMAS 블록 "+(b+1)+": 세로축 값 개수를 읽지 못했습니다 (줄 "+p+")");
+    const raw=new Float64Array(nord); for(let i=0;i<nord;i++) raw[i]=numStrict(nxt());   // 엄격: "1.#QNAN" → NaN (mkSpec 이 표시)
     const np=Math.floor(nord/nv);
     let x, cols=[];
     if(H.scan==="REGULAR"){ x=Float64Array.from({length:np},(_,i)=>B.absStart+i*B.absStep); for(let v=0;v<nv;v++) cols.push(Float64Array.from({length:np},(_,i)=>raw[i*nv+v])); }
@@ -299,7 +329,7 @@ function vamasParse(text,fileName){
     const y=Array.from(yr,v=>c?v/c:v);
     const regRaw=(B.species&&B.species!=="Survey"&&B.species!=="survey"?B.species+" ":"")+(B.trans&&B.trans.trim()?B.trans.trim():"");
     let region=regRaw.trim()||B.id;
-    if(/^survey$/i.test(B.species)&&!/survey/i.test(B.id)) region=B.id.replace(/\.(txt|vgd)$/i,"").replace(/^\[.*?\]\s*/,"")||"Survey";
+    if(/^survey$/i.test(B.species)&&!/survey/i.test(B.id)){ const lb=leadBracket(B.id); region=(lb?lb.rest:B.id).replace(/\.(txt|vgd)$/i,"").trim()||"Survey"; }
     if(/^survey$/i.test(B.species)&&/survey/i.test(B.id)) region="Survey";
     const meta={instrument:[H.inst,H.model].filter(s=>s&&s!=="Not Specified").join(" "),sourceLabel:B.src,passEnergy:isNullV(B.pe)?null:B.pe,anMode:B.anMode,
       workFunction:isNullV(B.wf)?null:B.wf,dwell:isNullV(B.dwell)?null:B.dwell,scans:B.scans,sigMode:B.sigMode,ordUnit:B.vars[yi]&&B.vars[yi].unit,
@@ -309,7 +339,7 @@ function vamasParse(text,fileName){
     if(meta.casa&&c===1) warn.push("CasaXPS 가 만든 VAMAS(dwell·scan = 1) — 세기가 이미 CPS 일 수 있어 counts 환산은 하지 않음");
     out.push(mkSpec({name:region,region,file:fileName,format:"VAMAS",hv,hvSrc:hvOK?"VAMAS 블록":"기본값",be,y,yRaw:c&&c!==1?yr:null,c:c&&!(meta.casa&&c===1)?c:null,
       cSrc:c&&!(meta.casa&&c===1)?`VAMAS: collection time ${B.dwell} s × ${B.scans} scans`:null,tfArr:ti>=0?cols[ti]:null,
-      sample:(B.id.match(/^\[(.+?)\]/)||[])[1]||(B.sample&&B.sample!==B.id?B.sample:""),meta,warn}));
+      sample:((leadBracket(B.id)||{}).inner||"").trim()||(B.sample&&B.sample!==B.id?B.sample:""),meta,warn}));
   }
   return out;
 }
@@ -486,7 +516,7 @@ async function xlsxWorkbook(u8){
       const ref=(/r="([A-Z]+)(\d+)"/.exec(a)); if(!ref) return m;
       let c=0; for(const ch of ref[1]) c=c*26+(ch.charCodeAt(0)-64); c--; const r=+ref[2]-1;
       const ty=(/t="([^"]+)"/.exec(a)||[])[1]||"n"; let v=null;
-      if(body){ const vv=/<v>([\s\S]*?)<\/v>/.exec(body); if(ty==="s"&&vv) v=ss[+vv[1]]; else if(ty==="inlineStr"){ const tt=/<t[^>]*>([\s\S]*?)<\/t>/.exec(body); v=tt?xmlUnesc(tt[1]):""; } else if(ty==="str"&&vv) v=xmlUnesc(vv[1]); else if(ty==="b"&&vv) v=vv[1]==="1"; else if(vv) v=parseFloat(vv[1]); }
+      if(body){ const vv=/<v>([\s\S]*?)<\/v>/.exec(body); if(ty==="s"&&vv) v=ss[+vv[1]]; else if(ty==="inlineStr"){ const tt=/<t[^>]*>([\s\S]*?)<\/t>/.exec(body); v=tt?xmlUnesc(tt[1]):""; } else if(ty==="str"&&vv) v=xmlUnesc(vv[1]); else if(ty==="b"&&vv) v=vv[1]==="1"; else if(vv) v=numStrict(vv[1]); }
       if(v!=null){ cells.set(r*1024+c,v); if(r>maxR) maxR=r; if(c>maxC) maxC=c; }
       return m;
     });
@@ -549,7 +579,7 @@ function avantageSheets(sheets,fileName){
    5) Avantage .avg (DataSpace_BatchDump 텍스트)
    ============================================================ */
 function avgParse(text,fileName){
-  const L=text.split(/\r?\n/); const P={}; let axes=[], data=[], cur=null, inData=false;
+  const L=text.split(/\r?\n/); const P={}; let axes=[], data=[], cur=null, inData=false, nBad=0;
   for(const raw of L){
     const s=raw.trim();
     const pm=/^([A-Z_]+(?:\[\d+\])?)\s*:\s*VT_(\w+)\s*=\s*(.*)$/.exec(s);
@@ -557,12 +587,13 @@ function avgParse(text,fileName){
     const am=/^(\d+)=\s*([-\d.eE+]+),\s*([-\d.eE+]+),\s*(\d+),\s*(\w+)\s*,\s*(\w+)?\s*,?\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'/.exec(s);
     if(am&&!inData){ axes.push({i:+am[1],start:+am[2],step:+am[3],n:+am[4],type:am[5],sym:am[7],unit:am[8],label:am[9]}); continue; }
     if(/^\$DATA\s*=/.test(s)){ if(cur&&cur.length) data.push(cur); cur=[]; inData=true; continue; }
-    if(inData&&/^LIST@/.test(s)){ const q=s.split("=").slice(1).join("="); q.split(",").forEach(t=>{ t=t.trim(); if(t==="#empty#") cur.push(NaN); else if(t!=="") { const v=parseFloat(t); if(isFinite(v)||t==="NaN") cur.push(v); } }); continue; }
+    if(inData&&/^LIST@/.test(s)){ const q=s.split("=").slice(1).join("="); q.split(",").forEach(t=>{ t=t.trim(); if(t==="") return; const v=numStrict(t); if(!isFinite(v)) nBad++; cur.push(v); }); continue; }   // 숫자가 아닌 칸(#empty#·NaN·1.#QNAN)도 자리를 지킨다(건너뛰면 뒤 채널이 밀림) — NaN 으로 넣고 mkSpec 이 표시
     if(inData&&/^\$/.test(s)&&!/^\$DATA/.test(s)) inData=false;
   }
   if(cur&&cur.length) data.push(cur);
   const eax=axes.find(a=>/ENERGY/i.test(a.type))||axes[0];
   if(!eax) throw new Error(".avg 에서 에너지 축($SPACEAXES)을 찾지 못했습니다");
+  if(!(eax.n>0)) throw new Error(".avg 에너지 축의 점 수를 읽지 못했습니다");
   const flat=[].concat(...data); const nsp=Math.max(1,Math.floor(flat.length/eax.n));
   const hv=+P.DS_SOPROPID_ENERGY>100?+P.DS_SOPROPID_ENERGY:1486.68;
   const dwell=+P.DS_ACPROPID_ACQ_TIME||null, scans=+P.DS_ACPROPID_PERIODS||null;
@@ -594,7 +625,7 @@ function commaDecimal(lines){
 }
 function textParse(text,fileName,opt){
   opt=opt||{};
-  const L=text.split(/\r?\n/); const rows=[]; let hdr=[];
+  const L=text.split(/\r?\n/); const rows=[]; let hdr=[], skipped=0;
   const cd=commaDecimal(L);
   for(const raw of L){
     const s=raw.trim(); if(!s) continue;
@@ -602,6 +633,7 @@ function textParse(text,fileName,opt){
     const nums=parts.map(Number);
     if(parts.length>=2&&nums.slice(0,2).every(isFinite)) rows.push(nums.filter(isFinite));
     else if(!rows.length) hdr.push(s);
+    else if(parts.length>=2&&isFinite(nums[0])) skipped++;   // 축 값은 있는데 세기가 숫자가 아님("1.#QNAN") — 조용히 버리지 않고 알림
   }
   if(rows.length<5) throw new Error("숫자 2열 이상인 행이 5개 미만입니다");
   const h=hdr.join(" ").toLowerCase();
@@ -612,6 +644,7 @@ function textParse(text,fileName,opt){
   const axisGuess=!/binding|kinetic|\bbe\b|\bke\b/.test(h)&&!opt.axis;
   if(axisGuess) warn.push("머리줄에 축 이름이 없어 결합에너지(BE)로 간주 — 운동에너지면 Info 탭에서 KE 로 바꾸세요");
   if(cd) warn.push("소수점이 쉼표(comma decimals)인 표로 읽었습니다");
+  if(skipped) warn.push(`세기가 숫자가 아닌 행 ${skipped} 개를 건너뜀(NaN·1.#QNAN 등) — 그 자리 채널이 빠졌습니다`);
   const bs=bgSubtracted(y); if(bs) warn.push(bs);
   const be=isKE?x.map(k=>hv-k):x;
   const base=String(fileName||"").replace(/^.*[\\/]/,"");
@@ -654,6 +687,16 @@ async function readFile(name,u8,opt){
   (r.spectra||[]).forEach(sp=>{ if(sp.meta&&!sp.meta.bgSub&&!(sp.reg&&sp.reg.kind==="survey")){ const w=bgSubtracted(sp.y); if(w){ sp.meta.bgSub=true; sp.warn.push(w); } } });
   return r;
 }
+/* 글 파일 해독: BOM(UTF-8 EF BB BF · UTF-16LE FF FE · UTF-16BE FE FF)을 보고, BOM 없는 UTF-16 은 앞부분의 0 바이트 자리로 알아본다 */
+function decodeText(u8){
+  if(u8.length>=3&&u8[0]===0xEF&&u8[1]===0xBB&&u8[2]===0xBF) return utf8(u8.subarray(3));
+  if(u8.length>=2&&u8[0]===0xFF&&u8[1]===0xFE) return utf16(u8.subarray(2));
+  if(u8.length>=2&&u8[0]===0xFE&&u8[1]===0xFF){ const sw=new Uint8Array(u8.length-2); for(let i=2;i+1<u8.length;i+=2){ sw[i-2]=u8[i+1]; sw[i-1]=u8[i]; } return utf16(sw); }
+  const m=Math.min(u8.length&~1,512); if(m>=8){ let ev=0, od=0; for(let i=0;i<m;i+=2){ if(u8[i]===0) ev++; if(u8[i+1]===0) od++; }
+    if(od>0.4*m/2&&ev===0) return utf16(u8);
+    if(ev>0.4*m/2&&od===0){ const sw=new Uint8Array(u8.length&~1); for(let i=0;i+1<u8.length;i+=2){ sw[i]=u8[i+1]; sw[i+1]=u8[i]; } return utf16(sw); } }
+  return utf8(u8);
+}
 async function readFile0(name,u8,opt){
   const low=String(name).toLowerCase();
   const head=latin1(u8.subarray(0,Math.min(u8.length,200)));
@@ -663,13 +706,14 @@ async function readFile0(name,u8,opt){
     if(C.has("Workbook")||C.has("Book")){ const r=avantageSheets(xlsWorkbook(u8),name); if(!r.spectra.length) throw new Error("엑셀 파일에서 에너지·세기 열을 찾지 못했습니다 ('Binding Energy' 머리칸)"); return r; }
     throw new Error("알 수 없는 OLE2 파일 (VGData·Workbook 스트림 없음)");
   }
-  if(u8[0]===0x50&&u8[1]===0x4B){ const r=avantageSheets(await xlsxWorkbook(u8),name); if(!r.spectra.length) throw new Error("xlsx 에서 에너지·세기 열을 찾지 못했습니다"); return r; }
-  const text=utf8(u8);
-  if(/^VAMAS/i.test(head.trim())) return {spectra:vamasParse(text,name),tables:[],warn:[],vamas:vamasHeader(text)};
+  if(u8[0]===0x50&&u8[1]===0x4B){ let W; try{ W=await xlsxWorkbook(u8); }catch(e){ throw new Error("xlsx 파일을 읽지 못했습니다 — 손상되었거나 잘린 파일일 수 있습니다 ("+e.message+")"); }
+    const r=avantageSheets(W,name); if(!r.spectra.length) throw new Error("xlsx 에서 에너지·세기 열을 찾지 못했습니다"); return r; }
+  const text=decodeText(u8);
+  if(/^VAMAS/i.test(text.slice(0,200).trim())){ let sp; try{ sp=vamasParse(text,name); }catch(e){ if(/^VAMAS/.test(e.message)) throw e; throw new Error("VAMAS 파일을 해석하지 못했습니다 — 손상되었거나 잘린 파일일 수 있습니다 ("+e.message+")"); } return {spectra:sp,tables:[],warn:[],vamas:vamasHeader(text)}; }
   if(/\.avg$/i.test(low)||/\$SPACEAXES|DS_EXT_SUPROPID/.test(text.slice(0,20000))) return {spectra:avgParse(text,name),tables:[],warn:[]};
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,numStrict,decodeText,leadBracket,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);

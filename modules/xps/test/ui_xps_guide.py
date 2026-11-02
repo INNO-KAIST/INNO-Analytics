@@ -48,8 +48,8 @@ def write(name, be, ys):
     return fn
 
 
-# Ce 3d: recipe lines (SPEC §17.3), Ce³⁺ fraction 0.2, ΔE 18.5, u/v 2/3, in-fit Shirley-type background (c0 + k∫P)
-LINES = [('v0', 880.5, 2.4, 0.2 * 0.288), ('v', 882.4, 2.3, 0.8 * 0.296), ('v1', 885.0, 3.1, 0.2 * 0.712), ('v2', 888.9, 5.0, 0.8 * 0.405), ('v3', 898.2, 2.3, 0.8 * 0.299)]
+# Ce 3d: recipe lines (SPEC §17.3; v1.9.8 v″ 888.3 eV), Ce³⁺ fraction 0.2, ΔE 18.5, u/v 2/3, in-fit Shirley-type background (c0 + k∫P)
+LINES = [('v0', 880.5, 2.4, 0.2 * 0.288), ('v', 882.4, 2.3, 0.8 * 0.296), ('v1', 885.0, 3.1, 0.2 * 0.712), ('v2', 888.3, 5.0, 0.8 * 0.405), ('v3', 898.2, 2.3, 0.8 * 0.299)]
 be = [870 + 0.1 * i for i in range(601)]
 P = [sum(150000 * fr * (0.6 * gls(e - b0, F) + 0.4 * gls(e - b0 - 18.5, F)) for _, b0, F, fr in LINES) for e in be]
 Q, acc = [], 0.0

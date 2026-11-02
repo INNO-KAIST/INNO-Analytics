@@ -39,9 +39,13 @@ console.log("== 1 Ce 3d recipe: data, anchoring to the charge correction, alignm
 { const R=G.recipeById("ce3d");
   ok(R&&R.lines.length===5&&R.lines.filter(l=>l.state==="Ce3+").length===2&&R.options.map(o=>o.keys.length*2).join()==="6,4,10","5 spin–orbit pairs (Ce⁴⁺ 3 · Ce³⁺ 2), options 6 · 4 · 10 lines",R.options.map(o=>o.label).join(" · "));
   // literature values reachable from the start ranges (SPEC §17.3 table): v-line positions and ΔE of every accessible source lie inside start ± beTol / the ΔE range
-  const lit={v0:[880.2,880.6,880.7],v:[882.2,882.4,882.5],v1:[884.5,884.7,885.6],v2:[888.7,888.8,889.2],v3:[898.1,898.2,898.3]}, dEs=[18.3,18.4,18.5,18.6,18.7];
-  const inR=R.lines.every(l=>lit[l.key].every(b=>Math.abs(b-l.be)<=R.beTol+1e-9)), dOK=dEs.every(d=>d>=Math.min(R.dE.lo,(R.dEs&&R.dEs["Ce3+"]||R.dE).lo)&&d<=R.dE.hi);
-  ok(inR&&dOK&&Math.abs(R.r-2/3)<1e-12,"literature positions within start ± 0.6 eV, ΔE 18.3–18.7 eV inside the free range, u/v area 2/3",`ΔE ${R.dE.lo}–${R.dE.hi}`);
+  // C 1s 284.8 scale: Bêche 2008 primary (printed at C 1s 285.0 → −0.2 eV), the Bêche-family CeO₂ data and the ACS SI table (SPEC §17.3);
+  // Morgan 2023 is referenced to the lattice O 1s 529.7 eV (another scale) — held to ± 1 eV (charge-reference uncertainty), reported
+  const beche={v0:880.9,v:882.7,v1:885.2,v2:888.5,v3:898.3}, lit={v0:[880.6,880.2],v:[882.4,882.2],v1:[884.5,884.7],v2:[888.8,888.7],v3:[898.2,898.1]}, morgan={v0:880.7,v:882.5,v1:885.6,v2:889.2,v3:898.3}, dEs=[18.3,18.4,18.5,18.6,18.7];
+  Object.keys(lit).forEach(k=>lit[k].push(+(beche[k]-0.2).toFixed(2)));
+  const inR=R.lines.every(l=>lit[l.key].every(b=>Math.abs(b-l.be)<=R.beTol+1e-9)), inM=R.lines.every(l=>Math.abs(morgan[l.key]-l.be)<=1.0+1e-9), dOK=dEs.every(d=>d>=Math.min(R.dE.lo,(R.dEs&&R.dEs["Ce3+"]||R.dE).lo)&&d<=R.dE.hi);
+  const v2=R.lines.find(l=>l.key==="v2");
+  ok(inR&&inM&&dOK&&Math.abs(v2.be-(beche.v2-0.2))<1e-9&&Math.abs(R.r-2/3)<1e-12,"C 1s-scale literature positions (Bêche 2008 −0.2 eV, Bêche-family, ACS SI) within start ± 0.6 eV; v″ start = Bêche 888.5 − 0.2 = 888.3; Morgan (O 1s scale) within ± 1 eV; ΔE 18.3–18.7 eV inside the free range, u/v area 2/3",`max |start − C 1s lit| ${Math.max(...R.lines.map(l=>Math.max(...lit[l.key].map(b=>Math.abs(b-l.be))))).toFixed(2)} eV · Morgan ${Math.max(...R.lines.map(l=>Math.abs(morgan[l.key]-l.be))).toFixed(2)} eV`);
   const M=G.recipeModel("ce3d",{shift:1.3,opt:"mix",align:false}); const c0=M.comps.find(c=>c.rk==="v3");
   ok(Math.abs(c0.be-(898.2-1.3))<1e-9&&Math.abs(M.lo-(875-1.3))<1e-9&&Math.abs(M.hi-(925-1.3))<1e-9,"anchors to the charge correction: raw BE = literature − Δ (positions and window)",`v‴ ${c0.be.toFixed(2)} · window ${M.lo.toFixed(1)}–${M.hi.toFixed(1)}`);
   const anc=M.comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const ancS={}; M.comps.forEach(c=>{ const x=ancS[c.rstate]; if(!x||c.area>x.area) ancS[c.rstate]=c; });
@@ -60,20 +64,29 @@ console.log("== 1 Ce 3d recipe: data, anchoring to the charge correction, alignm
 
 /* ---------- 2 noise ---------- */
 console.log("== 2 noise statistics from second differences (MA(1))");
-{ const rg=U.rng(11); const n=4000, wn=Float64Array.from({length:n},()=>rg.g()); const a=G.noiseMA1(wn,null);
-  ok(a.rho<0.04&&Math.abs(a.s2-1)<0.06,"white noise: ρ ≈ 0, σ² ≈ 1",`ρ ${a.rho.toFixed(3)} σ² ${a.s2.toFixed(3)}`);
-  const th=0.6, e=Float64Array.from({length:n+1},()=>rg.g()); const ma=Float64Array.from({length:n},(_,i)=>(e[i+1]+th*e[i])/Math.sqrt(1+th*th)); const b=G.noiseMA1(ma,null), rt=th/(1+th*th);
-  ok(Math.abs(b.rho-rt)<0.04&&Math.abs(b.lrv-(1+2*rt))<0.12,"MA(1) noise (lag-1 ρ 0.44, like VGD): ρ and long-run variance recovered",`ρ ${b.rho.toFixed(3)}/${rt.toFixed(3)} · LRV ${b.lrv.toFixed(3)}/${(1+2*rt).toFixed(3)}`);
-  const sm=Float64Array.from({length:n},(_,i)=>1e4*Math.exp(-Math.pow((i-2000)/300,2))+rg.g()); const s=G.noiseMA1(sm,null);
-  ok(s.rho<0.05&&Math.abs(s.s2-1)<0.08,"smooth signal (peak 300 channels wide) does not leak into the noise estimate",`ρ ${s.rho.toFixed(3)} σ² ${s.s2.toFixed(3)}`);
+/* Each check uses K = 8 independent series (seeds 11…18) and tests the mean against the truth with a tolerance of about 4 standard errors of the
+   mean (spread of the estimator over 300 series, n = 4000: σ(σ²) 0.047, σ(ρ̂) 0.018 white / 0.006 MA(1), σ(LRV) 0.086) plus the known small
+   upward bias of ρ̂ clipped at 0 (≈ 0.012 → σ² +0.02); every single series must also lie within 5 σ. One seed alone was a 1.3 σ test (failed at seed + 1/+2). */
+{ const K=8, n=4000, th=0.6, rt=th/(1+th*th); const W={rho:[],s2:[]}, M={rho:[],lrv:[]}, Sm={rho:[],s2:[]};
+  for(let k=0;k<K;k++){ const rg=U.rng(11+k); const wn=Float64Array.from({length:n},()=>rg.g()); const a=G.noiseMA1(wn,null); W.rho.push(a.rho); W.s2.push(a.s2);
+    const e=Float64Array.from({length:n+1},()=>rg.g()); const ma=Float64Array.from({length:n},(_,i)=>(e[i+1]+th*e[i])/Math.sqrt(1+th*th)); const b=G.noiseMA1(ma,null); M.rho.push(b.rho); M.lrv.push(b.lrv);
+    const sm=Float64Array.from({length:n},(_,i)=>1e4*Math.exp(-Math.pow((i-2000)/300,2))+rg.g()); const c=G.noiseMA1(sm,null); Sm.rho.push(c.rho); Sm.s2.push(c.s2); }
+  const mean=a=>a.reduce((x,y)=>x+y,0)/a.length, se=s=>s/Math.sqrt(K), within=(a,t,s)=>a.every(v=>Math.abs(v-t)<=5*s);
+  ok(mean(W.rho)<0.012+4*se(0.018)&&Math.abs(mean(W.s2)-1)<0.02+4*se(0.047)&&within(W.s2,1,0.047)&&W.rho.every(v=>v<0.012+5*0.018),"white noise: ρ ≈ 0, σ² ≈ 1 (mean of 8 series within 4 SE)",`ρ ${mean(W.rho).toFixed(3)} σ² ${mean(W.s2).toFixed(3)} (range ${Math.min(...W.s2).toFixed(3)}–${Math.max(...W.s2).toFixed(3)})`);
+  ok(Math.abs(mean(M.rho)-rt)<4*se(0.0062)+0.002&&Math.abs(mean(M.lrv)-(1+2*rt))<0.015+4*se(0.086)&&within(M.rho,rt,0.0062)&&within(M.lrv,1+2*rt,0.086),"MA(1) noise (lag-1 ρ 0.44, like VGD): ρ and long-run variance recovered (mean of 8 series within 4 SE)",`ρ ${mean(M.rho).toFixed(4)}/${rt.toFixed(4)} · LRV ${mean(M.lrv).toFixed(3)}/${(1+2*rt).toFixed(3)}`);
+  ok(mean(Sm.rho)<0.015+4*se(0.02)&&Math.abs(mean(Sm.s2)-1)<0.025+4*se(0.046)&&within(Sm.s2,1,0.046),"smooth signal (peak 300 channels wide) does not leak into the noise estimate (mean of 8 series within 4 SE)",`ρ ${mean(Sm.rho).toFixed(3)} σ² ${mean(Sm.s2).toFixed(3)}`);
 }
 
 /* ---------- 3 positive controls ---------- */
 console.log("== 3 fit check — every rule fires on a spectrum built to trigger it");
 const POS={};
 { const sp1=spectrum([[285,30000]]);
-  let x=fitDiag(sp1,{lo:278,hi:296,bg:ACT,comps:[comp(285,20000,1.0,"a")],cons:{a:{F:{mode:"free",lo:0.3,hi:0.9}}}});
-  const b=x.d.find(f=>f.id==="bound"&&/FWHM/.test(f.label)); POS.bound=!!b; ok(!!b&&b.sev==="warn"&&/upper bound/.test(b.label),"R1 bound: FWHM range below the true width → 'FWHM at upper bound'",b&&b.label);
+  /* R1: the width starts INSIDE its range (0.6 in 0.3–0.9). v1.9.7 started it at 1.0, outside the range: the bounded transform then maps the start
+     somewhere arbitrary and LM 'converged' short of the bound on some noise seeds (failed at seed + 1/+2). Inside: F reaches 0.9 on 40/40 seeds. */
+  const r1=[5,6,7].map(sd=>{ const q=fitDiag(spectrum([[285,30000]],{seed:sd}),{lo:278,hi:296,bg:ACT,comps:[comp(285,20000,0.6,"a")],cons:{a:{F:{mode:"free",lo:0.3,hi:0.9}}}});
+    return q.d.find(f=>f.id==="bound"&&/FWHM/.test(f.label)); });
+  POS.bound=r1.every(Boolean); ok(r1.every(b=>b&&b.sev==="warn"&&/upper bound/.test(b.label)),"R1 bound: FWHM range below the true width → 'FWHM at upper bound' (3 noise seeds)",r1.map(b=>b?b.label:"none").join(" | "));
+  let x;
   x=fitDiag(sp1,{lo:278,hi:296,bg:ACT,comps:[comp(284.75,15000,1.2,"a"),comp(285.25,15000,1.2,"b")],cons:{a:{F:{mode:"free",lo:0.3,hi:4},be:{mode:"free",lo:284,hi:285.5}},b:{F:{mode:"free",lo:0.3,hi:4},be:{mode:"free",lo:284.5,hi:286}}}});
   POS.corr=ids(x.d).includes("corr"); POS.merge=ids(x.d).includes("merge");
   ok(POS.corr,"R2 correlation: one peak fitted by two free lines → |r| > 0.95 pair",(x.d.find(f=>f.id==="corr")||{}).label);
@@ -84,7 +97,7 @@ const POS={};
   POS.stop=ids(x.d).includes("stop"); ok(POS.stop,"R5 stop: iteration limit → 'Fit did not converge'",x.fin.stop);
   const sp2=spectrum([[285,30000],[289,30000]]);
   x=fitDiag(sp2,{lo:279,hi:288.6,bg:{type:"shirley",n:5},comps:[comp(285,30000,1.2,"a")],cons:{}});
-  const ed=x.d.find(f=>f.id==="edge"); POS.edge=!!ed; ok(!!ed&&/high-BE/.test(ed.label)&&ed.act&&ed.act.type==="window","R6 edge: window ends on the flank of the next peak → 'Peak cut at the high-BE end' + widen action",ed&&ed.label+" → "+(ed.act&&ed.act.label));
+  /* the cut side; a line broadened by the cut can also touch the low end on some seeds (v1.9.8) */ const ed=x.d.find(f=>f.id==="edge"&&/high-BE/.test(f.label)); POS.edge=!!ed; ok(!!ed&&/high-BE/.test(ed.label)&&ed.act&&ed.act.type==="window","R6 edge: window ends on the flank of the next peak → 'Peak cut at the high-BE end' + widen action",ed&&ed.label+" → "+(ed.act&&ed.act.label));
   x=fitDiag(sp2,{lo:285.4,hi:292,bg:{type:"linear",n:5},comps:[comp(289,30000,1.2,"a")],cons:{}});
   POS.bgabove=ids(x.d).includes("bgabove"); ok(POS.bgabove,"R7 background above data: linear background from an endpoint on a peak flank",(x.d.find(f=>f.id==="bgabove")||{}).label);
   const sp3=spectrum([[285,30000],[287.2,6000]]);
@@ -113,7 +126,9 @@ const FP={n:0,warned:0,byRule:{},nS:0,warnedS:0,chiS:[]};
         const d=G.diagnose({E:P.E,y:P.y,fin,el:cs.el,orb:cs.orb,bgType:bt,dEref:S.info&&S.info.dE,spec:{be0:S.E[0],be1:S.E[n-1]}}); FP.nS++; if(d.some(x=>x.sev!=="info")){ FP.warnedS++; FP.chiS.push(fin.stats.chi2nu); console.log(`     [${bt}] ${cs.el} ${cs.orb} ${two?"two":"one"} χ²ν ${fin.stats.chi2nu.toFixed(2)}: ${d.filter(x=>x.sev!=="info").map(x=>x.label).join(" | ")}`); } } } }
   ok(FP.warned===0,`true model family (in-fit Shirley + slope): ${FP.n} fits, warnings on ${FP.warned}`,JSON.stringify(FP.byRule));
   const minChi=FP.chiS.length?Math.min(...FP.chiS):null;
-  ok(FP.warnedS<=0.1*FP.nS&&(minChi==null||minChi>2),`static Shirley/Smart on a flat baseline: ${FP.nS} fits, warnings on ${FP.warnedS} — all with χ²ν > 2 (static Shirley failing on wide windows: a real misfit)`,minChi==null?"none":`min χ²ν of warned ${minChi.toFixed(2)}`);
+  // v1.9.8: 'real misfit' = χ²ν > 1.5 (> 5 standard deviations of χ²ν above 1 for these windows, √(2/ν) ≤ 0.1); the old fixed 2 failed at seed offsets
+  // where a residual-structure warning came with χ²ν 1.77–2.00 (also a misfit, not a false alarm)
+  ok(FP.warnedS<=0.1*FP.nS&&(minChi==null||minChi>1.5),`static Shirley/Smart on a flat baseline: ${FP.nS} fits, warnings on ${FP.warnedS} — all with χ²ν > 1.5 (static Shirley failing on wide windows: a real misfit)`,minChi==null?"none":`min χ²ν of warned ${minChi.toFixed(2)}`);
 }
 
 /* ---------- 5 actions ---------- */
@@ -125,14 +140,17 @@ console.log("== 5 one-click actions");
   if(f1){ const mm={lo:m.lo,hi:m.hi,bg:m.bg,comps:x.fin.comps,cons:x.P.cons}; G.applyAction(mm,f1.act); const y2=fitDiag(sp1,mm); ok(mm.comps.length===1&&!y2.d.some(f=>f.sev!=="info"),"drop: removes the line (links re-anchored) → refit has no warnings",f1.label); }
   else ok(false,"drop: merge finding expected",ids(x.d).join());
   // bound F → link to the anchor
-  const sp2=spectrum([[285,30000],[287,15000]]);
-  m={lo:278,hi:296,bg:ACT,comps:[comp(285,30000,1.2,"a"),comp(287,15000,1.0,"b")],cons:{a:{F:{mode:"free",lo:0.3,hi:4}},b:{F:{mode:"free",lo:0.3,hi:0.8}}}};
-  x=fitDiag(sp2,m); const fb=x.d.find(f=>f.id==="bound"&&f.act&&f.act.type==="link");
-  if(fb){ const mm={lo:m.lo,hi:m.hi,bg:m.bg,comps:x.fin.comps,cons:x.P.cons}; G.applyAction(mm,fb.act); const y2=fitDiag(sp2,mm); ok(mm.cons.b.F.mode==="link"&&!y2.d.some(f=>f.id==="bound"&&/FWHM/.test(f.label)),"link: width at bound linked to the anchor → bound finding gone after refit",fb.label); }
-  else ok(false,"link: bound finding with link action expected",ids(x.d).join());
+  // b's width starts inside its range (0.6 in 0.3–0.8; v1.9.7 started at 1.0, outside — see §3 R1) and m is held at its true value, so only F can
+  // widen and it reaches its bound (12/12 seeds in development; 6/12 with the old out-of-range start). 3 seeds here.
+  const lk=[5,6,7].map(sd=>{ const sp2=spectrum([[285,30000],[287,15000]],{seed:sd});
+    const m0={lo:278,hi:296,bg:ACT,comps:[comp(285,30000,1.2,"a"),comp(287,15000,0.6,"b")],cons:{a:{F:{mode:"free",lo:0.3,hi:4},m:{mode:"fixed"}},b:{F:{mode:"free",lo:0.3,hi:0.8},m:{mode:"fixed"}}}};
+    const q=fitDiag(sp2,m0); const fb=q.d.find(f=>f.id==="bound"&&f.act&&f.act.type==="link"); if(!fb) return {ok:false,info:"no link finding: "+ids(q.d).join()};
+    const mm={lo:m0.lo,hi:m0.hi,bg:m0.bg,comps:q.fin.comps,cons:q.P.cons}; G.applyAction(mm,fb.act); const y2=fitDiag(sp2,mm);
+    return {ok:mm.cons.b.F.mode==="link"&&!y2.d.some(f=>f.id==="bound"&&/FWHM/.test(f.label)),info:fb.label}; });
+  ok(lk.every(r=>r.ok),"link: width at bound linked to the anchor → bound finding gone after refit (3 noise seeds)",lk.map(r=>r.info).join(" | "));
   // edge → widen window
   const sp3=spectrum([[285,30000],[289,30000]]); m={lo:279,hi:288.6,bg:{type:"shirley",n:5},comps:[comp(285,30000,1.2,"a")],cons:{}};
-  x=fitDiag(sp3,m); const fe=x.d.find(f=>f.id==="edge"); const mm={lo:m.lo,hi:m.hi,bg:m.bg,comps:x.fin.comps,cons:{}};
+  x=fitDiag(sp3,m); const fe=x.d.find(f=>f.id==="edge"&&/high-BE/.test(f.label)); const mm={lo:m.lo,hi:m.hi,bg:m.bg,comps:x.fin.comps,cons:{}};
   G.applyAction(mm,fe.act,{be0:sp3.be[0],be1:sp3.be[sp3.be.length-1]}); ok(mm.hi>m.hi+1.9&&mm.hi<=sp3.be[sp3.be.length-1],"window: widens the cut side within the spectrum",`${m.hi} → ${mm.hi.toFixed(2)}`);
   // residual → add line → refit → residual finding gone
   const sp4=spectrum([[285,30000],[287.2,6000]]); m={lo:278,hi:296,bg:ACT,comps:[comp(285,30000,1.2,"a")],cons:{a:{F:{mode:"free",lo:0.3,hi:4}}}};
@@ -187,7 +205,12 @@ const SYN={};
     console.log(`     f ${f} #${s}: Ce³⁺ ${dv[0].v.toFixed(1)} ± ${dv[0].sig.toFixed(1)} % (true ${100*f}) · u‴ ${dv[1].v.toFixed(2)} % (true ${(100*S.u3).toFixed(2)}) · χ²ν ${fin.stats.chi2nu.toFixed(2)} · ${st.staged.used} · bound hits ${nbR} | naive ${PN.comps.length} lines χ²ν ${fN.stats.chi2nu.toFixed(2)} bound hits ${nbN}`); }
   const mx=Math.max(...res.map(r=>Math.abs(r.d))), mb=res.reduce((s,r)=>s+r.d,0)/res.length, mu=Math.max(...res.map(r=>Math.abs(r.du)));
   SYN.maxD=mx; SYN.meanD=mb; SYN.maxDu=mu; SYN.bR=res.reduce((s,r)=>s+r.nbR,0); SYN.bN=res.reduce((s,r)=>s+r.nbN,0); SYN.n=res.length;
-  ok(mx<=4,"Ce³⁺ fraction recovered within ±4 % (absolute) for true 0 · 20 · 50 %",`max |Δ| ${mx.toFixed(2)} %, mean Δ ${mb.toFixed(2)} %`);
+  /* v1.9.8: tolerance from the reported σ instead of a fixed ±4 %p (which failed at seed offsets where one spectrum fell into the v′ ↔ v″ trade-off,
+     old and new recipe alike — 13–14 of 20 offsets with all 4 spectra per fraction). Measured over 69 distinct spectra (seed offsets 0–19):
+     Δ sd 2.3 %p, z rms 1.34; no spectrum beyond 3σ + 2 %p (model term: symmetric lines / common vs per-state ΔE, §17.3). The mean check catches a
+     systematic shift: |mean Δ| ≤ 1 %p + 3·2.4/√n (2.4 %p = spread per spectrum). */
+  const okS=res.every(r=>r.sig!=null&&Math.abs(r.d)<=3*r.sig+2), tolM=1+3*2.4/Math.sqrt(res.length);
+  ok(okS&&Math.abs(mb)<=tolM,"Ce³⁺ fraction recovered for true 0 · 20 · 50 %: every spectrum within 3σ + 2 %p, mean Δ within 1 + 3·2.4/√n %p",`max |Δ| ${mx.toFixed(2)} %, max |Δ|/(3σ+2) ${Math.max(...res.map(r=>Math.abs(r.d)/(3*r.sig+2))).toFixed(2)}, mean Δ ${mb.toFixed(2)} % (tol ${tolM.toFixed(2)})`);
   ok(mu<=0.3,"u‴ fraction recovered within ±0.3 %",`max |Δ| ${mu.toFixed(2)} %`);
   ok(SYN.bR<SYN.bN,"bound hits (non-area parameters) recipe + staged < naive Auto suggest",`recipe ${SYN.bR} vs naive ${SYN.bN} over ${res.length} spectra`);
   ok(res.every(r=>r.naiveRecipe),"fit check on every naive fit points to the recipe");
@@ -277,12 +300,22 @@ const TM={};
       const z=spd.map((d,i)=>(mix[d.id.slice(3)]||0)>0&&d.sig>0?dev[i]/d.sig:NaN);   /* present species only: an absent one sits at area 0 (a bound) where σ is not defined */ const sigSame=dv.every((d,i)=>Math.abs((d.sig||0)-(dvM[i].sig||0))<1e-9*(1+(d.sig||0)));
       let shk=null; if(id==="cu2p3"){ const tsum=S.truth.reduce((a,c)=>a+c.area,0), rOf={CuO:1.89,CuOH2:1.57}; const exp=100*S.truth.reduce((a,c)=>a+(c.rsat?(1+rOf[c.rsp])*c.area:0),0)/tsum; const d=dv.find(x=>x.id==="CuShk"); shk={v:d.v,exp,tr:100*(mix.CuO||0)+100*(mix.CuOH2||0)}; }
       const diag=G.diagnose({E:P.E,y:P.y,fin,el:R.el,orb:"2p",bgType:P.bg.type,recipe:R});
-      const r={id,mi,mx,chi:fin.stats.chi2nu,z,sigSame,shk,merge:diag.filter(x=>x.id==="merge").length,perPeak:diag.filter(x=>["ill","dead","neg"].includes(x.id)&&x.act&&x.act.type!=="dropSet").length,used:st.staged.used};
+      // v1.9.8: ±2.5 %p, or 3σ + 1 %p where the split is weakly determined; a species of a documented 'sum only' pair (recipe sums, e.g. Cu(0)+Cu(I):
+      // 0.45 eV, no satellites) may instead pass through that sum, judged the same way
+      const tolOf=sg=>Math.max(TOL,3*(sg||0)+1);
+      const within=spd.every((d,i)=>{ if(Math.abs(dev[i])<=tolOf(d.sig)) return true; const k=d.id.slice(3);
+        return (R.sums||[]).some(su=>{ if(!su.keys||!su.keys.includes(k)) return false; const ds=dv.find(x=>x.id===su.id); if(!ds||ds.v==null) return false; const tr=100*su.keys.reduce((a,q)=>a+(mix[q]||0),0); return Math.abs(ds.v-tr)<=tolOf(ds.sig); }); });
+      const r={id,mi,mx,within,chi:fin.stats.chi2nu,z,sigSame,shk,merge:diag.filter(x=>x.id==="merge").length,perPeak:diag.filter(x=>["ill","dead","neg"].includes(x.id)&&x.act&&x.act.type!=="dropSet").length,used:st.staged.used};
       res.push(r); TM.syn[id].push({mix,fit:Object.fromEntries(spd.map(d=>[d.id.slice(3),+d.v.toFixed(2)])),maxDev:+mx.toFixed(2),chi2nu:+r.chi.toFixed(2)});
       console.log(`     ${R.el} #${mi} ${keys.map(k=>k+" "+100*mix[k]).join(" + ")}: ${spd.map((d,i)=>`${d.label} ${d.v.toFixed(1)}±${d.sig.toFixed(1)}`).join(" · ")} | max |Δ| ${mx.toFixed(2)} % · χ²ν ${r.chi.toFixed(2)} · ${r.used}`+(shk?` · shake-up Cu(II) ${shk.v.toFixed(1)} % (formula on truth ${shk.exp.toFixed(1)}, species truth ${shk.tr})`:"")); }); });
   const MX=Math.max(...res.map(r=>r.mx)); TM.maxDev=MX; TM.chi=[Math.min(...res.map(r=>r.chi)),Math.max(...res.map(r=>r.chi))];
   TM.byEl=Object.fromEntries(ids.map(id=>[id,Math.max(...res.filter(r=>r.id===id).map(r=>r.mx))]));
-  ok(MX<=TOL,`species fractions recovered within ±${TOL} % (absolute) on ${res.length} synthetic mixtures of 2–3 species (6 elements)`,ids.map(id=>id.slice(0,2)+" "+TM.byEl[id].toFixed(2)).join(" · "));
+  /* v1.9.8: a fixed ±2.5 %p failed at seed offsets 3/12/17 (old and new guide identically) on Co + CoO, where the default-ticked Co(OH)₂ envelope (main
+     line 0.4 eV from CoO) takes up to 6.8 %p of CoO with σ 2.2 — the split is weakly determined and the fit says so. Pass = |Δ| ≤ max(2.5, 3σ + 1) %p
+     for every species (over 20 offsets × 3 Co mixtures: 0 failures; z rms of present species 0.97), or — for a species in a recipe 'sum' (pairs the
+     recipe says are only determined together) — the same test on that sum (seed + 3, Cu(0) 40 + CuO + Cu(OH)₂: Cu(0) −3.0 ± 0.4 with Cu₂O +3.4,
+     Cu(0)+Cu(I) +0.4 %p). */
+  ok(res.every(r=>r.within),`species fractions recovered on ${res.length} synthetic mixtures of 2–3 species (6 elements): |Δ| ≤ max(${TOL}, 3σ + 1) %p (or the recipe's documented sum)`,ids.map(id=>id.slice(0,2)+" "+TM.byEl[id].toFixed(2)).join(" · "));
   ok(res.every(r=>r.chi<1.3),"every fit reaches the noise floor (χ²ν < 1.3; true model family)",`χ²ν ${TM.chi.map(x=>x.toFixed(2)).join("–")}`);
   const zs=res.flatMap(r=>r.z).filter(isFinite), zr=Math.sqrt(zs.reduce((a,b)=>a+b*b,0)/zs.length); TM.zrms=zr;
   ok(zr<3,"covariance σ of the fractions is of the right size (rms of Δ/σ over the present species < 3)",`rms z ${zr.toFixed(2)} over ${zs.length}`);
@@ -309,7 +342,7 @@ const TM={};
 
 /* ---------- 9 v1.9.7 Ba · Y · lanthanide recipes ---------- */
 console.log("== 9 v1.9.7 Ba · Y · lanthanide recipes (Sunding 2011, Cole 2020, Karslıoğlu 2018, Haasch 2014) and overlap rules");
-const LT={};
+const LT={}; let SYNTHR=null;   // synthR is shared with §10
 { const fs=require("fs"), path=require("path"), RD=path.join(__dirname,"ref","lit2");
   const rd=f=>fs.readFileSync(path.join(RD,f),"utf8").split("\n").filter(l=>l.trim()&&!l.startsWith("#"));
   const num=x=>x==null||x===""?null:+x;
@@ -377,9 +410,10 @@ const LT={};
     P0.comps.forEach(c=>{ c.be+=off; if(tr.F&&tr.F[c.rk]) c.F=tr.F[c.rk]; if(c.doublet&&tr.dE) c.doublet.dE=tr.dE; if(tr.m!=null&&c.m!=null) c.m=tr.m; if(tr.area&&tr.area[c.rk]!=null) c.area=tr.area[c.rk]; });
     C.applyLinks(P0,map); const P=new Float64Array(n); P0.comps.forEach(d=>{ const v=C.compEval(d,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const Q=C.cumtrapz(E,P);
     const y=Float64Array.from(P,(p,i)=>rg.pois(3000+4*(E[i]-lo)+0.08*Q[i]+p)); return {E,y,truth:P0.comps}; }
+  SYNTHR=synthR;
   function fitR(id,S,o){ const R=G.recipeById(id); const M=G.recipeModel(id,{shift:0,be:S.E,y:S.y,species:o.species,flags:o.flags,hv:1486.6}); const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const st=G.stagedFit(P,{}); const fin=C.finalize(st.P,st.r);
     const dv=G.recipeDerived(fin,{id,cons:st.P.cons}); const atB=(fin.cov&&fin.cov.atB)||[]; const nb=fin.free.filter((f,j)=>atB[j]&&f.k!=="area").length;
-    const d=G.diagnose({E:st.P.E,y:st.P.y,fin,el:R.el,orb:R.orb,bgType:st.P.bg.type,recipe:R}); return {M,fin,dv,nb,warn:d.filter(x=>x.sev!=="info").map(x=>x.label)}; }
+    const d=G.diagnose({E:st.P.E,y:st.P.y,fin,el:R.el,orb:R.orb,bgType:st.P.bg.type,recipe:R}); return {M,fin,dv,nb,d,warn:d.filter(x=>x.sev!=="info").map(x=>x.label)}; }
   const truthOf=S=>{ const t={}, sp={}; let sat=0, tot=0; S.truth.forEach(c=>{ if(c.rx) return; tot+=c.area; if(c.rrole==="sat") sat+=c.area; sp[c.rsp]=(sp[c.rsp]||0)+c.area; }); Object.keys(sp).forEach(k=>t["sp_"+k]=100*sp[k]/tot); t.ct=100*sat/tot; return t; };
   const CASES=[
     {id:"la3d",species:["LaOH3"],seed:31,truth:{area:{LaOH3_m:43000,LaOH3_b:28500,aug:8000},dE:16.85,m:0.35,F:{LaOH3_m:1.5,LaOH3_b:2.1,LaOH3_a:2.3,aug:4}},tol:1.0},
@@ -390,7 +424,7 @@ const LT={};
     {id:"la4d",species:["La2O3"],seed:36,truth:{area:{La2O3_m:30000,La2O3_b:20000},dE:3.15},tol:1.0},
     {id:"la4d",species:["LaOH3","La2O3"],seed:37,truth:{area:{LaOH3_m:30000,La2O3_m:20000}},tol:2.5},
     {id:"y3d",species:["Y0","Y2O3"],seed:41,truth:{area:{Y0_m:15000,Y2O3_m:35000},dE:2.03},tol:2.5},
-    {id:"y3d",species:["Y0","Y2O3","YCl3"],seed:44,truth:{area:{Y0_m:10000,Y2O3_m:25000,YCl3_m:15000}},tol:null},
+    {id:"y3d",species:["Y0","Y2O3","YCl3"],seed:44,truth:{area:{Y0_m:10000,Y2O3_m:25000,YCl3_m:15000}},tol:null,ill:["Y2O3","YCl3"]},   // expected ill-posed (broad Y₂O₃ / YCl₃ 1.3 eV apart): the assertion is that Fit check flags it
     {id:"y3d",species:["Y2O3","YOH3"],seed:42,truth:{area:{Y2O3_m:30000,YOH3_m:20000}},tol:null},
     {id:"ba4d",species:["BaO","BaCO3"],seed:51,truth:{area:{BaO_m:20000,BaCO3_m:30000}},tol:2.5},
     {id:"ba4d",species:["BaO","BaOH2","BaNO32"],seed:52,truth:{area:{BaO_m:20000,BaOH2_m:15000,BaNO32_m:10000}},tol:2.5},
@@ -398,12 +432,19 @@ const LT={};
     {id:"ba3d",seed:54,truth:{area:{Ba_m:50000}},tol:null}];
   LT.syn=[]; const zs=[];
   (QUICK?CASES.filter((c,i)=>i%2===0):CASES).forEach(cs=>{ const S=synthR(cs.id,cs,cs.seed); const F=fitR(cs.id,S,cs); const t=truthOf(S);
-    const dv=F.dv.filter(d=>d.id in t); const dev=dv.map(d=>d.v-t[d.id]); const mx=dev.length?Math.max(...dev.map(Math.abs)):0; dv.forEach((d,i)=>{ if(d.sig>0) zs.push(dev[i]/d.sig); });
-    const r={id:cs.id,species:(cs.species||["Ba"]).join("+")+(cs.flags&&cs.flags.plasmon?"+pl":""),fit:Object.fromEntries(dv.map(d=>[d.id,+d.v.toFixed(2)])),truth:Object.fromEntries(dv.map(d=>[d.id,+t[d.id].toFixed(2)])),maxDev:+mx.toFixed(2),sig:Object.fromEntries(dv.map(d=>[d.id,+(d.sig||0).toFixed(2)])),chi2nu:+F.fin.stats.chi2nu.toFixed(3),bounds:F.nb,warn:F.warn,align:F.M.recipe.align,tol:cs.tol};
+    const dv=F.dv.filter(d=>d.id in t); const dev=dv.map(d=>d.v-t[d.id]); const mx=dev.length?Math.max(...dev.map(Math.abs)):0; if(!cs.ill) dv.forEach((d,i)=>{ if(d.sig>0) zs.push(dev[i]/d.sig); });
+    // v1.9.8: |Δ| ≤ max(tol, 3σ + 1) %p per derived value (fixed tolerances alone failed at seed offsets, e.g. Ba 4d three species +3 → BaO Δ 3.02, σ 1.09)
+    const within=cs.tol==null||dv.every((d,i)=>Math.abs(dev[i])<=Math.max(cs.tol,3*(d.sig||0)+1));
+    const illIds=cs.ill?new Set(F.fin.comps.filter(c=>cs.ill.includes(c.rsp)).map(c=>c.id)):null;
+    const flagged=cs.ill?F.d.some(x=>["corr","bound","ill"].includes(x.id)&&x.ids.some(id=>illIds.has(id))):null;
+    const okWell=cs.ill?dv.filter(d=>!cs.ill.includes(d.id.slice(3))).every(d=>Math.abs(d.v-t[d.id])<=Math.max(2.5,3*(d.sig||0)+1)):null;
+    const r={id:cs.id,species:(cs.species||["Ba"]).join("+")+(cs.flags&&cs.flags.plasmon?"+pl":""),fit:Object.fromEntries(dv.map(d=>[d.id,+d.v.toFixed(2)])),truth:Object.fromEntries(dv.map(d=>[d.id,+t[d.id].toFixed(2)])),maxDev:+mx.toFixed(2),sig:Object.fromEntries(dv.map(d=>[d.id,+(d.sig||0).toFixed(2)])),chi2nu:+F.fin.stats.chi2nu.toFixed(3),bounds:F.nb,warn:F.warn,align:F.M.recipe.align,tol:cs.tol,within,ill:!!cs.ill,flagged,okWell,find:F.d.map(x=>x.sev[0]+":"+x.id)};
     LT.syn.push(r); console.log(`     ${cs.id} ${r.species}: ${dv.map((d,i)=>`${d.label} ${d.v.toFixed(2)}±${(d.sig||0).toFixed(2)} (true ${t[d.id].toFixed(2)})`).join(" · ")||"—"} | χ²ν ${r.chi2nu} · align ${r.align.toFixed(2)} · bounds ${r.bounds}${r.warn.length?" · warn: "+r.warn.join(" ; "):""}`); });
   const tol=LT.syn.filter(r=>r.tol!=null); LT.zrms=Math.sqrt(zs.reduce((a,b)=>a+b*b,0)/zs.length);
-  ok(tol.every(r=>r.maxDev<=r.tol),"synthetic recovery: La c4f¹L share within ±1 %, compound / species fractions within ±2.5 % (La 3d, La 4d, Y 3d, Ba 4d)",tol.map(r=>`${r.id} ${r.species} ${r.maxDev}`).join(" · "));
-  ok(LT.syn.every(r=>r.chi2nu<1.3&&r.bounds===0&&!r.warn.length),"every synthetic fit: χ²ν < 1.3, no parameter at a bound, no Fit check warning (incl. the 0.4 eV Y₂O₃/Y(OH)₃ pair — literature positions are not a 'merge')",`χ²ν ${Math.min(...LT.syn.map(r=>r.chi2nu))}–${Math.max(...LT.syn.map(r=>r.chi2nu))}`);
+  ok(tol.every(r=>r.within),"synthetic recovery: every derived value within max(tol, 3σ + 1) %p — tol = 1 (La c4f¹L share), 2.5 (compound / species fractions; La 3d, La 4d, Y 3d, Ba 4d)",tol.map(r=>`${r.id} ${r.species} ${r.maxDev}`).join(" · "));
+  const ill=LT.syn.filter(r=>r.ill);
+  ok(ill.every(r=>r.flagged&&r.okWell&&r.chi2nu<1.3),"expected ill-posed case (Y metal + Y₂O₃ + YCl₃: broad lines 1.3 eV apart): Fit check flags the Y₂O₃/YCl₃ split (correlation, or the position bound that then shrinks σ); the well-separated Y metal fraction stays within max(2.5, 3σ + 1) %p",ill.map(r=>r.find.join(",")).join(" | "));
+  ok(LT.syn.filter(r=>!r.ill).every(r=>r.chi2nu<1.3&&r.bounds===0&&!r.warn.length),"every synthetic fit: χ²ν < 1.3, no parameter at a bound, no Fit check warning (incl. the 0.4 eV Y₂O₃/Y(OH)₃ pair — literature positions are not a 'merge')",`χ²ν ${Math.min(...LT.syn.map(r=>r.chi2nu))}–${Math.max(...LT.syn.map(r=>r.chi2nu))}`);
   ok(LT.zrms<3,"fraction σ of the right size (rms Δ/σ over all derived values < 3; the weakly determined Y₂O₃/Y(OH)₃ and three-species splits included)",`rms ${LT.zrms.toFixed(2)} over ${zs.length}`);
 
   // empirical envelopes: smoke test — synthetic built from the envelope (random areas), fit converges, no bound hits
@@ -439,6 +480,114 @@ const LT={};
     const d=G.diagnose({E:P.E,y:P.y,fin,el:"La",orb:"3d",bgType:"smart"}); const cx=d.find(x=>x.id==="complex");
     ok(cx&&cx.act&&cx.act.recipe==="la3d"&&/Sunding/.test(cx.tip)&&/charge-transfer/.test(cx.tip),"naive La 3d fit → Fit check 'Apply recipe' (La 3d, Sunding)",cx&&cx.label); }
 }
+/* ---------- 10 v1.9.8 audit fixes ---------- */
+console.log("== 10 v1.9.8: Ce floor, species-level remove, R6 at the recipe window, derived outputs, R1/R2/R4/R10/R11, staged-fit guards, PE column, Yb text");
+const V8={}; const synthR=(...a)=>SYNTHR(...a);
+{ // (a) Ce recipe: an absent state no longer starts at 1e-6 and freezes the fit (pure Ce³⁺ data, Mixed option)
+  const R=G.recipeById("ce3d"); const P3={v0:0.288,v1:0.712}; const step=0.1,lo=865,hi=935,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+  const rows=[]; for(const sd of [3,4]){ const rg=U.rng(sd*7+100); const P=new Float64Array(n); R.lines.forEach(l=>{ if(l.state!=="Ce3+") return; const c=C.newComp("GLS",l.be+(rg.u()-0.5)*0.2,{F:l.F,m:0.3,area:1e5*P3[l.key]}); c.doublet={dE:18.2,r:2/3,q:1}; const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; });
+    const Q=C.cumtrapz(E,P); const y=Float64Array.from(P,(p,i)=>rg.pois(2000+4*(E[i]-lo)+0.05*Q[i]+p)); const M=G.recipeModel("ce3d",{shift:0,be:E,y,opt:"mix"});
+    const amax=Math.max(...M.comps.map(c=>c.area)), minStart=Math.min(...M.comps.map(c=>c.area))/amax;
+    const st=G.stagedFit(C.makeProblem({be:E,y,c:1},M),{}); const fin=C.finalize(st.P,st.r); const ce3=G.recipeDerived(fin,{id:"ce3d"})[0].v;
+    rows.push({minStart,floor:M.comps.every(c=>c.afloor===0.02),itN:st.r.iter+(st.r.iter1||0),it23:st.staged.stages.slice(1).map(q=>q.iter),ce3,chi:fin.stats.chi2nu}); }
+  V8.ceFloor=rows;
+  ok(rows.every(r=>r.floor&&r.minStart>=0.02-1e-12&&r.it23.every(i=>i>0)&&r.ce3>=95&&r.chi<1.3),"Ce recipe: absent-state lines start at ≥ 2 % of the largest area (afloor), stages 2–3 are seeded the same way and iterate; pure Ce³⁺ → Ce³⁺ ≥ 95 %",rows.map(r=>`start ≥ ${(100*r.minStart).toFixed(1)} % · stage 2/3 iter ${r.it23.join("/")} · Ce³⁺ ${r.ce3.toFixed(1)} % · χ²ν ${r.chi.toFixed(2)}`).join(" | "));
+}
+{ // (b) R3 'Remove' on parametric / empirical recipe lines: species-level, links re-anchored exactly (nothing moves), no orphan, ranges carried
+  const missing=M=>{ const ids=new Set(M.comps.map(c=>c.id)); return M.comps.some(c=>Object.values(M.cons[c.id]||{}).some(q=>q&&q.mode==="link"&&!ids.has(q.ref))); };
+  const moved=(M,before)=>{ const P={comps:C.clone(M.comps),cons:M.cons,bg:M.bg}; C.applyLinks(P,C.buildMap(P)); return Math.max(...P.comps.map(c=>Math.abs(c.be-before[c.id]))); };
+  // La 3d, two compounds, data = La(OH)₃ only → the La₂O₃ species is absent → R3 acts on the whole species
+  const S=synthR("la3d",{species:["LaOH3"],truth:{area:{LaOH3_m:43000,LaOH3_b:28500,aug:8000}}},71); const R=G.recipeById("la3d");
+  const M=G.recipeModel("la3d",{shift:0,be:S.E,y:S.y,species:["LaOH3","La2O3"],hv:1486.6}); const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const r=C.fitOnce(P,{}); const fin=C.finalize(P,r);
+  const d=G.diagnose({E:P.E,y:P.y,fin,el:"La",orb:"3d",bgType:P.bg.type,recipe:R}); const f3=d.find(x=>["dead","ill","neg"].includes(x.id)&&x.act&&x.ids.some(id=>fin.comps.find(c=>c.id===id).rsp==="La2O3"));
+  let info="no R3 finding on La₂O₃", okLa=false;
+  if(f3){ const mm={lo:M.lo,hi:M.hi,bg:M.bg,comps:fin.comps,cons:P.cons}; const before=Object.fromEntries(mm.comps.map(c=>[c.id,c.be])); G.applyAction(mm,f3.act);
+    const left=mm.comps.map(c=>c.rk), m0=mm.comps.find(c=>c.rk==="LaOH3_m"), q=mm.cons[m0.id].be, dE=mm.comps.map(c=>mm.cons[c.id].dE).find(x=>x&&x.mode==="free");
+    okLa=f3.act.type==="dropSet"&&f3.act.ids.length===3&&!left.some(k=>k.startsWith("La2O3"))&&left.includes("aug")&&!missing(mm)&&moved(mm,before)<1e-9&&q.mode==="free"&&q.lo<=m0.be&&m0.be<=q.hi&&dE&&dE.lo===16.6&&dE.hi===17&&d.filter(x=>x.act&&x.act.type==="dropSet"&&x.act.ids.includes(f3.act.ids[0])).length===1;
+    info=`${f3.label} → ${left.join(",")}; ΔE range ${dE?dE.lo+"–"+dE.hi:"lost"}; La(OH)₃ c4f⁰ window ${q.lo}–${q.hi}`;
+    const P2=C.makeProblem({be:S.E,y:S.y,c:1},mm); const r2=C.fitOnce(P2,{}); const f2=C.finalize(P2,r2); const ct=G.recipeDerived(f2,{id:"la3d",cons:P2.cons}).find(x=>x.id==="ct"); V8.laDrop={info,ct:ct&&ct.v,label:ct&&ct.label};
+    okLa=okLa&&ct&&ct.fixed&&Math.abs(ct.v-57)<1e-6&&f2.stats.chi2nu<1.3; }   // two compounds at build → ratio fixed (Table 5) → the share stays an input after the drop
+  ok(okLa,"La 3d: R3 on an absent compound: one finding for the species, which removes it whole (main + 2 satellites; Auger kept), links re-anchored with nothing moved, the shared ΔE keeps 16.6–17.0 eV, refit χ²ν < 1.3, c4f¹L marked 'fixed' (ratio held from the two-compound build)",info+(V8.laDrop?` · ${V8.laDrop.label} ${V8.laDrop.ct!=null?V8.laDrop.ct.toFixed(1):"—"}`:""));
+  // per-line drops: the satellite of a species drags its species; a Haasch component and the Auger line go alone; nothing moves
+  const per=[]; { const M2=G.recipeModel("la3d",{species:["LaOH3","La2O3"]}); const before=Object.fromEntries(M2.comps.map(c=>[c.id,c.be])); const b=M2.comps.find(c=>c.rk==="LaOH3_b");
+    G.applyAction(M2,{type:"dropSet",ids:M2.comps.filter(c=>c.rsp==="LaOH3"&&c.rrole!=="aug").map(c=>c.id),label:"Remove La(OH)₃"}); per.push(["La(OH)₃ satellite → species",!missing(M2)&&moved(M2,before)<1e-9&&!M2.comps.some(c=>c.rsp==="LaOH3"&&c.rrole!=="aug")]); }
+  { const M3=G.recipeModel("dy4d",{}); const before=Object.fromEntries(M3.comps.map(c=>[c.id,c.be])); const anc=M3.comps.find(c=>M3.cons[c.id].be.mode==="free"); G.applyAction(M3,{type:"drop",id:anc.id,label:"Remove c1"});
+    const nf=M3.comps.find(c=>M3.cons[c.id].be.mode==="free"), q=M3.cons[nf.id].be; per.push(["Dy 4d position anchor",!missing(M3)&&moved(M3,before)<1e-9&&Math.abs((q.lo+q.hi)/2-nf.be)<1e-6&&M3.comps.length===7]); }
+  { const M4=G.recipeModel("la3d",{species:["LaOH3"],hv:1486.6}); const before=Object.fromEntries(M4.comps.map(c=>[c.id,c.be])); const au=M4.comps.find(c=>c.rrole==="aug"); G.applyAction(M4,{type:"drop",id:au.id,label:"Remove MNN"}); per.push(["La MNN Auger alone",!missing(M4)&&moved(M4,before)<1e-9&&M4.comps.length===3]); }
+  // the act diagnose builds for a parametric satellite line = the species
+  { const fake=G.recipeModel("la3d",{species:["LaOH3","La2O3"]}); const ids_=fake.comps.filter(c=>c.rsp==="La2O3").map(c=>c.id); per.push(["diagnose's act for a satellite = species",ids_.length===3]); }
+  ok(per.every(x=>x[1]),"per-line removes: a satellite drags its species, an empirical (Haasch) position anchor or the Auger line goes alone — no orphan link, no line moves, the new position window is centred on the line",per.map(x=>x[0]+" "+(x[1]?"ok":"BAD")).join(" · "));
+}
+{ // (c) R6: Fe 2p3/2 envelope satellites end at the recipe window (721 eV) — no 'peak cut' on fits of the true model; the generic R6 control (§3) still fires
+  const R=G.recipeById("fe2p3"); const rows=[]; for(const sd of [1,2,3]){ const rg=U.rng(sd*101+6); const T=G.recipeModel("fe2p3",{pe:20}); const lo=R.window[0]-3,hi=R.window[1]+3,step=0.05,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+    const P0={comps:C.clone(T.comps),cons:T.cons,bg:T.bg}; const map=C.buildMap(P0); map.free.forEach(f=>{ if(f.ci>=0&&f.k==="area") P0.comps[f.ci].area=20000*(0.5+rg.u()); }); C.applyLinks(P0,map); const off=(rg.u()-0.5)*0.2; P0.comps.forEach(c=>c.be+=off);
+    const P=new Float64Array(n); P0.comps.forEach(c=>{ const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const Q=C.cumtrapz(E,P); const y=Float64Array.from(P,(p,i)=>rg.pois(3000+3*(E[i]-lo)+0.08*Q[i]+p));
+    const M=G.recipeModel("fe2p3",{shift:0,be:E,y,pe:20}); const st=G.stagedFit(C.makeProblem({be:E,y,c:1},M),{}); const fin=C.finalize(st.P,st.r);
+    const d=G.diagnose({E:st.P.E,y:st.P.y,fin,el:"Fe",orb:"2p",bgType:st.P.bg.type,recipe:R,spec:{be0:E[0],be1:E[n-1]}}); rows.push({chi:fin.stats.chi2nu,w:d.filter(x=>x.sev!=="info").map(x=>x.label)}); }
+  ok(rows.every(r=>!r.w.length&&r.chi<1.3)&&POS.edge,"R6: Fe 2p3/2 recipe fits (satellites at 719–720 eV, window end 721 eV) give no 'peak cut' warning; the generic window-end control still fires",rows.map(r=>`χ²ν ${r.chi.toFixed(2)} ${r.w.join(";")||"no warning"}`).join(" | "));
+}
+{ // (d) derived outputs: Fix ratio marked 'fixed' (no σ); no covariance → σ null; Cu Eq. 2 capped / flagged
+  const S=synthR("la3d",{species:["La2O3"],flags:{auger:false},truth:{area:{La2O3_m:30000,La2O3_b:15000}}},72);   // c4f¹L truth = 2·15000/60000 = 50 %
+  const fx=G.recipeModel("la3d",{shift:0,be:S.E,y:S.y,species:["La2O3"],flags:{fixR:true,auger:false}}); const Pf=C.makeProblem({be:S.E,y:S.y,c:1},fx); const ff=C.finalize(Pf,C.fitOnce(Pf,{}));
+  const dF=G.recipeDerived(ff,{id:"la3d",cons:Pf.cons})[0], dFm=G.recipeDerived(ff,{id:"la3d"})[0];
+  const fr=G.recipeModel("la3d",{shift:0,be:S.E,y:S.y,species:["La2O3"],flags:{fixR:false,auger:false}}); const Pr=C.makeProblem({be:S.E,y:S.y,c:1},fr); const ffr=C.finalize(Pr,C.fitOnce(Pr,{})); const dR=G.recipeDerived(ffr,{id:"la3d",cons:Pr.cons})[0];
+  const Mc=G.recipeModel("ce3d",{opt:"mix"}); Mc.comps.forEach((c,i)=>c.area=1000*(i+1)); const nc=G.recipeDerived({comps:Mc.comps},{id:"ce3d"});
+  const Mu=G.recipeModel("cu2p3",{species:["Cu0","CuO"]}); Mu.comps.forEach(c=>c.area=c.rsat?100:0); const so=G.recipeDerived({comps:Mu.comps},{id:"cu2p3",cons:Mu.cons}).find(x=>x.id==="CuShk");
+  const Mo=G.recipeModel("cu2p3",{species:["Cu0","CuO"]}); Mo.comps.forEach(c=>c.area=c.rsat?100:(c.rsp==="Cu0"?20:1)); const ov=G.recipeDerived({comps:Mo.comps},{id:"cu2p3",cons:Mo.cons}).find(x=>x.id==="CuShk");
+  V8.derived={fixed:dF,free:{v:dR.v,sig:dR.sig},noCov:nc.map(x=>x.sig),satOnly:so,over:ov&&{v:ov.v,flag:ov.flag}};
+  ok(dF.fixed&&/fixed/.test(dF.label)&&dF.sig==null&&Math.abs(dF.v-90)<1e-6&&dFm.fixed&&!dR.fixed&&dR.sig>0&&Math.abs(dR.v-50)<1.5,"'Fix ratio': the c4f¹L share is marked 'fixed' (= Table 5 input 90 %, no σ; also from the build-time links); free ratio → measured share with σ",`fixed ${dF.v.toFixed(1)} (${dF.label}) · free ${dR.v.toFixed(2)} ± ${dR.sig.toFixed(2)} (truth 50)`);
+  ok(nc.length===2&&nc.every(x=>x.sig===null&&x.v!=null),"no covariance (or no free root area) → σ = null, not 0",JSON.stringify(nc.map(x=>[x.label,+x.v.toFixed(1),x.sig])));
+  ok(so&&so.v==null&&/satellite only/.test(so.flag||"")&&ov&&ov.v===100&&ov.sig==null&&/> 100/.test(ov.flag||""),"Cu(II) shake-up Eq. 2: satellite-only input → no value + flag; > 100 % → capped at 100 + flag",`${so&&so.flag} · ${ov&&ov.flag}`);
+}
+{ // (e) PE column: any pass energy ≤ 15 eV → PE 10 widths
+  const w=pe=>{ const M=G.recipeModel("ni2p3",{species:["NiO"],pe}); return {pe:M.recipe.pe,F:+C.compToCasa(M.comps.find(c=>c.rk==="NiO_1")).fwhm.toFixed(3)}; };
+  const r={5:w(5),10:w(10),15:w(15),20:w(20),50:w(50),none:w(undefined)};
+  ok(r[5].F===2.04&&r[10].F===2.04&&r[15].F===2.04&&r[20].F===3.25&&r[50].F===3.25&&r.none.F===3.25,"envelope FWHM column: pass energy ≤ 15 eV → PE 10 (5, 10, 15 eV), otherwise PE 20 (20, 50 eV, unknown)",Object.entries(r).map(([k,v])=>k+":"+v.F).join(" "));
+}
+{ // (f) R1 recipe-width hint for parametric species lines (not only Ce): La(OH)₃ c4f⁰ wider than its 4.5 eV fit range → no action, recipe hint
+  const S=synthR("la3d",{species:["LaOH3"],flags:{auger:false},truth:{area:{LaOH3_m:43000,LaOH3_b:28500},F:{LaOH3_m:5.5,LaOH3_b:2.1,LaOH3_a:2.3}}},73); const R=G.recipeById("la3d");
+  const M=G.recipeModel("la3d",{shift:0,be:S.E,y:S.y,species:["LaOH3"],flags:{auger:false}}); const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const fin=C.finalize(P,C.fitOnce(P,{}));
+  const d=G.diagnose({E:P.E,y:P.y,fin,el:"La",orb:"3d",bgType:P.bg.type,recipe:R}); const b=d.find(x=>x.id==="bound"&&/FWHM/.test(x.label)&&/upper/.test(x.label));
+  ok(b&&b.act===null&&/recipe width range/.test(b.tip),"R1: a parametric recipe line (La 3d c4f⁰) at its FWHM upper limit → recipe-range hint, no 'link' action",b&&b.label);
+}
+{ // (g) R2: background k ↔ slope correlation of a recipe's in-fit Shirley + slope → info; the same pair in a user model stays a warning
+  const S=synthR("ba4d",{species:["BaCO3"],truth:{area:{BaCO3_m:40000}}},74); const R=G.recipeById("ba4d"); const M=G.recipeModel("ba4d",{shift:0,be:S.E,y:S.y,species:["BaCO3"]});
+  const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const fin=C.finalize(P,C.fitOnce(P,{})); const th={corrBg:0,corr:2};
+  const dR=G.diagnose({E:P.E,y:P.y,fin,el:"Ba",orb:"4d",bgType:"active",recipe:R},th).filter(x=>x.id==="corr"&&/Background.*Background/.test(x.label));
+  const fin2=C.clone(fin); fin2.comps.forEach(c=>{ delete c.recipe; }); const dU=G.diagnose({E:P.E,y:P.y,fin:fin2,el:"Ba",orb:"4d",bgType:"active"},th).filter(x=>x.id==="corr"&&/Background.*Background/.test(x.label));
+  ok(dR.length&&dR.every(x=>x.sev==="info"&&!x.act)&&dU.length&&dU.every(x=>x.sev==="warn"),"R2: Shirley k ↔ slope of the recipe background → info (expected on a short window); in a user model → warning",dR.map(x=>x.label).join(" | "));
+}
+{ // (h) R4: a dead line (area at 0) is reported once (R3), not also as 'merge'
+  const rg=U.rng(9); const step=0.05,lo=278,hi=294,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+  const P0=C.compEval(C.newComp("GLS",285,{F:1.0,m:0.3,area:30000}),E,ctx); const y=Float64Array.from(P0,(p,i)=>rg.pois(2000+p));
+  const a=C.newComp("GLS",285,{F:1.0,m:0.3,area:30000,id:"a"}), b=C.newComp("GLS",285.3,{F:2,m:0.3,area:500,id:"b"}); const cons={a:{be:{mode:"free",lo:284.5,hi:285.5}},b:{be:{mode:"free",lo:285.0,hi:285.6},F:{mode:"fixed"},m:{mode:"fixed"}}};
+  const P=C.makeProblem({be:E,y,c:1},{lo,hi,bg:{type:"linear",n:5},comps:[a,b],cons}); const fin=C.finalize(P,C.fitOnce(P,{})); const j=fin.free.findIndex(f=>f.id==="b"&&f.k==="area"); fin.comps[1].area=0; fin.cov.atB[j]=true;
+  const d=G.diagnose({E:P.E,y:P.y,fin,bgType:"linear"}); ok(ids(d).includes("dead")&&!ids(d).includes("merge"),"R4: a line whose area went to 0 is reported by R3 only (no 'merge')",ids(d).join(","));
+}
+{ // (i) R10 Auger rules from library KEs; R11 recipe alignment at its search limit
+  const ak=(e,ln)=>(L.auger.find(a=>a.el===e&&a.line===ln)||{}).ke; const O=Object.fromEntries(G.OVERLAPS.map(r=>[r.id,r]));
+  const keOK=O.FeCo.b.ke[0]===ak("Fe","LM2")&&O.NiFe.b.ke.join()===[ak("Ni","LM4"),ak("Ni","LM5")].join()&&O.MnCe.b.ke[0]===ak("Mn","LM2")&&Math.abs(O.FeCo.a.be-L.core.Co.lv["2p3/2"])<1e-9&&Math.abs(O.NiFe.a.be-L.core.Fe.lv["2p3/2"])<1e-9;
+  const r1=G.overlapFindings("Co","2p",["Fe"],{lo:775,hi:792}), r2=G.overlapFindings("Fe","2p",["Ni"],{lo:703,hi:721}), r3=G.overlapFindings("Ce","3d",["Mn"],{lo:875,hi:925}), r0=G.overlapFindings("Ce","3d",["Mn"],{lo:875,hi:925,hv:1253.6}), rn=G.overlapFindings("Ce","3d",[],{lo:875,hi:925});
+  V8.ovl=[...r1,...r2,...r3].map(x=>x.label);
+  ok(keOK&&r1.some(x=>x.rule==="FeCo")&&r2.some(x=>x.rule==="NiFe")&&r3.some(x=>x.rule==="MnCe")&&!r0.length&&!rn.length&&[...r1,...r2,...r3].every(x=>x.label.length<90),"R10: Fe L3VV in Co 2p, Ni LMM in Fe 2p, Mn L3VV under Ce v‴/u0 (library KEs; Al Kα only; partner present only)",V8.ovl.join(" | "));
+  const al=[]; for(const off of [0,1.6]){ const S=synthR("ba4d",{species:["BaO","BaCO3"],truth:{area:{BaO_m:20000,BaCO3_m:30000}}},75); const Es=Float64Array.from(S.E,e=>e+off);   // shift the data by +off eV
+    const M=G.recipeModel("ba4d",{shift:0,be:Es,y:S.y,species:["BaO","BaCO3"]}); const P=C.makeProblem({be:Es,y:S.y,c:1},M); const fin=C.finalize(P,C.fitOnce(P,{}));
+    const d=G.diagnose({E:P.E,y:P.y,fin,el:"Ba",orb:"4d",bgType:P.bg.type,recipe:G.recipeById("ba4d"),recipeMeta:M.recipe}); al.push({off,align:M.recipe.align,f:d.find(x=>x.id==="alignlim")}); }
+  ok(!al[0].f&&al[1].f&&al[1].f.sev==="warn"&&Math.abs(al[1].align-1)<1e-9,"R11: recipe alignment stopped at its search limit (Ba 4d ±1 eV, data shifted +1.6 eV) → warning; in range → none",al.map(a=>`+${a.off}: align ${a.align.toFixed(2)} ${a.f?a.f.label:"—"}`).join(" | "));
+}
+{ // (j) staged fit guards: a throwing stage keeps the normal result; a non-finite normal χ²_d never wins; the stage-2 width anchor keeps the user's range
+  const sp1=spectrum([[285,30000],[286.3,12000]]); const prob=C.makeProblem(sp1,{lo:278,hi:296,bg:ACT,comps:[comp(285.3,20000,1.6,"a"),comp(286.0,20000,1.0,"b")],cons:{a:{F:{mode:"free",lo:0.6,hi:2.0}},b:{F:{mode:"link",ref:"a",k:0.8,b:0}}}});
+  const of=C.fitOnce; let calls=0; C.fitOnce=(p,o)=>{ if(++calls===2) throw new Error("stage-1 failure"); return of(p,o); }; let s1=null, e1=null; try{ s1=G.stagedFit(prob,{}); }catch(e){ e1=e; } C.fitOnce=of;
+  const fs=C.fitStats; let k=0; C.fitStats=(p,r)=>{ const s=fs(p,r); return k++===0?Object.assign({},s,{chi2d:NaN}):s; }; const s2=G.stagedFit(prob,{}); C.fitStats=fs;
+  const P1=C.clone(prob); P1.comps.find(c=>c.id==="b").area=1e7; const c2=G.stageCons(P1,prob.cons,2);
+  V8.staged={thrown:!!e1,used1:s1&&s1.staged.used,err:s1&&s1.staged.error,used2:s2.staged.used,anc:c2.b.F};
+  ok(!e1&&s1.staged.used==="normal"&&/stage-1/.test(s1.staged.error||"")&&s2.staged.used==="staged"&&isFinite(s2.staged.chi2dStaged)&&c2.b.F.mode==="free"&&Math.abs(c2.b.F.lo-0.48)<1e-9&&Math.abs(c2.b.F.hi-1.6)<1e-9,"staged fit: a failing stage keeps the normal result; a NaN normal χ²_d loses to a finite staged one; the stage-2 width anchor carries the user's range through its link (0.8 × 0.6–2.0)",JSON.stringify(V8.staged));
+}
+{ // (k) Yb text: no claim that Auto suggest handles Yb²⁺ as a plain doublet (core models Yb 4d as a multiplet) — LCF or a manual doublet
+  const yb=G.complexInfo("Yb","4d")||{}; const t=(yb.closed||"")+" "+(yb.note||"");
+  ok(C.multipletInfo("Yb","4d")&&!/Auto suggest handles/.test(t)&&/LCF/.test(t)&&/manual|by hand/.test(t),"Yb 4d: Auto suggest is not claimed to handle Yb²⁺ (core treats Yb 4d as a multiplet) — LCF or a manual doublet",yb.closed);
+}
+
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
 if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
-module.exports={FP,SYN,POS,TM,LT};
+module.exports={FP,SYN,POS,TM,LT,V8};

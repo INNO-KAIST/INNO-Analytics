@@ -14,7 +14,8 @@ const mx=a=>a.reduce((m,v)=>Math.max(m,v),-Infinity);
 const e1=v=>v.toExponential(1), p2=v=>(100*v).toFixed(2)+" %";
 const rd=f=>new Uint8Array(fs.readFileSync(f));
 
-if(!fs.existsSync(ROOT)){ console.log("test/data/real/kara 없음 — 실측 대조를 건너뜀 (skip)"); process.exit(0); }
+if(!fs.existsSync(ROOT)){ console.log("\nSKIPPED (data absent): test_real_kara — test/data/real/kara not found (private data, not in the public backup); 0 checks run"); process.exit(0); }
+let skipped=0; const skippedWhat=[];   // sections skipped because a sub-folder of the private data is absent
 
 (async()=>{
 /* ================= A) Avantage ================= */
@@ -91,7 +92,7 @@ if(fs.existsSync(AV)){
   const dh=[], db=[], df=[]; regs.forEach(r=>{ const E=r.sp.be.slice(r.i0,r.i1+1), T=Tof(r), nt=Float64Array.from(r.sp.y.slice(r.i0,r.i1+1),(v,i)=>v-T[i]); const pk=C.peakMaxPos(E,nt,E[0],E[E.length-1],0.15); if(!pk) return;
     dh.push(Math.abs(pk.y/r.row["Height CPS"]-1)); db.push(Math.abs(pk.be-r.row["Peak BE"])); });
   info("평활 최댓값(INNO peakMaxPos 0.15 eV) vs Avantage",`Height |Δ| 중앙 ${p2(med(dh))} 최대 ${p2(mx(dh))}; Peak BE |Δ| 중앙 ${med(db).toFixed(3)} eV 최대 ${mx(db).toFixed(3)} eV — Sr 3d 쌍에서 Avantage Peak BE 가 두 봉우리 사이(정의 미확인)`);
-} else console.log("A) avantage_231107 없음 — 건너뜀");
+} else { console.log("A) avantage_231107 없음 — 건너뜀"); skipped++; skippedWhat.push("A avantage_231107"); }
 
 /* ================= B) CasaXPS ================= */
 const CS=path.join(ROOT,"casa_240213");
@@ -143,8 +144,8 @@ if(fs.existsSync(CS)){
       const st=C.makeProblem(sp,{lo:ex[a].be-sp.step-1e-6,hi:ex[b].be+sp.step+1e-6,bg:{type:"shirley",conv:"casa",aw:1},comps:[],cons:{}}); const B=C.bgStatic(st.E,st.y,st.bg);
       let m=0,H=0; for(let i=1;i<st.E.length-1;i++){ const r=ex.find(r=>Math.abs(r.be-st.E[i])<1e-3); m=Math.max(m,Math.abs(B[i]-r.bg)); H=Math.max(H,st.y[i]-B[i]); }
       ok(m/H<5e-4,`${nm} #1: 배경 (영역 ${ex[a].be.toFixed(2)}–${ex[b].be.toFixed(2)} eV, Calib ${sh.toFixed(4)})`,e1(m/H)); }
-  }
-} else console.log("B) casa_240213 없음 — 건너뜀");
+  } else { console.log("B4) casa_240213/various 없음 — 건너뜀"); skipped++; skippedWhat.push("B4 casa_240213/various"); }
+} else { console.log("B) casa_240213 없음 — 건너뜀"); skipped++; skippedWhat.push("B casa_240213"); }
 
 /* ================= C) CasaXPS Cookbook 2026 정의 (p. 67) ================= */
 console.log("== C GL(m)T(k) = (GL + (1 − GL)·E(1,k)), E(1,k) = exp(k·x) (x < 0 = 높은 BE, x 단위 F) — INNO AGT(tu 'fwhm', TM 0)");
@@ -152,5 +153,7 @@ console.log("== C GL(m)T(k) = (GL + (1 − GL)·E(1,k)), E(1,k) = exp(k·x) (x <
     d=Math.max(d,Math.abs(C.aglRaw(x,{F,m,ET:k,TM:0,CT:0,tu:"fwhm"})-cb)); }
   ok(d<1e-12,"INNO aglRaw = Cookbook 식",e1(d)); }
 
-console.log(`\n${pass} 통과 · ${fail} 실패`); if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }
+console.log(`\n${pass} 통과 · ${fail} 실패`+(skipped?` · ${skipped} 건너뜀`:""));
+console.log(`test_real_kara: ${pass} passed, ${fail} failed, ${skipped} skipped`+(skipped?` (SKIPPED (data absent): ${skippedWhat.join(", ")})`:""));
+if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }
 })().catch(e=>{ console.error(e); process.exit(2); });

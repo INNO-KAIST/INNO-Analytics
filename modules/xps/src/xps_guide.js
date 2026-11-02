@@ -1,5 +1,5 @@
 /* ============================================================
-   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes; v1.9.7 Ba · Y · lanthanide recipes, overlap rules): fit check (diagnosis), region recipes, staged fit
+   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes; v1.9.7 Ba · Y · lanthanide recipes, overlap rules; v1.9.8 audit fixes, SPEC §17.9): fit check (diagnosis), region recipes, staged fit
    DOM-free: browser main thread, Web Worker (load after xps_core.js) and node.
    Definitions, thresholds, citations and validation: modules/xps/SPEC.md §17 (if they disagree, fix SPEC first).
    General rules only — nothing here is tuned to one data set; the Ce 3d recipe (SPEC §17.3), the Biesinger envelopes (SPEC §17.7) and the Ba/Y/lanthanide recipes (SPEC §17.8) are literature data.
@@ -37,7 +37,7 @@ const SEV_ORDER={bad:0,warn:1,info:2};
 const SAT_TM2P=["Cr","Mn","Fe","Co","Ni","Cu"], SAT_RE3D=["Ce","Pr","Nd"];
 function complexInfo(el,orb){
   const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).map(r=>r.id); const m=C.multipletInfo(el,orb);
-  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — a plain doublet (Auto suggest)":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
+  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — physically a plain 4d doublet, but Auto suggest models every Yb 4d as a multiplet: use LCF or add one doublet by hand":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
   if(orb==="2p"&&SAT_TM2P.includes(el)) return {kind:"satellite",why:`${el} 2p: multiplet splitting and shake-up satellites of the open 3d shell (closed-shell states such as Cu⁺/Cu⁰ excepted) — one doublet per chemical state does not describe the envelope`,closed:el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null,recipes:rc};
   if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc,note:rc.length&&recipeById(rc[0]).kind==="emp"?RE_LCF:null};
   if(el==="La"&&(orb==="3d"||orb==="4d")) return {kind:"satellite",why:`La ${orb}: charge-transfer (c4f¹L) satellites — a bonding and an antibonding satellite next to each c4f⁰ spin–orbit line (Sunding et al. 2011); their share differs between La(OH)₃ and La₂O₃`,closed:null,recipes:rc};
@@ -48,7 +48,7 @@ function complexInfo(el,orb){
 const RE3D_MORE=["Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb"];
 /* no tabulated parametric source (SPEC §17.8): Sm, Eu, Ho, Er, Tm, Yb → reference-spectrum LCF; Haasch envelopes (Pr, Nd, Gd, Tb, Dy) → also LCF for chemistry */
 function RE_NOTE(el,orb,rc){ if(rc.length) return RE_LCF;
-  return `No tabulated parametric source is built in for ${el} ${orb} (no recipe). `+RE_LCF+(el==="Eu"?" For Eu²⁺/Eu³⁺ use one reference per valence (e.g. EuO or EuS for Eu²⁺, Eu₂O₃ for Eu³⁺) — the valence ratio is the LCF weight ratio.":"")+(el==="Yb"?" Yb²⁺ (4f¹⁴) 4d — like Lu 4d — is a plain doublet: Auto suggest handles it.":""); }
+  return `No tabulated parametric source is built in for ${el} ${orb} (no recipe). `+RE_LCF+(el==="Eu"?" For Eu²⁺/Eu³⁺ use one reference per valence (e.g. EuO or EuS for Eu²⁺, Eu₂O₃ for Eu³⁺) — the valence ratio is the LCF weight ratio.":"")+(el==="Yb"?" Yb²⁺ (4f¹⁴) 4d — like Lu 4d — is physically a plain doublet, but Auto suggest cannot tell Yb²⁺ from Yb³⁺ and models every Yb 4d as a multiplet region: for Yb²⁺ use a measured reference (LCF) or add one doublet manually ('+ Add component' with 'Doublet' ticked — library ΔE).":""); }
 
 /* ------------------------------------------------------------
    2) Region recipes (SPEC §17.3) — data, not code. Positions are charge-corrected BE (C 1s C–C/C–H 284.8 eV).
@@ -63,7 +63,7 @@ const RECIPES=[{
     {key:"v0", name:"v0/u0", state:"Ce3+", be:880.5, F:2.4, Flo:1.2, Fhi:3.5},
     {key:"v",  name:"v/u",   state:"Ce4+", be:882.4, F:2.3, Flo:1.2, Fhi:3.5},
     {key:"v1", name:"v′/u′", state:"Ce3+", be:885.0, F:3.1, Flo:1.5, Fhi:4.5},
-    {key:"v2", name:"v″/u″", state:"Ce4+", be:888.9, F:5.0, Flo:2.5, Fhi:6.5},
+    {key:"v2", name:"v″/u″", state:"Ce4+", be:888.3, F:5.0, Flo:2.5, Fhi:6.5},   // v1.9.8: Bêche 2008 v″ 888.5 eV at C 1s 285.0 → 888.3 at 284.8 (was 888.9, which put the real CeO₂ S3 fit on its −0.6 eV limit)
     {key:"v3", name:"v‴/u‴", state:"Ce4+", be:898.2, F:2.3, Flo:1.2, Fhi:3.5}],
   options:[
     {id:"ce4", label:"CeO₂ only (6)", keys:["v","v2","v3"]},
@@ -314,13 +314,16 @@ function parModel(R,o){
     dbl.forEach(c=>{ const q=cons[c.id]; q.r={mode:"fixed"}; q.q={mode:"fixed"}; q.dE=R.dE.fix?{mode:"fixed"}:c===a?{mode:"free",lo:R.dE.lo,hi:R.dE.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
   if(!R.casa&&R.shape==="GLS"){ const a=comps.reduce((x,c)=>!x||c.area>x.area?c:x,null); comps.forEach(c=>{ cons[c.id].m=c===a?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
   const lab=R.species.filter(s=>keys.includes(s.key)).map(s=>s.short||s.label).join(" + ")+(R.ct&&(fl.fixR||keys.length>1)?" · ratio fixed":"")+(lines.some(l=>l.role==="pl")?" · plasmon":"")+(lines.some(l=>l.role==="aug")?" · Auger":"")+(wscale?" · FWHM×":"");
-  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"par",kind:R.kind,species:keys,flags:fl,label:lab,align:ds,score,clipped,name:R.name}};
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"par",kind:R.kind,species:keys,flags:fl,label:lab,align:ds,alignLim:score!=null&&o.align!==false?(R.align||0):0,score,clipped,name:R.name}};
 }
 /* Derived outputs of parametric recipes (SPEC §17.8) → [{id,label,w(c),tip}]; plasmon and Auger lines (c.rx) are outside the total */
-function parDerived(R,cs){
+function parDerived(R,cs,cons){
   const out=[]; const sp=[...new Set(cs.map(c=>c.rsp))];
-  if(R.ct&&sp.length===1){ const s=R.species.find(x=>x.key===sp[0]); const t=s&&s.ratio?s.ratio[1]:null;
-    out.push({id:"ct",label:"c4f¹L",w:c=>c.rrole==="sat"?1:0,tip:`c4f¹L share = (bonding + antibonding satellite areas) / (main + satellites) of ${R.el} ${R.orb}, plasmon and Auger lines excluded. Sunding Table 5: ${R.species.map(x=>x.label+" "+x.ratio[1]+" %").join(", ")} (±5 %; their background and shapes)${t!=null?"":""} — a higher share points to the oxide, a lower one to the hydroxide. ± = covariance σ (statistics only).`}); }
+  if(R.ct&&sp.length===1){ const s=R.species.find(x=>x.key===sp[0]);
+    // 'Fix ratio' links the bonding satellite area to the main line (k = Table 5 ratio): the share is then imposed, not measured (v1.9.8)
+    const m=cs.find(c=>c.rk===sp[0]+"_m"), b=cs.find(c=>c.rk===sp[0]+"_b"); const qa=cons&&b&&cons[b.id]&&cons[b.id].area;
+    const fixed=!!(m&&b&&(cons?(qa&&qa.mode==="link"&&qa.ref===m.id):b.aref===m.id));
+    out.push({id:"ct",label:fixed?"c4f¹L (fixed)":"c4f¹L",fixed,w:c=>c.rrole==="sat"?1:0,tip:(fixed?`Imposed by 'Fix ratio' (${s.label} Table 5 ratio ${s.ratio[0]}:${s.ratio[1]}) — an input, not a fit result; untick 'Fix ratio' to measure it. `:"")+`c4f¹L share = (bonding + antibonding satellite areas) / (main + satellites) of ${R.el} ${R.orb}, plasmon and Auger lines excluded. Sunding Table 5: ${R.species.map(x=>x.label+" "+x.ratio[1]+" %").join(", ")} (±5 %; their background and shapes) — a higher share points to the oxide, a lower one to the hydroxide. ± = covariance σ (statistics only).`}); }
   if(sp.length>1) R.species.forEach(s=>{ if(!sp.includes(s.key)) return; out.push({id:"sp_"+s.key,label:s.short||s.label,w:c=>c.rsp===s.key?1:0,
     tip:`${s.label} fraction = its area / all ${R.el} ${R.orb} lines of the recipe`+(R.ct?" (main + satellites; ratios fixed at Sunding Table 5)":"")+(R.kind==="emp"?"":"")+". ± = covariance σ (delta method, statistics only; the literature separations and ratios are held fixed, so model error is not included)."}); });
   (R.sums||[]).forEach(d=>{ const inS=c=>d.keys.includes(c.rsp); if(new Set(cs.filter(inS).map(c=>c.rsp)).size<2||cs.every(inS)) return; out.push({id:d.id,label:d.label,tip:d.tip,w:c=>inS(c)?1:0}); });
@@ -337,7 +340,7 @@ function envSets(R,keys,pe){
 function envDefaults(R){ return R.species.filter(s=>s.def).map(s=>s.key); }
 /* Envelope model (SPEC §17.7). o = {shift, be, y, species:[keys], pe (10|20), wscale (bool), stoich (bool, Fe₃O₄ 1:2)} */
 function envModel(R,o){
-  const C=CORE(); const sh=o.shift||0, pe=o.pe===10||o.pe===20?o.pe:20;
+  const C=CORE(); const sh=o.shift||0, pe=o.pe!=null&&isFinite(+o.pe)&&+o.pe>0?(+o.pe<=15?10:20):20;   // any pass energy: ≤ 15 eV → PE 10 column, else PE 20 (SPEC §17.7)
   let keys=(o.species||[]).filter(k=>R.species.some(s=>s.key===k)); if(!keys.length) keys=envDefaults(R);
   const sets=envSets(R,keys,pe);
   let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
@@ -383,6 +386,15 @@ function envDerived(R,cs){
     if(cs.every(inS)) return;   // the sum of everything fitted = 100 %
     out.push({id:d.id,label:d.label,tip:d.tip,w:c=>inS(c)?1:0}); });
   return out; }
+/* Recipe width range of a component (R1 hint): Ce lines (R.lines), parametric / empirical species lines (incl. plasmon and Auger), envelope
+   FWHM× scale (its range is set in the model from the literature width) → {Fhi} or null when c is not a line of R */
+function recipeLineF(R,c){
+  if(!R||!c||c.recipe!==R.id) return null;
+  if(R.lines){ const l=R.lines.find(x=>x.key===c.rk); return l?{Fhi:l.Fhi}:null; }
+  if(R.kind==="env") return c.renv?{Fhi:Infinity}:null;
+  if((R.kind==="par"||R.kind==="emp")&&c.rsp){ const L=parLines(R,[c.rsp],{plasmon:true,auger:true},null); const l=L.find(x=>x.key===c.rk); if(!l) return null;
+    if(l.Ffix) return R.wScale?{Fhi:l.F*R.wScale[1]}:null; return {Fhi:l.Fhi!=null?l.Fhi:Infinity}; }
+  return null; }
 function recipesFor(el,orb){ return RECIPES.filter(r=>r.el===el&&r.orb===orb); }
 function recipeById(id){ return RECIPES.find(r=>r.id===id)||null; }
 /* Build a recipe model on raw (uncorrected) BE: shift = charge correction Δ (BE_corr = BE_raw + Δ).
@@ -410,7 +422,10 @@ function recipeModel(id,o){
       let best=null; const st=0.05, K=Math.round((R.align||0)/st);
       for(let k=-K;k<=K;k++){ const d=k*st, t=trial(d); if(!best||t.ss<best.ss) best={d,ss:t.ss,a:t.a}; }
       ds=best.d; score=best.ss; areas=best.a; } }
-  const comps=mk(ds); if(areas) comps.forEach((c,i)=>{ c.area=Math.max(areas[i],1e-6); });
+  // v1.9.8: an absent state started at 1e-6 froze the fit (zero area → zero derivatives for its position/width; 0 iterations) — start at ≥ 2 % of
+  // the largest NNLS area and flag afloor, as the envelope / parametric recipes do (the core's area initialisation applies the same floor)
+  const comps=mk(ds); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  comps.forEach(c=>{ c.afloor=0.02; });
   const anc=comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const cons={};
   const ancS={}; comps.forEach(c=>{ const a=ancS[c.rstate]; if(!a||c.area>a.area) ancS[c.rstate]=c; });
   comps.forEach((c,i)=>{ const l=lines[i]; const q=cons[c.id]={};
@@ -419,7 +434,7 @@ function recipeModel(id,o){
     q.r={mode:"fixed"}; q.q={mode:"fixed"};
     const dS=dEof(R,l.state), aS=ancS[c.rstate]; q.dE=c===aS?{mode:"free",lo:dS.lo,hi:dS.hi}:{mode:"link",ref:aS.id,k:1,b:0};
     q.m=c===anc?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:anc.id,k:1,b:0}; });
-  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:op.id,label:op.label,align:ds,score,clipped,name:R.name}};
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:op.id,label:op.label,align:ds,alignLim:o.be&&o.y&&o.align!==false?(R.align||0):0,score,clipped,name:R.name}};
 }
 /* Derived recipe output (SPEC §17.3): fractions of summed areas with covariance σ (delta method on the free area parameters).
    fin = finalize() output; returns [{id,label,v,sig,tip}] in % */
@@ -435,14 +450,24 @@ function recipeDerived(fin,meta){
   const root=c=>{ if(cons){ let id=c.id, mul=1, g=0; for(;;){ const q=cons[id]&&cons[id].area; if(q&&q.mode==="link"&&q.ref!=null&&byId[q.ref]&&(q.rk==null||q.rk==="area")&&g++<20){ mul*=q.k!=null?+q.k:1; id=q.ref; } else break; } return {id,mul}; }
     if(c.aref&&byId[c.aref]) return {id:c.aref,mul:c.amul!=null?c.amul:1}; return {id:c.id,mul:1}; };
   const roots=cs.map(root);
-  const list=R.kind==="env"?envDerived(R,cs):(R.kind==="par"||R.kind==="emp")?parDerived(R,cs):R.derived;
+  const list=R.kind==="env"?envDerived(R,cs):(R.kind==="par"||R.kind==="emp")?parDerived(R,cs,cons):R.derived;
+  const hasCov=np>0&&Cm.length===np*np;
   return list.map(d=>{
     const part=d.shake?(c=>c.rsat?1+(d.shake[c.rsp]||0):0):d.w?d.w:c=>{ if(d.state) return c.rstate===d.state?1:0; if(d.key) return c.rk===d.key?(d.part==="partner"?(c.doublet?c.doublet.r/(1+c.doublet.r):0):(c.doublet?1/(1+c.doublet.r):1)):0; return 0; };
     const num=cs.reduce((s,c)=>s+part(c)*Math.max(0,c.area),0), f=num/T;
-    const g=new Float64Array(np); cs.forEach((c,i)=>{ const rt=roots[i]; const j=aIdx[rt.id]; if(j==null) return; g[j]+=rt.mul*(part(c)-f)/T; });   // 0 + 1·x = x: Ce results unchanged bit for bit
-    let s=0; const ok=true; for(let a=0;a<np;a++) if(g[a]) for(let b=0;b<np;b++) if(g[b]){ const v=Cm[a*np+b]; if(isFinite(v)) s+=g[a]*v*g[b]; }   // areas at a bound count as fixed (SPEC §3.4)
+    const g=new Float64Array(np); let mapped=0; cs.forEach((c,i)=>{ const rt=roots[i]; const j=aIdx[rt.id]; if(j==null) return; mapped++; g[j]+=rt.mul*(part(c)-f)/T; });   // 0 + 1·x = x: Ce results unchanged bit for bit
+    let s=0; for(let a=0;a<np;a++) if(g[a]) for(let b=0;b<np;b++) if(g[b]){ const v=Cm[a*np+b]; if(isFinite(v)) s+=g[a]*v*g[b]; }   // areas at a bound count as fixed (SPEC §3.4)
+    // σ needs the covariance and at least one free root area; without them σ is unknown (null), not 0 (v1.9.8). A value imposed by a constraint has no σ.
+    const ok=hasCov&&mapped>0&&!d.fixed;
     const present=cs.some(c=>part(c)>0);
-    return {id:d.id,label:d.label,v:present?100*f:null,sig:present&&ok?100*Math.sqrt(Math.max(0,s)):null,tip:d.tip};
+    const out={id:d.id,label:d.label,v:present?100*f:null,sig:present&&ok?100*Math.sqrt(Math.max(0,s)):null,tip:d.tip};
+    if(d.fixed) out.fixed=true;
+    if(d.shake&&present){   // Eq. 2 is a model estimate: > 100 % (shake-up larger than pure Cu(II) allows) or no main-line area → capped and flagged (v1.9.8)
+      const main=cs.reduce((s,c)=>s+(c.rsat?0:Math.max(0,c.area)),0);
+      if(!(main>1e-9*T)){ out.flag="satellite only: no main-line area — Eq. 2 is undefined"; out.v=null; out.sig=null; }
+      else if(f>1){ out.flag=`Eq. 2 gives ${(100*f).toFixed(1)} % (> 100 %): the shake-up is larger than pure Cu(II) allows (A1s/Bs) — check the background under the satellites and the window end`; out.v=100; out.sig=null; }
+      if(out.flag) out.tip=out.flag+". "+d.tip; }
+    return out;
   });
 }
 
@@ -479,7 +504,14 @@ function diagnose(ctx,th){
   const fw=i=>(summ[i]&&summ[i].fwhm)||comps[i].F||1;
   const isFree=(id,k)=>free.some(f=>f.id===id&&f.k===k);
   const push=f=>{ if(!out.some(x=>x.key===f.key)) out.push(f); };
-  const dropAct=id=>({type:"drop",id,label:"Remove "+nm(id)});
+  // v1.9.8: a recipe line is removed with relinkWithout (links re-anchored with their current linear relation), never by a per-line removeComp:
+  // a parametric line drags its species (main + satellites + plasmon share position / area links — removing one orphaned the others or carried the
+  // anchor's position window to the wrong line); an empirical (Haasch) component or a free Auger line goes alone
+  const dropAct=id=>{ const c=comps[byId[id]]; const Rc=c&&c.recipe?recipeById(c.recipe):null;
+    if(Rc&&Rc.kind==="par"&&c.rsp&&c.rrole!=="aug"){ const s=Rc.species.find(x=>x.key===c.rsp); const ids_=comps.filter(q=>q.recipe===c.recipe&&q.rsp===c.rsp&&q.rrole!=="aug").map(q=>q.id);
+      return {type:"dropSet",ids:ids_,label:"Remove "+(s?s.short||s.label:nm(id))+(ids_.length>1?` (${ids_.length} lines)`:"")}; }
+    if(Rc) return {type:"dropSet",ids:[id],label:"Remove "+nm(id)};
+    return {type:"drop",id,label:"Remove "+nm(id)}; };
   const areaDead=new Set();
   // R3a area at 0 (lower bound) → handled as a component finding
   free.forEach((f,j)=>{ if(f.k!=="area"||f.ci<0) return; const p=val(f.id,"area"); if(p!=null&&(atB[j]||p<=Math.max(0,f.lo)+1e-6*tot)) areaDead.add(f.id); });
@@ -499,8 +531,8 @@ function diagnose(ctx,th){
     if(["F","wG","wL"].includes(f.k)){
       const ci=byId[f.id], others=comps.filter((c,i)=>i!==ci&&c[f.k]!=null&&isFree(c.id,f.k));
       const anc=others.reduce((a,c)=>!a||c.area>a.area?c:a,null);
-      const rc=ctx.recipe?ctx.recipe.lines&&ctx.recipe.lines.find(l=>l.key===comps[ci].rk):null;
-      if(rc&&f.k==="F"&&side==="upper"&&p>=rc.Fhi-1e-9){ act=null; hint=" The recipe width range is a typical span (not a literature limit) — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
+      const rc=ctx.recipe?recipeLineF(ctx.recipe,comps[ci]):null;   // v1.9.8: Ce lines, parametric species lines, envelope FWHM× range
+      if(rc&&f.k==="F"&&side==="upper"&&p>=Math.min(rc.Fhi,f.hi)-1e-9){ act=null; hint=" The recipe width range is a typical span (not a literature limit) — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
       else if(anc){ act={type:"link",id:f.id,k:f.k,ref:anc.id,label:`Link ${lab(f.k)} to ${nm(anc.id)}`}; hint=` Linking it to ${nm(anc.id)} (same ratio as now) removes one free width; if the line should be broader (e.g. a satellite), fix it at a literature value instead.`; }
       else if(side==="lower"){ act={type:"fix",id:f.id,k:f.k,v:p,label:`Fix ${lab(f.k)}`}; hint=" A width at its lower limit is narrower than the instrument resolution allows — fix it at the width of a well-resolved line in the same spectrum."; }
     } else if(f.k==="be"){
@@ -510,6 +542,7 @@ function diagnose(ctx,th){
       else if(edge){ act=dropAct(f.id); hint=" The line drifted to the window edge — it is not supported by the data inside the window. Remove it, or widen the window if the line is really outside."; }
       else { act={type:"widen",id:f.id,k:"be",by:0.3,label:"Widen range ±0.3 eV"}; hint=" Widen the range only if the literature allows a larger shift (charge-reference error is ±0.2–0.3 eV); otherwise the model is missing a line or the line belongs to another state."; }
     } else if(f.k==="dE"){
+      const cd=comps[byId[f.id]]; if(cd&&cd.doublet&&cd.doublet.dE<C.DOUBLET_RESOLVE) sev="info";   // v1.9.8: an unresolved doublet's Δ is not determined by the data (as R2) — fix it, not a misfit
       const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[f.id]]||{}).rstate).v:ctx.dEref;
       if(ref!=null){ act={type:"fix",id:f.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=` Fix the spin–orbit splitting at the literature value (${fmt(ref,2)} eV) unless the doublet is well resolved and isolated.`; }
     } else if(f.k==="r"||f.k==="q"){
@@ -531,14 +564,22 @@ function diagnose(ctx,th){
       if(fa.k===fb.k&&["F","wG","wL"].includes(fa.k)&&fa.id!==fb.id){ const ia=byId[fa.id], ib=byId[fb.id]; const big=comps[ia].area>=comps[ib].area?fa:fb, sm=big===fa?fb:fa;
         act={type:"link",id:sm.id,k:fa.k,ref:big.id,label:`Link ${lab(fa.k)}s`}; hint=" Linking the two widths (fixed ratio) usually resolves it."; }
       else if(fa.k==="be"&&fb.k==="be"){ const ia=byId[fa.id], ib=byId[fb.id]; const big=comps[ia].area>=comps[ib].area?fa:fb, sm=big===fa?fb:fa;
-        act={type:"offset",id:sm.id,ref:big.id,label:"Fix separation"}; hint=" Fixing the separation at the current (or literature) value leaves one position free."; }
-      else if((()=>{ const unres=id=>{ const c=comps[byId[id]]; return !!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE); }; return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
+        act={type:"offset",id:sm.id,ref:big.id,label:"Fix separation"}; hint=" Fixing the separation at the current (or literature) value leaves one position free.";
+        // v1.9.8: two unresolved doublets (Δ < 1.2 eV) with one Δ free and shared: their positions are coupled through that Δ (Al 2p, two states) → info + fix Δ
+        const ca=comps[byId[fa.id]], cb=comps[byId[fb.id]], unr=c=>!!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE), qd=isFree(fa.id,"dE")?fa:isFree(fb.id,"dE")?fb:null;
+        if(unr(ca)&&unr(cb)&&qd){ const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[qd.id]]||{}).rstate).v:ctx.dEref; sevOv="info"; hint=" Both lines are unresolved doublets sharing one free Δ, which couples their positions; fix Δ at the literature value."; act=ref!=null?{type:"fix",id:qd.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}:null; } }
+      else if((()=>{ const unres=id=>{ const c=comps[byId[id]]; return !!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE); };
+          return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
         const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[q.id]]||{}).rstate).v:ctx.dEref;
         if(ref!=null&&isFree(q.id,"dE")) act={type:"fix",id:q.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=" The doublet is not resolved (Δ < 1.2 eV), so its two halves trade off against position and width; fix Δ at the literature value and keep the area ratio fixed."; sevOv="info"; }
       else if(fa.k==="area"&&fb.k==="area") hint=" The two areas trade off against each other — their sum is well determined, each alone is not. Report the sum, or constrain widths/positions from literature.";
       else hint=" One of the two parameters should be fixed or linked (literature value) — the data cannot separate them.";
       const inRec=fa.id!=="bg"&&fb.id!=="bg"&&comps[byId[fa.id]].recipe&&comps[byId[fa.id]].recipe===comps[byId[fb.id]].recipe;
       if(inRec){ act=null; hint=" Expected in this recipe (overlapping lines): report the derived fraction — its ± includes this correlation — not single-line areas."; }
+      // v1.9.8: the recipe's in-fit Shirley + slope on a short window (e.g. Ba 4d, 12.5 eV): k and the slope s trade off by construction (both rise
+      // across the window); the component areas are what is reported, and their σ include this correlation → info, not warn
+      const bgRec=fa.id==="bg"&&fb.id==="bg"&&!!(ctx.recipe&&ctx.recipe.id&&comps.some(c=>c.recipe===ctx.recipe.id));
+      if(bgRec){ act=null; sevOv="info"; hint=" Expected for the recipe's in-fit Shirley + slope on a short window: the Shirley step and the slope both rise across the window and trade off; the component areas (and their σ) already include this. Fix the slope at 0 in the background row only if the baseline outside the peak is flat."; }
       push({key:"corr|"+fa.id+fa.k+"|"+fb.id+fb.k,id:"corr",sev:inRec?"info":(sevOv||"warn"),ids:[fa.id,fb.id].filter(x=>x!=="bg"),
         label:`${nm(fa.id)} ${lab(fa.k)} ↔ ${nm(fb.id)} ${lab(fb.k)} correlated (r ${fmt(r,3)})`,
         tip:`Correlation coefficient ${fmt(r,4)} from the covariance matrix (|r| > ${fa.id==="bg"||fb.id==="bg"?th.corrBg:th.corr}). Changing one can be compensated by the other with almost no change in χ², so both σ are large and the split between them is arbitrary.`+hint,act}); });
@@ -553,13 +594,18 @@ function diagnose(ctx,th){
       else if(share<th.negShare) push({key:"neg|"+c.id,id:"neg",sev:"info",ids,label:`${c.rlab}: negligible (${fmt(100*share,1)} % of area)`,tip:`The ${c.rlab} envelope carries ${fmt(100*share,2)} % of the fitted area (< ${th.negShare*100} %) — the species is absent within the statistics. Remove it if it is not expected.`,act});
       return; }
     const share=Math.max(0,c.area||0)/tot, s=summ[i]&&summ[i].sig?summ[i].sig.area:null, rel=s!=null&&c.area>0?s/c.area:null;
+    // v1.9.8: parametric recipe species (main + satellites removed together) → one R3 finding per species, on its first line
+    const Rp=c.recipe&&c.rsp&&c.rrole!=="aug"?recipeById(c.recipe):null; if(Rp&&Rp.kind==="par"){ const k3="r3sp|"+c.recipe+"|"+c.rsp; if(out.some(x=>x.r3sp===k3)) return; const n0=out.length; r3one(c,i,share,rel); if(out.length>n0) out[out.length-1].r3sp=k3; return; }
+    r3one(c,i,share,rel); });
+  function r3one(c,i,share,rel){
     if(areaDead.has(c.id)) push({key:"dead|"+c.id,id:"dead",sev:"warn",ids:[c.id],label:`${nm(c.id)}: area went to zero`,tip:`The fit drove the area of ${nm(c.id)} to its lower bound 0 — the data do not need this component. Remove it and fit again (a zero-area line makes the covariance singular).`,act:dropAct(c.id)});
     else if(rel!=null&&rel>th.relSig) push({key:"ill|"+c.id,id:"ill",sev:"warn",ids:[c.id],label:`${nm(c.id)}: area ill-determined (±${fmt(100*rel,0)} %)`,tip:`σ(area)/area = ${fmt(100*rel,0)} % (> ${th.relSig*100} %): the data cannot say how large this component is. Typical causes: it overlaps a larger line with free width/position, or it is not there. Constrain it (literature position/width, link the width) or remove it.`,act:dropAct(c.id)});
     else if(share<th.negShare&&comps.length>1) push({key:"neg|"+c.id,id:"neg",sev:"info",ids:[c.id],label:`${nm(c.id)}: negligible (${fmt(100*share,1)} % of area)`,tip:`This component carries ${fmt(100*share,2)} % of the component area (< ${th.negShare*100} %). If it is not required physically, remove it — it adds free parameters without information.`+(c.recipe?" In a recipe model a negligible group means that state is absent; the simpler recipe option may be enough.":""),act:dropAct(c.id)});
-  });
+  }
   // R4 merging main lines (both positions free and not tied to each other)
   const freeBe=comps.map(c=>isFree(c.id,"be"));
-  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue; if(comps[i].rsp&&comps[i].recipe&&comps[i].recipe===comps[j].recipe&&comps[i].rsp!==comps[j].rsp) continue;   // envelopes / literature species positions overlap by construction (v1.9.7) if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;
+  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue; if(comps[i].rsp&&comps[i].recipe&&comps[i].recipe===comps[j].recipe&&comps[i].rsp!==comps[j].rsp) continue;   // envelopes / literature species positions overlap by construction (v1.9.7)
+    if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;   // a dead line is reported once, by R3 (v1.9.8: this skip used to sit inside the comment above)
     const d=Math.abs(comps[i].be-comps[j].be), w=(fw(i)+fw(j))/2; if(!(d<th.merge*w)) continue;
     const sm=comps[i].area<=comps[j].area?comps[i]:comps[j], bg_=sm===comps[i]?comps[j]:comps[i];
     push({key:"merge|"+comps[i].id+"|"+comps[j].id,id:"merge",sev:"warn",ids:[comps[i].id,comps[j].id],label:`${nm(comps[i].id)} and ${nm(comps[j].id)} merge (ΔBE ${fmt(d,2)} eV)`,
@@ -571,7 +617,13 @@ function diagnose(ctx,th){
   const P=fin.mu&&fin.B?fin.mu.map((m,i)=>m-fin.B[i]):null; const ys=C.smoothQ(E,y,C.smoothHW(E));
   let net=0; if(fin.B) for(let i=0;i<n;i++) net=Math.max(net,ys[i]-fin.B[i]); let pmax=0; if(P) for(const v of P) pmax=Math.max(pmax,v);
   const ne=Math.max(3,Math.round(0.3/Math.max(step,1e-6))), kL=Math.min(n-1,Math.max(1,Math.round(th.edgeLen/Math.max(step,1e-6))));
-  const sideTest=(lowSide)=>{ const idx=lowSide?[...Array(ne).keys()]:[...Array(ne).keys()].map(k=>n-1-k); const pe=P?idx.reduce((s,i)=>s+P[i],0)/ne:0;
+  /* v1.9.8: at a window end that is the applied recipe's own literature window end (e.g. Fe 2p3/2 ends at 721 eV, before the 2p1/2), the tails of the
+     recipe's components there are fixed by the published envelope (Fe₂O₃/FeOOH satellites at 719.3/719.7 eV) — test (a) counts only the other
+     components; test (b) (data rising towards the outside) still applies. */
+  const RW=ctx.recipe&&ctx.recipe.window, atRecipeEnd=lowSide=>!!RW&&Math.abs((lowSide?E[0]:E[n-1])+sh-RW[lowSide?0:1])<=Math.max(2*step,0.051);
+  const recipeEdge=idx=>{ if(!P) return 0; const ex=comps.filter(c=>c.recipe&&c.recipe===ctx.recipe.id); if(!ex.length) return 0; const Ee=Float64Array.from(idx,i=>E[i]), cx={emin:E[0],emax:E[n-1]};
+    let s=0; ex.forEach(c=>{ try{ const v=C.compEval(c,Ee,cx); for(let j=0;j<v.length;j++) s+=v[j]; }catch(e){} }); return s/idx.length; };
+  const sideTest=(lowSide)=>{ const idx=lowSide?[...Array(ne).keys()]:[...Array(ne).keys()].map(k=>n-1-k); const pe=P?Math.max(0,idx.reduce((s,i)=>s+P[i],0)/ne-(atRecipeEnd(lowSide)?recipeEdge(idx):0)):0;
     const e0=lowSide?0:n-1, inner=lowSide?[...Array(kL+1).keys()]:[...Array(kL+1).keys()].map(k=>n-1-k); let mn=Infinity; inner.forEach(i=>{ if(ys[i]<mn) mn=ys[i]; });
     const rise=ys[e0]-mn; const byComp=pmax>0&&pe>th.edgeComp*pmax, byData=net>0&&rise>th.edgeRise*net; return {byComp,byData,pe:pmax>0?pe/pmax:0,rise:net>0?rise/net:0}; };
   [["low",true],["high",false]].forEach(([nmS,lowS])=>{ const t=sideTest(lowS); if(!t.byComp&&!t.byData) return;
@@ -601,6 +653,10 @@ function diagnose(ctx,th){
     push({key:"complex",id:"complex",sev:"info",ids:[],label:rc?`${ctx.el} ${ctx.orb}: use the region recipe`:`${ctx.el} ${ctx.orb}: multiplet/satellite region`,
       tip:ci_.why+". "+(rc?(recipeById(rc)&&(recipeById(rc).kind==="par"||recipeById(rc).kind==="emp")?recipeById(rc).how+" "+(recipeById(rc).kind==="emp"?"":"Derived values are shown after the fit."):recipeById(rc)&&recipeById(rc).kind==="env"?"The recipe fits each chemical species as one literature envelope (Biesinger: fixed spacings, area % and FWHMs; one position ± tolerance and one area per species) on the 2p3/2 window with a Shirley background; species fractions are shown after the fit. Pick the species in the recipe row.":"The recipe sets literature lines with doublet links (ΔE, area ratio, equal widths), the window and the background; derived output (e.g. Ce³⁺ fraction) is shown after the fit."):"No literature recipe is built in for this region: fit only the envelope and use the summed area, or compare with measured reference spectra (Store as reference → LCF), which carry the multiplet structure.")+(ci_.closed?` Closed-shell exception: ${ci_.closed}.`:"")+(ci_.note?" "+ci_.note:""),
       act:rc?{type:"recipe",recipe:rc,label:"Apply recipe"}:null}); }
+  // R11 recipe alignment at its search limit (v1.9.8): the NNLS shift search stopped at ±limit, so the true offset may lie outside it
+  const rm=ctx.recipeMeta; if(rm&&rm.alignLim>0&&rm.align!=null&&Math.abs(rm.align)>=rm.alignLim-0.026){ const lim=rm.alignLim;
+    push({key:"alignlim",id:"alignlim",sev:"warn",ids:[],label:`Recipe alignment at its ±${fmt(lim,1)} eV search limit (${rm.align>0?"+":""}${fmt(rm.align,2)} eV)`,
+      tip:`The recipe lines were shifted by ${rm.align>0?"+":""}${fmt(rm.align,2)} eV to match the data — the end of the ±${fmt(lim,1)} eV search range, so the best match may lie further out. Usual causes: a wrong or missing charge correction (check C 1s / the reference line), differential charging, or a different compound (for Ba 4d, ±1 eV cannot tell a global offset from BaO → Ba(OH)₂, +1.2 eV — confirm with O 1s / C 1s). Correct the charge reference and apply the recipe again; the fitted positions are otherwise held near the wrong start.`,act:null}); }
   // R10 peak overlaps with other elements present (v1.9.7, SPEC §17.8)
   if(ctx.present) overlapFindings(ctx.el,ctx.orb,ctx.present,{hv:ctx.hv,lo:E[0]+sh,hi:E[n-1]+sh}).forEach(push);
   out.sort((a,b)=>SEV_ORDER[a.sev]-SEV_ORDER[b.sev]);
@@ -630,6 +686,13 @@ const OVERLAPS=[
   tip:"Co L3VV Auger (library KE 774 eV → BE ≈ 713 eV under Al Kα) falls inside the Fe 2p3/2 region (706.8–720 eV) — with Co present the Fe 2p3/2 envelope fit takes up Auger intensity. Mg Kα moves it."},
  {id:"NiMn", sev:"info", al:true, a:{el:"Mn",orb:"2p",sub:"2p3/2",be:638.7}, b:{el:"Ni",auger:"L3VV",ke:[846]}, src:AVK,
   tip:"Ni L3VV Auger (library KE 846 eV → BE ≈ 641 eV under Al Kα) lies on Mn 2p3/2 (638.7 eV) — with Ni present the Mn 2p3/2 fit takes up Auger intensity. Mg Kα moves it."},
+ /* v1.9.8: three more Auger rules, KEs from the library table (test_guide checks them against xps_lib) */
+ {id:"FeCo", sev:"info", al:true, a:{el:"Co",orb:"2p",sub:"2p3/2",be:778.1}, b:{el:"Fe",auger:"L3VV",ke:[703]}, src:AVK,
+  tip:"Fe L3VV Auger (library KE 703 eV → BE ≈ 784 eV under Al Kα) falls inside the Co 2p3/2 region (778–792 eV, on the Co²⁺ shake-up near 786 eV) — with Fe present (e.g. Co–Fe oxides, BCFZY) the Co 2p3/2 envelope fit takes up Auger intensity, which inflates Co²⁺. Mg Kα moves it."},
+ {id:"NiFe", sev:"info", al:true, a:{el:"Fe",orb:"2p",sub:"2p3/2",be:706.8}, b:{el:"Ni",auger:"LMM",ke:[781,775]}, src:AVK+" (Ni LM4 781, LM5 775 eV)",
+  tip:"Ni LMM Auger lines (library KE 781 / 775 eV → BE ≈ 706 / 712 eV under Al Kα) lie on Fe 2p3/2 (Fe metal 706.6, oxides 708–714 eV) — with Ni present (Ni–Fe alloys, NiFe₂O₄, NiFe LDH) part of the Fe 2p3/2 intensity is Ni Auger: Fe species fractions and Fe at% are biased. Use Mg Kα, or Fe 3p."},
+ {id:"MnCe", sev:"info", al:true, a:{el:"Ce",orb:"3d",sub:"v‴/u0",be:898.2}, b:{el:"Mn",auger:"L3VV",ke:[587]}, src:AVK,
+  tip:"Mn L3VV Auger (library KE 587 eV → BE ≈ 900 eV under Al Kα) lies under Ce v‴ (≈ 898 eV) and u0 (≈ 899 eV) — with Mn present (Ce–Mn oxides) the Ce 3d recipe gives that intensity to v‴ (Ce⁴⁺) and u0 (Ce³⁺), which biases the Ce³⁺ fraction; the u‴ fraction (916.7 eV) is not affected. Mg Kα moves it."},
  {id:"RuC", sev:"warn", a:{el:"Ru",orb:"3d",sub:"3d3/2",be:284.2}, b:{el:"C",orb:"1s",sub:"1s",be:284.2}, src:BKL,
   tip:"Ru 3d3/2 (284.2 eV) coincides with C 1s (284.2 eV, Booklet) — C 1s charge referencing and the Ru 3d3/2 area are both affected; fit Ru 3d and C 1s in one model (Ru 3d5/2 at 280.0 eV is free of C) or use Ru 3p."},
  {id:"BiS", sev:"warn", a:{el:"Bi",orb:"4f",sub:"4f5/2",be:162.3}, b:{el:"S",orb:"2p",sub:"2p3/2",be:162.5}, src:BKL,
@@ -656,6 +719,7 @@ function applyAction(model,act,o){
   const C=CORE(); o=o||{}; const cs=model.comps, byId={}; cs.forEach(c=>byId[c.id]=c); model.cons=model.cons||{};
   const q=id=>(model.cons[id]=model.cons[id]||{});
   if(act.type==="dropSet"){ const gone=new Set(act.ids||[]); if(!cs.some(c=>gone.has(c.id))) return null; relinkWithout(model,gone); return "Removed "+(act.label||"").replace(/^Remove /,""); }
+  if(act.type==="drop"&&byId[act.id]&&byId[act.id].recipe){ relinkWithout(model,new Set([act.id])); return "Removed "+(act.label||"").replace(/^Remove /,""); }   // recipe lines: exact re-anchoring (v1.9.8)
   if(act.type==="drop"){ const P={comps:cs,cons:model.cons}; C.removeComp(P,act.id); model.comps=P.comps; model.cons=P.cons; return "Removed "+(act.label||"").replace(/^Remove /,""); }
   if(act.type==="link"){ const c=byId[act.id], a=byId[act.ref]; if(!c||!a) return null; const ka=C.getP(a,act.k), kc=C.getP(c,act.k); q(act.id)[act.k]={mode:"link",ref:act.ref,k:ka>0?+(kc/ka).toFixed(6):1,b:0}; return "Linked"; }
   if(act.type==="fix"){ const c=byId[act.id]; if(!c) return null; C.setP(c,act.k,act.v); q(act.id)[act.k]={mode:"fixed"}; return "Fixed"; }
@@ -674,15 +738,21 @@ function applyAction(model,act,o){
    relation (values are current, so k = v_user/v_anchor for area/widths, b = Δ for positions) — exact, unlike a k = 1 re-anchor. */
 function relinkWithout(model,gone){
   const C=CORE(); const cons=model.cons=model.cons||{};
+  const goneC={}; gone.forEach(id=>{ goneC[id]=cons[id]||{}; });
   model.comps=model.comps.filter(c=>!gone.has(c.id)); gone.forEach(id=>delete cons[id]);
   const byRef={}; model.comps.forEach(c=>{ const q=cons[c.id]||{}; for(const k in q){ const l=q[k]; if(l&&l.mode==="link"&&gone.has(l.ref)) (byRef[l.ref+"|"+k]=byRef[l.ref+"|"+k]||[]).push(c); } });
-  for(const key in byRef){ const k=key.split("|")[1], users=byRef[key], Y=users[0];
-    const v=c=>C.getP(c,k), vY=v(Y);
+  for(const key in byRef){ const ref=key.split("|")[0], k=key.split("|")[1], users=byRef[key], Y=users[0];
+    const v=c=>C.getP(c,k), vY=v(Y), lY=cons[Y.id][k];
     if(k==="be"){ const R0=Y.recipe&&recipeById(Y.recipe), tol=R0&&R0.beTol?R0.beTol:0.3; cons[Y.id][k]={mode:"free",lo:+(vY-tol).toFixed(4),hi:+(vY+tol).toFixed(4)}; }
-    else cons[Y.id][k]={mode:"free"};
+    else { // v1.9.8: carry the old anchor's range through Y's own link (Y = kL·X + bL), e.g. the shared ΔE 16.6–17.0 eV of a recipe, instead of dropping it
+      const ga=goneC[ref]&&goneC[ref][k]; let q={mode:"free"};
+      if(ga&&ga.mode==="free"&&(ga.lo!=null||ga.hi!=null)&&lY&&lY.k!=null){ const kL=+lY.k, bL=+(lY.b||0); const a=ga.lo!=null?kL*ga.lo+bL:null, b=ga.hi!=null?kL*ga.hi+bL:null;
+        if(kL>0) q={mode:"free",lo:a!=null?+a.toFixed(6):undefined,hi:b!=null?+b.toFixed(6):undefined}; else if(kL<0) q={mode:"free",lo:b!=null?+b.toFixed(6):undefined,hi:a!=null?+a.toFixed(6):undefined};
+        if(q.lo===undefined) delete q.lo; if(q.hi===undefined) delete q.hi; }
+      cons[Y.id][k]=q; }
     users.forEach(u=>{ if(u===Y) return; cons[u.id][k]=k==="be"?{mode:"link",ref:Y.id,k:1,b:+(v(u)-vY).toFixed(4)}:{mode:"link",ref:Y.id,k:vY>0?+(v(u)/vY).toFixed(8):1,b:0}; });
     if(k==="F"&&Y.renv){ const R0=recipeById(Y.recipe); if(R0&&R0.wScale) cons[Y.id].F={mode:"free",lo:+(Y.F*R0.wScale[0]).toFixed(5),hi:+(Y.F*R0.wScale[1]).toFixed(5)}; }
-    if(k==="area"&&Y.renv){ Y.ranc=1; Y.afloor=0.02; } }
+    if(k==="area"&&Y.renv){ Y.ranc=1; Y.afloor=0.02; } else if(k==="area"&&Y.recipe) Y.afloor=0.02; }
   model.comps.forEach(c=>{ if(c.aref&&gone.has(c.aref)){ const q=cons[c.id]&&cons[c.id].area; c.aref=q&&q.mode==="link"?q.ref:c.id; c.amul=q&&q.mode==="link"?q.k:1; } });
 }
 
@@ -700,7 +770,11 @@ function stageCons(P,user,stage){
   P.comps.forEach(c=>{ const q=cons[c.id]=cons[c.id]||{}; C.paramNames(c).forEach(k=>{ if(k==="area"||k==="be"||WKEYS.includes(k)) return; q[k]={mode:"fixed"}; }); });
   WKEYS.forEach(k=>{ const has=P.comps.filter(c=>C.paramNames(c).includes(k)&&!C.derivedParam(c,k)&&(get(c.id,k)||{}).mode!=="fixed");
     if(has.length<2) return; const anc=has.reduce((a,c)=>!a||c.area>a.area?c:a,null); const ua=get(anc.id,k);
-    cons[anc.id][k]=ua&&ua.mode==="free"?ua:{mode:"free"};
+    // v1.9.8: when the stage anchor was linked by the user (y = k·x + b to a free width with a range), carry that range through the link
+    let q={mode:"free"}; if(ua&&ua.mode==="free") q=ua;
+    else if(ua&&ua.mode==="link"){ const ux=get(ua.ref,k); const kL=ua.k!=null?+ua.k:1, bL=+(ua.b||0);
+      if(ux&&ux.mode==="free"&&(ux.lo!=null||ux.hi!=null)&&kL!==0){ const a=ux.lo!=null?kL*ux.lo+bL:null, b=ux.hi!=null?kL*ux.hi+bL:null; const lo=kL>0?a:b, hi=kL>0?b:a; q={mode:"free"}; if(lo!=null) q.lo=lo; if(hi!=null) q.hi=hi; } }
+    cons[anc.id][k]=q;
     has.forEach(c=>{ if(c===anc) return; const va=C.getP(anc,k), vc=C.getP(c,k); cons[c.id][k]={mode:"link",ref:anc.id,k:va>0?vc/va:1,b:0}; }); });
   return cons;
 }
@@ -709,17 +783,28 @@ function stagedFit(prob,opt){
   const base=()=>{ const P=C.clone(C.stripProb(prob)); P.E=prob.E; P.y=prob.y; return P; };
   const P0=base(); { const m=C.buildMap(P0); C.applyLinks(P0,m); }
   const user=C.clone(prob.cons||{}); const stages=[];
-  // normal path from the same start
-  const PN=base(); const rN=C.fitOnce(PN,opt); const sN=C.fitStats(PN,rN);
-  // stage 1: heights (areas) only
-  const P1=base(); cpParams(P1,P0); P1.cons=stageCons(P1,user,1); const r1=C.fitOnce(P1,opt); stages.push({stage:1,chi2:r1.chi2,iter:r1.iter+(r1.iter1||0),stop:r1.stop});
-  // stage 2: positions within their ranges, widths linked
-  const P2=base(); cpParams(P2,P1); P2.cons=stageCons(P2,user,2); const r2=C.fitOnce(P2,Object.assign({},opt,{initAreas:false})); stages.push({stage:2,chi2:r2.chi2,iter:r2.iter+(r2.iter1||0),stop:r2.stop});
-  // stage 3: the user's constraints, normal fit path (stall rule applies)
-  const P3=base(); cpParams(P3,P2); P3.cons=user; const r3=C.fitOnce(P3,Object.assign({},opt,{initAreas:false})); const s3=C.fitStats(P3,r3); stages.push({stage:3,chi2:r3.chi2,iter:r3.iter+(r3.iter1||0),stop:r3.stop});
-  const useStaged=s3.chi2d<sN.chi2d*(1-1e-9);
+  // normal path from the same start (computed first; a failing stage below never loses it)
+  const PN=base(); let rN=null, sN=null, errN=null; try{ rN=C.fitOnce(PN,opt); sN=C.fitStats(PN,rN); }catch(e){ errN=e; }
+  /* v1.9.8: stages 2–3 start without the core's area initialisation (initAreas:false), so an area that stage 1/2 left at 0 would stay frozen there
+     (zero area → zero derivatives for its position and width). Components flagged afloor (recipe roots) restart at ≥ afloor × the largest such area. */
+  const seedFloor=P=>{ const m=C.buildMap(P); const fa=m.free.filter(f=>f.k==="area"&&f.ci>=0&&P.comps[f.ci].afloor>0); if(!fa.length) return;
+    const amax=Math.max(...fa.map(f=>P.comps[f.ci].area),0); if(!(amax>0)) return;
+    fa.forEach(f=>{ const c=P.comps[f.ci]; const v=Math.min(Math.max(c.area,c.afloor*amax),isFinite(f.hi)?f.hi:Infinity); if(v!==c.area) C.setP(c,"area",v); }); C.applyLinks(P,C.buildMap(P)); };
+  let P3=null, r3=null, s3=null, errS=null;
+  try{
+    // stage 1: heights (areas) only
+    const P1=base(); cpParams(P1,P0); P1.cons=stageCons(P1,user,1); const r1=C.fitOnce(P1,opt); stages.push({stage:1,chi2:r1.chi2,iter:r1.iter+(r1.iter1||0),stop:r1.stop});
+    // stage 2: positions within their ranges, widths linked
+    const P2=base(); cpParams(P2,P1); P2.cons=stageCons(P2,user,2); seedFloor(P2); const r2=C.fitOnce(P2,Object.assign({},opt,{initAreas:false})); stages.push({stage:2,chi2:r2.chi2,iter:r2.iter+(r2.iter1||0),stop:r2.stop});
+    // stage 3: the user's constraints, normal fit path (stall rule applies)
+    P3=base(); cpParams(P3,P2); P3.cons=user; seedFloor(P3); r3=C.fitOnce(P3,Object.assign({},opt,{initAreas:false})); s3=C.fitStats(P3,r3); stages.push({stage:3,chi2:r3.chi2,iter:r3.iter+(r3.iter1||0),stop:r3.stop});
+  }catch(e){ errS=e; stages.push({stage:stages.length+1,chi2:NaN,iter:0,stop:"error",error:String(e&&e.message||e)}); }
+  if(errN&&(errS||!s3)) throw errN;   // nothing to return
+  // keep the lower finite χ²_d; a non-finite or missing side never wins
+  const fS=!!s3&&isFinite(s3.chi2d), fN=!!sN&&isFinite(sN.chi2d);
+  const useStaged=fS&&(!fN||s3.chi2d<sN.chi2d*(1-1e-9));
   const P=useStaged?P3:PN, r=useStaged?r3:rN;
-  return {P,r,staged:{used:useStaged?"staged":"normal",chi2dStaged:s3.chi2d,chi2dNormal:sN.chi2d,chi2Staged:r3.chi2,chi2Normal:rN.chi2,stopStaged:r3.stop,stopNormal:rN.stop,stages,ms:Date.now()-t0}};
+  return {P,r,staged:{used:useStaged?"staged":"normal",chi2dStaged:s3?s3.chi2d:NaN,chi2dNormal:sN?sN.chi2d:NaN,chi2Staged:r3?r3.chi2:NaN,chi2Normal:rN?rN.chi2:NaN,stopStaged:r3?r3.stop:"error",stopNormal:rN?rN.stop:"error",error:errS?String(errS.message||errS):errN?String(errN.message||errN):null,stages,ms:Date.now()-t0}};
 }
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }

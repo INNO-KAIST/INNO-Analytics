@@ -617,6 +617,17 @@ function bgStatic(E,y,bg){
   if(t==="none") return new Float64Array(E.length);
   return null;   // active
 }
+/* Shirley 가 수렴하지 않고 창에 봉우리가 없음(평활 자료가 직선 배경에서 5σ 안; 봉우리 없는 창: 끝값 차 d 가 잡음뿐이고 ∫(y − B) 가 0 근처에서 부호를 바꿔 반복이 튐 — 노이즈만 있는 창 200 개 중 91 개,
+   참 배경에서 최대 847 cps 벗어남) → 직선 배경으로 대신하고 표시한다 (SPEC §2). 자동 경로(민감도·잔차 보강)에서 쓴다; 보통 피팅은 B.converged 만 알린다 */
+function shirleyFallback(P){
+  const t=P.bg&&P.bg.type; if(!(t==="shirley"||t==="smart")||P.bg.conv==="avantage"||P.bg.conv==="casa") return null;
+  const B=P._Bst||(P._Bst=bgStatic(P.E,P.y,P.bg)); if(B.converged!==false) return null;
+  const L=bgLinear(P.E,P.y,P.bg.n||5);
+  // 봉우리가 있는 창(바탕이 기울어 고정점이 없는 경우 등)은 바꾸지 않는다: 평활 자료가 직선 배경에서 5σ(채널 잡음) 넘게 벗어나면 봉우리 있음
+  const ys=smoothQ(P.E,P.y,smoothHW(P.E)), sg=Math.sqrt(constVar(P.y)[0]); let dev=0; for(let i=0;i<ys.length;i++) dev=Math.max(dev,Math.abs(ys[i]-L[i]));
+  if(!(dev<5*sg)) return null; L.converged=true; L.fallback="linear"; P._Bst=L;
+  return P.bgFallback={from:t,to:"linear",iter:B.iter};
+}
 const BG_TYPES={linear:"Linear",shirley:"Shirley",smart:"Smart",tougaard:"Tougaard (U2/U3)",active:"Shirley (in-fit)",spline:"Spline (knots)",none:"None"};
 
 /* ============================================================
@@ -646,6 +657,8 @@ function buildMap(prob){
       if(cs.mode==="link"&&cs.ref!=null&&byId[cs.ref]!=null&&byId[cs.ref]!==ci){ links.push({ci,k,ri:byId[cs.ref],rk:cs.rk||k,mul:cs.k!=null?+cs.k:1,add:cs.b!=null?+cs.b:0}); return; }
       let [lo,hi]=defBounds(c,k); if(cs.lo!=null&&isFinite(cs.lo)) lo=+cs.lo; if(cs.hi!=null&&isFinite(cs.hi)) hi=+cs.hi;
       if(k==="area") lo=Math.max(0,lo);
+      // 한계가 겹침(hi − lo ≤ ε): CasaXPS 가 '고정'을 lo = hi 로 적는 방식 — 자유로 두면 toU/dPdU 가 0/0 = NaN (SPEC §3.1). 고정으로 보고 값을 그 한계에 둔다
+      if(isFinite(lo)&&isFinite(hi)&&hi-lo<=1e-12*Math.max(1,Math.abs(lo),Math.abs(hi))){ const v=getP(c,k); if(!(v>=lo&&v<=hi)) setP(c,k,hi<lo?(lo+hi)/2:lo); fixed.push({ci,k,pinned:true}); return; }
       free.push({ci,k,lo,hi,id:c.id});
     });
   });
@@ -659,17 +672,22 @@ function buildMap(prob){
   }
   // 연결 사슬: 연결 대상이 또 연결이면 끝까지 따라간다(순환 금지)
   const linkOf=(ci,k)=>links.find(l=>l.ci===ci&&l.k===k);
-  links.forEach(l=>{ let g=0, cur=l; const seen=new Set([l.ci+"|"+l.k]); while(true){ const nx=linkOf(cur.ri,cur.rk); if(!nx) break; const key=nx.ci+"|"+nx.k; if(seen.has(key)||g++>20) throw new Error("연결이 순환합니다: "+comps[l.ci].name+" "+l.k); seen.add(key); cur=nx; } });
-  return {free,links,fixed};
+  links.forEach(l=>{ let g=0, cur=l; const seen=new Set([l.ci+"|"+l.k]); while(true){ const nx=linkOf(cur.ri,cur.rk); if(!nx) break; const key=nx.ci+"|"+nx.k; if(seen.has(key)) throw new Error("연결이 순환합니다: "+comps[l.ci].name+" "+l.k); seen.add(key); cur=nx; g++; } l.depth=g; });
+  // 위상 순서: 대상이 연결이 아닌 것(깊이 0)부터 — applyLinks 가 한 번 훑어 사슬 길이와 상관없이 맞는 값 (옛 8 회 반복은 사슬 > 8 에서 틀림)
+  const linkOrder=links.map((l,i)=>i).sort((a,b)=>links[a].depth-links[b].depth||a-b);   // links 자체의 순서는 그대로(initAreas 등의 합 순서 = 비트 동일)
+  return {free,links,fixed,linkOrder};
 }
 function applyLinks(prob,map){
-  // 위상 순서대로 (사슬 길이만큼 반복)
-  for(let pass=0;pass<8;pass++){ map.links.forEach(l=>{ const ref=prob.comps[l.ri]; const v=getP(ref,l.rk)*l.mul+l.add; setP(prob.comps[l.ci],l.k,v); }); }
+  // buildMap 이 위상 순서로 정렬해 두었으면 한 번; 아니면(직접 만든 map) 바뀌지 않을 때까지 (사슬 길이 + 1 번까지)
+  const L=map.links, one=l=>{ const v=getP(prob.comps[l.ri],l.rk)*l.mul+l.add; const old=getP(prob.comps[l.ci],l.k); setP(prob.comps[l.ci],l.k,v); return old!==v; };
+  const O=map.linkOrder; if(O&&O.length===L.length){ for(let i=0;i<O.length;i++) one(L[O[i]]); return; }
+  for(let pass=0;pass<=L.length;pass++){ let ch=false; for(let i=0;i<L.length;i++) if(one(L[i])) ch=true; if(!ch) break; }
 }
 function getVec(prob,map){ return map.free.map(f=>f.ci<0?prob.bg[f.k]:getP(prob.comps[f.ci],f.k)); }
 function setVec(prob,map,v){ map.free.forEach((f,i)=>{ if(f.ci<0) prob.bg[f.k]=v[i]; else setP(prob.comps[f.ci],f.k,v[i]); }); applyLinks(prob,map); }
 /* 무제약 변환 (MINUIT) */
 function toU(p,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
+  if(L&&H&&!(hi>lo)) return 0;   // 겹친 한계: buildMap 이 고정으로 돌리지만, 직접 부를 때도 NaN 대신 0
   if(L&&H){ const t=Math.max(-1,Math.min(1,2*(p-lo)/(hi-lo)-1)); return Math.asin(t); }
   if(L){ const t=p-lo+1; return Math.sqrt(Math.max(0,t*t-1)); }
   if(H){ const t=hi-p+1; return Math.sqrt(Math.max(0,t*t-1)); }
@@ -680,6 +698,7 @@ function fromU(u,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
   if(H) return hi+1-Math.sqrt(u*u+1);
   return u; }
 function dPdU(u,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
+  if(L&&H&&!(hi>lo)) return 0;
   if(L&&H) return (hi-lo)*Math.cos(u)/2;
   if(L) return u/Math.sqrt(u*u+1);
   if(H) return -u/Math.sqrt(u*u+1);
@@ -761,6 +780,7 @@ function rng(seed){ let a=(seed>>>0)||1; const u=()=>{ a|=0; a=a+0x6D2B79F5|0; l
 function constVar(y){ const n=y.length, q=[]; for(let i=1;i<n-1;i++){ const d=y[i]-(y[i-1]+y[i+1])/2; q.push(d*d/1.5); } q.sort((a,b)=>a-b);
   let v=q.length?q[Math.floor(q.length/2)]/0.4549:1; if(!(v>0)){ let m=0; for(const t of y) m=Math.max(m,Math.abs(t)); v=Math.max(1e-12,(1e-3*m)**2); } return Float64Array.from(y,()=>v); }
 /* CasaXPS 피팅 가중 (SPEC_casa_v2 §1, CasaXPS 2.3.27 V2 실측): 가중 없는 최소제곱, 창 [i0, i1] 의 양 끝 채널은 빼고 i0+1 … i1−1 만 (DoF = N − 2 − p) */
+const VAR_OFF=1e29;   // 이 이상인 분산 = 그 채널은 피팅에서 빠짐(무게 0)
 function casaVar(y){ const n=y.length; return Float64Array.from(y,(v,i)=>i===0||i===n-1?1e30:1); }
 function dataVar(prob,ys){ return prob.weight==="const"?constVar(prob.y):prob.weight==="casa"?casaVar(prob.y):varianceFrom(ys,prob.c); }
 function varianceFrom(yhat,c){ const cc=c>0?c:1; let m=0; for(const t of yhat) if(t>m) m=t; const vmin=Math.max(1/cc,1e-6*m); return Float64Array.from(yhat,v=>Math.max(v,vmin)/cc); }
@@ -853,7 +873,7 @@ function makeLM(prob,map,v,opt){
   setVec(prob,map,p); let cur=ev.full(); let X=chi(cur.mu);
   let nEff=0; for(let i=0;i<n;i++) if(sw[i]>1e-10) nEff++;
   const L={done:false,it:0,X,p,u,np,nEff,trapped:false,XH:[X],lastA:null};
-  if(!np){ L.done=true; L.out=()=>({chi2:X,iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B}); return L; }
+  if(!np||!isFinite(X)){ const bad=!isFinite(X); L.done=true; L.out=()=>({chi2:X,iter:0,conv:!bad,stop:bad?"invalid":"converged",mu:cur.mu,B:cur.B,comps:ev.comps()}); return L; }   // 시작 χ² 가 유한하지 않으면 '수렴'이 아니라 invalid (SPEC §3.3)
   let lam=1e-3, nu=2, calm=0, it=0, conv=false, stop=null;
   const stall=opt.stall!==false&&FIT_HOOK.stall!==false, ST=opt.stallCfg?Object.assign({},LM_STALL,opt.stallCfg):LM_STALL; const hX=FIT_HOOK.lm?[X]:null, hL=hX?[]:null, hT=hX?[]:null;
   const fast=!!opt._fast, calmTol=fast?ST.calmFast:1e-10;   // 갈래 안은 조금 느슨하게 끝냄(채택되면 2차가 다시 다듬음)
@@ -942,7 +962,7 @@ function lmFit(prob,map,v,opt){
     const B={kind:reset.length?"rescue":"kick",at:k,Xinc:L.X,nit:0,phase:reset.length?1:2,done:false,wInc:0,wBr:0,wMax:ST.budget*(WORK.n-wStart),
       reset:reset.map(j=>({id:map.free[j].id,ci:map.free[j].ci,k:map.free[j].k,from:p[j],to:pS[j]})),
       flags:fl.map(f=>({id:f.id,ci:f.ci,k:f.k,p:f.p,lo:f.lo,hi:f.hi,why:f.why}))};
-    setVec(prob,map,q); B.lm=makeLM(prob,reset.length?{free:map.free.filter((f,j)=>reset.indexOf(j)<0),links:map.links,fixed:map.fixed}:map,v,o2);
+    setVec(prob,map,q); B.lm=makeLM(prob,reset.length?{free:map.free.filter((f,j)=>reset.indexOf(j)<0),links:map.links,fixed:map.fixed,linkOrder:map.linkOrder}:map,v,o2);
     B.q=getVec(prob,map); setVec(prob,map,L.p);
     B.step=function(){ setVec(prob,map,B.q); B.lm.step(); B.nit++;
       if(B.lm.done){ if(B.phase===1){ B.phase=2; B.lm=makeLM(prob,map,v,o2); } else { B.done=true; B.r=B.lm.out(); B.X=B.r.chi2; } }
@@ -982,7 +1002,7 @@ function lmFit(prob,map,v,opt){
 }
 /* 한 번의 완전한 피팅: (넓이 초기화) → LM(평활 분산) → LM(모형 분산) */
 function fitOnce(prob,opt){
-  opt=opt||{};
+  opt=opt||{}; checkData(prob.E,prob.y," (fitOnce)");
   let map=buildMap(prob); applyLinks(prob,map);
   const E=prob.E, y=prob.y; let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const ys=smoothQ(E,y,smoothHW(E));
@@ -1144,7 +1164,7 @@ function monteCarlo(prob,res,M,opt){
   const refNoise=opt.refNoise!==false&&base.comps.some(c=>c.shape==="MEAS"&&c.tpl&&c.tpl.raw);
   for(let m=0;m<M;m++){
     const y=new Float64Array(n); let e=0;
-    for(let i=0;i<n;i++){ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; y[i]=res.mu[i]+e*Math.sqrt(phi*res.v[i]); }
+    for(let i=0;i<n;i++){ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; const vi=res.v[i]; y[i]=res.mu[i]+(vi<VAR_OFF&&isFinite(vi)?e*Math.sqrt(phi*vi):0); }   // 무게 0 채널(CasaXPS 가중의 양 끝 v = 1e30)은 흔들지 않음 — 흔들면 잡음이 1e15 배로 터짐 (SPEC §12)
     const P=clone(base); P.E=prob.E; P.y=y;
     if(refNoise){ const pt={}; P.comps.forEach(c=>{ if(c.shape!=="MEAS"||!c.tpl||!c.tpl.raw) return; const id=c.tpl.id; if(!pt[id]) pt[id]=perturbTpl(c.tpl,R); c.tpl=pt[id]; }); }
     try{ const r=fitOnce(P,{initAreas:false,irls:opt.irls!==false,maxit:opt.maxit||200}); samples.push(compSummary(P,r,null).map(q=>({be:q.be,area:q.area,areaPct:q.areaPct,fwhm:q.fwhm,height:q.height}))); }
@@ -1384,7 +1404,9 @@ function multipletInfo(el,orb){
   if(MULT_TM.includes(el)&&(orb==="3p"||orb==="3s"))
     return {kind:"3d",why:`${el} ${orb}: 열린 3d 껍질과의 교환 상호작용(다중항)이 스핀–궤도 갈라짐과 비슷 — doublet 모형이 맞지 않음`,closed:el==="Ti"?"Ti⁴⁺ (3d⁰)":el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null};
   if(MULT_RE.includes(el)&&["4s","4p","4d","5s","5p"].includes(orb))
-    return {kind:"4f",why:`${el} ${orb}: 열린 4f 껍질과의 교환 상호작용(다중항)으로 넓게 갈라짐 — doublet 모형이 맞지 않음`,closed:el==="Yb"?"Yb²⁺ (4f¹⁴)":el==="Ce"?"Ce⁴⁺ (형식상 4f⁰, 실제로는 4f¹L 종상태가 섞임)":null};
+    return {kind:"4f",why:`${el} ${orb}: 열린 4f 껍질과의 교환 상호작용(다중항)으로 넓게 갈라짐 — doublet 모형이 맞지 않음`,closed:el==="Yb"?"Yb²⁺ (4f¹⁴)":el==="Ce"?"Ce⁴⁺ (형식상 4f⁰, 실제로는 4f¹L 종상태가 섞임)":null,
+      // Yb: 흔한 Yb³⁺(4f¹³)는 다중항, Yb²⁺(4f¹⁴)만 닫힌 껍질 = 보통 doublet. 원자가에 따라 갈리므로 core 는 다중항으로 두고 이 표지로 알린다 (SPEC §9)
+      valenceDependent:el==="Yb"?{multiplet:"Yb³⁺ (4f¹³)",doublet:"Yb²⁺ (4f¹⁴)",note:"Yb 4d/4p/5p: Yb³⁺(흔함)는 넓은 다중항, 순수 Yb²⁺ 일 때만 보통 doublet"}:null};
   return null;
 }
 function doubletInfo(lib,el,orb){
@@ -1399,18 +1421,31 @@ function doubletInfo(lib,el,orb){
      둘 다 있을 때 357 개 중 78 개가 ≥ 0.3 eV 달랐다 → Booklet 이 없거나 soWarn 일 때만 Avantage 를 씀. */
   /* 단, Δ < 2 eV 에서는 Booklet 의 0.1 eV 반올림이 상대 오차로 커서(Si 2p 0.4 vs 고분해능 문헌 ≈0.6, S 2p 1.1 vs ≈1.2) 둘 다 정밀하지 않다 —
      이 범위는 v1.9.4 까지와 같이 Avantage 먼저(시험으로 검증된 동작 유지), Δ 제약 범위(±max(0.3, 5 %, 두 출처 차+0.1))가 차이를 흡수. */
+  const unrel=[]; let trendHi=null;
   if(bkOK&&(bk>=2||av==null)){ dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  else if(bkOK&&av!=null&&Math.abs(av-bk)>0.5){   // Δ < 2 eV 인데 두 출처가 0.5 eV 넘게 다름(Ni 3p: Avantage 4.0 vs Booklet 1.8) → 원자 준위 편집값(Booklet)을 쓰고 표시
+    dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]+" (Avantage "+av+" 와 크게 다름)"; unrel.push("sources");
+  }
   else if(av!=null){ dE=av; src="Avantage 원소표 "+el+" "+orb+J[1]+" − "+orb+J[0]+(bkOK?" (Δ < 2 eV: Booklet 반올림 정밀도 부족)":" (Booklet 값 없음)"); }
+  // 두 출처가 같은 값인데 Z 추세와 어긋남(Rb 3d 1.0: Kr 1.2 → Sr 1.8) — 값을 지어내지 않고 Δ 범위를 이웃 Booklet 값의 보간까지 넓힘 (SPEC §9)
+  const tr=DOUBLET_TREND[el+" "+orb]; if(tr&&dE!=null){ const nb=tr.nb.map(e=>{ const r=(lib.core||{})[e]||{}, v=r.lv||{}; return v[orb+J[0]]>0&&v[orb+J[1]]>0?{Z:r.Z,d:v[orb+J[1]]-v[orb+J[0]]}:null; });
+    if(nb[0]&&nb[1]&&rec.Z){ const t=(rec.Z-nb[0].Z)/(nb[1].Z-nb[0].Z), ip=nb[0].d+(nb[1].d-nb[0].d)*t; trendHi=+Math.max(ip,dE).toFixed(3); unrel.push("trend"); } }
+  // Xe–Tb 의 4p·5p: 출처 값이 Z 에 따라 들쭉날쭉(Xe 4p 1.2 · Cs 11.1 · Ba 13.4 · La 9.8 · Gd 15 · Tb 38.3 — 4p 는 4p⁻¹ → 4d⁻²4f super-Coster–Kronig 붕괴로 한 덩어리가 아님) → doublet 을 강요하지 않음
+  const erratic=(orb==="4p"||orb==="5p")&&rec.Z>=54&&rec.Z<=65; if(erratic) unrel.push("erratic");
   return {dE,r:ORB_RR[l],J,src:dE!=null?src:"라이브러리에 쓸 수 있는 값 없음",alt:{avantage:av,booklet:bkOK?bk:null},
-    spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE, multiplet:multipletInfo(el,orb)};
+    spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE, multiplet:multipletInfo(el,orb),
+    unreliable:unrel.length?unrel:null, trendHi, erratic};
 }
+/* Z 추세 점검(감사 2026-11): 두 출처가 같은데 이웃 원소 사이 값과 어긋나는 준위 — Δ 범위를 이웃 Booklet 보간값까지 넓힌다 */
+const DOUBLET_TREND={"Rb 3d":{nb:["Kr","Sr"]}};
 const DOUBLET_RESOLVE=1.2;   // eV — 이 이상이면 두 봉우리가 데이터에서 갈라져 Δ 를 데이터로 정할 수 있다
 /* Δ 제약: 라이브러리 Δ ± max(0.3 eV, 5 %, 두 출처 차 + 0.1) 안에서 자유. 라이브러리 Δ 의 정밀도가 0.1–0.5 eV 라
    고정하면 분해되지 않는 doublet 에서도 계통 편향·가짜 성분이 생긴다(합성 시험: Rb 3d 라이브러리 1.0 vs 참 1.07 → 20 회 중 3 회 가짜 성분).
    여러 화학 상태의 doublet 은 첫 성분의 Δ 에 연결(매개변수 1 개만 늘어남). */
 function dEConstraint(info){
   if(!info||info.dE==null) return {mode:"free",lo:0.05,hi:40};
-  const w=Math.max(0.3,0.05*info.dE,(info.spread||0)+0.1); return {mode:"free",lo:+Math.max(0.05,info.dE-w).toFixed(3),hi:+(info.dE+w).toFixed(3)};
+  const w=Math.max(0.3,0.05*info.dE,(info.spread||0)+0.1); let hi=info.dE+w; if(info.trendHi!=null) hi=Math.max(hi,info.trendHi+0.1);
+  return {mode:"free",lo:+Math.max(0.05,info.dE-w).toFixed(3),hi:+hi.toFixed(3)};
 }
 /* 출발 모형 제안: 봉우리 찾기 → (짝이 보이거나 짝 위치가 영역 안이면) doublet → 넓이는 높이에서.
    o = {bg, el, orb, lib, shape, F}. 반환 {comps, cons, info, peaks} */
@@ -1424,7 +1459,7 @@ function suggestModel(E,y,o){
   pk=pk.sort((a,b)=>b.h-a.h).slice(0,o.maxComps||8);
   // 가장 큰 봉우리의 2 % 미만은 출발 모형에서 뺀다(작은 실제 성분은 잔차 보강이 근거 있을 때 다시 더함)
   if(pk.length){ const hm=pk[0].h; pk=pk.filter(q=>q.h>=(o.minRel!=null?o.minRel:0.02)*hm); }
-  const info=doubletInfo(o.lib||{},o.el,o.orb); const mult=multipletInfo(o.el,o.orb);
+  const info=doubletInfo(o.lib||{},o.el,o.orb); const mult=multipletInfo(o.el,o.orb)||(info&&info.erratic?{kind:"erratic",why:`${o.el} ${o.orb}: 라이브러리 Δ 가 Z 에 따라 들쭉날쭉(믿을 수 없음) — doublet 을 강요하지 않고 넓은 성분으로 모양만`,closed:null}:null);
   const comps=[], cons={}; if(!pk.length) return {comps,cons,info,mult,peaks:[]};
   const asc=pk.slice().sort((a,b)=>a.be-b.be), used=new Set();
   // 다중항 준위: doublet 을 쓰지 않고 넓은 성분(F 출발 2 eV, 0.3–8 eV)으로 모양만
@@ -1484,7 +1519,7 @@ function refineByResidual(prob,o){
   // 성분을 더할지는 유연한 배경(피팅 안 Shirley + 기울기)으로 판단한다 — 정적 배경의 모양 오차가 잔차 덩어리로 남아
   // '가짜 성분'으로 채택되는 것을 막기 위해(합성 시험: 정적 배경으로 판단하면 참 1 성분 스펙트럼 143 개 중 106 개에 성분이 더해짐)
   let cur=clone(stripProb(prob)); cur.E=E; cur.y=prob.y; const userBg=clone(prob.bg);
-  if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}};
+  if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}}; else shirleyFallback(cur);
   let r=fitOnce(cur,{}); let S=fitStats(cur,r); const log=[`시작 ${cur.comps.length} 성분 BIC ${S.BIC.toFixed(1)}`]; let added=0, removed=0;
   // 죽은 성분 덜기: 넓이 몫이 작거나(< 5 %) 중심이 창 밖으로 나간 성분을 빼 보고 BIC 가 나빠지지 않으면(ΔBIC ≤ 2) 뺀다.
   // 자동 제안이 겹친 다중항의 위쪽 짝(예: Au 4f5/2 + 다른 상태 4f7/2)을 별도 성분으로 잡으면 피팅이 그 성분을 넓이 0 으로 보내는데,
@@ -1546,12 +1581,12 @@ function refineByResidual(prob,o){
   }
   if(added) prune();
   // 사용자 배경으로 되돌려 다시 맞춘다(성분 구성만 가져감)
-  if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
+  if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; const fb=shirleyFallback(fin); if(fb) log.push(`${fb.from} 배경이 ${fb.iter} 번 반복에도 수렴하지 않아 직선 배경으로 대신함(봉우리 없는 창?)`); try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
   return {prob:cur,res:r,stats:S,added,removed,relaxed,log};
 }
 
 /* Worker 용: 잔차 보강 결과를 직렬화 가능한 형태로 */
-function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
+function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,bgFallback:rf.prob.bgFallback||null,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
 
 /* ============================================================
    12) 모형 민감도 (SPEC §11): 같은 성분 구성을 '합리적인 분석 선택'의 조합으로 다시 맞춰
@@ -1597,8 +1632,9 @@ function sensJob(spec,model,variants){
       // 지금 창 안에 있던 성분 중심이 변형 창에서 잘려 나가면 건너뜀(창 밖에 있던 성분 — 꼬리·가장자리 — 은 사용자 모형 그대로 둔다)
       if(model.comps.some(c=>c.be>=model.lo&&c.be<=model.hi&&(c.be<v.lo||c.be>v.hi))) return {i,ok:false,err:"성분 중심이 창 밖으로 잘림"};
       const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons,weight:model.weight,optimizer:model.optimizer});
+      const fb=shirleyFallback(P);
       const r=fitOnce(P,{}); const st=fitStats(P,r); const tot=P.comps.reduce((s,c)=>s+c.area,0);
-      return {i,ok:true,conv:r.conv,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
+      return {i,ok:true,conv:r.conv,bgFallback:fb,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
     }catch(e){ return {i,ok:false,err:String(e&&e.message||e)}; }
   });
 }
@@ -1788,6 +1824,7 @@ function nmFit(prob,map,v,opt){
   const chi=mu=>{ let s=0; for(let i=0;i<n;i++){ const r=(y[i]-mu[i])*sw[i]; s+=r*r; } return s; };
   setVec(prob,map,p0); let cur=ev.full();
   if(!np) return {chi2:chi(cur.mu),iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B,comps:ev.comps()};
+  { const X0=chi(cur.mu); if(!isFinite(X0)) return {chi2:X0,iter:0,conv:false,stop:"invalid",mu:cur.mu,B:cur.B,comps:ev.comps(),optimizer:"simplex"}; }   // §3.3: 시작 χ² 가 유한하지 않음
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const s=map.free.map((f,j)=>{ const p=p0[j]; let dp;
     if(f.k==="be"||f.k==="dE") dp=0.1; else if(Math.abs(p)>1e-8) dp=0.1*Math.abs(p); else if(isFinite(lo[j])&&isFinite(hi[j])) dp=0.05*(hi[j]-lo[j]); else dp=1e-3*Math.max(1,ymax);
@@ -1852,8 +1889,16 @@ function quantMC(rows,opts,M,seed){
    보조: 문제 만들기 (스펙트럼 + 영역 + 배경 + 성분)
    ============================================================ */
 function sliceRegion(be,y,lo,hi){ const i0=be.findIndex(e=>e>=lo); let i1=-1; for(let i=be.length-1;i>=0;i--) if(be[i]<=hi){ i1=i; break; } if(i0<0||i1<i0) return null; return {E:be.slice(i0,i1+1),y:y.slice(i0,i1+1),i0,i1}; }
+/* 영역 자료 검사 (SPEC §2): 에너지 축은 오름차순(mkSpec 이 맞춤 — 직접 만든 spec 이 내림차순이면 sliceRegion 이 조용히 빈/엉뚱한 창을 줌),
+   세기는 모두 유한해야 한다(NaN 하나가 χ² 를 NaN 으로 만들어 '0 번째 반복에서 수렴'처럼 보였음) */
+function checkData(E,y,where){
+  for(let i=1;i<E.length;i++) if(!(E[i]>E[i-1])) throw new Error("에너지 축이 오름차순이 아닙니다"+(where||"")+" (채널 "+i+": "+E[i-1]+" → "+E[i]+")");
+  let bad=0, first=-1; for(let i=0;i<y.length;i++) if(!isFinite(y[i])){ bad++; if(first<0) first=i; }
+  if(bad){ const e=new Error("영역 안에 숫자가 아닌 세기(NaN/∞)가 "+bad+" 채널 있습니다 (첫 BE "+(+E[first]).toFixed(2)+" eV) — 영역을 옮기거나 자료를 고치세요"); e.code="nonFinite"; e.nonFinite=bad; throw e; }
+}
 function makeProblem(spec,st){
   const r=sliceRegion(spec.be,spec.y,st.lo,st.hi); if(!r||r.E.length<8) throw new Error("영역 안 데이터 점이 8개 미만입니다");
+  checkData(r.E,r.y);
   const P={E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":st.weight==="casa"?"casa":"poisson"};
   if(st.optimizer==="simplex") P.optimizer="simplex";
   if(P.bg&&P.bg.conv==="casa") P.bg._ends=casaEnds(spec.be,spec.y,r.i0,r.i1,P.bg.aw!=null?P.bg.aw:1);
@@ -1910,7 +1955,8 @@ function finalize(P,r){
     cov:{sig:cov.sig,corr:Array.from(cov.corr),C:Array.from(cov.C),atB:cov.atB,phi:cov.phi,dof:cov.dof,singular:cov.singular,names:cov.names,np:cov.np},
     summ,multi:r.multi||null,free:map.free.map(f=>({id:f.id,k:f.k,lo:f.lo,hi:f.hi})),
     sumSig:{all:areaSumSigma(P,map,cov,P.comps.map((c,i)=>i))},
-    lcf:lcfDiag(P,r.v),optimizer:P.optimizer==="simplex"?"simplex":"lm"};
+    lcf:lcfDiag(P,r.v),optimizer:P.optimizer==="simplex"?"simplex":"lm",
+    bgConverged:P._Bst&&P._Bst.converged===false?false:true,bgFallback:P.bgFallback||null};   // 정적 Shirley 가 수렴하지 않았으면 false (SPEC §2)
 }
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
@@ -2130,8 +2176,8 @@ function casaModelToINNO(cm,hv,o){
   return {lo,hi,bg,comps:comps.filter(Boolean),cons,weight:"casa",shift:cm.shift||0,notes,region:R.name};
 }
 const XPS_CORE={_hook:FIT_HOOK,_work:WORK,LM_STALL,areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
-  cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
-  paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
+  cumtrapz,endpoints,shirleyFallback,checkData,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
+  paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,dPdU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
   tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,bgShirleyAvantageV18,bgSmartAvantageV18,avantageV19,avantageHalf,avantagePQ,avantageSmooth,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_GRID,CASA_DS_T,dsCasaAreaFactor,casaStK,compToCasa,casaToComp,casaBg,casaModelToINNO,
   s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};

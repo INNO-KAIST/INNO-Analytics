@@ -6,6 +6,15 @@ Inputs (all in ../data):
   kherve_extract.json         numeric RSF tables (Scofield Al/Mg, Avantage ALTHERMO1) + Avantage Auger KE
   scofield_paper_spotcheck.json  values read from the Scofield 1976 paper   (verification only)
   auger_literature_check.json    NIST SRD 20 / ASTM E2108 Auger KE         (verification only)
+  ../test/ref/scofield1976_transcription.json  Scofield 1976 Tables 1-2 transcribed in full from the paper
+                                 (v1.9.5) — THE source of the published Scofield tables (scofield.al / .mg).
+                                 Doublet totals (e.g. "Ce 3d") are derived as the sum of the printed subshells
+                                 (one subshell when only one is printed, e.g. Al Tm 3d5/2: 3d3/2 is above 1487 eV).
+                                 The KherveFitting digitised tables are still read and checked (checks 1-2,
+                                 meta.filled/corrected/totals_rederived describe that table), but not published.
+
+meta.built is kept from the existing src/xps_lib.js when nothing else in the output changed, so re-running the
+build on unchanged inputs reproduces the committed file byte for byte (test/test_robust_lib.js checks this).
 
 Every check below must pass, otherwise the build aborts (no silent fallback).
 Run:  python3 -I build/build_lib.py
@@ -14,8 +23,9 @@ import json, os, re, sys, hashlib, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, '..', 'data')
-OUT = os.path.join(HERE, '..', 'src', 'xps_lib.js')
+OUT = os.environ.get('XPS_LIB_OUT') or os.path.join(HERE, '..', 'src', 'xps_lib.js')   # XPS_LIB_OUT: write elsewhere (reproducibility test)
 rd = lambda f: json.load(open(os.path.join(DATA, f), encoding='utf-8'))
+TRANS = os.path.join(HERE, '..', 'test', 'ref', 'scofield1976_transcription.json')
 
 core = rd('core_xdb_table_1_1.json')
 kh = rd('kherve_extract.json')
@@ -178,6 +188,37 @@ for el, rec in core_out.items():
             rec.setdefault('soWarn', []).append(orb)
             so_warn.append('%s %s (%s%s=%s < %s%s=%s)' % (el, orb, orb, J[l][0], hi, orb, J[l][1], lo))
 
+# ---------- v1.9.5: published Scofield tables = full transcription of the paper ----------
+#   total of a doublet = sum of the printed subshells (same rule as the committed v1.9.5 table); keys sorted.
+trans = json.load(open(TRANS, encoding='utf-8'))
+def from_transcription(t, name):
+    out = dict(t)
+    grp = {}
+    for k, v in t.items():
+        el, sub = k.split(' ')
+        if len(sub) > 2:
+            grp.setdefault(el + ' ' + sub[:2], []).append(v)
+    for g, vs in grp.items():
+        if g in t:
+            problems.append('transcription %s: total %s given explicitly (must be derived)' % (name, g))
+        out[g] = round(sum(vs), 6)
+    if abs(out.get('C 1s', 0) - 1) > 1e-12:
+        problems.append('transcription %s: C 1s != 1' % name)
+    return {k: out[k] for k in sorted(out)}
+n_trans = {}
+for src in ('al', 'mg'):
+    n_trans[src] = len(trans[src])
+sc_al = from_transcription(trans['al'], 'al')
+sc_mg = from_transcription(trans['mg'], 'mg')
+# check 7 (report only): transcription vs the independent spot check read from the paper earlier
+spot_diff = []
+for src, tab in (('al', sc_al), ('mg', sc_mg)):
+    for el, subs in spot[src].items():
+        for sub, val in subs.items():
+            v = tab.get(el + ' ' + sub)
+            if v is not None and abs(v - val) > 0.01 * abs(val) + 5e-4:
+                spot_diff.append('%s %s %s: transcription %s vs spot check %s' % (src, el, sub, v, val))
+
 if problems:
     print('\n'.join(problems))
     sys.exit('library build aborted: %d problem(s)' % len(problems))
@@ -186,9 +227,15 @@ meta = {
     'built': datetime.date.today().isoformat(),
     'sources': {
         'BE (core levels)': core['source'] + '. ' + core['notes'],
-        'Scofield RSF': 'J.H. Scofield, J. Electron Spectrosc. Relat. Phenom. 8, 129 (1976), Hartree-Slater subshell '
-                        'photoionization cross-sections at 1487 eV (Al Ka) and 1254 eV (Mg Ka), relative to C 1s = 1. '
-                        'Digitised table: ' + kh['source'] + ' Verified against the paper for %d subshells (tol 1 %%).' % n_chk,
+        'Scofield RSF': ('J.H. Scofield, J. Electron Spectrosc. Relat. Phenom. 8, 129 (1976), Tables 1 (1254 eV, Mg Ka, units of '
+                         'C 1s = 22,200 b) and 2 (1487 eV, Al Ka, C 1s = 13,600 b); relative to C 1s = 1. Transcribed in full '
+                         '(2026-10-31) from the journal PDF (KAIST library access) page by page, every subshell of Z = 1-96 '
+                         '(Al %d, Mg %d values); checked against the previous KherveFitting-derived table (agreeing values '
+                         'unchanged; 10x decimal errors found and fixed, e.g. Mg Na 2s 3.9 -> 0.390, Mg Ti 3s 4.08 -> 0.408, '
+                         'Mg Zr 4s 3.05 -> 0.305, Mg Pr 3p3/2 30.72 -> 9.75, Mg Au 4s 1.115 -> 1.45, Al K 3p total 0.037 -> '
+                         '0.362, Mg Zr 4p 3.666 -> 0.903; Al 2p1/2 0.179 -> 0.1811), Z-smoothness and Al/Mg-ratio smoothness '
+                         'checks. Doublet keys (e.g. Ce 3d) = sum of the two printed subshells. Raw transcription: '
+                         'modules/xps/test/ref/scofield1976_transcription.json') % (n_trans['al'], n_trans['mg']),
         'ALTHERMO1 RSF': 'Thermo Fisher Scientific Avantage "ALTHERMO1" sensitivity-factor library (Al Ka, C 1s = 1), '
                          'as digitised in KherveFitting (same file). Not identical to Scofield (e.g. Ta 4f 9.09 vs 8.62); '
                          'intended to reproduce Avantage at%% together with Avantage transmission and energy compensation.',
@@ -214,9 +261,20 @@ meta['sources']['ID positions'] = ('Avantage element-table peak positions (Al Ka
     'Representative values for peak identification only (e.g. O 1s 532.9, Ta 4f 25); the booklet values of %s are '
     'vacuum-level (gas) energies and are never used for identification.' % ', '.join(GAS))
 lib = {'core': core_out, 'scofield': {'al': sc_al, 'mg': sc_mg}, 'althermo1': th1, 'idpos': idpos, 'auger': auger, 'meta': meta}
-js = ('/* INNO Analytics — XPS 원소 라이브러리 (자동 생성: modules/xps/build/build_lib.py — 직접 고치지 말 것) */\n'
-      '(function(root){ const L=' + json.dumps(lib, ensure_ascii=False, separators=(',', ':')) + ';\n'
-      ' if(typeof module!=="undefined"&&module.exports) module.exports=L; else root.XPS_LIB=L; })(typeof self!=="undefined"?self:this);\n')
+def render(lib):
+    return ('/* INNO Analytics — XPS 원소 라이브러리 (자동 생성: modules/xps/build/build_lib.py — 직접 고치지 말 것) */\n'
+            '(function(root){ const L=' + json.dumps(lib, ensure_ascii=False, separators=(',', ':')) + ';\n'
+            ' if(typeof module!=="undefined"&&module.exports) module.exports=L; else root.XPS_LIB=L; })(typeof self!=="undefined"?self:this);\n')
+# keep meta.built when the rest of the output is unchanged (reproducible rebuild)
+if os.path.exists(OUT):
+    old = open(OUT, encoding='utf-8').read()
+    m = re.search(r'"built":"(\d{4}-\d\d-\d\d)"', old)
+    if m:
+        keep = meta['built']
+        meta['built'] = m.group(1)
+        if render(lib) != old:
+            meta['built'] = keep
+js = render(lib)
 open(OUT, 'w', encoding='utf-8').write(js)
 print('idpos %d, far %d: %s' % (len(idpos), len(far), '; '.join(far[:30])))
 print('xps_lib.js: %d elements, Scofield Al %d / Mg %d, ALTHERMO1 %d, Auger %d; checks %s; %d bytes, sha256 %s'
@@ -224,5 +282,7 @@ print('xps_lib.js: %d elements, Scofield Al %d / Mg %d, ALTHERMO1 %d, Auger %d; 
          hashlib.sha256(js.encode()).hexdigest()[:16]))
 for r in aug_rep:
     print('  auger:', r)
+print('  Scofield (published) = transcription: Al %d (+%d totals), Mg %d (+%d totals); differs from the old spot check in %d: %s'
+      % (n_trans['al'], len(sc_al) - n_trans['al'], n_trans['mg'], len(sc_mg) - n_trans['mg'], len(spot_diff), '; '.join(spot_diff[:20])))
 for t,L in (('filled',filled),('corrected',corrected),('retotal',retotal),('so_warn',so_warn)):
     print(' ',t,len(L),'; '.join(L[:40]))
