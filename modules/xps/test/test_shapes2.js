@@ -115,13 +115,17 @@ console.log("== 4 속도 (10 성분 × 2000 채널)");
   { const cons2=C.clone(cons); cons2.c8.wL={mode:"free"};
     const P2=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
     const t2=Date.now(); const r2=C.fitOnce(P2,{}); const tf2=Date.now()-t2; const fl=((r2.stall||{}).flags||[]).map(q=>`${q.id}|${q.k}(${q.why.join("+")})`);
-    const REF=QUICK?{chi2:2013.5711049269707,it:"450+452",s:65.8}:{chi2:1940.0021061926182,it:"15+7",s:3.1};
+    const REF=QUICK?{chi2:1974.4783700704436,it:"35+1",s:3.5}:{chi2:1940.002107709826,it:"15+7",s:1.9};   // v1.9.10 다시 잼 (아래 설명)
     const rel=(r2.chi2-REF.chi2)/REF.chi2, okStop=r2.stop==="stalled"?fl.some(t=>t.startsWith("c8|wL")):r2.stop==="converged";
     const br=r2.branch?` · 갈래 ${r2.branch.kind}${r2.branch.reset.length?" ("+r2.branch.reset.map(q=>q.id+"|"+q.k).join(", ")+" 되돌림)":""}`:"";
     ok(okStop&&tf2<5000&&rel<=1e-7,`TP wL 까지 자유(퇴화): ${(tf2/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${br}${fl.length?" · 표시 "+fl.join(", "):""}`,
       `χ² ${r2.chi2.toFixed(2)} vs 옛 LM ${REF.chi2.toFixed(4)} (${REF.it} 반복, ${REF.s} s): ${rel>=0?"+":""}${rel.toExponential(1)} (허용 ≤ +1e-7)`);
-    /* 같은 문제·다른 잡음(전체 모드만): 잡음 = C.rng(seed) 의 Poisson 근사. 옛 LM(XPS_NOSTALL=1)의 χ²·반복·시간을 기준으로 — 3·5·6 은 옛 LM 이 2차 500 번까지 기어감, 4 는 갇히지 않음(비트 같음) */
-    if(!QUICK) [[3,1980.2494613747012,"128+500",29.6],[4,1974.7418719910895,"50+2",2.9],[5,2112.2358369480357,"263+500",35.0],[6,2070.9979109246174,"74+500",27.4]].forEach(([sd,ref,it,sec])=>{
+    /* 같은 문제·다른 잡음(전체 모드만): 잡음 = C.rng(seed) 의 Poisson 근사. 옛 LM(XPS_NOSTALL=1)의 χ²·반복·시간을 기준으로 — 3·5·6 은 옛 LM 이 2차 500 번까지 기어감, 4 는 갇히지 않음(비트 같음).
+       기준값은 '옛 LM' = 규칙 끈 같은 엔진의 결과라 **모형이 바뀌면 다시 재야 한다**(이 퇴화 문제의 LM 경로는 혼돈적: HEAD 의 DS-Shirley 모형에 1e-8 상대 섭동만 줘도
+       네 seed 의 옛 LM 끝점이 모두 달라짐). v1.9.10 (σ₁ 문턱 제거·DS-Shirley 꺾임 보정 — 이 문제에서 바뀐 성분은 DS-Shirley 하나, 최댓값 대비 5e-8)에서 XPS_NOSTALL 로 다시 잼:
+       v1.9.9 기준은 3 1980.2495 (128+500, 29.6 s) · 4 1974.7419 (50+2, 2.9 s) · 5 2112.2358 (263+500, 35.0 s) · 6 2070.9979 (74+500, 27.4 s);
+       주 자료 1940.0021061926182 (15+7, 3.1 s), QUICK 2013.5711049269707 (450+452, 65.8 s). 허용(≤ 10 s · ≤ +1e-7)은 그대로 */
+    if(!QUICK) [[3,1937.2921028281705,"44+500",40.3],[4,1975.7096817489492,"28+2",2.9],[5,2061.125739792668,"108+500",51.5],[6,2069.838469517457,"46+500",40.9]].forEach(([sd,ref,it,sec])=>{
       const Rs=C.rng(sd), ys=Float64Array.from(mu,v=>Math.max(0,Math.round(v+100+Math.sqrt(v+100)*Rs.g())));
       const Ps=C.makeProblem({be:E,y:ys,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
       const t3=Date.now(); const rs=C.fitOnce(Ps,{}); const tf3=Date.now()-t3, rl=rs.chi2/ref-1;
