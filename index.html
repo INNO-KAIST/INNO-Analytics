@@ -901,6 +901,12 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .xps-rcp-env{gap:2px 10px;font-size:12px;margin-top:0}
 .xps .xps-rcp-sp{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;cursor:help}
 .xps .xps-rcp-sp input{margin:0}
+/* v1.9.8 — migration notice (Quantification) and derived-value marks (fixed / flagged) */
+.xps .xps-mig{margin:4px 0;font-size:11.5px;display:flex;flex-direction:column;gap:3px}
+.xps .xps-mig>div{display:flex;flex-wrap:wrap;align-items:center;gap:6px;overflow-wrap:anywhere}
+.xps .xps-mig .warn{color:var(--warn)}
+.xps .xps-chk-d .fx{font-style:italic}
+.xps .xps-chk-d .fl{color:var(--warn)}
 
 /* ============ INNO Analytics — Image (ImageJ motif) ============ */
 .imx [hidden]{display:none!important}
@@ -42737,6 +42743,11 @@ function utf8(u8){ return TDU?TDU.decode(u8):latin1(u8); }
 function dv(u8){ return new DataView(u8.buffer,u8.byteOffset,u8.byteLength); }
 const NULLV=1e37;                          // VAMAS 의 '값 없음'
 const isNullV=v=>!isFinite(v)||Math.abs(v)>=0.99e37;
+/* 엄격한 숫자 읽기: 칸 전체가 십진수여야 함. parseFloat 는 Windows 의 "1.#QNAN"·"1.#INF" 를 1 로, "12abc" 를 12 로 읽는다 → NaN 으로 */
+const NUMRE=/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+function numStrict(t){ t=String(t==null?"":t).trim(); return NUMRE.test(t)?Number(t):NaN; }
+/* 맨 앞 [ … ] (안에 괄호가 겹쳐 있어도 짝이 맞는 ] 까지): "[D.I. [600'C] 5h] Ta4f" → "D.I. [600'C] 5h" */
+function leadBracket(s){ s=String(s||""); if(s[0]!=="[") return null; let d=0; for(let i=0;i<s.length;i++){ if(s[i]==="[") d++; else if(s[i]==="]"&&--d===0) return {inner:s.slice(1,i),rest:s.slice(i+1)}; } return null; }
 
 /* 영역 이름 → 원소·궤도 ("Co2p", "Ta 4f7/2", "O1s Scan", "fe2p", "Survey")
    원소 기호는 주기율표(Z = 1–92 + 몇 개)에 있는 것만 인정한다 — "Peak 2p" 같은 이름을 원소로 오인하지 않게. */
@@ -42759,7 +42770,7 @@ function parseRegionName(s){
 /* 파일 이름에서 시료 이름: "[D.I. on BCT (600'C 5h)] Ta4f.txt" → "D.I. on BCT (600'C 5h)" */
 function sampleFromName(fn){
   const b=String(fn||"").replace(/^.*[\\/]/,"");
-  const m=/^\[(.+?)\]/.exec(b); if(m) return m[1].trim();
+  const lb=leadBracket(b); if(lb&&lb.inner.trim()) return lb.inner.trim();
   const r=parseRegionName(b);
   let s=b.replace(/(\.(txt|vms|npl|csv|dat|xy|vgd|avg|xlsx?))+$/i,"");
   s=s.replace(/(Survey|Scan|Snap|Region)/ig,"");
@@ -42788,15 +42799,18 @@ function pathSample(p){
 /* 스펙트럼 객체: be 는 오름차순 Float64Array, y 는 CPS. c = 1 CPS 당 count (모르면 null) */
 let _uid=0;
 function mkSpec(o){
-  const n=o.be.length; let be=Float64Array.from(o.be), y=Float64Array.from(o.y), yr=o.yRaw?Float64Array.from(o.yRaw):null, tf=o.tfArr?Float64Array.from(o.tfArr):null;
+  const n=o.be.length; let be=Float64Array.from(o.be), y=Float64Array.from(o.y), warn=(o.warn||[]).slice(), meta=o.meta||{}, yr=o.yRaw?Float64Array.from(o.yRaw):null, tf=o.tfArr?Float64Array.from(o.tfArr):null;
   if(n>1&&be[0]>be[n-1]){ be.reverse(); y.reverse(); if(yr) yr.reverse(); if(tf) tf.reverse(); }
   for(let i=1;i<n;i++) if(!(be[i]>be[i-1])) throw new Error("에너지 축이 단조롭지 않습니다 ("+o.name+")");
   const step=n>1?(be[n-1]-be[0])/(n-1):0;
+  // 숫자가 아닌 세기(NaN·∞): 조용히 두지 않고 표시 — 피팅은 그 채널이 영역 안에 있으면 거절한다(xps_core makeProblem)
+  let bad=0, first=-1; for(let i=0;i<n;i++) if(!isFinite(y[i])){ bad++; if(first<0) first=i; }
+  if(bad){ meta=Object.assign({},meta,{nonFinite:bad}); warn.push(`숫자가 아닌 세기 ${bad} 채널 (NaN/∞, 첫 BE ${be[first].toFixed(2)} eV) — 그 채널을 포함한 영역은 피팅할 수 없습니다`); }
   const reg=parseRegionName(o.region||o.name);
   const region=reg.el||reg.kind==="survey"?reg.label:(o.region||reg.label);
   return {uid:"x"+(++_uid)+"_"+Date.now().toString(36), name:o.name, region, reg, sample:o.sample||"", file:o.file||"", format:o.format,
     hv:o.hv||1486.6, hvSrc:o.hvSrc||"기본값(Al Kα 1486.6)", be, y, yRaw:yr, c:o.c||null, cSrc:o.cSrc||null, step, n,
-    tfArr:tf, meta:o.meta||{}, warn:o.warn||[], extra:o.extra||null};
+    tfArr:tf, meta, warn, extra:o.extra||null};
 }
 
 /* ============================================================
@@ -42807,6 +42821,7 @@ function cfbOpen(u8){
   if(!cfbIs(u8)) throw new Error("OLE2(Compound File) 형식이 아닙니다");
   const D=dv(u8);
   const ss=1<<D.getUint16(30,true), mss=1<<D.getUint16(32,true);
+  if(ss!==512&&ss!==4096) throw new Error("OLE2 머리가 손상되었습니다(섹터 크기 "+ss+")");
   const nFat=D.getUint32(44,true), dir0=D.getUint32(48,true), cutoff=D.getUint32(56,true)||4096;
   const mf0=D.getUint32(60,true), nMf=D.getUint32(64,true), df0=D.getUint32(68,true), nDf=D.getUint32(72,true);
   const off=s=>(s+1)*ss;
@@ -42814,29 +42829,49 @@ function cfbOpen(u8){
   // DIFAT → FAT 섹터 목록
   const fatSecs=[];
   for(let i=0;i<109&&fatSecs.length<nFat;i++){ const s=D.getUint32(76+4*i,true); if(s!==FREE) fatSecs.push(s); }
-  let ds=df0, guard=0;
+  let ds=df0, guard=0; const dseen=new Set();
   while(fatSecs.length<nFat&&ds!==ENDC&&ds!==FREE&&guard++<nDf+2){
-    const o=off(ds); for(let i=0;i<ss/4-1&&fatSecs.length<nFat;i++){ const s=D.getUint32(o+4*i,true); if(s!==FREE) fatSecs.push(s); }
+    if(dseen.has(ds)) throw new Error("OLE2 DIFAT 사슬이 순환합니다 (손상된 파일)"); dseen.add(ds);
+    const o=off(ds); if(o+ss>u8.length) throw new Error("파일이 잘렸습니다(file truncated) — OLE2 DIFAT 섹터가 파일 길이를 넘습니다"); for(let i=0;i<ss/4-1&&fatSecs.length<nFat;i++){ const s=D.getUint32(o+4*i,true); if(s!==FREE) fatSecs.push(s); }
     ds=D.getUint32(o+ss-4,true);
   }
   const per=ss/4, fat=new Uint32Array(fatSecs.length*per);
-  fatSecs.forEach((s,k)=>{ const o=off(s); for(let i=0;i<per;i++) fat[k*per+i]=o+4*i+4<=u8.length?D.getUint32(o+4*i,true):FREE; });
-  const chain=(s,maxN)=>{ const out=[]; let g=0; while(s!==ENDC&&s!==FREE&&s<fat.length&&g++<(maxN||1e7)){ out.push(s); s=fat[s]; } return out; };
-  const readChain=(s,size)=>{ const cs=chain(s); const buf=new Uint8Array(cs.length*ss); cs.forEach((c,i)=>{ const o=off(c); buf.set(u8.subarray(o,Math.min(o+ss,u8.length)),i*ss); }); return size!=null?buf.subarray(0,size):buf; };
+  const nSec=Math.ceil((u8.length-ss)/ss);   // 파일 안에 (적어도 일부라도) 있는 섹터 수 (머리 섹터 다음부터)
+  const TRUNC="파일이 잘렸습니다(file truncated) — OLE2 섹터가 파일 길이를 넘습니다";
+  fatSecs.forEach((s,k)=>{ if(s>=nSec) throw new Error(TRUNC+" (FAT 섹터 "+s+")"); const o=off(s); for(let i=0;i<per;i++) fat[k*per+i]=o+4*i+4<=u8.length?D.getUint32(o+4*i,true):FREE; });
+  // 사슬: 방문 집합(순환 → 오류) · 섹터 번호 범위 검사 · 파일 밖 섹터 → 잘림 오류
+  const chain=s=>{ const out=[], seen=new Set(); while(s!==ENDC){
+      if(s===FREE) break;
+      if(s>=fat.length||s>=nSec) throw new Error(TRUNC+" (섹터 "+s+")");
+      if(seen.has(s)) throw new Error("OLE2 섹터 사슬이 순환합니다 (손상된 파일, 섹터 "+s+")");
+      seen.add(s); out.push(s); s=fat[s]; }
+    return out; };
+  // readChain: 사슬이 밝힌 스트림 크기를 덮는지 확인(못 덮으면 잘림 — 0 으로 채운 채 조용히 읽지 않음)
+  const readChain=(s,size)=>{ const cs=chain(s); const buf=new Uint8Array(cs.length*ss); let have=0;
+    let gap=cs.length*ss; cs.forEach((c,i)=>{ const o=off(c), m=Math.max(0,Math.min(ss,u8.length-o)); if(m>0) buf.set(u8.subarray(o,o+m),i*ss); if(m<ss) gap=Math.min(gap,i*ss+m); }); have=gap;
+    if(size!=null&&have<size) throw new Error(TRUNC+" (스트림 "+size+" 바이트 중 "+have+" 바이트만 있음)");
+    return size!=null?buf.subarray(0,size):buf; };
   // 디렉터리
   const dbuf=readChain(dir0); const DD=dv(dbuf); const ents=[];
   for(let o=0;o+128<=dbuf.length;o+=128){
-    const nl=DD.getUint16(o+64,true); const type=dbuf[o+66];
+    const nl=Math.min(64,DD.getUint16(o+64,true)); const type=dbuf[o+66];
     const name=nl>=2?utf16(dbuf.subarray(o,o+nl-2)):"";
     ents.push({name,type,left:DD.getUint32(o+68,true),right:DD.getUint32(o+72,true),child:DD.getUint32(o+76,true),start:DD.getUint32(o+116,true),size:DD.getUint32(o+120,true)+(ss===4096?DD.getUint32(o+124,true)*4294967296:0)});
   }
+  if(!ents.length||ents[0].type!==5) throw new Error("OLE2 디렉터리가 손상되었습니다(뿌리 항목 없음) — 파일이 잘렸거나 0 으로 채워졌을 수 있습니다");
   const rootE=ents[0];
   let mini=null, mfat=null;
   const getMini=()=>{ if(mini) return; mini=readChain(rootE.start,rootE.size); const mb=readChain(mf0); const MD=dv(mb); mfat=new Uint32Array(Math.min(nMf*per,mb.length/4)); for(let i=0;i<mfat.length;i++) mfat[i]=MD.getUint32(4*i,true); };
-  const readMini=(s,size)=>{ getMini(); const out=new Uint8Array(size); let p=0,g=0; while(s!==ENDC&&s!==FREE&&p<size&&g++<1e7){ const o=s*mss; const n=Math.min(mss,size-p); out.set(mini.subarray(o,o+n),p); p+=n; s=mfat[s]; } return out; };
-  // 경로 목록 (트리 순회)
-  const paths={};
-  const walk=(id,pre,depth)=>{ if(id===FREE||id>=ents.length||depth>64) return; const e=ents[id]; walk(e.left,pre,depth+1); const p=pre?pre+"/"+e.name:e.name; paths[p]=id; if(e.type===1||e.type===5) walk(e.child,p,depth+1); walk(e.right,pre,depth+1); };
+  const readMini=(s,size)=>{ getMini(); const out=new Uint8Array(size); let p=0; const seen=new Set();
+    while(s!==ENDC&&s!==FREE&&p<size){
+      if(s>=mfat.length||s*mss>=mini.length) throw new Error(TRUNC+" (미니 섹터 "+s+")");
+      if(seen.has(s)) throw new Error("OLE2 미니 섹터 사슬이 순환합니다 (손상된 파일)"); seen.add(s);
+      const o=s*mss; const n=Math.min(mss,size-p, mini.length-o); if(n<=0) break; out.set(mini.subarray(o,o+n),p); p+=n; s=mfat[s]; }
+    if(p<size) throw new Error(TRUNC+" (미니 스트림 "+size+" 바이트 중 "+p+" 바이트만 있음)");
+    return out; };
+  // 경로 목록 (트리 순회): 방문 집합 — 손상된(0 으로 채운) 디렉터리의 left/right = 0 이 같은 항목을 되풀이해 지수적으로 도는 것을 막는다
+  const paths={}, visited=new Set([0]);
+  const walk=(id,pre,depth)=>{ if(id===FREE||id>=ents.length||depth>64||visited.has(id)) return; visited.add(id); const e=ents[id]; walk(e.left,pre,depth+1); const p=pre?pre+"/"+e.name:e.name; if(!(p in paths)) paths[p]=id; if(e.type===1||e.type===5) walk(e.child,p,depth+1); walk(e.right,pre,depth+1); };
   walk(rootE.child,"",0);
   return {
     list:()=>Object.keys(paths),
@@ -42997,7 +43032,8 @@ function vamasParse(text,fileName){
     const nord=nxi();
     const nv=H.scan==="REGULAR"?nvar:nvar+1;
     for(let i=0;i<nv;i++){ nxt(); nxt(); }      // 각 변수 최소·최대
-    const raw=new Float64Array(nord); for(let i=0;i<nord;i++) raw[i]=parseFloat(nxt());
+    if(!(nord>=0)||nord>5e7) throw new Error("VAMAS 블록 "+(b+1)+": 세로축 값 개수를 읽지 못했습니다 (줄 "+p+")");
+    const raw=new Float64Array(nord); for(let i=0;i<nord;i++) raw[i]=numStrict(nxt());   // 엄격: "1.#QNAN" → NaN (mkSpec 이 표시)
     const np=Math.floor(nord/nv);
     let x, cols=[];
     if(H.scan==="REGULAR"){ x=Float64Array.from({length:np},(_,i)=>B.absStart+i*B.absStep); for(let v=0;v<nv;v++) cols.push(Float64Array.from({length:np},(_,i)=>raw[i*nv+v])); }
@@ -43017,7 +43053,7 @@ function vamasParse(text,fileName){
     const y=Array.from(yr,v=>c?v/c:v);
     const regRaw=(B.species&&B.species!=="Survey"&&B.species!=="survey"?B.species+" ":"")+(B.trans&&B.trans.trim()?B.trans.trim():"");
     let region=regRaw.trim()||B.id;
-    if(/^survey$/i.test(B.species)&&!/survey/i.test(B.id)) region=B.id.replace(/\.(txt|vgd)$/i,"").replace(/^\[.*?\]\s*/,"")||"Survey";
+    if(/^survey$/i.test(B.species)&&!/survey/i.test(B.id)){ const lb=leadBracket(B.id); region=(lb?lb.rest:B.id).replace(/\.(txt|vgd)$/i,"").trim()||"Survey"; }
     if(/^survey$/i.test(B.species)&&/survey/i.test(B.id)) region="Survey";
     const meta={instrument:[H.inst,H.model].filter(s=>s&&s!=="Not Specified").join(" "),sourceLabel:B.src,passEnergy:isNullV(B.pe)?null:B.pe,anMode:B.anMode,
       workFunction:isNullV(B.wf)?null:B.wf,dwell:isNullV(B.dwell)?null:B.dwell,scans:B.scans,sigMode:B.sigMode,ordUnit:B.vars[yi]&&B.vars[yi].unit,
@@ -43027,7 +43063,7 @@ function vamasParse(text,fileName){
     if(meta.casa&&c===1) warn.push("CasaXPS 가 만든 VAMAS(dwell·scan = 1) — 세기가 이미 CPS 일 수 있어 counts 환산은 하지 않음");
     out.push(mkSpec({name:region,region,file:fileName,format:"VAMAS",hv,hvSrc:hvOK?"VAMAS 블록":"기본값",be,y,yRaw:c&&c!==1?yr:null,c:c&&!(meta.casa&&c===1)?c:null,
       cSrc:c&&!(meta.casa&&c===1)?`VAMAS: collection time ${B.dwell} s × ${B.scans} scans`:null,tfArr:ti>=0?cols[ti]:null,
-      sample:(B.id.match(/^\[(.+?)\]/)||[])[1]||(B.sample&&B.sample!==B.id?B.sample:""),meta,warn}));
+      sample:((leadBracket(B.id)||{}).inner||"").trim()||(B.sample&&B.sample!==B.id?B.sample:""),meta,warn}));
   }
   return out;
 }
@@ -43204,7 +43240,7 @@ async function xlsxWorkbook(u8){
       const ref=(/r="([A-Z]+)(\d+)"/.exec(a)); if(!ref) return m;
       let c=0; for(const ch of ref[1]) c=c*26+(ch.charCodeAt(0)-64); c--; const r=+ref[2]-1;
       const ty=(/t="([^"]+)"/.exec(a)||[])[1]||"n"; let v=null;
-      if(body){ const vv=/<v>([\s\S]*?)<\/v>/.exec(body); if(ty==="s"&&vv) v=ss[+vv[1]]; else if(ty==="inlineStr"){ const tt=/<t[^>]*>([\s\S]*?)<\/t>/.exec(body); v=tt?xmlUnesc(tt[1]):""; } else if(ty==="str"&&vv) v=xmlUnesc(vv[1]); else if(ty==="b"&&vv) v=vv[1]==="1"; else if(vv) v=parseFloat(vv[1]); }
+      if(body){ const vv=/<v>([\s\S]*?)<\/v>/.exec(body); if(ty==="s"&&vv) v=ss[+vv[1]]; else if(ty==="inlineStr"){ const tt=/<t[^>]*>([\s\S]*?)<\/t>/.exec(body); v=tt?xmlUnesc(tt[1]):""; } else if(ty==="str"&&vv) v=xmlUnesc(vv[1]); else if(ty==="b"&&vv) v=vv[1]==="1"; else if(vv) v=numStrict(vv[1]); }
       if(v!=null){ cells.set(r*1024+c,v); if(r>maxR) maxR=r; if(c>maxC) maxC=c; }
       return m;
     });
@@ -43267,7 +43303,7 @@ function avantageSheets(sheets,fileName){
    5) Avantage .avg (DataSpace_BatchDump 텍스트)
    ============================================================ */
 function avgParse(text,fileName){
-  const L=text.split(/\r?\n/); const P={}; let axes=[], data=[], cur=null, inData=false;
+  const L=text.split(/\r?\n/); const P={}; let axes=[], data=[], cur=null, inData=false, nBad=0;
   for(const raw of L){
     const s=raw.trim();
     const pm=/^([A-Z_]+(?:\[\d+\])?)\s*:\s*VT_(\w+)\s*=\s*(.*)$/.exec(s);
@@ -43275,12 +43311,13 @@ function avgParse(text,fileName){
     const am=/^(\d+)=\s*([-\d.eE+]+),\s*([-\d.eE+]+),\s*(\d+),\s*(\w+)\s*,\s*(\w+)?\s*,?\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'/.exec(s);
     if(am&&!inData){ axes.push({i:+am[1],start:+am[2],step:+am[3],n:+am[4],type:am[5],sym:am[7],unit:am[8],label:am[9]}); continue; }
     if(/^\$DATA\s*=/.test(s)){ if(cur&&cur.length) data.push(cur); cur=[]; inData=true; continue; }
-    if(inData&&/^LIST@/.test(s)){ const q=s.split("=").slice(1).join("="); q.split(",").forEach(t=>{ t=t.trim(); if(t==="#empty#") cur.push(NaN); else if(t!=="") { const v=parseFloat(t); if(isFinite(v)||t==="NaN") cur.push(v); } }); continue; }
+    if(inData&&/^LIST@/.test(s)){ const q=s.split("=").slice(1).join("="); q.split(",").forEach(t=>{ t=t.trim(); if(t==="") return; const v=numStrict(t); if(!isFinite(v)) nBad++; cur.push(v); }); continue; }   // 숫자가 아닌 칸(#empty#·NaN·1.#QNAN)도 자리를 지킨다(건너뛰면 뒤 채널이 밀림) — NaN 으로 넣고 mkSpec 이 표시
     if(inData&&/^\$/.test(s)&&!/^\$DATA/.test(s)) inData=false;
   }
   if(cur&&cur.length) data.push(cur);
   const eax=axes.find(a=>/ENERGY/i.test(a.type))||axes[0];
   if(!eax) throw new Error(".avg 에서 에너지 축($SPACEAXES)을 찾지 못했습니다");
+  if(!(eax.n>0)) throw new Error(".avg 에너지 축의 점 수를 읽지 못했습니다");
   const flat=[].concat(...data); const nsp=Math.max(1,Math.floor(flat.length/eax.n));
   const hv=+P.DS_SOPROPID_ENERGY>100?+P.DS_SOPROPID_ENERGY:1486.68;
   const dwell=+P.DS_ACPROPID_ACQ_TIME||null, scans=+P.DS_ACPROPID_PERIODS||null;
@@ -43312,7 +43349,7 @@ function commaDecimal(lines){
 }
 function textParse(text,fileName,opt){
   opt=opt||{};
-  const L=text.split(/\r?\n/); const rows=[]; let hdr=[];
+  const L=text.split(/\r?\n/); const rows=[]; let hdr=[], skipped=0;
   const cd=commaDecimal(L);
   for(const raw of L){
     const s=raw.trim(); if(!s) continue;
@@ -43320,6 +43357,7 @@ function textParse(text,fileName,opt){
     const nums=parts.map(Number);
     if(parts.length>=2&&nums.slice(0,2).every(isFinite)) rows.push(nums.filter(isFinite));
     else if(!rows.length) hdr.push(s);
+    else if(parts.length>=2&&isFinite(nums[0])) skipped++;   // 축 값은 있는데 세기가 숫자가 아님("1.#QNAN") — 조용히 버리지 않고 알림
   }
   if(rows.length<5) throw new Error("숫자 2열 이상인 행이 5개 미만입니다");
   const h=hdr.join(" ").toLowerCase();
@@ -43330,6 +43368,7 @@ function textParse(text,fileName,opt){
   const axisGuess=!/binding|kinetic|\bbe\b|\bke\b/.test(h)&&!opt.axis;
   if(axisGuess) warn.push("머리줄에 축 이름이 없어 결합에너지(BE)로 간주 — 운동에너지면 Info 탭에서 KE 로 바꾸세요");
   if(cd) warn.push("소수점이 쉼표(comma decimals)인 표로 읽었습니다");
+  if(skipped) warn.push(`세기가 숫자가 아닌 행 ${skipped} 개를 건너뜀(NaN·1.#QNAN 등) — 그 자리 채널이 빠졌습니다`);
   const bs=bgSubtracted(y); if(bs) warn.push(bs);
   const be=isKE?x.map(k=>hv-k):x;
   const base=String(fileName||"").replace(/^.*[\\/]/,"");
@@ -43372,6 +43411,16 @@ async function readFile(name,u8,opt){
   (r.spectra||[]).forEach(sp=>{ if(sp.meta&&!sp.meta.bgSub&&!(sp.reg&&sp.reg.kind==="survey")){ const w=bgSubtracted(sp.y); if(w){ sp.meta.bgSub=true; sp.warn.push(w); } } });
   return r;
 }
+/* 글 파일 해독: BOM(UTF-8 EF BB BF · UTF-16LE FF FE · UTF-16BE FE FF)을 보고, BOM 없는 UTF-16 은 앞부분의 0 바이트 자리로 알아본다 */
+function decodeText(u8){
+  if(u8.length>=3&&u8[0]===0xEF&&u8[1]===0xBB&&u8[2]===0xBF) return utf8(u8.subarray(3));
+  if(u8.length>=2&&u8[0]===0xFF&&u8[1]===0xFE) return utf16(u8.subarray(2));
+  if(u8.length>=2&&u8[0]===0xFE&&u8[1]===0xFF){ const sw=new Uint8Array(u8.length-2); for(let i=2;i+1<u8.length;i+=2){ sw[i-2]=u8[i+1]; sw[i-1]=u8[i]; } return utf16(sw); }
+  const m=Math.min(u8.length&~1,512); if(m>=8){ let ev=0, od=0; for(let i=0;i<m;i+=2){ if(u8[i]===0) ev++; if(u8[i+1]===0) od++; }
+    if(od>0.4*m/2&&ev===0) return utf16(u8);
+    if(ev>0.4*m/2&&od===0){ const sw=new Uint8Array(u8.length&~1); for(let i=0;i+1<u8.length;i+=2){ sw[i]=u8[i+1]; sw[i+1]=u8[i]; } return utf16(sw); } }
+  return utf8(u8);
+}
 async function readFile0(name,u8,opt){
   const low=String(name).toLowerCase();
   const head=latin1(u8.subarray(0,Math.min(u8.length,200)));
@@ -43381,14 +43430,15 @@ async function readFile0(name,u8,opt){
     if(C.has("Workbook")||C.has("Book")){ const r=avantageSheets(xlsWorkbook(u8),name); if(!r.spectra.length) throw new Error("엑셀 파일에서 에너지·세기 열을 찾지 못했습니다 ('Binding Energy' 머리칸)"); return r; }
     throw new Error("알 수 없는 OLE2 파일 (VGData·Workbook 스트림 없음)");
   }
-  if(u8[0]===0x50&&u8[1]===0x4B){ const r=avantageSheets(await xlsxWorkbook(u8),name); if(!r.spectra.length) throw new Error("xlsx 에서 에너지·세기 열을 찾지 못했습니다"); return r; }
-  const text=utf8(u8);
-  if(/^VAMAS/i.test(head.trim())) return {spectra:vamasParse(text,name),tables:[],warn:[],vamas:vamasHeader(text)};
+  if(u8[0]===0x50&&u8[1]===0x4B){ let W; try{ W=await xlsxWorkbook(u8); }catch(e){ throw new Error("xlsx 파일을 읽지 못했습니다 — 손상되었거나 잘린 파일일 수 있습니다 ("+e.message+")"); }
+    const r=avantageSheets(W,name); if(!r.spectra.length) throw new Error("xlsx 에서 에너지·세기 열을 찾지 못했습니다"); return r; }
+  const text=decodeText(u8);
+  if(/^VAMAS/i.test(text.slice(0,200).trim())){ let sp; try{ sp=vamasParse(text,name); }catch(e){ if(/^VAMAS/.test(e.message)) throw e; throw new Error("VAMAS 파일을 해석하지 못했습니다 — 손상되었거나 잘린 파일일 수 있습니다 ("+e.message+")"); } return {spectra:sp,tables:[],warn:[],vamas:vamasHeader(text)}; }
   if(/\.avg$/i.test(low)||/\$SPACEAXES|DS_EXT_SUPROPID/.test(text.slice(0,20000))) return {spectra:avgParse(text,name),tables:[],warn:[]};
   return {spectra:textParse(text,name,opt),tables:[],warn:[]};
 }
 
-const XPS_IO={SYMS,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
+const XPS_IO={SYMS,numStrict,decodeText,leadBracket,readFile,casaCommentParse,textMultiParse,vamasHeader,vamasBlockMeta,reaxis,bgSubtracted,commaDecimal,pathSample,pathPoint,vgdParse,vamasParse,xlsWorkbook,xlsxWorkbook,avantageSheets,avgParse,textParse,cfbOpen,cfbIs,propsetParse,parseRegionName,sampleFromName,mkSpec};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_IO; else root.XPS_IO=XPS_IO;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -44012,6 +44062,17 @@ function bgStatic(E,y,bg){
   if(t==="none") return new Float64Array(E.length);
   return null;   // active
 }
+/* Shirley 가 수렴하지 않고 창에 봉우리가 없음(평활 자료가 직선 배경에서 5σ 안; 봉우리 없는 창: 끝값 차 d 가 잡음뿐이고 ∫(y − B) 가 0 근처에서 부호를 바꿔 반복이 튐 — 노이즈만 있는 창 200 개 중 91 개,
+   참 배경에서 최대 847 cps 벗어남) → 직선 배경으로 대신하고 표시한다 (SPEC §2). 자동 경로(민감도·잔차 보강)에서 쓴다; 보통 피팅은 B.converged 만 알린다 */
+function shirleyFallback(P){
+  const t=P.bg&&P.bg.type; if(!(t==="shirley"||t==="smart")||P.bg.conv==="avantage"||P.bg.conv==="casa") return null;
+  const B=P._Bst||(P._Bst=bgStatic(P.E,P.y,P.bg)); if(B.converged!==false) return null;
+  const L=bgLinear(P.E,P.y,P.bg.n||5);
+  // 봉우리가 있는 창(바탕이 기울어 고정점이 없는 경우 등)은 바꾸지 않는다: 평활 자료가 직선 배경에서 5σ(채널 잡음) 넘게 벗어나면 봉우리 있음
+  const ys=smoothQ(P.E,P.y,smoothHW(P.E)), sg=Math.sqrt(constVar(P.y)[0]); let dev=0; for(let i=0;i<ys.length;i++) dev=Math.max(dev,Math.abs(ys[i]-L[i]));
+  if(!(dev<5*sg)) return null; L.converged=true; L.fallback="linear"; P._Bst=L;
+  return P.bgFallback={from:t,to:"linear",iter:B.iter};
+}
 const BG_TYPES={linear:"Linear",shirley:"Shirley",smart:"Smart",tougaard:"Tougaard (U2/U3)",active:"Shirley (in-fit)",spline:"Spline (knots)",none:"None"};
 
 /* ============================================================
@@ -44041,6 +44102,8 @@ function buildMap(prob){
       if(cs.mode==="link"&&cs.ref!=null&&byId[cs.ref]!=null&&byId[cs.ref]!==ci){ links.push({ci,k,ri:byId[cs.ref],rk:cs.rk||k,mul:cs.k!=null?+cs.k:1,add:cs.b!=null?+cs.b:0}); return; }
       let [lo,hi]=defBounds(c,k); if(cs.lo!=null&&isFinite(cs.lo)) lo=+cs.lo; if(cs.hi!=null&&isFinite(cs.hi)) hi=+cs.hi;
       if(k==="area") lo=Math.max(0,lo);
+      // 한계가 겹침(hi − lo ≤ ε): CasaXPS 가 '고정'을 lo = hi 로 적는 방식 — 자유로 두면 toU/dPdU 가 0/0 = NaN (SPEC §3.1). 고정으로 보고 값을 그 한계에 둔다
+      if(isFinite(lo)&&isFinite(hi)&&hi-lo<=1e-12*Math.max(1,Math.abs(lo),Math.abs(hi))){ const v=getP(c,k); if(!(v>=lo&&v<=hi)) setP(c,k,hi<lo?(lo+hi)/2:lo); fixed.push({ci,k,pinned:true}); return; }
       free.push({ci,k,lo,hi,id:c.id});
     });
   });
@@ -44054,17 +44117,22 @@ function buildMap(prob){
   }
   // 연결 사슬: 연결 대상이 또 연결이면 끝까지 따라간다(순환 금지)
   const linkOf=(ci,k)=>links.find(l=>l.ci===ci&&l.k===k);
-  links.forEach(l=>{ let g=0, cur=l; const seen=new Set([l.ci+"|"+l.k]); while(true){ const nx=linkOf(cur.ri,cur.rk); if(!nx) break; const key=nx.ci+"|"+nx.k; if(seen.has(key)||g++>20) throw new Error("연결이 순환합니다: "+comps[l.ci].name+" "+l.k); seen.add(key); cur=nx; } });
-  return {free,links,fixed};
+  links.forEach(l=>{ let g=0, cur=l; const seen=new Set([l.ci+"|"+l.k]); while(true){ const nx=linkOf(cur.ri,cur.rk); if(!nx) break; const key=nx.ci+"|"+nx.k; if(seen.has(key)) throw new Error("연결이 순환합니다: "+comps[l.ci].name+" "+l.k); seen.add(key); cur=nx; g++; } l.depth=g; });
+  // 위상 순서: 대상이 연결이 아닌 것(깊이 0)부터 — applyLinks 가 한 번 훑어 사슬 길이와 상관없이 맞는 값 (옛 8 회 반복은 사슬 > 8 에서 틀림)
+  const linkOrder=links.map((l,i)=>i).sort((a,b)=>links[a].depth-links[b].depth||a-b);   // links 자체의 순서는 그대로(initAreas 등의 합 순서 = 비트 동일)
+  return {free,links,fixed,linkOrder};
 }
 function applyLinks(prob,map){
-  // 위상 순서대로 (사슬 길이만큼 반복)
-  for(let pass=0;pass<8;pass++){ map.links.forEach(l=>{ const ref=prob.comps[l.ri]; const v=getP(ref,l.rk)*l.mul+l.add; setP(prob.comps[l.ci],l.k,v); }); }
+  // buildMap 이 위상 순서로 정렬해 두었으면 한 번; 아니면(직접 만든 map) 바뀌지 않을 때까지 (사슬 길이 + 1 번까지)
+  const L=map.links, one=l=>{ const v=getP(prob.comps[l.ri],l.rk)*l.mul+l.add; const old=getP(prob.comps[l.ci],l.k); setP(prob.comps[l.ci],l.k,v); return old!==v; };
+  const O=map.linkOrder; if(O&&O.length===L.length){ for(let i=0;i<O.length;i++) one(L[O[i]]); return; }
+  for(let pass=0;pass<=L.length;pass++){ let ch=false; for(let i=0;i<L.length;i++) if(one(L[i])) ch=true; if(!ch) break; }
 }
 function getVec(prob,map){ return map.free.map(f=>f.ci<0?prob.bg[f.k]:getP(prob.comps[f.ci],f.k)); }
 function setVec(prob,map,v){ map.free.forEach((f,i)=>{ if(f.ci<0) prob.bg[f.k]=v[i]; else setP(prob.comps[f.ci],f.k,v[i]); }); applyLinks(prob,map); }
 /* 무제약 변환 (MINUIT) */
 function toU(p,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
+  if(L&&H&&!(hi>lo)) return 0;   // 겹친 한계: buildMap 이 고정으로 돌리지만, 직접 부를 때도 NaN 대신 0
   if(L&&H){ const t=Math.max(-1,Math.min(1,2*(p-lo)/(hi-lo)-1)); return Math.asin(t); }
   if(L){ const t=p-lo+1; return Math.sqrt(Math.max(0,t*t-1)); }
   if(H){ const t=hi-p+1; return Math.sqrt(Math.max(0,t*t-1)); }
@@ -44075,6 +44143,7 @@ function fromU(u,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
   if(H) return hi+1-Math.sqrt(u*u+1);
   return u; }
 function dPdU(u,lo,hi){ const L=isFinite(lo), H=isFinite(hi);
+  if(L&&H&&!(hi>lo)) return 0;
   if(L&&H) return (hi-lo)*Math.cos(u)/2;
   if(L) return u/Math.sqrt(u*u+1);
   if(H) return -u/Math.sqrt(u*u+1);
@@ -44156,6 +44225,7 @@ function rng(seed){ let a=(seed>>>0)||1; const u=()=>{ a|=0; a=a+0x6D2B79F5|0; l
 function constVar(y){ const n=y.length, q=[]; for(let i=1;i<n-1;i++){ const d=y[i]-(y[i-1]+y[i+1])/2; q.push(d*d/1.5); } q.sort((a,b)=>a-b);
   let v=q.length?q[Math.floor(q.length/2)]/0.4549:1; if(!(v>0)){ let m=0; for(const t of y) m=Math.max(m,Math.abs(t)); v=Math.max(1e-12,(1e-3*m)**2); } return Float64Array.from(y,()=>v); }
 /* CasaXPS 피팅 가중 (SPEC_casa_v2 §1, CasaXPS 2.3.27 V2 실측): 가중 없는 최소제곱, 창 [i0, i1] 의 양 끝 채널은 빼고 i0+1 … i1−1 만 (DoF = N − 2 − p) */
+const VAR_OFF=1e29;   // 이 이상인 분산 = 그 채널은 피팅에서 빠짐(무게 0)
 function casaVar(y){ const n=y.length; return Float64Array.from(y,(v,i)=>i===0||i===n-1?1e30:1); }
 function dataVar(prob,ys){ return prob.weight==="const"?constVar(prob.y):prob.weight==="casa"?casaVar(prob.y):varianceFrom(ys,prob.c); }
 function varianceFrom(yhat,c){ const cc=c>0?c:1; let m=0; for(const t of yhat) if(t>m) m=t; const vmin=Math.max(1/cc,1e-6*m); return Float64Array.from(yhat,v=>Math.max(v,vmin)/cc); }
@@ -44248,7 +44318,7 @@ function makeLM(prob,map,v,opt){
   setVec(prob,map,p); let cur=ev.full(); let X=chi(cur.mu);
   let nEff=0; for(let i=0;i<n;i++) if(sw[i]>1e-10) nEff++;
   const L={done:false,it:0,X,p,u,np,nEff,trapped:false,XH:[X],lastA:null};
-  if(!np){ L.done=true; L.out=()=>({chi2:X,iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B}); return L; }
+  if(!np||!isFinite(X)){ const bad=!isFinite(X); L.done=true; L.out=()=>({chi2:X,iter:0,conv:!bad,stop:bad?"invalid":"converged",mu:cur.mu,B:cur.B,comps:ev.comps()}); return L; }   // 시작 χ² 가 유한하지 않으면 '수렴'이 아니라 invalid (SPEC §3.3)
   let lam=1e-3, nu=2, calm=0, it=0, conv=false, stop=null;
   const stall=opt.stall!==false&&FIT_HOOK.stall!==false, ST=opt.stallCfg?Object.assign({},LM_STALL,opt.stallCfg):LM_STALL; const hX=FIT_HOOK.lm?[X]:null, hL=hX?[]:null, hT=hX?[]:null;
   const fast=!!opt._fast, calmTol=fast?ST.calmFast:1e-10;   // 갈래 안은 조금 느슨하게 끝냄(채택되면 2차가 다시 다듬음)
@@ -44337,7 +44407,7 @@ function lmFit(prob,map,v,opt){
     const B={kind:reset.length?"rescue":"kick",at:k,Xinc:L.X,nit:0,phase:reset.length?1:2,done:false,wInc:0,wBr:0,wMax:ST.budget*(WORK.n-wStart),
       reset:reset.map(j=>({id:map.free[j].id,ci:map.free[j].ci,k:map.free[j].k,from:p[j],to:pS[j]})),
       flags:fl.map(f=>({id:f.id,ci:f.ci,k:f.k,p:f.p,lo:f.lo,hi:f.hi,why:f.why}))};
-    setVec(prob,map,q); B.lm=makeLM(prob,reset.length?{free:map.free.filter((f,j)=>reset.indexOf(j)<0),links:map.links,fixed:map.fixed}:map,v,o2);
+    setVec(prob,map,q); B.lm=makeLM(prob,reset.length?{free:map.free.filter((f,j)=>reset.indexOf(j)<0),links:map.links,fixed:map.fixed,linkOrder:map.linkOrder}:map,v,o2);
     B.q=getVec(prob,map); setVec(prob,map,L.p);
     B.step=function(){ setVec(prob,map,B.q); B.lm.step(); B.nit++;
       if(B.lm.done){ if(B.phase===1){ B.phase=2; B.lm=makeLM(prob,map,v,o2); } else { B.done=true; B.r=B.lm.out(); B.X=B.r.chi2; } }
@@ -44377,7 +44447,7 @@ function lmFit(prob,map,v,opt){
 }
 /* 한 번의 완전한 피팅: (넓이 초기화) → LM(평활 분산) → LM(모형 분산) */
 function fitOnce(prob,opt){
-  opt=opt||{};
+  opt=opt||{}; checkData(prob.E,prob.y," (fitOnce)");
   let map=buildMap(prob); applyLinks(prob,map);
   const E=prob.E, y=prob.y; let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const ys=smoothQ(E,y,smoothHW(E));
@@ -44539,7 +44609,7 @@ function monteCarlo(prob,res,M,opt){
   const refNoise=opt.refNoise!==false&&base.comps.some(c=>c.shape==="MEAS"&&c.tpl&&c.tpl.raw);
   for(let m=0;m<M;m++){
     const y=new Float64Array(n); let e=0;
-    for(let i=0;i<n;i++){ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; y[i]=res.mu[i]+e*Math.sqrt(phi*res.v[i]); }
+    for(let i=0;i<n;i++){ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; const vi=res.v[i]; y[i]=res.mu[i]+(vi<VAR_OFF&&isFinite(vi)?e*Math.sqrt(phi*vi):0); }   // 무게 0 채널(CasaXPS 가중의 양 끝 v = 1e30)은 흔들지 않음 — 흔들면 잡음이 1e15 배로 터짐 (SPEC §12)
     const P=clone(base); P.E=prob.E; P.y=y;
     if(refNoise){ const pt={}; P.comps.forEach(c=>{ if(c.shape!=="MEAS"||!c.tpl||!c.tpl.raw) return; const id=c.tpl.id; if(!pt[id]) pt[id]=perturbTpl(c.tpl,R); c.tpl=pt[id]; }); }
     try{ const r=fitOnce(P,{initAreas:false,irls:opt.irls!==false,maxit:opt.maxit||200}); samples.push(compSummary(P,r,null).map(q=>({be:q.be,area:q.area,areaPct:q.areaPct,fwhm:q.fwhm,height:q.height}))); }
@@ -44779,7 +44849,9 @@ function multipletInfo(el,orb){
   if(MULT_TM.includes(el)&&(orb==="3p"||orb==="3s"))
     return {kind:"3d",why:`${el} ${orb}: 열린 3d 껍질과의 교환 상호작용(다중항)이 스핀–궤도 갈라짐과 비슷 — doublet 모형이 맞지 않음`,closed:el==="Ti"?"Ti⁴⁺ (3d⁰)":el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null};
   if(MULT_RE.includes(el)&&["4s","4p","4d","5s","5p"].includes(orb))
-    return {kind:"4f",why:`${el} ${orb}: 열린 4f 껍질과의 교환 상호작용(다중항)으로 넓게 갈라짐 — doublet 모형이 맞지 않음`,closed:el==="Yb"?"Yb²⁺ (4f¹⁴)":el==="Ce"?"Ce⁴⁺ (형식상 4f⁰, 실제로는 4f¹L 종상태가 섞임)":null};
+    return {kind:"4f",why:`${el} ${orb}: 열린 4f 껍질과의 교환 상호작용(다중항)으로 넓게 갈라짐 — doublet 모형이 맞지 않음`,closed:el==="Yb"?"Yb²⁺ (4f¹⁴)":el==="Ce"?"Ce⁴⁺ (형식상 4f⁰, 실제로는 4f¹L 종상태가 섞임)":null,
+      // Yb: 흔한 Yb³⁺(4f¹³)는 다중항, Yb²⁺(4f¹⁴)만 닫힌 껍질 = 보통 doublet. 원자가에 따라 갈리므로 core 는 다중항으로 두고 이 표지로 알린다 (SPEC §9)
+      valenceDependent:el==="Yb"?{multiplet:"Yb³⁺ (4f¹³)",doublet:"Yb²⁺ (4f¹⁴)",note:"Yb 4d/4p/5p: Yb³⁺(흔함)는 넓은 다중항, 순수 Yb²⁺ 일 때만 보통 doublet"}:null};
   return null;
 }
 function doubletInfo(lib,el,orb){
@@ -44794,18 +44866,31 @@ function doubletInfo(lib,el,orb){
      둘 다 있을 때 357 개 중 78 개가 ≥ 0.3 eV 달랐다 → Booklet 이 없거나 soWarn 일 때만 Avantage 를 씀. */
   /* 단, Δ < 2 eV 에서는 Booklet 의 0.1 eV 반올림이 상대 오차로 커서(Si 2p 0.4 vs 고분해능 문헌 ≈0.6, S 2p 1.1 vs ≈1.2) 둘 다 정밀하지 않다 —
      이 범위는 v1.9.4 까지와 같이 Avantage 먼저(시험으로 검증된 동작 유지), Δ 제약 범위(±max(0.3, 5 %, 두 출처 차+0.1))가 차이를 흡수. */
+  const unrel=[]; let trendHi=null;
   if(bkOK&&(bk>=2||av==null)){ dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]; }
+  else if(bkOK&&av!=null&&Math.abs(av-bk)>0.5){   // Δ < 2 eV 인데 두 출처가 0.5 eV 넘게 다름(Ni 3p: Avantage 4.0 vs Booklet 1.8) → 원자 준위 편집값(Booklet)을 쓰고 표시
+    dE=bk; src="X-ray Data Booklet "+el+" "+orb+J[1]+" − "+orb+J[0]+" (Avantage "+av+" 와 크게 다름)"; unrel.push("sources");
+  }
   else if(av!=null){ dE=av; src="Avantage 원소표 "+el+" "+orb+J[1]+" − "+orb+J[0]+(bkOK?" (Δ < 2 eV: Booklet 반올림 정밀도 부족)":" (Booklet 값 없음)"); }
+  // 두 출처가 같은 값인데 Z 추세와 어긋남(Rb 3d 1.0: Kr 1.2 → Sr 1.8) — 값을 지어내지 않고 Δ 범위를 이웃 Booklet 값의 보간까지 넓힘 (SPEC §9)
+  const tr=DOUBLET_TREND[el+" "+orb]; if(tr&&dE!=null){ const nb=tr.nb.map(e=>{ const r=(lib.core||{})[e]||{}, v=r.lv||{}; return v[orb+J[0]]>0&&v[orb+J[1]]>0?{Z:r.Z,d:v[orb+J[1]]-v[orb+J[0]]}:null; });
+    if(nb[0]&&nb[1]&&rec.Z){ const t=(rec.Z-nb[0].Z)/(nb[1].Z-nb[0].Z), ip=nb[0].d+(nb[1].d-nb[0].d)*t; trendHi=+Math.max(ip,dE).toFixed(3); unrel.push("trend"); } }
+  // Xe–Tb 의 4p·5p: 출처 값이 Z 에 따라 들쭉날쭉(Xe 4p 1.2 · Cs 11.1 · Ba 13.4 · La 9.8 · Gd 15 · Tb 38.3 — 4p 는 4p⁻¹ → 4d⁻²4f super-Coster–Kronig 붕괴로 한 덩어리가 아님) → doublet 을 강요하지 않음
+  const erratic=(orb==="4p"||orb==="5p")&&rec.Z>=54&&rec.Z<=65; if(erratic) unrel.push("erratic");
   return {dE,r:ORB_RR[l],J,src:dE!=null?src:"라이브러리에 쓸 수 있는 값 없음",alt:{avantage:av,booklet:bkOK?bk:null},
-    spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE, multiplet:multipletInfo(el,orb)};
+    spread:(av!=null&&bkOK)?Math.abs(av-bk):null, resolvable:dE!=null&&dE>=DOUBLET_RESOLVE, multiplet:multipletInfo(el,orb),
+    unreliable:unrel.length?unrel:null, trendHi, erratic};
 }
+/* Z 추세 점검(감사 2026-11): 두 출처가 같은데 이웃 원소 사이 값과 어긋나는 준위 — Δ 범위를 이웃 Booklet 보간값까지 넓힌다 */
+const DOUBLET_TREND={"Rb 3d":{nb:["Kr","Sr"]}};
 const DOUBLET_RESOLVE=1.2;   // eV — 이 이상이면 두 봉우리가 데이터에서 갈라져 Δ 를 데이터로 정할 수 있다
 /* Δ 제약: 라이브러리 Δ ± max(0.3 eV, 5 %, 두 출처 차 + 0.1) 안에서 자유. 라이브러리 Δ 의 정밀도가 0.1–0.5 eV 라
    고정하면 분해되지 않는 doublet 에서도 계통 편향·가짜 성분이 생긴다(합성 시험: Rb 3d 라이브러리 1.0 vs 참 1.07 → 20 회 중 3 회 가짜 성분).
    여러 화학 상태의 doublet 은 첫 성분의 Δ 에 연결(매개변수 1 개만 늘어남). */
 function dEConstraint(info){
   if(!info||info.dE==null) return {mode:"free",lo:0.05,hi:40};
-  const w=Math.max(0.3,0.05*info.dE,(info.spread||0)+0.1); return {mode:"free",lo:+Math.max(0.05,info.dE-w).toFixed(3),hi:+(info.dE+w).toFixed(3)};
+  const w=Math.max(0.3,0.05*info.dE,(info.spread||0)+0.1); let hi=info.dE+w; if(info.trendHi!=null) hi=Math.max(hi,info.trendHi+0.1);
+  return {mode:"free",lo:+Math.max(0.05,info.dE-w).toFixed(3),hi:+hi.toFixed(3)};
 }
 /* 출발 모형 제안: 봉우리 찾기 → (짝이 보이거나 짝 위치가 영역 안이면) doublet → 넓이는 높이에서.
    o = {bg, el, orb, lib, shape, F}. 반환 {comps, cons, info, peaks} */
@@ -44819,7 +44904,7 @@ function suggestModel(E,y,o){
   pk=pk.sort((a,b)=>b.h-a.h).slice(0,o.maxComps||8);
   // 가장 큰 봉우리의 2 % 미만은 출발 모형에서 뺀다(작은 실제 성분은 잔차 보강이 근거 있을 때 다시 더함)
   if(pk.length){ const hm=pk[0].h; pk=pk.filter(q=>q.h>=(o.minRel!=null?o.minRel:0.02)*hm); }
-  const info=doubletInfo(o.lib||{},o.el,o.orb); const mult=multipletInfo(o.el,o.orb);
+  const info=doubletInfo(o.lib||{},o.el,o.orb); const mult=multipletInfo(o.el,o.orb)||(info&&info.erratic?{kind:"erratic",why:`${o.el} ${o.orb}: 라이브러리 Δ 가 Z 에 따라 들쭉날쭉(믿을 수 없음) — doublet 을 강요하지 않고 넓은 성분으로 모양만`,closed:null}:null);
   const comps=[], cons={}; if(!pk.length) return {comps,cons,info,mult,peaks:[]};
   const asc=pk.slice().sort((a,b)=>a.be-b.be), used=new Set();
   // 다중항 준위: doublet 을 쓰지 않고 넓은 성분(F 출발 2 eV, 0.3–8 eV)으로 모양만
@@ -44879,7 +44964,7 @@ function refineByResidual(prob,o){
   // 성분을 더할지는 유연한 배경(피팅 안 Shirley + 기울기)으로 판단한다 — 정적 배경의 모양 오차가 잔차 덩어리로 남아
   // '가짜 성분'으로 채택되는 것을 막기 위해(합성 시험: 정적 배경으로 판단하면 참 1 성분 스펙트럼 143 개 중 106 개에 성분이 더해짐)
   let cur=clone(stripProb(prob)); cur.E=E; cur.y=prob.y; const userBg=clone(prob.bg);
-  if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}};
+  if(o.decisionBg!==false) cur.bg={type:"active",n:(prob.bg&&prob.bg.n)||5,cons:{s:{mode:"free"}}}; else shirleyFallback(cur);
   let r=fitOnce(cur,{}); let S=fitStats(cur,r); const log=[`시작 ${cur.comps.length} 성분 BIC ${S.BIC.toFixed(1)}`]; let added=0, removed=0;
   // 죽은 성분 덜기: 넓이 몫이 작거나(< 5 %) 중심이 창 밖으로 나간 성분을 빼 보고 BIC 가 나빠지지 않으면(ΔBIC ≤ 2) 뺀다.
   // 자동 제안이 겹친 다중항의 위쪽 짝(예: Au 4f5/2 + 다른 상태 4f7/2)을 별도 성분으로 잡으면 피팅이 그 성분을 넓이 0 으로 보내는데,
@@ -44941,12 +45026,12 @@ function refineByResidual(prob,o){
   }
   if(added) prune();
   // 사용자 배경으로 되돌려 다시 맞춘다(성분 구성만 가져감)
-  if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
+  if(o.decisionBg!==false){ const fin=clone(stripProb(cur)); fin.E=E; fin.y=prob.y; fin.bg=userBg; const fb=shirleyFallback(fin); if(fb) log.push(`${fb.from} 배경이 ${fb.iter} 번 반복에도 수렴하지 않아 직선 배경으로 대신함(봉우리 없는 창?)`); try{ r=fitOnce(fin,{}); S=fitStats(fin,r); cur=fin; }catch(e){ log.push("사용자 배경 재피팅 실패: "+e.message); } }
   return {prob:cur,res:r,stats:S,added,removed,relaxed,log};
 }
 
 /* Worker 용: 잔차 보강 결과를 직렬화 가능한 형태로 */
-function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
+function autoJob(prob,opt){ const rf=refineByResidual(prob,opt||{}); return {comps:rf.prob.comps,cons:rf.prob.cons,bg:rf.prob.bg,bgFallback:rf.prob.bgFallback||null,added:rf.added,removed:rf.removed,relaxed:rf.relaxed,log:rf.log}; }
 
 /* ============================================================
    12) 모형 민감도 (SPEC §11): 같은 성분 구성을 '합리적인 분석 선택'의 조합으로 다시 맞춰
@@ -44992,8 +45077,9 @@ function sensJob(spec,model,variants){
       // 지금 창 안에 있던 성분 중심이 변형 창에서 잘려 나가면 건너뜀(창 밖에 있던 성분 — 꼬리·가장자리 — 은 사용자 모형 그대로 둔다)
       if(model.comps.some(c=>c.be>=model.lo&&c.be<=model.hi&&(c.be<v.lo||c.be>v.hi))) return {i,ok:false,err:"성분 중심이 창 밖으로 잘림"};
       const P=makeProblem(spec,{lo:v.lo,hi:v.hi,bg:v.bg,comps:model.comps,cons:model.cons,weight:model.weight,optimizer:model.optimizer});
+      const fb=shirleyFallback(P);
       const r=fitOnce(P,{}); const st=fitStats(P,r); const tot=P.comps.reduce((s,c)=>s+c.area,0);
-      return {i,ok:true,conv:r.conv,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
+      return {i,ok:true,conv:r.conv,bgFallback:fb,chi2nu:st.chi2nu,comps:P.comps.map(c=>{ const tf=trueFWHM(c.shape,shapeParams(c,1)); return {id:c.id,be:c.be,area:c.area,areaPct:tot>0?100*c.area/tot:null,fwhm:tf.fwhm,dE:c.doublet?c.doublet.dE:null}; }),tot};
     }catch(e){ return {i,ok:false,err:String(e&&e.message||e)}; }
   });
 }
@@ -45183,6 +45269,7 @@ function nmFit(prob,map,v,opt){
   const chi=mu=>{ let s=0; for(let i=0;i<n;i++){ const r=(y[i]-mu[i])*sw[i]; s+=r*r; } return s; };
   setVec(prob,map,p0); let cur=ev.full();
   if(!np) return {chi2:chi(cur.mu),iter:0,conv:true,stop:"converged",mu:cur.mu,B:cur.B,comps:ev.comps()};
+  { const X0=chi(cur.mu); if(!isFinite(X0)) return {chi2:X0,iter:0,conv:false,stop:"invalid",mu:cur.mu,B:cur.B,comps:ev.comps(),optimizer:"simplex"}; }   // §3.3: 시작 χ² 가 유한하지 않음
   let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
   const s=map.free.map((f,j)=>{ const p=p0[j]; let dp;
     if(f.k==="be"||f.k==="dE") dp=0.1; else if(Math.abs(p)>1e-8) dp=0.1*Math.abs(p); else if(isFinite(lo[j])&&isFinite(hi[j])) dp=0.05*(hi[j]-lo[j]); else dp=1e-3*Math.max(1,ymax);
@@ -45247,8 +45334,16 @@ function quantMC(rows,opts,M,seed){
    보조: 문제 만들기 (스펙트럼 + 영역 + 배경 + 성분)
    ============================================================ */
 function sliceRegion(be,y,lo,hi){ const i0=be.findIndex(e=>e>=lo); let i1=-1; for(let i=be.length-1;i>=0;i--) if(be[i]<=hi){ i1=i; break; } if(i0<0||i1<i0) return null; return {E:be.slice(i0,i1+1),y:y.slice(i0,i1+1),i0,i1}; }
+/* 영역 자료 검사 (SPEC §2): 에너지 축은 오름차순(mkSpec 이 맞춤 — 직접 만든 spec 이 내림차순이면 sliceRegion 이 조용히 빈/엉뚱한 창을 줌),
+   세기는 모두 유한해야 한다(NaN 하나가 χ² 를 NaN 으로 만들어 '0 번째 반복에서 수렴'처럼 보였음) */
+function checkData(E,y,where){
+  for(let i=1;i<E.length;i++) if(!(E[i]>E[i-1])) throw new Error("에너지 축이 오름차순이 아닙니다"+(where||"")+" (채널 "+i+": "+E[i-1]+" → "+E[i]+")");
+  let bad=0, first=-1; for(let i=0;i<y.length;i++) if(!isFinite(y[i])){ bad++; if(first<0) first=i; }
+  if(bad){ const e=new Error("영역 안에 숫자가 아닌 세기(NaN/∞)가 "+bad+" 채널 있습니다 (첫 BE "+(+E[first]).toFixed(2)+" eV) — 영역을 옮기거나 자료를 고치세요"); e.code="nonFinite"; e.nonFinite=bad; throw e; }
+}
 function makeProblem(spec,st){
   const r=sliceRegion(spec.be,spec.y,st.lo,st.hi); if(!r||r.E.length<8) throw new Error("영역 안 데이터 점이 8개 미만입니다");
+  checkData(r.E,r.y);
   const P={E:Float64Array.from(r.E),y:Float64Array.from(r.y),c:spec.c||null,bg:clone(st.bg),comps:clone(st.comps),cons:clone(st.cons||{}),i0:r.i0,weight:st.weight==="const"?"const":st.weight==="casa"?"casa":"poisson"};
   if(st.optimizer==="simplex") P.optimizer="simplex";
   if(P.bg&&P.bg.conv==="casa") P.bg._ends=casaEnds(spec.be,spec.y,r.i0,r.i1,P.bg.aw!=null?P.bg.aw:1);
@@ -45305,7 +45400,8 @@ function finalize(P,r){
     cov:{sig:cov.sig,corr:Array.from(cov.corr),C:Array.from(cov.C),atB:cov.atB,phi:cov.phi,dof:cov.dof,singular:cov.singular,names:cov.names,np:cov.np},
     summ,multi:r.multi||null,free:map.free.map(f=>({id:f.id,k:f.k,lo:f.lo,hi:f.hi})),
     sumSig:{all:areaSumSigma(P,map,cov,P.comps.map((c,i)=>i))},
-    lcf:lcfDiag(P,r.v),optimizer:P.optimizer==="simplex"?"simplex":"lm"};
+    lcf:lcfDiag(P,r.v),optimizer:P.optimizer==="simplex"?"simplex":"lm",
+    bgConverged:P._Bst&&P._Bst.converged===false?false:true,bgFallback:P.bgFallback||null};   // 정적 Shirley 가 수렴하지 않았으면 false (SPEC §2)
 }
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
@@ -45525,8 +45621,8 @@ function casaModelToINNO(cm,hv,o){
   return {lo,hi,bg,comps:comps.filter(Boolean),cons,weight:"casa",shift:cm.shift||0,notes,region:R.name};
 }
 const XPS_CORE={_hook:FIT_HOOK,_work:WORK,LM_STALL,areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
-  cumtrapz,endpoints,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
-  paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,makeEvaluator,
+  cumtrapz,endpoints,shirleyFallback,checkData,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
+  paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,dPdU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
   tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,bgShirleyAvantageV18,bgSmartAvantageV18,avantageV19,avantageHalf,avantagePQ,avantageSmooth,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_GRID,CASA_DS_T,dsCasaAreaFactor,casaStK,compToCasa,casaToComp,casaBg,casaModelToINNO,
   s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
@@ -45535,7 +45631,7 @@ if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else ro
 </script>
 <script id="xps-guide-src">
 /* ============================================================
-   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes; v1.9.7 Ba · Y · lanthanide recipes, overlap rules): fit check (diagnosis), region recipes, staged fit
+   INNO Analytics — XPS fit guidance (v1.9.3; v1.9.6 transition-metal 2p3/2 envelope recipes; v1.9.7 Ba · Y · lanthanide recipes, overlap rules; v1.9.8 audit fixes, SPEC §17.9): fit check (diagnosis), region recipes, staged fit
    DOM-free: browser main thread, Web Worker (load after xps_core.js) and node.
    Definitions, thresholds, citations and validation: modules/xps/SPEC.md §17 (if they disagree, fix SPEC first).
    General rules only — nothing here is tuned to one data set; the Ce 3d recipe (SPEC §17.3), the Biesinger envelopes (SPEC §17.7) and the Ba/Y/lanthanide recipes (SPEC §17.8) are literature data.
@@ -45573,7 +45669,7 @@ const SEV_ORDER={bad:0,warn:1,info:2};
 const SAT_TM2P=["Cr","Mn","Fe","Co","Ni","Cu"], SAT_RE3D=["Ce","Pr","Nd"];
 function complexInfo(el,orb){
   const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).map(r=>r.id); const m=C.multipletInfo(el,orb);
-  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — a plain doublet (Auto suggest)":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
+  if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — physically a plain 4d doublet, but Auto suggest models every Yb 4d as a multiplet: use LCF or add one doublet by hand":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
   if(orb==="2p"&&SAT_TM2P.includes(el)) return {kind:"satellite",why:`${el} 2p: multiplet splitting and shake-up satellites of the open 3d shell (closed-shell states such as Cu⁺/Cu⁰ excepted) — one doublet per chemical state does not describe the envelope`,closed:el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null,recipes:rc};
   if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc,note:rc.length&&recipeById(rc[0]).kind==="emp"?RE_LCF:null};
   if(el==="La"&&(orb==="3d"||orb==="4d")) return {kind:"satellite",why:`La ${orb}: charge-transfer (c4f¹L) satellites — a bonding and an antibonding satellite next to each c4f⁰ spin–orbit line (Sunding et al. 2011); their share differs between La(OH)₃ and La₂O₃`,closed:null,recipes:rc};
@@ -45584,7 +45680,7 @@ function complexInfo(el,orb){
 const RE3D_MORE=["Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb"];
 /* no tabulated parametric source (SPEC §17.8): Sm, Eu, Ho, Er, Tm, Yb → reference-spectrum LCF; Haasch envelopes (Pr, Nd, Gd, Tb, Dy) → also LCF for chemistry */
 function RE_NOTE(el,orb,rc){ if(rc.length) return RE_LCF;
-  return `No tabulated parametric source is built in for ${el} ${orb} (no recipe). `+RE_LCF+(el==="Eu"?" For Eu²⁺/Eu³⁺ use one reference per valence (e.g. EuO or EuS for Eu²⁺, Eu₂O₃ for Eu³⁺) — the valence ratio is the LCF weight ratio.":"")+(el==="Yb"?" Yb²⁺ (4f¹⁴) 4d — like Lu 4d — is a plain doublet: Auto suggest handles it.":""); }
+  return `No tabulated parametric source is built in for ${el} ${orb} (no recipe). `+RE_LCF+(el==="Eu"?" For Eu²⁺/Eu³⁺ use one reference per valence (e.g. EuO or EuS for Eu²⁺, Eu₂O₃ for Eu³⁺) — the valence ratio is the LCF weight ratio.":"")+(el==="Yb"?" Yb²⁺ (4f¹⁴) 4d — like Lu 4d — is physically a plain doublet, but Auto suggest cannot tell Yb²⁺ from Yb³⁺ and models every Yb 4d as a multiplet region: for Yb²⁺ use a measured reference (LCF) or add one doublet manually ('+ Add component' with 'Doublet' ticked — library ΔE).":""); }
 
 /* ------------------------------------------------------------
    2) Region recipes (SPEC §17.3) — data, not code. Positions are charge-corrected BE (C 1s C–C/C–H 284.8 eV).
@@ -45599,7 +45695,7 @@ const RECIPES=[{
     {key:"v0", name:"v0/u0", state:"Ce3+", be:880.5, F:2.4, Flo:1.2, Fhi:3.5},
     {key:"v",  name:"v/u",   state:"Ce4+", be:882.4, F:2.3, Flo:1.2, Fhi:3.5},
     {key:"v1", name:"v′/u′", state:"Ce3+", be:885.0, F:3.1, Flo:1.5, Fhi:4.5},
-    {key:"v2", name:"v″/u″", state:"Ce4+", be:888.9, F:5.0, Flo:2.5, Fhi:6.5},
+    {key:"v2", name:"v″/u″", state:"Ce4+", be:888.3, F:5.0, Flo:2.5, Fhi:6.5},   // v1.9.8: Bêche 2008 v″ 888.5 eV at C 1s 285.0 → 888.3 at 284.8 (was 888.9, which put the real CeO₂ S3 fit on its −0.6 eV limit)
     {key:"v3", name:"v‴/u‴", state:"Ce4+", be:898.2, F:2.3, Flo:1.2, Fhi:3.5}],
   options:[
     {id:"ce4", label:"CeO₂ only (6)", keys:["v","v2","v3"]},
@@ -45850,13 +45946,16 @@ function parModel(R,o){
     dbl.forEach(c=>{ const q=cons[c.id]; q.r={mode:"fixed"}; q.q={mode:"fixed"}; q.dE=R.dE.fix?{mode:"fixed"}:c===a?{mode:"free",lo:R.dE.lo,hi:R.dE.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
   if(!R.casa&&R.shape==="GLS"){ const a=comps.reduce((x,c)=>!x||c.area>x.area?c:x,null); comps.forEach(c=>{ cons[c.id].m=c===a?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:a.id,k:1,b:0}; }); }
   const lab=R.species.filter(s=>keys.includes(s.key)).map(s=>s.short||s.label).join(" + ")+(R.ct&&(fl.fixR||keys.length>1)?" · ratio fixed":"")+(lines.some(l=>l.role==="pl")?" · plasmon":"")+(lines.some(l=>l.role==="aug")?" · Auger":"")+(wscale?" · FWHM×":"");
-  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"par",kind:R.kind,species:keys,flags:fl,label:lab,align:ds,score,clipped,name:R.name}};
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"par",kind:R.kind,species:keys,flags:fl,label:lab,align:ds,alignLim:score!=null&&o.align!==false?(R.align||0):0,score,clipped,name:R.name}};
 }
 /* Derived outputs of parametric recipes (SPEC §17.8) → [{id,label,w(c),tip}]; plasmon and Auger lines (c.rx) are outside the total */
-function parDerived(R,cs){
+function parDerived(R,cs,cons){
   const out=[]; const sp=[...new Set(cs.map(c=>c.rsp))];
-  if(R.ct&&sp.length===1){ const s=R.species.find(x=>x.key===sp[0]); const t=s&&s.ratio?s.ratio[1]:null;
-    out.push({id:"ct",label:"c4f¹L",w:c=>c.rrole==="sat"?1:0,tip:`c4f¹L share = (bonding + antibonding satellite areas) / (main + satellites) of ${R.el} ${R.orb}, plasmon and Auger lines excluded. Sunding Table 5: ${R.species.map(x=>x.label+" "+x.ratio[1]+" %").join(", ")} (±5 %; their background and shapes)${t!=null?"":""} — a higher share points to the oxide, a lower one to the hydroxide. ± = covariance σ (statistics only).`}); }
+  if(R.ct&&sp.length===1){ const s=R.species.find(x=>x.key===sp[0]);
+    // 'Fix ratio' links the bonding satellite area to the main line (k = Table 5 ratio): the share is then imposed, not measured (v1.9.8)
+    const m=cs.find(c=>c.rk===sp[0]+"_m"), b=cs.find(c=>c.rk===sp[0]+"_b"); const qa=cons&&b&&cons[b.id]&&cons[b.id].area;
+    const fixed=!!(m&&b&&(cons?(qa&&qa.mode==="link"&&qa.ref===m.id):b.aref===m.id));
+    out.push({id:"ct",label:fixed?"c4f¹L (fixed)":"c4f¹L",fixed,w:c=>c.rrole==="sat"?1:0,tip:(fixed?`Imposed by 'Fix ratio' (${s.label} Table 5 ratio ${s.ratio[0]}:${s.ratio[1]}) — an input, not a fit result; untick 'Fix ratio' to measure it. `:"")+`c4f¹L share = (bonding + antibonding satellite areas) / (main + satellites) of ${R.el} ${R.orb}, plasmon and Auger lines excluded. Sunding Table 5: ${R.species.map(x=>x.label+" "+x.ratio[1]+" %").join(", ")} (±5 %; their background and shapes) — a higher share points to the oxide, a lower one to the hydroxide. ± = covariance σ (statistics only).`}); }
   if(sp.length>1) R.species.forEach(s=>{ if(!sp.includes(s.key)) return; out.push({id:"sp_"+s.key,label:s.short||s.label,w:c=>c.rsp===s.key?1:0,
     tip:`${s.label} fraction = its area / all ${R.el} ${R.orb} lines of the recipe`+(R.ct?" (main + satellites; ratios fixed at Sunding Table 5)":"")+(R.kind==="emp"?"":"")+". ± = covariance σ (delta method, statistics only; the literature separations and ratios are held fixed, so model error is not included)."}); });
   (R.sums||[]).forEach(d=>{ const inS=c=>d.keys.includes(c.rsp); if(new Set(cs.filter(inS).map(c=>c.rsp)).size<2||cs.every(inS)) return; out.push({id:d.id,label:d.label,tip:d.tip,w:c=>inS(c)?1:0}); });
@@ -45873,7 +45972,7 @@ function envSets(R,keys,pe){
 function envDefaults(R){ return R.species.filter(s=>s.def).map(s=>s.key); }
 /* Envelope model (SPEC §17.7). o = {shift, be, y, species:[keys], pe (10|20), wscale (bool), stoich (bool, Fe₃O₄ 1:2)} */
 function envModel(R,o){
-  const C=CORE(); const sh=o.shift||0, pe=o.pe===10||o.pe===20?o.pe:20;
+  const C=CORE(); const sh=o.shift||0, pe=o.pe!=null&&isFinite(+o.pe)&&+o.pe>0?(+o.pe<=15?10:20):20;   // any pass energy: ≤ 15 eV → PE 10 column, else PE 20 (SPEC §17.7)
   let keys=(o.species||[]).filter(k=>R.species.some(s=>s.key===k)); if(!keys.length) keys=envDefaults(R);
   const sets=envSets(R,keys,pe);
   let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
@@ -45919,6 +46018,15 @@ function envDerived(R,cs){
     if(cs.every(inS)) return;   // the sum of everything fitted = 100 %
     out.push({id:d.id,label:d.label,tip:d.tip,w:c=>inS(c)?1:0}); });
   return out; }
+/* Recipe width range of a component (R1 hint): Ce lines (R.lines), parametric / empirical species lines (incl. plasmon and Auger), envelope
+   FWHM× scale (its range is set in the model from the literature width) → {Fhi} or null when c is not a line of R */
+function recipeLineF(R,c){
+  if(!R||!c||c.recipe!==R.id) return null;
+  if(R.lines){ const l=R.lines.find(x=>x.key===c.rk); return l?{Fhi:l.Fhi}:null; }
+  if(R.kind==="env") return c.renv?{Fhi:Infinity}:null;
+  if((R.kind==="par"||R.kind==="emp")&&c.rsp){ const L=parLines(R,[c.rsp],{plasmon:true,auger:true},null); const l=L.find(x=>x.key===c.rk); if(!l) return null;
+    if(l.Ffix) return R.wScale?{Fhi:l.F*R.wScale[1]}:null; return {Fhi:l.Fhi!=null?l.Fhi:Infinity}; }
+  return null; }
 function recipesFor(el,orb){ return RECIPES.filter(r=>r.el===el&&r.orb===orb); }
 function recipeById(id){ return RECIPES.find(r=>r.id===id)||null; }
 /* Build a recipe model on raw (uncorrected) BE: shift = charge correction Δ (BE_corr = BE_raw + Δ).
@@ -45946,7 +46054,10 @@ function recipeModel(id,o){
       let best=null; const st=0.05, K=Math.round((R.align||0)/st);
       for(let k=-K;k<=K;k++){ const d=k*st, t=trial(d); if(!best||t.ss<best.ss) best={d,ss:t.ss,a:t.a}; }
       ds=best.d; score=best.ss; areas=best.a; } }
-  const comps=mk(ds); if(areas) comps.forEach((c,i)=>{ c.area=Math.max(areas[i],1e-6); });
+  // v1.9.8: an absent state started at 1e-6 froze the fit (zero area → zero derivatives for its position/width; 0 iterations) — start at ≥ 2 % of
+  // the largest NNLS area and flag afloor, as the envelope / parametric recipes do (the core's area initialisation applies the same floor)
+  const comps=mk(ds); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  comps.forEach(c=>{ c.afloor=0.02; });
   const anc=comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); const cons={};
   const ancS={}; comps.forEach(c=>{ const a=ancS[c.rstate]; if(!a||c.area>a.area) ancS[c.rstate]=c; });
   comps.forEach((c,i)=>{ const l=lines[i]; const q=cons[c.id]={};
@@ -45955,7 +46066,7 @@ function recipeModel(id,o){
     q.r={mode:"fixed"}; q.q={mode:"fixed"};
     const dS=dEof(R,l.state), aS=ancS[c.rstate]; q.dE=c===aS?{mode:"free",lo:dS.lo,hi:dS.hi}:{mode:"link",ref:aS.id,k:1,b:0};
     q.m=c===anc?{mode:"free",lo:R.m.lo,hi:R.m.hi}:{mode:"link",ref:anc.id,k:1,b:0}; });
-  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:op.id,label:op.label,align:ds,score,clipped,name:R.name}};
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:op.id,label:op.label,align:ds,alignLim:o.be&&o.y&&o.align!==false?(R.align||0):0,score,clipped,name:R.name}};
 }
 /* Derived recipe output (SPEC §17.3): fractions of summed areas with covariance σ (delta method on the free area parameters).
    fin = finalize() output; returns [{id,label,v,sig,tip}] in % */
@@ -45971,14 +46082,24 @@ function recipeDerived(fin,meta){
   const root=c=>{ if(cons){ let id=c.id, mul=1, g=0; for(;;){ const q=cons[id]&&cons[id].area; if(q&&q.mode==="link"&&q.ref!=null&&byId[q.ref]&&(q.rk==null||q.rk==="area")&&g++<20){ mul*=q.k!=null?+q.k:1; id=q.ref; } else break; } return {id,mul}; }
     if(c.aref&&byId[c.aref]) return {id:c.aref,mul:c.amul!=null?c.amul:1}; return {id:c.id,mul:1}; };
   const roots=cs.map(root);
-  const list=R.kind==="env"?envDerived(R,cs):(R.kind==="par"||R.kind==="emp")?parDerived(R,cs):R.derived;
+  const list=R.kind==="env"?envDerived(R,cs):(R.kind==="par"||R.kind==="emp")?parDerived(R,cs,cons):R.derived;
+  const hasCov=np>0&&Cm.length===np*np;
   return list.map(d=>{
     const part=d.shake?(c=>c.rsat?1+(d.shake[c.rsp]||0):0):d.w?d.w:c=>{ if(d.state) return c.rstate===d.state?1:0; if(d.key) return c.rk===d.key?(d.part==="partner"?(c.doublet?c.doublet.r/(1+c.doublet.r):0):(c.doublet?1/(1+c.doublet.r):1)):0; return 0; };
     const num=cs.reduce((s,c)=>s+part(c)*Math.max(0,c.area),0), f=num/T;
-    const g=new Float64Array(np); cs.forEach((c,i)=>{ const rt=roots[i]; const j=aIdx[rt.id]; if(j==null) return; g[j]+=rt.mul*(part(c)-f)/T; });   // 0 + 1·x = x: Ce results unchanged bit for bit
-    let s=0; const ok=true; for(let a=0;a<np;a++) if(g[a]) for(let b=0;b<np;b++) if(g[b]){ const v=Cm[a*np+b]; if(isFinite(v)) s+=g[a]*v*g[b]; }   // areas at a bound count as fixed (SPEC §3.4)
+    const g=new Float64Array(np); let mapped=0; cs.forEach((c,i)=>{ const rt=roots[i]; const j=aIdx[rt.id]; if(j==null) return; mapped++; g[j]+=rt.mul*(part(c)-f)/T; });   // 0 + 1·x = x: Ce results unchanged bit for bit
+    let s=0; for(let a=0;a<np;a++) if(g[a]) for(let b=0;b<np;b++) if(g[b]){ const v=Cm[a*np+b]; if(isFinite(v)) s+=g[a]*v*g[b]; }   // areas at a bound count as fixed (SPEC §3.4)
+    // σ needs the covariance and at least one free root area; without them σ is unknown (null), not 0 (v1.9.8). A value imposed by a constraint has no σ.
+    const ok=hasCov&&mapped>0&&!d.fixed;
     const present=cs.some(c=>part(c)>0);
-    return {id:d.id,label:d.label,v:present?100*f:null,sig:present&&ok?100*Math.sqrt(Math.max(0,s)):null,tip:d.tip};
+    const out={id:d.id,label:d.label,v:present?100*f:null,sig:present&&ok?100*Math.sqrt(Math.max(0,s)):null,tip:d.tip};
+    if(d.fixed) out.fixed=true;
+    if(d.shake&&present){   // Eq. 2 is a model estimate: > 100 % (shake-up larger than pure Cu(II) allows) or no main-line area → capped and flagged (v1.9.8)
+      const main=cs.reduce((s,c)=>s+(c.rsat?0:Math.max(0,c.area)),0);
+      if(!(main>1e-9*T)){ out.flag="satellite only: no main-line area — Eq. 2 is undefined"; out.v=null; out.sig=null; }
+      else if(f>1){ out.flag=`Eq. 2 gives ${(100*f).toFixed(1)} % (> 100 %): the shake-up is larger than pure Cu(II) allows (A1s/Bs) — check the background under the satellites and the window end`; out.v=100; out.sig=null; }
+      if(out.flag) out.tip=out.flag+". "+d.tip; }
+    return out;
   });
 }
 
@@ -46015,7 +46136,14 @@ function diagnose(ctx,th){
   const fw=i=>(summ[i]&&summ[i].fwhm)||comps[i].F||1;
   const isFree=(id,k)=>free.some(f=>f.id===id&&f.k===k);
   const push=f=>{ if(!out.some(x=>x.key===f.key)) out.push(f); };
-  const dropAct=id=>({type:"drop",id,label:"Remove "+nm(id)});
+  // v1.9.8: a recipe line is removed with relinkWithout (links re-anchored with their current linear relation), never by a per-line removeComp:
+  // a parametric line drags its species (main + satellites + plasmon share position / area links — removing one orphaned the others or carried the
+  // anchor's position window to the wrong line); an empirical (Haasch) component or a free Auger line goes alone
+  const dropAct=id=>{ const c=comps[byId[id]]; const Rc=c&&c.recipe?recipeById(c.recipe):null;
+    if(Rc&&Rc.kind==="par"&&c.rsp&&c.rrole!=="aug"){ const s=Rc.species.find(x=>x.key===c.rsp); const ids_=comps.filter(q=>q.recipe===c.recipe&&q.rsp===c.rsp&&q.rrole!=="aug").map(q=>q.id);
+      return {type:"dropSet",ids:ids_,label:"Remove "+(s?s.short||s.label:nm(id))+(ids_.length>1?` (${ids_.length} lines)`:"")}; }
+    if(Rc) return {type:"dropSet",ids:[id],label:"Remove "+nm(id)};
+    return {type:"drop",id,label:"Remove "+nm(id)}; };
   const areaDead=new Set();
   // R3a area at 0 (lower bound) → handled as a component finding
   free.forEach((f,j)=>{ if(f.k!=="area"||f.ci<0) return; const p=val(f.id,"area"); if(p!=null&&(atB[j]||p<=Math.max(0,f.lo)+1e-6*tot)) areaDead.add(f.id); });
@@ -46035,8 +46163,8 @@ function diagnose(ctx,th){
     if(["F","wG","wL"].includes(f.k)){
       const ci=byId[f.id], others=comps.filter((c,i)=>i!==ci&&c[f.k]!=null&&isFree(c.id,f.k));
       const anc=others.reduce((a,c)=>!a||c.area>a.area?c:a,null);
-      const rc=ctx.recipe?ctx.recipe.lines&&ctx.recipe.lines.find(l=>l.key===comps[ci].rk):null;
-      if(rc&&f.k==="F"&&side==="upper"&&p>=rc.Fhi-1e-9){ act=null; hint=" The recipe width range is a typical span (not a literature limit) — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
+      const rc=ctx.recipe?recipeLineF(ctx.recipe,comps[ci]):null;   // v1.9.8: Ce lines, parametric species lines, envelope FWHM× range
+      if(rc&&f.k==="F"&&side==="upper"&&p>=Math.min(rc.Fhi,f.hi)-1e-9){ act=null; hint=" The recipe width range is a typical span (not a literature limit) — a wider peak usually means a missing line, a wrong background or a charging/beam-damage broadening, not a wider component."; }
       else if(anc){ act={type:"link",id:f.id,k:f.k,ref:anc.id,label:`Link ${lab(f.k)} to ${nm(anc.id)}`}; hint=` Linking it to ${nm(anc.id)} (same ratio as now) removes one free width; if the line should be broader (e.g. a satellite), fix it at a literature value instead.`; }
       else if(side==="lower"){ act={type:"fix",id:f.id,k:f.k,v:p,label:`Fix ${lab(f.k)}`}; hint=" A width at its lower limit is narrower than the instrument resolution allows — fix it at the width of a well-resolved line in the same spectrum."; }
     } else if(f.k==="be"){
@@ -46046,6 +46174,7 @@ function diagnose(ctx,th){
       else if(edge){ act=dropAct(f.id); hint=" The line drifted to the window edge — it is not supported by the data inside the window. Remove it, or widen the window if the line is really outside."; }
       else { act={type:"widen",id:f.id,k:"be",by:0.3,label:"Widen range ±0.3 eV"}; hint=" Widen the range only if the literature allows a larger shift (charge-reference error is ±0.2–0.3 eV); otherwise the model is missing a line or the line belongs to another state."; }
     } else if(f.k==="dE"){
+      const cd=comps[byId[f.id]]; if(cd&&cd.doublet&&cd.doublet.dE<C.DOUBLET_RESOLVE) sev="info";   // v1.9.8: an unresolved doublet's Δ is not determined by the data (as R2) — fix it, not a misfit
       const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[f.id]]||{}).rstate).v:ctx.dEref;
       if(ref!=null){ act={type:"fix",id:f.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=` Fix the spin–orbit splitting at the literature value (${fmt(ref,2)} eV) unless the doublet is well resolved and isolated.`; }
     } else if(f.k==="r"||f.k==="q"){
@@ -46067,14 +46196,22 @@ function diagnose(ctx,th){
       if(fa.k===fb.k&&["F","wG","wL"].includes(fa.k)&&fa.id!==fb.id){ const ia=byId[fa.id], ib=byId[fb.id]; const big=comps[ia].area>=comps[ib].area?fa:fb, sm=big===fa?fb:fa;
         act={type:"link",id:sm.id,k:fa.k,ref:big.id,label:`Link ${lab(fa.k)}s`}; hint=" Linking the two widths (fixed ratio) usually resolves it."; }
       else if(fa.k==="be"&&fb.k==="be"){ const ia=byId[fa.id], ib=byId[fb.id]; const big=comps[ia].area>=comps[ib].area?fa:fb, sm=big===fa?fb:fa;
-        act={type:"offset",id:sm.id,ref:big.id,label:"Fix separation"}; hint=" Fixing the separation at the current (or literature) value leaves one position free."; }
-      else if((()=>{ const unres=id=>{ const c=comps[byId[id]]; return !!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE); }; return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
+        act={type:"offset",id:sm.id,ref:big.id,label:"Fix separation"}; hint=" Fixing the separation at the current (or literature) value leaves one position free.";
+        // v1.9.8: two unresolved doublets (Δ < 1.2 eV) with one Δ free and shared: their positions are coupled through that Δ (Al 2p, two states) → info + fix Δ
+        const ca=comps[byId[fa.id]], cb=comps[byId[fb.id]], unr=c=>!!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE), qd=isFree(fa.id,"dE")?fa:isFree(fb.id,"dE")?fb:null;
+        if(unr(ca)&&unr(cb)&&qd){ const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[qd.id]]||{}).rstate).v:ctx.dEref; sevOv="info"; hint=" Both lines are unresolved doublets sharing one free Δ, which couples their positions; fix Δ at the literature value."; act=ref!=null?{type:"fix",id:qd.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}:null; } }
+      else if((()=>{ const unres=id=>{ const c=comps[byId[id]]; return !!(c&&c.doublet&&c.doublet.dE<C.DOUBLET_RESOLVE); };
+          return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
         const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[q.id]]||{}).rstate).v:ctx.dEref;
         if(ref!=null&&isFree(q.id,"dE")) act={type:"fix",id:q.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=" The doublet is not resolved (Δ < 1.2 eV), so its two halves trade off against position and width; fix Δ at the literature value and keep the area ratio fixed."; sevOv="info"; }
       else if(fa.k==="area"&&fb.k==="area") hint=" The two areas trade off against each other — their sum is well determined, each alone is not. Report the sum, or constrain widths/positions from literature.";
       else hint=" One of the two parameters should be fixed or linked (literature value) — the data cannot separate them.";
       const inRec=fa.id!=="bg"&&fb.id!=="bg"&&comps[byId[fa.id]].recipe&&comps[byId[fa.id]].recipe===comps[byId[fb.id]].recipe;
       if(inRec){ act=null; hint=" Expected in this recipe (overlapping lines): report the derived fraction — its ± includes this correlation — not single-line areas."; }
+      // v1.9.8: the recipe's in-fit Shirley + slope on a short window (e.g. Ba 4d, 12.5 eV): k and the slope s trade off by construction (both rise
+      // across the window); the component areas are what is reported, and their σ include this correlation → info, not warn
+      const bgRec=fa.id==="bg"&&fb.id==="bg"&&!!(ctx.recipe&&ctx.recipe.id&&comps.some(c=>c.recipe===ctx.recipe.id));
+      if(bgRec){ act=null; sevOv="info"; hint=" Expected for the recipe's in-fit Shirley + slope on a short window: the Shirley step and the slope both rise across the window and trade off; the component areas (and their σ) already include this. Fix the slope at 0 in the background row only if the baseline outside the peak is flat."; }
       push({key:"corr|"+fa.id+fa.k+"|"+fb.id+fb.k,id:"corr",sev:inRec?"info":(sevOv||"warn"),ids:[fa.id,fb.id].filter(x=>x!=="bg"),
         label:`${nm(fa.id)} ${lab(fa.k)} ↔ ${nm(fb.id)} ${lab(fb.k)} correlated (r ${fmt(r,3)})`,
         tip:`Correlation coefficient ${fmt(r,4)} from the covariance matrix (|r| > ${fa.id==="bg"||fb.id==="bg"?th.corrBg:th.corr}). Changing one can be compensated by the other with almost no change in χ², so both σ are large and the split between them is arbitrary.`+hint,act}); });
@@ -46089,13 +46226,18 @@ function diagnose(ctx,th){
       else if(share<th.negShare) push({key:"neg|"+c.id,id:"neg",sev:"info",ids,label:`${c.rlab}: negligible (${fmt(100*share,1)} % of area)`,tip:`The ${c.rlab} envelope carries ${fmt(100*share,2)} % of the fitted area (< ${th.negShare*100} %) — the species is absent within the statistics. Remove it if it is not expected.`,act});
       return; }
     const share=Math.max(0,c.area||0)/tot, s=summ[i]&&summ[i].sig?summ[i].sig.area:null, rel=s!=null&&c.area>0?s/c.area:null;
+    // v1.9.8: parametric recipe species (main + satellites removed together) → one R3 finding per species, on its first line
+    const Rp=c.recipe&&c.rsp&&c.rrole!=="aug"?recipeById(c.recipe):null; if(Rp&&Rp.kind==="par"){ const k3="r3sp|"+c.recipe+"|"+c.rsp; if(out.some(x=>x.r3sp===k3)) return; const n0=out.length; r3one(c,i,share,rel); if(out.length>n0) out[out.length-1].r3sp=k3; return; }
+    r3one(c,i,share,rel); });
+  function r3one(c,i,share,rel){
     if(areaDead.has(c.id)) push({key:"dead|"+c.id,id:"dead",sev:"warn",ids:[c.id],label:`${nm(c.id)}: area went to zero`,tip:`The fit drove the area of ${nm(c.id)} to its lower bound 0 — the data do not need this component. Remove it and fit again (a zero-area line makes the covariance singular).`,act:dropAct(c.id)});
     else if(rel!=null&&rel>th.relSig) push({key:"ill|"+c.id,id:"ill",sev:"warn",ids:[c.id],label:`${nm(c.id)}: area ill-determined (±${fmt(100*rel,0)} %)`,tip:`σ(area)/area = ${fmt(100*rel,0)} % (> ${th.relSig*100} %): the data cannot say how large this component is. Typical causes: it overlaps a larger line with free width/position, or it is not there. Constrain it (literature position/width, link the width) or remove it.`,act:dropAct(c.id)});
     else if(share<th.negShare&&comps.length>1) push({key:"neg|"+c.id,id:"neg",sev:"info",ids:[c.id],label:`${nm(c.id)}: negligible (${fmt(100*share,1)} % of area)`,tip:`This component carries ${fmt(100*share,2)} % of the component area (< ${th.negShare*100} %). If it is not required physically, remove it — it adds free parameters without information.`+(c.recipe?" In a recipe model a negligible group means that state is absent; the simpler recipe option may be enough.":""),act:dropAct(c.id)});
-  });
+  }
   // R4 merging main lines (both positions free and not tied to each other)
   const freeBe=comps.map(c=>isFree(c.id,"be"));
-  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue; if(comps[i].rsp&&comps[i].recipe&&comps[i].recipe===comps[j].recipe&&comps[i].rsp!==comps[j].rsp) continue;   // envelopes / literature species positions overlap by construction (v1.9.7) if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;
+  for(let i=0;i<comps.length;i++) for(let j=i+1;j<comps.length;j++){ if(!freeBe[i]||!freeBe[j]) continue; if(comps[i].renv&&comps[j].renv) continue; if(comps[i].rsp&&comps[i].recipe&&comps[i].recipe===comps[j].recipe&&comps[i].rsp!==comps[j].rsp) continue;   // envelopes / literature species positions overlap by construction (v1.9.7)
+    if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;   // a dead line is reported once, by R3 (v1.9.8: this skip used to sit inside the comment above)
     const d=Math.abs(comps[i].be-comps[j].be), w=(fw(i)+fw(j))/2; if(!(d<th.merge*w)) continue;
     const sm=comps[i].area<=comps[j].area?comps[i]:comps[j], bg_=sm===comps[i]?comps[j]:comps[i];
     push({key:"merge|"+comps[i].id+"|"+comps[j].id,id:"merge",sev:"warn",ids:[comps[i].id,comps[j].id],label:`${nm(comps[i].id)} and ${nm(comps[j].id)} merge (ΔBE ${fmt(d,2)} eV)`,
@@ -46107,7 +46249,13 @@ function diagnose(ctx,th){
   const P=fin.mu&&fin.B?fin.mu.map((m,i)=>m-fin.B[i]):null; const ys=C.smoothQ(E,y,C.smoothHW(E));
   let net=0; if(fin.B) for(let i=0;i<n;i++) net=Math.max(net,ys[i]-fin.B[i]); let pmax=0; if(P) for(const v of P) pmax=Math.max(pmax,v);
   const ne=Math.max(3,Math.round(0.3/Math.max(step,1e-6))), kL=Math.min(n-1,Math.max(1,Math.round(th.edgeLen/Math.max(step,1e-6))));
-  const sideTest=(lowSide)=>{ const idx=lowSide?[...Array(ne).keys()]:[...Array(ne).keys()].map(k=>n-1-k); const pe=P?idx.reduce((s,i)=>s+P[i],0)/ne:0;
+  /* v1.9.8: at a window end that is the applied recipe's own literature window end (e.g. Fe 2p3/2 ends at 721 eV, before the 2p1/2), the tails of the
+     recipe's components there are fixed by the published envelope (Fe₂O₃/FeOOH satellites at 719.3/719.7 eV) — test (a) counts only the other
+     components; test (b) (data rising towards the outside) still applies. */
+  const RW=ctx.recipe&&ctx.recipe.window, atRecipeEnd=lowSide=>!!RW&&Math.abs((lowSide?E[0]:E[n-1])+sh-RW[lowSide?0:1])<=Math.max(2*step,0.051);
+  const recipeEdge=idx=>{ if(!P) return 0; const ex=comps.filter(c=>c.recipe&&c.recipe===ctx.recipe.id); if(!ex.length) return 0; const Ee=Float64Array.from(idx,i=>E[i]), cx={emin:E[0],emax:E[n-1]};
+    let s=0; ex.forEach(c=>{ try{ const v=C.compEval(c,Ee,cx); for(let j=0;j<v.length;j++) s+=v[j]; }catch(e){} }); return s/idx.length; };
+  const sideTest=(lowSide)=>{ const idx=lowSide?[...Array(ne).keys()]:[...Array(ne).keys()].map(k=>n-1-k); const pe=P?Math.max(0,idx.reduce((s,i)=>s+P[i],0)/ne-(atRecipeEnd(lowSide)?recipeEdge(idx):0)):0;
     const e0=lowSide?0:n-1, inner=lowSide?[...Array(kL+1).keys()]:[...Array(kL+1).keys()].map(k=>n-1-k); let mn=Infinity; inner.forEach(i=>{ if(ys[i]<mn) mn=ys[i]; });
     const rise=ys[e0]-mn; const byComp=pmax>0&&pe>th.edgeComp*pmax, byData=net>0&&rise>th.edgeRise*net; return {byComp,byData,pe:pmax>0?pe/pmax:0,rise:net>0?rise/net:0}; };
   [["low",true],["high",false]].forEach(([nmS,lowS])=>{ const t=sideTest(lowS); if(!t.byComp&&!t.byData) return;
@@ -46137,6 +46285,10 @@ function diagnose(ctx,th){
     push({key:"complex",id:"complex",sev:"info",ids:[],label:rc?`${ctx.el} ${ctx.orb}: use the region recipe`:`${ctx.el} ${ctx.orb}: multiplet/satellite region`,
       tip:ci_.why+". "+(rc?(recipeById(rc)&&(recipeById(rc).kind==="par"||recipeById(rc).kind==="emp")?recipeById(rc).how+" "+(recipeById(rc).kind==="emp"?"":"Derived values are shown after the fit."):recipeById(rc)&&recipeById(rc).kind==="env"?"The recipe fits each chemical species as one literature envelope (Biesinger: fixed spacings, area % and FWHMs; one position ± tolerance and one area per species) on the 2p3/2 window with a Shirley background; species fractions are shown after the fit. Pick the species in the recipe row.":"The recipe sets literature lines with doublet links (ΔE, area ratio, equal widths), the window and the background; derived output (e.g. Ce³⁺ fraction) is shown after the fit."):"No literature recipe is built in for this region: fit only the envelope and use the summed area, or compare with measured reference spectra (Store as reference → LCF), which carry the multiplet structure.")+(ci_.closed?` Closed-shell exception: ${ci_.closed}.`:"")+(ci_.note?" "+ci_.note:""),
       act:rc?{type:"recipe",recipe:rc,label:"Apply recipe"}:null}); }
+  // R11 recipe alignment at its search limit (v1.9.8): the NNLS shift search stopped at ±limit, so the true offset may lie outside it
+  const rm=ctx.recipeMeta; if(rm&&rm.alignLim>0&&rm.align!=null&&Math.abs(rm.align)>=rm.alignLim-0.026){ const lim=rm.alignLim;
+    push({key:"alignlim",id:"alignlim",sev:"warn",ids:[],label:`Recipe alignment at its ±${fmt(lim,1)} eV search limit (${rm.align>0?"+":""}${fmt(rm.align,2)} eV)`,
+      tip:`The recipe lines were shifted by ${rm.align>0?"+":""}${fmt(rm.align,2)} eV to match the data — the end of the ±${fmt(lim,1)} eV search range, so the best match may lie further out. Usual causes: a wrong or missing charge correction (check C 1s / the reference line), differential charging, or a different compound (for Ba 4d, ±1 eV cannot tell a global offset from BaO → Ba(OH)₂, +1.2 eV — confirm with O 1s / C 1s). Correct the charge reference and apply the recipe again; the fitted positions are otherwise held near the wrong start.`,act:null}); }
   // R10 peak overlaps with other elements present (v1.9.7, SPEC §17.8)
   if(ctx.present) overlapFindings(ctx.el,ctx.orb,ctx.present,{hv:ctx.hv,lo:E[0]+sh,hi:E[n-1]+sh}).forEach(push);
   out.sort((a,b)=>SEV_ORDER[a.sev]-SEV_ORDER[b.sev]);
@@ -46166,6 +46318,13 @@ const OVERLAPS=[
   tip:"Co L3VV Auger (library KE 774 eV → BE ≈ 713 eV under Al Kα) falls inside the Fe 2p3/2 region (706.8–720 eV) — with Co present the Fe 2p3/2 envelope fit takes up Auger intensity. Mg Kα moves it."},
  {id:"NiMn", sev:"info", al:true, a:{el:"Mn",orb:"2p",sub:"2p3/2",be:638.7}, b:{el:"Ni",auger:"L3VV",ke:[846]}, src:AVK,
   tip:"Ni L3VV Auger (library KE 846 eV → BE ≈ 641 eV under Al Kα) lies on Mn 2p3/2 (638.7 eV) — with Ni present the Mn 2p3/2 fit takes up Auger intensity. Mg Kα moves it."},
+ /* v1.9.8: three more Auger rules, KEs from the library table (test_guide checks them against xps_lib) */
+ {id:"FeCo", sev:"info", al:true, a:{el:"Co",orb:"2p",sub:"2p3/2",be:778.1}, b:{el:"Fe",auger:"L3VV",ke:[703]}, src:AVK,
+  tip:"Fe L3VV Auger (library KE 703 eV → BE ≈ 784 eV under Al Kα) falls inside the Co 2p3/2 region (778–792 eV, on the Co²⁺ shake-up near 786 eV) — with Fe present (e.g. Co–Fe oxides, BCFZY) the Co 2p3/2 envelope fit takes up Auger intensity, which inflates Co²⁺. Mg Kα moves it."},
+ {id:"NiFe", sev:"info", al:true, a:{el:"Fe",orb:"2p",sub:"2p3/2",be:706.8}, b:{el:"Ni",auger:"LMM",ke:[781,775]}, src:AVK+" (Ni LM4 781, LM5 775 eV)",
+  tip:"Ni LMM Auger lines (library KE 781 / 775 eV → BE ≈ 706 / 712 eV under Al Kα) lie on Fe 2p3/2 (Fe metal 706.6, oxides 708–714 eV) — with Ni present (Ni–Fe alloys, NiFe₂O₄, NiFe LDH) part of the Fe 2p3/2 intensity is Ni Auger: Fe species fractions and Fe at% are biased. Use Mg Kα, or Fe 3p."},
+ {id:"MnCe", sev:"info", al:true, a:{el:"Ce",orb:"3d",sub:"v‴/u0",be:898.2}, b:{el:"Mn",auger:"L3VV",ke:[587]}, src:AVK,
+  tip:"Mn L3VV Auger (library KE 587 eV → BE ≈ 900 eV under Al Kα) lies under Ce v‴ (≈ 898 eV) and u0 (≈ 899 eV) — with Mn present (Ce–Mn oxides) the Ce 3d recipe gives that intensity to v‴ (Ce⁴⁺) and u0 (Ce³⁺), which biases the Ce³⁺ fraction; the u‴ fraction (916.7 eV) is not affected. Mg Kα moves it."},
  {id:"RuC", sev:"warn", a:{el:"Ru",orb:"3d",sub:"3d3/2",be:284.2}, b:{el:"C",orb:"1s",sub:"1s",be:284.2}, src:BKL,
   tip:"Ru 3d3/2 (284.2 eV) coincides with C 1s (284.2 eV, Booklet) — C 1s charge referencing and the Ru 3d3/2 area are both affected; fit Ru 3d and C 1s in one model (Ru 3d5/2 at 280.0 eV is free of C) or use Ru 3p."},
  {id:"BiS", sev:"warn", a:{el:"Bi",orb:"4f",sub:"4f5/2",be:162.3}, b:{el:"S",orb:"2p",sub:"2p3/2",be:162.5}, src:BKL,
@@ -46192,6 +46351,7 @@ function applyAction(model,act,o){
   const C=CORE(); o=o||{}; const cs=model.comps, byId={}; cs.forEach(c=>byId[c.id]=c); model.cons=model.cons||{};
   const q=id=>(model.cons[id]=model.cons[id]||{});
   if(act.type==="dropSet"){ const gone=new Set(act.ids||[]); if(!cs.some(c=>gone.has(c.id))) return null; relinkWithout(model,gone); return "Removed "+(act.label||"").replace(/^Remove /,""); }
+  if(act.type==="drop"&&byId[act.id]&&byId[act.id].recipe){ relinkWithout(model,new Set([act.id])); return "Removed "+(act.label||"").replace(/^Remove /,""); }   // recipe lines: exact re-anchoring (v1.9.8)
   if(act.type==="drop"){ const P={comps:cs,cons:model.cons}; C.removeComp(P,act.id); model.comps=P.comps; model.cons=P.cons; return "Removed "+(act.label||"").replace(/^Remove /,""); }
   if(act.type==="link"){ const c=byId[act.id], a=byId[act.ref]; if(!c||!a) return null; const ka=C.getP(a,act.k), kc=C.getP(c,act.k); q(act.id)[act.k]={mode:"link",ref:act.ref,k:ka>0?+(kc/ka).toFixed(6):1,b:0}; return "Linked"; }
   if(act.type==="fix"){ const c=byId[act.id]; if(!c) return null; C.setP(c,act.k,act.v); q(act.id)[act.k]={mode:"fixed"}; return "Fixed"; }
@@ -46210,15 +46370,21 @@ function applyAction(model,act,o){
    relation (values are current, so k = v_user/v_anchor for area/widths, b = Δ for positions) — exact, unlike a k = 1 re-anchor. */
 function relinkWithout(model,gone){
   const C=CORE(); const cons=model.cons=model.cons||{};
+  const goneC={}; gone.forEach(id=>{ goneC[id]=cons[id]||{}; });
   model.comps=model.comps.filter(c=>!gone.has(c.id)); gone.forEach(id=>delete cons[id]);
   const byRef={}; model.comps.forEach(c=>{ const q=cons[c.id]||{}; for(const k in q){ const l=q[k]; if(l&&l.mode==="link"&&gone.has(l.ref)) (byRef[l.ref+"|"+k]=byRef[l.ref+"|"+k]||[]).push(c); } });
-  for(const key in byRef){ const k=key.split("|")[1], users=byRef[key], Y=users[0];
-    const v=c=>C.getP(c,k), vY=v(Y);
+  for(const key in byRef){ const ref=key.split("|")[0], k=key.split("|")[1], users=byRef[key], Y=users[0];
+    const v=c=>C.getP(c,k), vY=v(Y), lY=cons[Y.id][k];
     if(k==="be"){ const R0=Y.recipe&&recipeById(Y.recipe), tol=R0&&R0.beTol?R0.beTol:0.3; cons[Y.id][k]={mode:"free",lo:+(vY-tol).toFixed(4),hi:+(vY+tol).toFixed(4)}; }
-    else cons[Y.id][k]={mode:"free"};
+    else { // v1.9.8: carry the old anchor's range through Y's own link (Y = kL·X + bL), e.g. the shared ΔE 16.6–17.0 eV of a recipe, instead of dropping it
+      const ga=goneC[ref]&&goneC[ref][k]; let q={mode:"free"};
+      if(ga&&ga.mode==="free"&&(ga.lo!=null||ga.hi!=null)&&lY&&lY.k!=null){ const kL=+lY.k, bL=+(lY.b||0); const a=ga.lo!=null?kL*ga.lo+bL:null, b=ga.hi!=null?kL*ga.hi+bL:null;
+        if(kL>0) q={mode:"free",lo:a!=null?+a.toFixed(6):undefined,hi:b!=null?+b.toFixed(6):undefined}; else if(kL<0) q={mode:"free",lo:b!=null?+b.toFixed(6):undefined,hi:a!=null?+a.toFixed(6):undefined};
+        if(q.lo===undefined) delete q.lo; if(q.hi===undefined) delete q.hi; }
+      cons[Y.id][k]=q; }
     users.forEach(u=>{ if(u===Y) return; cons[u.id][k]=k==="be"?{mode:"link",ref:Y.id,k:1,b:+(v(u)-vY).toFixed(4)}:{mode:"link",ref:Y.id,k:vY>0?+(v(u)/vY).toFixed(8):1,b:0}; });
     if(k==="F"&&Y.renv){ const R0=recipeById(Y.recipe); if(R0&&R0.wScale) cons[Y.id].F={mode:"free",lo:+(Y.F*R0.wScale[0]).toFixed(5),hi:+(Y.F*R0.wScale[1]).toFixed(5)}; }
-    if(k==="area"&&Y.renv){ Y.ranc=1; Y.afloor=0.02; } }
+    if(k==="area"&&Y.renv){ Y.ranc=1; Y.afloor=0.02; } else if(k==="area"&&Y.recipe) Y.afloor=0.02; }
   model.comps.forEach(c=>{ if(c.aref&&gone.has(c.aref)){ const q=cons[c.id]&&cons[c.id].area; c.aref=q&&q.mode==="link"?q.ref:c.id; c.amul=q&&q.mode==="link"?q.k:1; } });
 }
 
@@ -46236,7 +46402,11 @@ function stageCons(P,user,stage){
   P.comps.forEach(c=>{ const q=cons[c.id]=cons[c.id]||{}; C.paramNames(c).forEach(k=>{ if(k==="area"||k==="be"||WKEYS.includes(k)) return; q[k]={mode:"fixed"}; }); });
   WKEYS.forEach(k=>{ const has=P.comps.filter(c=>C.paramNames(c).includes(k)&&!C.derivedParam(c,k)&&(get(c.id,k)||{}).mode!=="fixed");
     if(has.length<2) return; const anc=has.reduce((a,c)=>!a||c.area>a.area?c:a,null); const ua=get(anc.id,k);
-    cons[anc.id][k]=ua&&ua.mode==="free"?ua:{mode:"free"};
+    // v1.9.8: when the stage anchor was linked by the user (y = k·x + b to a free width with a range), carry that range through the link
+    let q={mode:"free"}; if(ua&&ua.mode==="free") q=ua;
+    else if(ua&&ua.mode==="link"){ const ux=get(ua.ref,k); const kL=ua.k!=null?+ua.k:1, bL=+(ua.b||0);
+      if(ux&&ux.mode==="free"&&(ux.lo!=null||ux.hi!=null)&&kL!==0){ const a=ux.lo!=null?kL*ux.lo+bL:null, b=ux.hi!=null?kL*ux.hi+bL:null; const lo=kL>0?a:b, hi=kL>0?b:a; q={mode:"free"}; if(lo!=null) q.lo=lo; if(hi!=null) q.hi=hi; } }
+    cons[anc.id][k]=q;
     has.forEach(c=>{ if(c===anc) return; const va=C.getP(anc,k), vc=C.getP(c,k); cons[c.id][k]={mode:"link",ref:anc.id,k:va>0?vc/va:1,b:0}; }); });
   return cons;
 }
@@ -46245,17 +46415,28 @@ function stagedFit(prob,opt){
   const base=()=>{ const P=C.clone(C.stripProb(prob)); P.E=prob.E; P.y=prob.y; return P; };
   const P0=base(); { const m=C.buildMap(P0); C.applyLinks(P0,m); }
   const user=C.clone(prob.cons||{}); const stages=[];
-  // normal path from the same start
-  const PN=base(); const rN=C.fitOnce(PN,opt); const sN=C.fitStats(PN,rN);
-  // stage 1: heights (areas) only
-  const P1=base(); cpParams(P1,P0); P1.cons=stageCons(P1,user,1); const r1=C.fitOnce(P1,opt); stages.push({stage:1,chi2:r1.chi2,iter:r1.iter+(r1.iter1||0),stop:r1.stop});
-  // stage 2: positions within their ranges, widths linked
-  const P2=base(); cpParams(P2,P1); P2.cons=stageCons(P2,user,2); const r2=C.fitOnce(P2,Object.assign({},opt,{initAreas:false})); stages.push({stage:2,chi2:r2.chi2,iter:r2.iter+(r2.iter1||0),stop:r2.stop});
-  // stage 3: the user's constraints, normal fit path (stall rule applies)
-  const P3=base(); cpParams(P3,P2); P3.cons=user; const r3=C.fitOnce(P3,Object.assign({},opt,{initAreas:false})); const s3=C.fitStats(P3,r3); stages.push({stage:3,chi2:r3.chi2,iter:r3.iter+(r3.iter1||0),stop:r3.stop});
-  const useStaged=s3.chi2d<sN.chi2d*(1-1e-9);
+  // normal path from the same start (computed first; a failing stage below never loses it)
+  const PN=base(); let rN=null, sN=null, errN=null; try{ rN=C.fitOnce(PN,opt); sN=C.fitStats(PN,rN); }catch(e){ errN=e; }
+  /* v1.9.8: stages 2–3 start without the core's area initialisation (initAreas:false), so an area that stage 1/2 left at 0 would stay frozen there
+     (zero area → zero derivatives for its position and width). Components flagged afloor (recipe roots) restart at ≥ afloor × the largest such area. */
+  const seedFloor=P=>{ const m=C.buildMap(P); const fa=m.free.filter(f=>f.k==="area"&&f.ci>=0&&P.comps[f.ci].afloor>0); if(!fa.length) return;
+    const amax=Math.max(...fa.map(f=>P.comps[f.ci].area),0); if(!(amax>0)) return;
+    fa.forEach(f=>{ const c=P.comps[f.ci]; const v=Math.min(Math.max(c.area,c.afloor*amax),isFinite(f.hi)?f.hi:Infinity); if(v!==c.area) C.setP(c,"area",v); }); C.applyLinks(P,C.buildMap(P)); };
+  let P3=null, r3=null, s3=null, errS=null;
+  try{
+    // stage 1: heights (areas) only
+    const P1=base(); cpParams(P1,P0); P1.cons=stageCons(P1,user,1); const r1=C.fitOnce(P1,opt); stages.push({stage:1,chi2:r1.chi2,iter:r1.iter+(r1.iter1||0),stop:r1.stop});
+    // stage 2: positions within their ranges, widths linked
+    const P2=base(); cpParams(P2,P1); P2.cons=stageCons(P2,user,2); seedFloor(P2); const r2=C.fitOnce(P2,Object.assign({},opt,{initAreas:false})); stages.push({stage:2,chi2:r2.chi2,iter:r2.iter+(r2.iter1||0),stop:r2.stop});
+    // stage 3: the user's constraints, normal fit path (stall rule applies)
+    P3=base(); cpParams(P3,P2); P3.cons=user; seedFloor(P3); r3=C.fitOnce(P3,Object.assign({},opt,{initAreas:false})); s3=C.fitStats(P3,r3); stages.push({stage:3,chi2:r3.chi2,iter:r3.iter+(r3.iter1||0),stop:r3.stop});
+  }catch(e){ errS=e; stages.push({stage:stages.length+1,chi2:NaN,iter:0,stop:"error",error:String(e&&e.message||e)}); }
+  if(errN&&(errS||!s3)) throw errN;   // nothing to return
+  // keep the lower finite χ²_d; a non-finite or missing side never wins
+  const fS=!!s3&&isFinite(s3.chi2d), fN=!!sN&&isFinite(sN.chi2d);
+  const useStaged=fS&&(!fN||s3.chi2d<sN.chi2d*(1-1e-9));
   const P=useStaged?P3:PN, r=useStaged?r3:rN;
-  return {P,r,staged:{used:useStaged?"staged":"normal",chi2dStaged:s3.chi2d,chi2dNormal:sN.chi2d,chi2Staged:r3.chi2,chi2Normal:rN.chi2,stopStaged:r3.stop,stopNormal:rN.stop,stages,ms:Date.now()-t0}};
+  return {P,r,staged:{used:useStaged?"staged":"normal",chi2dStaged:s3?s3.chi2d:NaN,chi2dNormal:sN?sN.chi2d:NaN,chi2Staged:r3?r3.chi2:NaN,chi2Normal:rN?rN.chi2:NaN,stopStaged:r3?r3.stop:"error",stopNormal:rN?rN.stop:"error",error:errS?String(errS.message||errS):errN?String(errN.message||errN):null,stages,ms:Date.now()-t0}};
 }
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }
@@ -46950,14 +47131,15 @@ function lbfgs(fg,x0,o){
   return {x,F,iter:it};
 }
 /* setup: th (deg), L[k] (nm, attenuation length of species k photoelectrons in the film), I[k][a] intensities ÷ sensitivity, sI σ.
-   o = {J (layers, default 20), zmax (default 3·max L·cos θ_min), m (default model: 'normal' = apparent composition at smallest θ, or array K), alpha|'auto'} */
+   o = {J (layers, default 20), zmax (default 3·max L·cos θ_min), m (default model: uniform composition fitting the smallest-θ intensities, I_k/L_k normalized; or array K), alpha|'auto'} */
 function maxentSetup(th,L,I,sI,o){
   o=o||{}; const K=L.length, A=th.length, J=o.J||20; const cmin=Math.min(...th.map(cosd)), cmax=Math.max(...th.map(cosd));
   const zmax=o.zmax||3*Math.max(...L)*cmax; const z=Float64Array.from({length:J},(_,j)=>j*zmax/(J-1));
   sI=sI||I.map(r=>r.map(v=>0.01*Math.abs(v)));
   let m0;
   if(Array.isArray(o.m)) m0=o.m;
-  else { const a0=th.indexOf(Math.min(...th)); const tot=I.reduce((s,r)=>s+r[a0],0); m0=I.map(r=>r[a0]/tot); }
+  else { // uniform composition that reproduces the most-normal-angle intensities through the kernel: Σ_j W_kaj = L_k cosθ_a ⇒ m_k ∝ I_ka0 / L_k
+    const a0=th.indexOf(Math.min(...th)); const q=I.map((r,k)=>r[a0]/L[k]); const tot=q.reduce((s,v)=>s+v,0); m0=q.map(v=>v/tot); }
   const m=new Float64Array(K*J); for(let k=0;k<K;k++) for(let j=0;j<J;j++) m[k*J+j]=Math.max(m0[k],1e-6);
   for(let j=0;j<J;j++){ let s=0; for(let k=0;k<K;k++) s+=m[k*J+j]; for(let k=0;k<K;k++) m[k*J+j]/=s; }
   return {K,J,A,th,L,I,sI,z,W:kernel(th,L,z),m,cmin};
@@ -46967,24 +47149,44 @@ function maxentSolve(P,alpha,u0){
   const r=lbfgs(x=>meObjective(x,P,alpha),u,{maxIter:20000,gtol:1e-10});
   return {alpha,u:r.x,c:r.F.c,chi2:r.F.chi2,S:r.F.S,Q:r.F.f,G:r.F.G,M:r.F.M,iter:r.iter};
 }
-/* α by the discrepancy ('historic MaxEnt') criterion χ²(α) = N, N = K·A − A (data minus profiled per-angle scales).
-   Continuation (SPEC_multi §4.5): α_k = α_max·10^(−k/2) from α_max = 1e6 down to α_min = 1e−4, each solve warm-started from the previous
-   (large α = unique, near the default model); the first α_k with χ² ≤ N brackets the root with α_{k−1}; then 40 bisection steps in ln α,
-   always warm-started from the larger-α end of the bracket (deterministic path). Small-α solutions are ill-posed — never used as starts. */
+/* α by the discrepancy ('historic MaxEnt') criterion χ²(α) = N, N = K·A − A (data minus profiled per-angle scales), guarded against the
+   flat part of χ²(α) (SPEC_multi §4.5).
+   Why the guard: χ²(α) falls steeply from the default model and then flattens at χ²_min (the best attainable fit; the corner between the
+   two is the L-curve corner). The χ² of the TRUE profile is distributed χ²_N (mean N, sd √(2N)), so χ²_min — and the plateau — lies
+   above or just below N in a sizeable fraction of realizations. χ² = N then puts α on the plateau, where χ² hardly depends on α and the
+   poorly determined (deep) layers swing to 0/1 (seen: 6 of 20 seeds of a uniform film, |Δc| up to 0.70). The guard keeps the target at
+   least one sampling sd above the best attainable fit — Morozov's discrepancy principle with a safety factor (Engl, Hanke & Neubauer,
+   Regularization of Inverse Problems, 1996, §4.3):   T = max(N, χ²_min + τ·√(2N)),  τ = o.chi2Tol (default 1),
+   and α is the largest α (maximum entropy) with χ²(α) ≤ T. When χ²_min ≤ N − τ√(2N) (most realizations) T = N exactly (classic rule).
+   χ²_min = smallest χ² on the continuation path and at α_min (one extra solve, warm-started from the last path solution, never used as a
+   start). notReached: χ²_min above the 99 % point of χ²_N (Wilson–Hilferty) — the data are not fitted within noise (model error or σ
+   underestimated); the guarded α is still returned (the corner), not the ill-posed α_min solution.
+   Continuation: α_k = α_max·10^(−k/2) from α_max = 1e6 down to α_min = 1e−4, each solve warm-started from the previous (large α = unique,
+   near the default model); the first α_k with χ² ≤ T brackets the root with α_{k−1}; then bisection in ln α (≤ 40 steps, to 1e-4 in
+   ln α), always warm-started from the larger-α end of the bracket (deterministic path). Small-α solutions are ill-posed — never used as starts.
+   chi2Tol = 0 restores the unguarded classic rule exactly (χ² = N; the α_min solution, flagged notReached, when N is not reached). */
 function maxentProfile(th,L,I,sI,o){
   o=o||{}; const P=maxentSetup(th,L,I,sI,o); const N=o.target||(P.K*P.A-P.A); const curve=[]; let sol;
+  const tol=o.chi2Tol!=null?+o.chi2Tol:1, sdChi=Math.sqrt(2*N); let target=N, notReached=false, chi2min=null;
+  const h=2/(9*N), q99=N*Math.pow(1-h+2.3263*Math.sqrt(h),3);   // Wilson–Hilferty 99 % point of χ²_N
+  const bisect=(prev,cur,T)=>{ let hi=Math.log(prev.alpha), lo=Math.log(cur.alpha), sHi=prev, best=cur;
+    for(let i=0;i<40;i++){ const mid=0.5*(lo+hi); const s=maxentSolve(P,Math.exp(mid),sHi.u); curve.push({alpha:s.alpha,chi2:s.chi2,S:s.S}); if(s.chi2>T){ hi=mid; sHi=s; } else { lo=mid; best=s; } if(hi-lo<1e-4) break; }
+    return best; };
   if(typeof o.alpha==="number") sol=maxentSolve(P,o.alpha);
   else {
-    const aMax=o.alphaMax||1e6, aMin=o.alphaMin||1e-4; let prev=null, cur=null;
-    for(let k=0;;k++){ const a=aMax*Math.pow(10,-k/2); if(a<aMin*0.999) break; cur=maxentSolve(P,a,prev?prev.u:null); curve.push({alpha:a,chi2:cur.chi2,S:cur.S}); if(cur.chi2<=N) break; prev=cur; }
-    if(!prev&&cur.chi2<=N) sol=cur;                       // the default-like solution already fits within noise
-    else if(cur.chi2>N){ sol=cur; sol.notReached=true; }  // noise level never reached (model error or underestimated σ)
-    else { let hi=Math.log(prev.alpha), lo=Math.log(cur.alpha), sHi=prev; sol=cur;
-      for(let i=0;i<40;i++){ const mid=0.5*(lo+hi); const s=maxentSolve(P,Math.exp(mid),sHi.u); curve.push({alpha:s.alpha,chi2:s.chi2,S:s.S}); if(s.chi2>N){ hi=mid; sHi=s; } else { lo=mid; sol=s; } if(hi-lo<1e-4) break; } }
+    const aMax=o.alphaMax||1e6, aMin=o.alphaMin||1e-4; let prev=null, cur=null; const path=[];
+    for(let k=0;;k++){ const a=aMax*Math.pow(10,-k/2); if(a<aMin*0.999) break; cur=maxentSolve(P,a,prev?prev.u:null); path.push(cur); curve.push({alpha:a,chi2:cur.chi2,S:cur.S}); if(cur.chi2<=N) break; prev=cur; }
+    if(tol>0){
+      chi2min=Math.min(...path.map(s=>s.chi2));
+      if(cur.alpha>aMin*1.001){ const f=maxentSolve(P,aMin,cur.u); curve.push({alpha:f.alpha,chi2:f.chi2,S:f.S,floor:true}); chi2min=Math.min(chi2min,f.chi2); }
+      target=Math.max(N,chi2min+tol*sdChi); notReached=chi2min>q99;
+      let i=path.findIndex(s=>s.chi2<=target); if(i<0) i=path.length-1;
+      sol=i>0?bisect(path[i-1],path[i],target):path[i];          // i = 0: the default-like solution already fits within noise
+    } else { notReached=cur.chi2>N; sol=!notReached&&prev?bisect(prev,cur,N):cur; }   // classic unguarded rule
   }
   const K=P.K, J=P.J; const c=Array.from({length:K},(_,k)=>Float64Array.from({length:J},(_,j)=>sol.c[k*J+j]));
   const dz=P.z[1]-P.z[0];
-  return {z:P.z,dz,c,alpha:sol.alpha,chi2:sol.chi2,N,S:sol.S,G:sol.G,iter:sol.iter,curve,notReached:!!sol.notReached,setup:P,
+  return {z:P.z,dz,c,alpha:sol.alpha,chi2:sol.chi2,N,target:typeof o.alpha==="number"?null:target,chi2min,S:sol.S,G:sol.G,iter:sol.iter,curve,notReached,setup:P,
     model:Array.from({length:K},(_,k)=>Float64Array.from({length:P.A},(_,a)=>sol.G[a]*sol.M[k*P.A+a])),
     warn:["ARXPS carries only a few independent depth parameters (Cumpson 1995): the MaxEnt profile is the smoothest one consistent with the data, not a unique profile",
           "below ≈ "+(3*Math.max(...L)*P.cmin).toFixed(2)+"–"+(3*Math.max(...L)).toFixed(2)+" nm the profile reverts to the default model (no information)",
@@ -47921,7 +48123,8 @@ const ACCEPT=".vgd,.vms,.npl,.xls,.xlsx,.txt,.csv,.dat,.xy,.avg,.json";
 const ORB_J={s:null,p:["3/2","1/2"],d:["5/2","3/2"],f:["7/2","5/2"]};
 
 /* ---------------- 상태 ---------------- */
-function defState(){ return {v:1,specs:[],sel:null,proc:{},samples:{},quant:{lib:"scofield",imfp:{model:"power",n:0.7,mat:{rho:5,Nv:24,M:150,Eg:3}},tf:{model:"auto",x:1},custom:{},rows:{}},ui:{tab:"fit",showRef:true,resid:"norm",overlay:[],ovNorm:"max",ovOffset:0,selComp:null,addMode:false,survey:{},ws:"spectra"}}; }
+const STATE_SV=2;   // v1.9.8 state schema version (see migrateState)
+function defState(){ return {v:1,sv:STATE_SV,specs:[],sel:null,proc:{},samples:{},quant:{lib:"scofield",imfp:{model:"power",n:0.7,mat:{rho:5,Nv:24,M:150,Eg:3}},tf:{model:"auto",x:1},custom:{},rows:{}},ui:{tab:"fit",showRef:true,resid:"norm",overlay:[],ovNorm:"max",ovOffset:0,selComp:null,addMode:false,survey:{},ws:"spectra"}}; }
 let S=defState(), ROOT=null, PV={}, LOADED=false, WORK=null, RUN=null;
 const DBN="innoanalytics_xps", DBS="proj";
 function idb(){ return new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,1); q.onupgradeneeded=()=>q.result.createObjectStore(DBS); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }catch(e){ rej(e); } }); }
@@ -47934,6 +48137,22 @@ function save(){ clearTimeout(_svT); _svT=setTimeout(()=>{ _svT=null; dbPut(_sna
 function flushSave(){ if(_svT){ clearTimeout(_svT); _svT=null; dbPut(_snap()); } }
 try{ window.addEventListener("pagehide",flushSave); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushSave(); }); }catch(e){}
 function revive(o){ return JSON.parse(JSON.stringify(o),(k,v)=>v&&typeof v==="object"&&Array.isArray(v.__f64)?Float64Array.from(v.__f64):v); }
+/* v1.9.8 — saved-state migration (project file and IndexedDB). S.sv = state schema version (S.v stays 1: the stored-state marker).
+   Defaults are deep-merged (a saved quant.imfp without mat used to crash the Quantification panel); nothing that changes a result is altered
+   silently — differences are reported (notes) and shown in the Quantification panel until the user acts. SPEC §17.9. */
+const isPlain=v=>!!v&&typeof v==="object"&&!Array.isArray(v)&&!ArrayBuffer.isView(v);
+function deepDefaults(def,v){ if(!isPlain(def)) return v===undefined?def:v; if(!isPlain(v)) return v===undefined||v===null?def:v;
+  const o=Object.assign({},v); Object.keys(def).forEach(k=>{ o[k]=deepDefaults(def[k],v[k]); }); return o; }
+const vgdTfUnknown=s=>!!(s&&s.format==="VGD"&&s.meta&&s.meta.tf&&!("tfRemoved" in s.meta));   // read before v1.9.2: prop 415 (TXF removed?) not recorded
+function migrateState(r){ const D=defState(), notes=[]; const sv=+(r&&r.sv)||1;
+  const st=deepDefaults(D,r||{}); st.sv=STATE_SV;
+  const nTf=(st.specs||[]).filter(vgdTfUnknown).length;
+  if(nTf) notes.push(`${nTf} VGD spectra were saved before the 'TF removed at acquisition' flag existed: if their transmission function was already removed, Quantification may apply it twice — re-read the original .VGD files (Open files) to refresh the flag; results are unchanged until then.`);
+  const im=st.quant&&st.quant.imfp, n0=D.quant.imfp.n; if(im&&im.n!=null&&+im.n!==n0&&sv<STATE_SV&&!st.quant.imfpOld) st.quant.imfpOld=+im.n;
+  if(st.quant&&st.quant.imfpOld!=null) notes.push(`IMFP exponent n = ${st.quant.imfpOld} kept from the saved project (the default is now ${n0}, v1.9.5) — at% use the saved value until you change it.`);
+  return {st,notes,from:sv}; }
+function migNotesHTML(){ const n=(S.specs||[]).filter(vgdTfUnknown).length, im=S.quant&&S.quant.imfpOld; if(!n&&im==null) return "";
+  return `<div class="xps-mig" id="xqMig">${n?`<div class="warn" data-mig="tf">${n} VGD spectra from an older project: TF-removed flag unknown — the TF may be applied twice. <button class="btn xs" id="xqMigRe" title="Pick the original .VGD files: only the transmission metadata of the matching spectra is refreshed (data and fits are kept)">Re-read VGD files</button></div>`:""}${im!=null?`<div class="muted xs" data-mig="imfp">IMFP n = ${esc(String(S.quant.imfp.n))} from the saved project (default now 0.7). <button class="btn xs" id="xqMigN">Use 0.7</button> <button class="btn xs" id="xqMigK">Keep</button></div>`:""}</div>`; }
 
 /* ---------------- 접근자 ---------------- */
 const cur=()=>S.specs.find(s=>s.uid===S.sel)||null;
@@ -47964,6 +48183,9 @@ async function loadFiles(list,lopt){
   // 이미 열린 같은 스펙트럼(같은 시료·영역·파일·형식·점 수·첫 BE·첫 세기 · VAMAS 블록 번호 · 여러 열 텍스트의 열 번호)은 다시 넣지 않는다
   const sig=s=>[SK(s),s.region,s.file,s.format,s.n,(+s.be[0]).toFixed(4),(+s.y[0]).toPrecision(8),s.meta&&s.meta.vamas?s.meta.vamas.blockIndex:"",s.meta&&s.meta.mcol?s.meta.mcol.col:""].join("|");
   const have=new Set(S.specs.map(sig)); const isDup=s=>{ const k=sig(s); if(have.has(k)) return true; have.add(k); return false; };
+  // v1.9.8: re-reading a VGD that an older project holds refreshes only its transmission metadata (TF-removed flag, prop 415) — data and fits are kept
+  const bySig=new Map(S.specs.map(s=>[sig(s),s])); let nTfFix=0;
+  const refreshTf=sp=>{ const o=bySig.get(sig(sp)); if(!o||!vgdTfUnknown(o)||!sp.meta||!("tfRemoved" in sp.meta)) return; o.meta.tf=sp.meta.tf; o.meta.tfRemoved=sp.meta.tfRemoved; o.meta.tfMode=sp.meta.tfMode; nTfFix++; };
   for(const file of arr){
     try{
       const u8=new Uint8Array(await file.arrayBuffer());
@@ -47974,7 +48196,7 @@ async function loadFiles(list,lopt){
       const r=await IO.readFile(file.name,u8,{});
       if(r.vamas&&/^(MAP|SEM)/i.test(r.vamas.mode||"")){ const pos=r.spectra.filter(s=>s.meta&&s.meta.vamas&&s.meta.vamas.x!=null&&s.meta.vamas.y!=null);
         if(pos.length>=4){ await imgLoadDB(); nImg+=stacksFromVamas(pos,file.name).length; r.spectra=r.spectra.filter(s=>!pos.includes(s)); if(!r.spectra.length) continue; } }
-      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++;
+      r.spectra.forEach(sp=>{ if(isDup(sp)){ nDup++; refreshTf(sp); return; } S.specs.push(sp); pr(sp); smpOf(sp); nNew++;
         const ac=axisCheck(sp); if(ac){ sp.warn.push(ac.msg); if(ac.fits&&isText(sp)) axq.push(sp); }
         if(sp.warn.length) warns.push(sp.name+": "+sp.warn.join(" / ")); });
       if(r.tables&&r.tables.length) r.tables.forEach(t=>{ if(/peak/i.test(t.name)&&t.rows.length>1) warns.push(file.name+": Avantage '"+t.name+"' 표가 있습니다(Info 탭)"); });
@@ -47985,6 +48207,7 @@ async function loadFiles(list,lopt){
   else if(nNew>=2&&S.ui.ws==="spectra"&&S.specs.slice(-nNew).some(s=>s.meta&&(s.meta.mcol||(s.meta.vamas&&s.meta.vamas.expVars&&s.meta.vamas.expVars.length)))) note("여러 단계(깊이·각도) 자료입니다 — 위의 Series · ARXPS 에서 묶어 볼 수 있습니다","",{label:"Open Series",fn:()=>{ S.ui.ws=(S.specs.slice(-1)[0].meta.vamas&&/angle/i.test(((S.specs.slice(-1)[0].meta.vamas.expVars||[])[0]||{}).label||""))?"arxps":"series"; save(); rerender(); }});
   save(); rerender();
   if(nNew) note(`스펙트럼 ${nNew}개를 읽었습니다`+(nDup?` (이미 열린 ${nDup}개는 건너뜀)`:"")+(warns.length?` — 확인할 점 ${warns.length}건(Info 탭)`:""),"ok");
+  else if(nTfFix) note(`Transmission metadata refreshed for ${nTfFix} VGD spectra (TF-removed flag read from the file) — Quantification now uses it`,"ok");
   else if(nDup) note(`이미 열려 있는 스펙트럼입니다 (${nDup}개) — 새로 넣지 않았습니다`);
   errs.forEach(e=>note(e,"warn"));
   axq.forEach(sp=>{ const ac=axisCheck(sp); if(ac) note(`${sp.name}: ${ac.msg}`,"warn",{label:`Read as ${ac.other}`,fn:()=>applyAxis(sp,ac.other,sp.hv)}); });
@@ -48577,7 +48800,7 @@ function casaEq1(c,sm,win){ let q; try{ q=C.compToCasa(c,win||undefined); }catch
    ============================================================ */
 function render(root){
   ROOT=root;
-  if(!LOADED){ LOADED=true; root.innerHTML=`<div class="card"><div class="xps-empty">XPS 작업을 불러오는 중…</div></div>`; dbGet().then(o=>{ if(o&&o.v===1){ const r=revive(o); S=Object.assign(defState(),r); S.ui=Object.assign(defState().ui,r.ui||{}); S.quant=Object.assign(defState().quant,r.quant||{}); } if(ROOT===root) build(root); }); return; }
+  if(!LOADED){ LOADED=true; root.innerHTML=`<div class="card"><div class="xps-empty">XPS 작업을 불러오는 중…</div></div>`; dbGet().then(o=>{ if(o&&o.v===1){ const M=migrateState(revive(o)); S=M.st; if(M.from<STATE_SV&&M.notes.length) setTimeout(()=>note(M.notes.join(" "),"warn"),0); } if(ROOT===root) build(root); }); return; }
   build(root);
 }
 function build(root){
@@ -48957,7 +49180,7 @@ function fitStrip(r,sp){
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=2;   // v1.9.7: overlap rules (R10)
+const CHECK_V=3;   // v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
 const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
@@ -49020,11 +49243,11 @@ function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free)
   if(r.check&&r.check.sh===sh&&r.check.v===CHECK_V&&r.check.pk===pk) return r.check.items;
   const R=C.sliceRegion(sp.be,sp.y,r.lo!=null?r.lo:p.lo,r.hi!=null?r.hi:p.hi); if(!R||R.E.length!==r.mu.length) return null;
   const rg=sp.reg||{}; const so=rg.el?soInfo(rg.el,rg.orb):null; const rc=(r.comps||[]).find(c=>c.recipe); let items=[];
-  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
+  try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,recipeMeta:rc&&p.recipe&&p.recipe.id===rc.recipe?p.recipe:null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
   r.check={sh,v:CHECK_V,items,pk}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
-  const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null); if(!dv.length) return "";
-  return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" title="${esc(d.tip)}">${esc(d.label)} <b>${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
+  const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null||d.flag); if(!dv.length) return "";
+  return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" class="${d.fixed?"fx":d.flag?"fl":""}" title="${esc(d.tip)}">${esc(d.label)} <b>${d.flag&&d.v>=100?"≥ ":""}${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %${d.fixed?` <span class="muted xs">fixed</span>`:""}${d.flag?` <span class="badge wr" title="${esc(d.flag)}">!</span>`:""}</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
 function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
   const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
   const st=s?`<span class="muted xs" title="${esc(`Staged fit (SPEC §17.4): stage χ² ${s.stages.map(q=>g(q.chi2,5)).join(" → ")}; data-variance χ²_d staged ${g(s.chi2dStaged,6)} vs normal fit ${g(s.chi2dNormal,6)} — the lower one is kept`)}">staged: kept ${esc(s.used)} ⓘ</span>`:"";
@@ -49321,19 +49544,28 @@ function rsfLookup(el,line,src,hv){
   if(src==="althermo1"){ if(s!=="al") return null; return L.althermo1&&L.althermo1[key]!=null?{v:L.althermo1[key],src:"ALTHERMO1"}:null; }
   if(!s) return null; const t=(L.scofield&&L.scofield[s])||{}; return t[key]!=null?{v:t[key],src:"Scofield "+(s==="al"?"Al":"Mg")}:null;
 }
-/* 이 원소에서 감도계수가 있는 선 전부(궤도 합 먼저, Scofield 큰 순) — 어떤 원소든 */
-function lineChoices(el,orb){
-  const t=(LIB().scofield||{}).al||{}; const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")).map(k=>k.slice(el.length+1));
+/* v1.9.8 — lines by X-ray source (SPEC §17.9): the Scofield table of the spectrum's source (Al Kα / Mg Kα; other hν → Al table as before) and only
+   lines that can be measured with it: BE < hν − 100 eV (KE ≥ 100 eV — e.g. Se 2p, Er/Tm 3d lie above hν − 100 under Al Kα, Ho 3d under Mg Kα). */
+function srcTab(hv){ const s=srcOf(hv||1486.6)||"al"; return {s,t:((LIB().scofield||{})[s])||{},h:s==="mg"?1253.6:1486.6}; }
+const KE_MIN=100;
+/* every line with a sensitivity factor for this element (orbital totals first, larger S first), for the row's source */
+function lineChoices(el,orb,hv){
+  const {t,h}=srcTab(hv), lv=((LIB().core||{})[el]||{}).lv||{}; const beOf=k=>{ const o=k.replace(/(1\/2|3\/2|5\/2|7\/2)$/,""); const v=Object.entries(lv).filter(([q])=>q===k||q.startsWith(o)).map(([,x])=>x); return v.length?Math.max(...v):null; };
+  const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")).map(k=>k.slice(el.length+1)).filter(k=>{ const be=beOf(k); return be==null||be<h; });
   const tot=ks.filter(k=>k.length===2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]), sub=ks.filter(k=>k.length>2).sort((a,b)=>t[el+" "+b]-t[el+" "+a]);
   const out=[]; if(orb) out.push(orb); tot.concat(sub).forEach(k=>{ if(!out.includes(k)) out.push(k); }); return out.length?out:[orb||""];
 }
-/* 한 원소의 '주선'(Scofield Al 이 가장 큰 궤도 합 — 예: Ba 3d, Co 2p) 과 그 subshell 라이브러리 BE */
-function mainLine(el){ const L=LIB(), t=(L.scofield||{}).al||{}, lv=((L.core||{})[el]||{}).lv||{};
-  const ks=Object.keys(t).filter(k=>k.startsWith(el+" ")&&k.length-el.length-1===2).map(k=>k.slice(el.length+1)).filter(o=>Object.keys(lv).some(q=>q.startsWith(o)));
-  if(!ks.length) return null; ks.sort((a,b)=>t[el+" "+b]-t[el+" "+a]); const o=ks[0];
-  return {orb:o,key:el+" "+o,bes:Object.entries(lv).filter(([q])=>q.startsWith(o)).map(([q,v])=>({sub:q,be:v}))}; }
-/* 같은 원소의 여러 선(예: Co 2p·Co 3p) 중 '센 선' 순위 값: 행의 선 이름으로 Scofield Al */
-function lineStrength(el,line){ const t=((LIB().scofield||{}).al)||{}; const v=t[el+" "+line]; if(v!=null) return v;
+/* measurable orbital totals of an element for the source, strongest first: [{orb,key,S,bes:[{sub,be}]}] */
+function practicalLines(el,hv){ const {t,h}=srcTab(hv), lv=((LIB().core||{})[el]||{}).lv||{};
+  return Object.keys(t).filter(k=>k.startsWith(el+" ")&&k.length-el.length-1===2).map(k=>k.slice(el.length+1)).map(o=>({orb:o,key:el+" "+o,S:t[el+" "+o],bes:Object.entries(lv).filter(([q])=>q.startsWith(o)).map(([q,v])=>({sub:q,be:v}))}))
+    .filter(x=>x.S>0&&x.bes.length&&Math.max(...x.bes.map(b=>b.be))<h-KE_MIN).sort((a,b)=>b.S-a.S); }
+/* an element's 'main line': the strongest measurable orbital total (e.g. Ba 3d, Co 2p; Se 3p, not 2p, under Al Kα) */
+function mainLine(el,hv){ const L=practicalLines(el,hv); return L.length?L[0]:null; }
+/* lines strong enough to disturb another region: measurable and S ≥ 25 % of the main line (Si 2p and 2s, Pt 4d·4f·4p) */
+const STRONG_FR=0.25;
+function strongLines(el,hv){ const L=practicalLines(el,hv); if(!L.length) return []; return L.filter(x=>x.S>=STRONG_FR*L[0].S); }
+/* rank of a line among the lines of the same element (Co 2p vs Co 3p): S of the row's source */
+function lineStrength(el,line,hv){ const {t}=srcTab(hv); const v=t[el+" "+line]; if(v!=null) return v;
   const o=(line||"").replace(/(1\/2|3\/2|5\/2|7\/2)$/,""); return t[el+" "+o]!=null?t[el+" "+o]:0; }
 function quantRows(sample){
   const rows=[]; const skipped=[];
@@ -49360,21 +49592,21 @@ function quantRows(sample){
     });
   });
   // 기본 포함: 원소마다 가장 센 선(Scofield) 하나만 — 같은 원소의 다른 선(Co 2p 와 Co 3p)이 둘 다 Σ 에 들어가지 않게. 사용자가 체크한 것은 그대로
-  const best={}; rows.forEach(r=>{ const v=lineStrength(r.el,r.line); if(!best[r.el]||v>best[r.el].v) best[r.el]={v,id:r.id}; });
+  const best={}; rows.forEach(r=>{ const v=lineStrength(r.el,r.line,r.hv); if(!best[r.el]||v>best[r.el].v) best[r.el]={v,id:r.id}; });
   rows.forEach(r=>{ r.weaker=best[r.el].id!==r.id; r.inc=r.incSet!=null?r.incSet!==false:!r.weaker; });
   rows.skipped=skipped;
   return rows;
 }
-/* 창 안에 다른 원소의 주선: 포함된 원소 + 이 시료 survey 에서 채택한 원소의 주선 BE(라이브러리, 원소 상태)가 행의 피팅 창(보정 BE) 안이면 경고.
-   예: Co 2p 창(775–810 eV) 안의 Ba 3d5/2 780 eV — 넓이에 Ba 가 섞인다 */
+/* 창 안에 다른 원소의 센 선: 포함된 원소 + 이 시료 survey 에서 채택한 원소의 센 선(v1.9.8: 그 스펙트럼의 X 선원에서 측정 가능한 선 중 S ≥ 주선의 25 %,
+   라이브러리 BE)이 행의 피팅 창(보정 BE) 안이면 경고. 예: Co 2p 창(775–810 eV) 안의 Ba 3d5/2 780 eV — 넓이에 Ba 가 섞인다 */
 function interferences(sample,rows){
   const els=new Set(rows.filter(r=>r.inc).map(r=>r.el));
   sampleSpecs(sample).forEach(s=>{ const st=S.ui.survey[s.uid]; if(st&&st.acc) Object.keys(st.acc).forEach(e=>{ if(st.acc[e]) els.add(e); }); });
   const out=[], seen=new Set();
   rows.filter(r=>r.inc).forEach(r=>{ const p=pr(r.sp), lo=p.lo+r.sh, hi=p.hi+r.sh;
-    els.forEach(e=>{ if(e===r.el) return; const m=mainLine(e); if(!m) return; const hit=m.bes.filter(b=>b.be>=lo&&b.be<=hi); if(!hit.length) return;
-      const k=r.id+"|"+e; if(seen.has(k)) return; seen.add(k);
-      out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 주선(${hit.map(b=>f(b.be,1)).join(", ")} eV) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); });
+    els.forEach(e=>{ if(e===r.el) return; const SL=strongLines(e,r.hv); SL.forEach(m=>{ const hit=m.bes.filter(b=>b.be>=lo&&b.be<=hi); if(!hit.length) return;
+      const k=r.id+"|"+e+"|"+m.orb; if(seen.has(k)) return; seen.add(k);
+      out.push(`${r.el} ${r.line||""} 창(${f(lo,0)}–${f(hi,0)} eV) 안에 ${e} ${hit.map(b=>b.sub).join("/")} 선(${hit.map(b=>f(b.be,1)).join(", ")} eV${m===SL[0]?", 주선":""}) — 넓이에 ${e} 가 섞였을 수 있습니다`); }); }); });
   return out;
 }
 /* VGD prop 415 (Acq_TXFN_Correction) = true: transmission 은 측정 때 이미 제거됨 → 'auto'·'profile' 에서 TF 를 다시 나누지 않는다 (이중 보정 — K-Alpha 실측에서 at% 최대 9.8 차, SPEC §4).
@@ -49416,9 +49648,10 @@ function panelQuant(el,sp){
    <div class="xps-row"><span class="xps-f">Transmission <select class="xps-sel" id="xqTf"><option value="auto">From file (VGD/avg), else none</option><option value="power">(PE/KE)^x</option><option value="none">None</option></select></span>${tq.model==="power"?`<span class="xps-f">x <input type="number" class="w56" step="0.05" id="xqTfx" value="${tq.x}"></span>`:""}${nRm?`<span class="badge inf" data-tfrm="panel" title="${esc(TF_RM_TIP)}">TF already removed at acquisition (${nRm})</span>`:""}${pwRm?`<span class="badge wr" data-tfrm="power" title="${esc(TF_RM_TIP)} (PE/KE)^x is applied anyway because you chose it — this corrects twice.">TF applied twice?</span>`:""}${tq.model==="auto"&&anyVgdTF?`<label class="xps-f" title="Read the VGD/avg transmission coefficients as in the Avantage manual: log10[A/(PE·XSF)] = a + b·x + c·x² + d·x³, x = log10(KE/PE) → T = PE·10^poly. Off = earlier natural-log reading (SPEC §4)"><input type="checkbox" id="xqTfAv" ${S.quant.tfAv?"checked":""}> Avantage form (log10)</label>`:""}</div>
    <div class="xps-row"><span class="xps-f">IMFP <select class="xps-sel" id="xqIm"><option value="power">KE^n</option><option value="tpp2m">TPP-2M (enter material)</option><option value="none">None</option></select></span>${im.model==="power"?`<span class="xps-f" title="λ ∝ KE^n. TPP-2M (Tanuma, Powell &amp; Penn, Surf. Interface Anal. 21, 165 (1994), Eq. 3–8) gives an effective n of 0.64–0.77 between 200 and 1500 eV for C, Si, SiO₂, CeO₂ and Au (computed in INNO) → default 0.7 (v1.9.5; was 0.6, uncited). For the most faithful value choose TPP-2M and enter the material.">n <input type="number" class="w56" step="0.05" id="xqImn" value="${im.n}"></span>`:""}
      ${im.model==="tpp2m"?`<span class="xps-f" title="Density (g/cm³)">ρ <input type="number" class="w56" step="0.1" id="xqR" value="${im.mat.rho}"></span><span class="xps-f" title="Valence electrons per molecule (or atom)">Nv <input type="number" class="w56" id="xqNv" value="${im.mat.Nv}"></span><span class="xps-f" title="Molar mass (g/mol)">M <input type="number" class="w64" id="xqM" value="${im.mat.M}"></span><span class="xps-f" title="Band gap (eV)">Eg <input type="number" class="w56" step="0.1" id="xqEg" value="${im.mat.Eg}"></span>`:""}</div>
+   ${migNotesHTML()}
    <div class="tw" style="margin-top:6px"><table class="xps-tbl xq-tbl"><thead><tr><th></th><th>Element · line</th><th class="num">at %</th><th class="num">BE</th><th class="num">Area</th><th class="num">RSF (S)</th><th class="num">T</th><th class="num">λ</th></tr></thead><tbody>
    ${rows.map(r=>{ const q=qi.get(r.id); const atC=`<td class="num xq-at">${q&&q.nd?`<span class="badge wr" title="Area ≤ 0 or below 2σ — not detected; excluded from the sum">n.d.</span>`:`<b>${q?f(q.at,2):"—"}</b>${q&&q.sAt?`<div class="muted xs">± ${f(q.sAt,2)}</div>`:""}${q&&q.sAt&&qmi.get(r.id)?`<div class="muted xs xq-mc" title="Monte Carlo 95 % interval: 2000 draws of every area within its σ (CasaXPS-style). Differs from ±σ when area errors are large">${f(qmi.get(r.id).lo,2)}–${f(qmi.get(r.id).hi,2)}</div>`:""}`}</td>`;
-     return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
+     return `<tr><td><input type="checkbox" data-qinc="${esc(r.id)}" ${r.inc?"checked":""} ${r.weaker&&r.incSet==null?`title="Another line of ${esc(r.el)} is stronger (Scofield) — excluded by default"`:""}></td><td><b>${esc(r.el)}</b> <select class="xps-sel" data-qline="${esc(r.id)}" style="padding:1px 3px;font-size:11.5px">${lineChoices(r.el,r.sp.reg.el===r.el?r.sp.reg.orb:r.line,r.hv).filter(Boolean).map(l=>`<option ${l===r.line?"selected":""}>${esc(l)}</option>`).join("")}${r.sp.reg.el!==r.el?`<option value="">Manual</option>`:""}</select><div class="muted xs">${esc(r.sp.region)} · ${esc(r.src)}${r.weaker&&!r.inc?" · weaker line":""}</div></td>${atC}
      <td class="num">${f(r.BE+r.sh,2)}</td><td class="num">${g(r.area,5)}${r.sArea?`<div class="muted xs">± ${g(r.sArea,3)}</div>`:""}</td>
      <td class="num"><input type="number" class="w56" step="any" data-qrsf="${esc(r.id)}" value="${r.S!=null?+(+r.S).toPrecision(5):""}" placeholder="?"><div class="muted xs">${esc(r.Ssrc)}</div></td>
      <td class="num">${q?g(q.T,4):"—"}${r.tf&&r.tf.removed?`<div class="muted xs" data-tfrm="${esc(r.id)}" title="${esc(TF_RM_TIP)}">removed ⓘ</div>`:""}</td><td class="num">${q?g(q.L,4):"—"}</td></tr>`; }).join("")}
@@ -49443,7 +49676,10 @@ function panelQuant(el,sp){
   const tav=$q(el,"#xqTfAv"); if(tav) tav.onchange=()=>{ S.quant.tfAv=tav.checked; save(); renderPanel(); };
   const tx=$q(el,"#xqTfx"); if(tx) tx.onchange=()=>{ S.quant.tf.x=+tx.value; save(); renderPanel(); };
   $q(el,"#xqIm").onchange=e=>{ S.quant.imfp.model=e.target.value; save(); renderPanel(); };
-  const imn=$q(el,"#xqImn"); if(imn) imn.onchange=()=>{ S.quant.imfp.n=+imn.value; save(); renderPanel(); };
+  const imn=$q(el,"#xqImn"); if(imn) imn.onchange=()=>{ S.quant.imfp.n=+imn.value; delete S.quant.imfpOld; save(); renderPanel(); };
+  const mR=$q(el,"#xqMigRe"); if(mR) mR.onclick=()=>{ const fi=ROOT&&ROOT.querySelector("#xpsFin"); if(fi) fi.click(); };
+  const mN=$q(el,"#xqMigN"); if(mN) mN.onclick=()=>{ S.quant.imfp.n=0.7; delete S.quant.imfpOld; save(); renderPanel(); };
+  const mK=$q(el,"#xqMigK"); if(mK) mK.onclick=()=>{ delete S.quant.imfpOld; save(); renderPanel(); };
   [["xqR","rho"],["xqNv","Nv"],["xqM","M"],["xqEg","Eg"]].forEach(([id,k])=>{ const i=$q(el,"#"+id); if(i) i.onchange=()=>{ S.quant.imfp.mat[k]=+i.value; save(); renderPanel(); }; });
   $a(el,"[data-qinc]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qinc]=S.quant.rows[i.dataset.qinc]||{}); o.inc=i.checked; save(); renderPanel(); });
   $a(el,"[data-qline]").forEach(i=>i.onchange=()=>{ const o=(S.quant.rows[i.dataset.qline]=S.quant.rows[i.dataset.qline]||{}); o.line=i.value; delete o.rsf; save(); renderPanel(); });
@@ -49743,7 +49979,7 @@ function exportFig(kind){ const sp=cur(); const s=figSVG(); if(!s){ note("그림
   const img=new Image(); img.onload=()=>{ const k=3; const cv=document.createElement("canvas"); cv.width=PW*k; cv.height=(PH+RH)*k; const ctx=cv.getContext("2d"); ctx.scale(k,k); ctx.drawImage(img,0,0); cv.toBlob(b=>download(nm+".png",b),"image/png"); }; img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(s); }
 function exportProject(){ if(!S.specs.length){ note("저장할 것이 없습니다","warn"); return; } const o=JSON.stringify({app:"INNO Analytics XPS",v:1,saved:new Date().toISOString(),state:S},(k,v)=>ArrayBuffer.isView(v)?{__f64:Array.from(v)}:v);
   download("XPS_project_"+new Date().toISOString().slice(0,10)+".json",new Blob([o],{type:"application/json"})); }
-function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); S=Object.assign(defState(),o.state); S.ui=Object.assign(defState().ui,o.state.ui||{}); S.quant=Object.assign(defState().quant,o.state.quant||{}); PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)","ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
+function importProject(txt){ try{ const o=revive(JSON.parse(txt)); if(!o||o.app!=="INNO Analytics XPS"||!o.state) throw new Error("INNO Analytics XPS 프로젝트 파일이 아닙니다"); const M=migrateState(o.state); S=M.st; PV={}; save(); rerender(); note("프로젝트를 열었습니다 ("+S.specs.length+" 스펙트럼)"+(M.notes.length?" — "+M.notes.join(" "):""),M.notes.length?"warn":"ok"); }catch(e){ note("열기 실패: "+(e.message||e),"warn"); } }
 
 
 /* ============================================================
@@ -50469,7 +50705,7 @@ function drawWS(){ if(!ROOT) return; const ws=S.ui.ws||"spectra"; const main=$q(
   else box.innerHTML="";
   placeShared(); drawMsg(); }
 
-window.XPS_UI={_staged:sp=>runStaged(sp||cur()),_recipe:(id,opt)=>applyRecipe(cur(),id,opt),_check:()=>{ const sp=cur(); return sp?checkOf(sp,pr(sp)):null; },_applyCheck:i=>{ const sp=cur(), p=pr(sp); const it=checkOf(sp,p); if(it&&it[i]) applyCheck(sp,p,it[i].act); },render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
+window.XPS_UI={_lines:{mainLine,strongLines,practicalLines,lineChoices,lineStrength},_interferences:(k,rows)=>interferences(k,rows),_migrate:o=>migrateState(o),_importProject:t=>importProject(t),_staged:sp=>runStaged(sp||cur()),_recipe:(id,opt)=>applyRecipe(cur(),id,opt),_check:()=>{ const sp=cur(); return sp?checkOf(sp,pr(sp)):null; },_applyCheck:i=>{ const sp=cur(), p=pr(sp); const it=checkOf(sp,p); if(it&&it[i]) applyCheck(sp,p,it[i].act); },render,rerender,_state:()=>S,_setState:o=>{ S=Object.assign(defState(),o); rerender(); },_load:loadFiles,_cur:cur,_pr:pr,_fit:runFit,_mc:runMC,_auto:autoSuggest,_shiftC1s:()=>calibrateC1s(cur()),_calib:sp=>calibrateC1s(sp||cur()),_saveTpl:saveTpl,_loadTpl:loadTpl,_tplList:tplList,_quantRows:k=>quantRows(k),_interf:k=>interferences(k,quantRows(k)),_augCalc:e=>augCalc(e),_applyAxis:(u,a,hv)=>applyAxis(byUid(u),a,hv),_axisCheck:u=>axisCheck(byUid(u)),_rename:renameSample,_move:(u,k)=>moveSpec(byUid(u),k),_geo:()=>GEO,_storeRef:sp=>storeRef(sp||cur()),_refs:()=>REFS(),_addRef:(id,lcf)=>{ const t=REFS().find(x=>x.id===id); if(t){ const sp=cur(), p=pr(sp); pushHist(p,"기준 추가"); addRefComp(sp,t,!!lcf); touch(p); rerender(); } },_lcfAll:()=>lcfAll(cur()),_batch:(uids,fit)=>{ S.ui.batSel={}; uids.forEach(u=>S.ui.batSel[u]=true); return runBatch(cur(),fit!==false); },_addKnot:be=>addKnot(be),
   /* v1.8 Series · ARXPS · Imaging · Processing (시험용 손잡이) */
   _res:()=>RES,_pres:()=>PRES,_ims:()=>IMS,_drawWS:()=>drawWS(),_ser:{compute:q=>serCompute(q),pca:()=>serPCA(),resolve:()=>serResolve(),build:()=>buildSet(SER()),tt:()=>ttRows(),profiles:()=>resolveProfiles(),applyFit:r=>{ const D=buildSet(SER()); const rs=D&&D.regions.find(x=>x.region===r); return rs?serApplyFit(rs):null; }},
   _arx:{get:()=>arxIntensities(),ov:()=>arxFitOv(),ml:()=>arxFitMl(),rdp:()=>arxRDP(),me:()=>arxMaxent(),al:k=>arxAL(arxKE(k))},
