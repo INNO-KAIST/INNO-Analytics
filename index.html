@@ -43874,7 +43874,7 @@ function s2Base(sh,p){
   if(sh==="LA"){ const F=p.F,a=Math.max(LA_ALPHA_LO,p.alpha),b=Math.max(LA_ALPHA_LO,p.beta),N=laNorm(F,a,b); return {f:x=>Math.pow(1+4*x*x/(F*F),-(x>=0?a:b))/N,left:(F/4)*SQPI*Math.exp(lgamma(b-0.5)-lgamma(b))/N,s0:F*Math.min(1,Math.sqrt(Math.pow(2,1/Math.max(a,b))-1)),sg:sgw(p.wG),kink:a!==b,kd:x=>{ const t=1+4*x*x/(F*F); return (Math.pow(t,-a)-Math.pow(t,-b))/N; }}; }   // s0 (v1.9.11): 좁은 쪽 반높이 폭 — α 가 크면 F 보다 좁음 (예전 s0 = F 는 α 20 에서 격자 부족, SPEC_shapes2 §3)
   if(sh==="V"){ const wG=p.wG,wL=p.wL; return {f:x=>voigt(x,wG,wL),left:0.5,s0:Math.max(1e-3,0.5346*wL+Math.sqrt(0.2166*wL*wL+wG*wG)),sg:0}; }
   if(sh==="TLA"){ const F=p.F,a=Math.max(LA_ALPHA_LO,p.alpha),mu=p.mu, I1=tlaI1(a), J=tlaJ(a), c=PI/2+PI/mu, Z=2*c*I1*F;
-    return {f:x=>{ const u=x/F; return Math.pow(1+4*u*u,-a)*(PI/2+Math.atan(2*u)+PI/mu)/Z; },left:F*((PI/mu)*I1+0.5*J)/Z,s0:F,sg:sgw(p.wG)}; }
+    return {f:x=>{ const u=x/F; return Math.pow(1+4*u*u,-a)*(PI/2+Math.atan(2*u)+PI/mu)/Z; },left:F*((PI/mu)*I1+0.5*J)/Z,s0:F*Math.min(1,Math.sqrt(Math.pow(2,1/a)-1)),sg:sgw(p.wG)}; }   // s0 (v1.9.12): (1+4u²)^−α 의 반높이 폭 — LA 와 같은 식 (예전 s0 = F 는 α 가 크면 격자 부족, SPEC_shapes2 §3)
   if(sh==="GLN"||sh==="SGLN"){ const F=p.F,m=p.m,form=sh==="SGLN"?"SGL":"GL", tail=p.tail==="T"||p.tail==="PHI"?p.tail:"", K=glnConst(form,m,tail,p.tj,p.tk), raw=glnRaw(form,m), Z=K.Z*F, kap=K.kap, jj=K.j;
     const f=tail&&kap>0?x=>{ const u=x/F, r=raw(u); return (u>0?r+(1-r)*jj*Math.exp(-kap*u):r)/Z; }:x=>raw(x/F)/Z;
     return {f,left:0.5*K.R0*F/Z,s0:tail&&kap>0?Math.min(F,4*F/kap):F,sg:sgw(p.wG),kink:!!tail,kd:tail&&kap>0?x=>{ const u=x/F; return (1-raw(u))*jj*Math.exp(-kap*u)/Z; }:x=>0}; }
@@ -43892,11 +43892,11 @@ function gridInt6(v,k0,h,a,b){   // ∫_a^b (6점 보간 함수) — 온 칸은 
   let s=0; for(let c=c0;c<c1;c++){ if(c-2<0||c+3>M-1){ s+=part(c,c+1); continue; } s+=h*(11*(v[c-2]+v[c+3])-93*(v[c-1]+v[c+2])+802*(v[c]+v[c+1]))/1440; }
   return s+part(ta,c0)+part(c1,tb); }
 /* 격자 Gaussian 합성곱 (사다리꼴 = 매끄러운 피적분에 지수 수렴; 핵 ±8σ, 해석 무게) */
-function s2Gconv(v,k0,h,sg,r,xa,xb){   // 출력은 r 칸마다 (x = j·r·h), [xa, xb] 안만 → [값, j0].  핵 ±7σ (잘린 무게 < 3e-12)
+function s2Gconv(v,k0,h,sg,r,xa,xb,cnt){   // 출력은 r 칸마다 (x = j·r·h), [xa, xb] 안만 → [값, j0].  핵 ±7σ (잘린 무게 < 3e-12). cnt: 계산량만 세고 [null, j0]
   r=r||1; const K=Math.ceil(7*sg/h), w=new Float64Array(K+1), c=h/(sg*Math.sqrt(2*PI)); for(let k=0;k<=K;k++){ const t=k*h/sg; w[k]=c*Math.exp(-0.5*t*t); }
   const n=v.length; let j0=Math.ceil(k0/r), j1=Math.floor((k0+n-1)/r);
   if(xa!=null){ j0=Math.max(j0,Math.floor(xa/(r*h))); j1=Math.min(j1,Math.ceil(xb/(r*h))); }
-  const m=Math.max(0,j1-j0+1), out=new Float64Array(m); WORK.n+=m*K*WORK.kc;
+  const m=Math.max(0,j1-j0+1); WORK.n+=m*K*WORK.kc; if(cnt) return [null,j0]; const out=new Float64Array(m);
   const w0=w[0]; let jj=0;
   {   // (v1.9.10) 안쪽 마디는 4 개씩 함께 (각 출력의 덧셈 순서는 그대로 → 비트 단위로 같음, ~1.6 배 빠름)
     const r2=2*r, r3=3*r;
@@ -43931,8 +43931,8 @@ function s2SmallD(v,K){ const M=v.length, w=K.w, Kw=K.Kw, c0=w[0]-1, D=new Float
    u = f·(Φ(y−L)+1/μ)·N_ST = 매끄러운 부분 + K₀ + K_L,  K₀ = kd(y)·(Φ(y−L) − kD(y−L)H(y−L) + 1/μ)·N_ST·H(y)  (f″ 끊김, y = 0),
    K_L = f(y)·kD(y−L)·N_ST·H(y−L)  (Φ‴ = f″ 끊김, y = L ≥ 0). 격자 연산(보간 ⊗ G − 1)은 다항식에 정확하므로 K 의 몫이 틀리는 곳은 |x − y₀| < (C+6)h 뿐:
    거기서만 out += [G⊗K − K](x) (Kronrod-15, 조각 4σ, 끊는 점 0·L) − lag6(K 의 마디 값에 같은 격자 연산)(x). */
-function s2KinkFix(out,x,sg,h,SK,kinks,brk){ s2KinkFixF(sg,h,SK,kinks,brk)(x,out); }
-function s2KinkFixF(sg,h,SK,kinks,brk){   // 준비(Kv·DK·조각 캐시)를 한 번 → (x, out) 에 여러 번 적용
+function s2KinkFix(out,x,sg,h,SK,kinks,brk,s0){ s2KinkFixF(sg,h,SK,kinks,brk,s0)(x,out); }
+function s2KinkFixF(sg,h,SK,kinks,brk,s0){   // 준비(Kv·DK·조각 캐시)를 한 번 → (x, out) 에 여러 번 적용
   const C=SK.C, Kw=SK.Kw, w=SK.w, T=8.5*sg, cn=1/(sg*Math.sqrt(2*PI)), i2=1/(2*sg*sg);
   const KS=kinks.map(({y0,A:A0})=>{ const A=y=>y>y0?A0(y):0, jc=Math.round(y0/h), R=(C+6)*h, nD=C+9, nK=nD+Kw;
     const Kv=new Float64Array(2*nK+1), Av=new Float64Array(2*nK+1); for(let j=-nK;j<=nK;j++){ const y=(jc+j)*h, a=A0(y); Av[nK+j]=a; Kv[nK+j]=y>y0?a:0; }
@@ -43940,7 +43940,7 @@ function s2KinkFixF(sg,h,SK,kinks,brk){   // 준비(Kv·DK·조각 캐시)를 �
     const DK=op(Kv), DA=op(Av), DD=new Float64Array(2*nD+1); for(let j=0;j<DD.length;j++) DD[j]=DA[j]-DK[j];
     WORK.n+=(2*nK+1)*6;
     // G⊗K: y > y₀ 를 폭 4σ 의 고정 조각(끊는 점에서 다시 나눔)으로, 조각마다 Kronrod-15 마디의 A 를 한 번만 계산해 출력 점끼리 나눠 씀
-    const pw=4*sg, PC=new Map(), piece=k=>{ let P=PC.get(k); if(P) return P; const a=y0+k*pw, b=a+pw, br=[a]; for(const t of brk) if(t>a&&t<b) br.push(t); br.push(b);
+    const pw=Math.min(4*sg,Math.max(s0,Math.abs(y0))/2), PC=new Map(), piece=k=>{ let P=PC.get(k); if(P) return P; const a=y0+k*pw, b=a+pw, br=[a]; for(const t of brk) if(t>a&&t<b) br.push(t); br.push(b);   // (v1.9.12) 조각 ≤ max(s0, |y₀|)/2: A 는 봉우리 근처에서 s0 크기로, 먼 꺾임(DS-Shirley xc)에서는 |y₀| 크기로 변함 (예전 4σ 만 — 큰 σ 에서 Kronrod 가 A 를 못 풀어 최댓값 대비 4e-4)
       const ys=[], ws=[]; for(let q=0;q+1<br.length;q++){ const hw=(br[q+1]-br[q])/2, mid=br[q]+hw; for(let j=0;j<15;j++){ const y=mid+hw*K15X[j]; ys.push(y); ws.push(K15W[j]*hw*cn*A0(y)); } }
       P={ys,ws}; PC.set(k,P); return P; };
     return {y0,A,jc,R,nD,DK,DD,pw,piece}; });
@@ -43983,20 +43983,20 @@ function s2WinEdge(F,lo,hi,sg,brk){ const T=8.5*sg, r2=1/(sg*Math.SQRT2), Pn=z=>
   if(hi-lo<=2*T) return quadA(g,lo-T,hi+T,1e-13,bk); return quadA(g,lo-T,lo+T,1e-13,bk)+quadA(g,hi-T,hi+T,1e-13,bk); }
 /* 사다리꼴 σ (마디 hf, 출력 간격 H, 출력 마디 k0·H…) 의 꺾임 보정: K(y) = kd(y)·H(y − xc).
    출력 = lag6(사다리꼴 G⊗f 마디) 에서 K 의 몫(사다리꼴 마디 합 TK_j = Σ_k hf·g(k·hf)·K(x_j + k·hf))을 빼고 정확한 G⊗K (Kronrod, 폭 4σ 조각)를 더함, |x − xc| < 8.5σ + 4H 만 */
-function s2TrapKink(out,x,sg,hf,H,k0,kd,xc){ s2TrapKinkF(sg,hf,H,kd,xc)(x,out); }
-function s2TrapKinkF(sg,hf,H,kd,xc){   // 준비(TK·조각 캐시)를 한 번 → (x, out) 에 여러 번
+function s2TrapKink(out,x,sg,hf,H,k0,kd,xc,s0){ s2TrapKinkF(sg,hf,H,kd,xc,s0)(x,out); }
+function s2TrapKinkF(sg,hf,H,kd,xc,s0,i8){   // i8: 출력이 8 점 보간이면 TK 도 같은 보간 (빼는 몫이 출력의 사다리꼴 몫과 같게)   // 준비(TK·조각 캐시)를 한 번 → (x, out) 에 여러 번
   const T=8.5*sg, R=T+4*H, KK=Math.ceil(7*sg/hf), cn=1/(sg*Math.sqrt(2*PI)), i2=1/(2*sg*sg);
   const j0=Math.floor((xc-R)/H)-3, j1=Math.ceil((xc+R)/H)+3, m0=Math.floor((j0*H)/hf)-KK, m1=Math.ceil((j1*H)/hf)+KK;
   const Kf=new Float64Array(m1-m0+1); for(let m=m0;m<=m1;m++){ const y=m*hf; Kf[m-m0]=y>xc?kd(y):0; }
   const w=new Float64Array(KK+1); for(let k=0;k<=KK;k++){ const t=k*hf/sg; w[k]=hf*cn*Math.exp(-0.5*t*t); }
   const TK=new Float64Array(j1-j0+1); for(let j=j0;j<=j1;j++){ const c=Math.round(j*H/hf)-m0; let s=w[0]*Kf[c]; for(let k=1;k<=KK;k++) s+=w[k]*(Kf[c+k]+Kf[c-k]); TK[j-j0]=s; }
   WORK.n+=(m1-m0+1)*3+(j1-j0+1)*KK*WORK.kc;
-  const pw=4*sg, PC=new Map(), piece=k=>{ let P=PC.get(k); if(P) return P; const a=xc+k*pw, hw=pw/2, mid=a+hw, ys=new Float64Array(15), ws=new Float64Array(15);
+  const pw=Math.min(4*sg,Math.max(s0,Math.abs(xc))/2), PC=new Map(), piece=k=>{ let P=PC.get(k); if(P) return P; const a=xc+k*pw, hw=pw/2, mid=a+hw, ys=new Float64Array(15), ws=new Float64Array(15);   // (v1.9.12) 조각 ≤ max(s0, |xc|)/2 (kd 의 복소 특이점은 0 ± i·wL/2 — 꺾임 xc 에서 거리 ≥ max(wL/2, |xc|))
     for(let j=0;j<15;j++){ const y=mid+hw*K15X[j]; ys[j]=y; ws[j]=K15W[j]*hw*cn*kd(y); } P={ys,ws}; PC.set(k,P); return P; };
   return (x,out)=>{ for(let i=0;i<out.length;i++){ const xi=x[i]; if(!(Math.abs(xi-xc)<R)) continue;
     let I=0; const ka=Math.max(0,Math.floor((xi-T-xc)/pw)), kb=Math.floor((xi+T-xc)/pw);
     for(let k=ka;k<=kb;k++){ const P=piece(k); for(let q=0;q<15;q++){ const t=P.ys[q]-xi; I+=P.ws[q]*Math.exp(-t*t*i2); } }
-    out[i]+=I-lag6(TK,j0,H,xi); } }; }
+    out[i]+=I-(i8?lag8:lag6)(TK,j0,H,xi); } }; }
 /* Φ(z) = Φ(가까운 마디) + ∫_마디^z f (GL4, 길이 ≤ h/2). 꺾임은 마디 x = 0 에 있어 넘지 않음 → 꺾인 바탕의 지연 Φ(x−L) 를 보간 오차 없이 (|x−L| < 4h 에서만 씀) */
 function s2PhiX(P,k0,h,f,cum){
   if(cum){ const T=[0], U=[0]; const g=(a,b)=>{ let s=0; for(let q=0;q<4;q++) s+=GL4W[q]*f(a+(b-a)*GL4T[q]); return s*(b-a); };   // kD(z) = ∫_0^z f (z < 0 도: 꺾임 보정의 매끄러운 연장), 마디 표를 필요한 만큼 늘림
@@ -44013,7 +44013,7 @@ function tpEval(x,p){ const n=x.length, out=new Float64Array(n), F=p.F, ta=p.ta,
     out[i]=((c0+c1*t)*dl-c1*dm)/Z; }
   return out; }
 /* 새 모양의 값 (상대좌표 x). 넓이 1 (ℝ), 단 DS·SB 는 피팅 창 [ctx.lo, ctx.hi] 안 넓이 1 (SPEC_shapes2 §2) */
-const S2G=new Map(), S2GN={hit:0,miss:0}, S2G_MAX=48; let S2EP=0;   // 격자 단계 캐시 (LRU)
+const S2G=new Map(), S2GN={hit:0,miss:0,lv:0}, S2G_MAX=48; let S2EP=0;   // 격자 단계 캐시 (LRU)
 function s2Eval(sh,x,p,ctx){ S2EP++;
   const n=x.length; let out=new Float64Array(n); if(!n) return out;
   if(sh==="TP") return tpEval(x,p);
@@ -44029,44 +44029,128 @@ function s2Eval(sh,x,p,ctx){ S2EP++;
   // 2) 격자 (SPEC_shapes2 §3): 입력 간격 h = 0.04·2^−k ≤ min(s0/16 (꺾임 있으면 /32), σ/2) — 양자화(폭이 조금 바뀌어도 마디 고정).
   //    출력(보간·창 적분) 간격 r·h ≤ max(s0/32, σ_eff/8): 넓은 Gaussian 이면 r 칸마다만 합성곱을 계산. 여유 8(σ1+σ2)
   //    σ₁ < 2h₀ (small1): 격자를 σ₁ 에 맞춰 줄이지 않고 보간 ⊗ G 핵 (σ₂ 와 같은 방법; 예전엔 h ≤ σ₁/2 → 문턱 바로 위에서 격자 수천 배)
-  const qz=t=>{ let q=0.04; while(q>t&&q>1e-7) q/=2; return q; };
-  const kk=!!B.kink&&!!B.kd, seff=Math.sqrt(sg1*sg1+sg2*sg2), smooth0=sg1&&seff>=B.s0/2, h0o=qz(B.s0/(B.kink||!smooth0?32:16)), small1=sg1>0&&(sg1<2*h0o||(kk&&sg1<6*h0o));   // 꺾인 바탕: σ₁ < 6h₀ (그 위 DS-Shirley 는 사다리꼴 + 꺾임 보정 s2TrapKink)
+  const pl=s2Plan(B.s0,!!B.kink,!!B.kink&&!!B.kd,sg1,sg2);
+  const {kk,seff,small1,smooth,g1,small}=pl; let h=pl.h;
+  const P=8*(sg1+sg2)+16*h+(small1?9*sg1+4*h:0); let a=Math.min(lo,xmin)-P, b=Math.max(hi,xmax)+P; if(mod){ a=Math.min(a,-h); b=Math.max(b,h); }
+  while((b-a)/h>400000) h*=2;
+  const xa0=Math.min(lo,xmin), xb0=Math.max(hi,xmax);   // 출력이 필요한 범위 (+ 다음 단계 여유, 보간 여유 8 칸)
+  // (v1.9.12) 여러 층 격자: 좁은 구조(α 큰 LA·TLA, 짧은 꼬리 …)가 넓은 창의 한가운데에만 있으면 바깥은 성긴 격자로 (SPEC_shapes2 §3 '층')
+  if(sh!=="DS"&&!L&&(b-a)/h>S2LV.min){ const LV=s2Levels(sh,p,B,mod,sg1,sg2,muI,pl,h,a,b,xa0,xb0); if(LV) return s2EvalLv(sh,p,B,mod,x,n,lo,hi,win,muI,sg1,sg2,stN,seff,LV); }
+  // (v1.9.10) 격자 단계 캐시: 결과가 위치(be)에 의존하는 것은 마디 범위 정수(k0, k1)와 합성곱 출력 범위 정수뿐 → 그 정수들과 모양 매개변수를 키로.
+  //    LM 의 be 열(be ± 2.8e-4 eV)은 대개 같은 정수 → 격자 단계 전체를 그대로(비트 단위로 같은 계산) 다시 씀
+  const gkey=sh+"|"+JSON.stringify(p)+"|"+s2KeyTail(h,a,b,xa0,xb0,smooth,seff,sg2,g1);
+  const G=s2GridC(gkey,sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0,null);
+  S2EP++; return s2Out(G,B,mod,x,n,lo,hi,win,muI,L,sg1,sg2,kk,small1); }   // 출력 단계의 조각 세기는 새로 (격자 단계 몫은 G.work — 캐시 적중과 무관하게 같은 세기)
+const S2Q=t=>{ let q=0.04; while(q>t&&q>1e-7) q/=2; return q; };
+/* 넓은 Gaussian 경로의 출력 간격 r·h ≤ min(σ_eff/8, σ₂/2). (v1.9.12) 이 경로의 출력은 8 점 Lagrange (lag8): 예전 6 점은 출력 ≈ Gaussian(폭 σ_c ≥ σ_eff) 에서
+   4.9e-3·15·(H/σ_c)⁶ = 최댓값 대비 2.8e-7 (H = σ/8; ST 는 곱이라 ~2 배 — sweep 6.1e-7) → 8 점 1.07e-3·105·(1/8)⁸ = 6.7e-9 (같은 간격, 같은 계산량).
+   꺾인 바탕(α ≫ β 의 LA: f″ 끊김 8(α−β)/F²·f(0))에서도 6 점은 1.7e-7 (ST 6.0e-7) 이었고 8 점은 ≤ 2.1e-8 (§3 v1.9.12) */
+function s2Stride(smooth,seff,sg2,h){ return smooth?Math.max(1,Math.floor(Math.min(seff/8,sg2?sg2/2:Infinity)/h)):1; }
+/* 8 점 Lagrange (마디 k−3…k+4) — 넓은 Gaussian 경로의 출력 격자 보간 */
+const L8D=[-5040,720,-240,144,-144,240,-720,5040];   // Π_{j≠i}(i − j)
+function lag8(v,k0,h,x){ const M=v.length, t=x/h-k0; let b=Math.floor(t)-3; if(b<0) b=0; if(b>M-8) b=M-8; const f=t-b;
+  const d0=f,d1=f-1,d2=f-2,d3=f-3,d4=f-4,d5=f-5,d6=f-6,d7=f-7, p1=d0,p2=p1*d1,p3=p2*d2,p4=p3*d3,p5=p4*d4,p6=p5*d5,p7=p6*d6, q6=d7,q5=q6*d6,q4=q5*d5,q3=q4*d4,q2=q3*d3,q1=q2*d2,q0=q1*d1;
+  return (q0*v[b]/L8D[0]+p1*q1*v[b+1]/L8D[1]+p2*q2*v[b+2]/L8D[2]+p3*q3*v[b+3]/L8D[3]+p4*q4*v[b+4]/L8D[4]+p5*q5*v[b+5]/L8D[5]+p6*q6*v[b+6]/L8D[6]+p7*v[b+7]/L8D[7]); }
+/* 격자 계획: s0 = 가장 좁은 구조, kink = 꺾임(격자 /32), kk = 꺾임 보정 가능(kd) → 간격 h 와 경로 (작은 σ₁ · 사다리꼴 σ₁ · 작은 σ₂ …) */
+function s2Plan(s0,kink,kk,sg1,sg2){
+  const seff=Math.sqrt(sg1*sg1+sg2*sg2), smooth0=sg1&&seff>=s0/2, h0o=S2Q(s0/(kink||!smooth0?32:16)), small1=sg1>0&&(sg1<2*h0o||(kk&&sg1<6*h0o));   // 꺾인 바탕: σ₁ < 6h₀ (그 위 DS-Shirley 는 사다리꼴 + 꺾임 보정 s2TrapKink)
   const smooth=smooth0&&!small1, g1=small1?0:sg1;   // g1: 사다리꼴 합성곱으로 처리할 σ₁ (예전 경로 그대로)
-  let h=qz(Math.min(B.s0/(B.kink||!smooth?32:16),g1?g1/2:Infinity));
+  let h=S2Q(Math.min(s0/(kink||!smooth?32:16),g1?g1/2:Infinity));
   // σ₂ < 2h: 격자를 σ₂ 에 맞춰 줄이지 않고 보간 ⊗ G 핵 (예전: h ≤ σ₂/2 → 격자 수천 배·5–9 배 느림). 꺾인 바탕(사다리꼴 σ₁ 없음)은 모든 σ₂ 에서
   // (사다리꼴은 꺾임에서 Euler–Maclaurin h⁴/σ² 오차 — σ₂ = 2h 에서 1e-6 넘음 — 핵 + 꺾임 보정은 σ₂ 와 무관하게 ≤ 4e-7)
   const small=sg2>0&&(sg2<2*h||(!g1&&kk));
-  if(sg2&&!small) h=qz(Math.min(B.s0/(B.kink||!smooth?32:16),g1?g1/2:Infinity,sg2/2));
-  const P=8*(sg1+sg2)+16*h+(small1?9*sg1+4*h:0); let a=Math.min(lo,xmin)-P, b=Math.max(hi,xmax)+P; if(mod){ a=Math.min(a,-h); b=Math.max(b,h); }
-  while((b-a)/h>400000) h*=2;
-  // (v1.9.10) 격자 범위·합성곱 출력 범위를 64h 단위로 바깥쪽 맞춤 → 위치(be)만 조금 바뀐 평가(LM 의 be 열)는 같은 범위 → 격자 단계 전체를 캐시에서 (값은 마디마다 그대로)
-  // (v1.9.10) 격자 단계 캐시: 결과가 위치(be)에 의존하는 것은 마디 범위 정수(k0, k1)와 합성곱 출력 범위 정수뿐 → 그 정수들과 모양 매개변수를 키로.
-  //    LM 의 be 열(be ± 2.8e-4 eV)은 대개 같은 정수 → 격자 단계 전체를 그대로(비트 단위로 같은 계산) 다시 씀
-  const xa0=Math.min(lo,xmin), xb0=Math.max(hi,xmax);   // 출력이 필요한 범위 (+ 다음 단계 여유, 보간 여유 8 칸)
-  const rr=smooth?Math.max(1,Math.floor(Math.min(seff/8,sg2?sg2/2:Infinity)/h)):1, r1=sg2?1:rr, m1=8*sg2+8*h*Math.max(r1,rr), h2=g1?h*r1:h, r2=g1&&r1>1?1:rr;
-  const gkey=sh+"|"+JSON.stringify(p)+"|"+h+"|"+Math.floor(a/h)+"|"+Math.ceil(b/h)+"|"+Math.floor((xa0-m1)/(r1*h))+"|"+Math.ceil((xb0+m1)/(r1*h))+"|"+Math.floor((xa0-8*h2*r2)/(r2*h2))+"|"+Math.ceil((xb0+8*h2*r2)/(r2*h2));
+  if(sg2&&!small) h=S2Q(Math.min(s0/(kink||!smooth?32:16),g1?g1/2:Infinity,sg2/2));
+  return {kk,seff,small1,smooth,g1,small,h}; }
+function s2KeyTail(h,a,b,xa0,xb0,smooth,seff,sg2,g1){
+  const rr=s2Stride(smooth,seff,sg2,h), r1=sg2?1:rr, m1=8*sg2+8*h*Math.max(r1,rr), h2=g1?h*r1:h, r2=g1&&r1>1?1:rr;
+  return h+"|"+Math.floor(a/h)+"|"+Math.ceil(b/h)+"|"+Math.floor((xa0-m1)/(r1*h))+"|"+Math.ceil((xb0+m1)/(r1*h))+"|"+Math.floor((xa0-8*h2*r2)/(r2*h2))+"|"+Math.ceil((xb0+8*h2*r2)/(r2*h2)); }
+function s2GridC(gkey,sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0,seed){
   let G=S2G.get(gkey); if(G){ S2G.delete(gkey); S2G.set(gkey,G); S2GN.hit++; WORK.n+=G.work; }   // 계산량 세기는 캐시와 무관하게(§3.3b 갈래 몫이 캐시 상태에 따라 달라지지 않게)
-  else { const w0=WORK.n; G=s2Grid(sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0); G.work=WORK.n-w0; S2G.set(gkey,G); if(S2G.size>S2G_MAX) S2G.delete(S2G.keys().next().value); S2GN.miss++; }
-  S2EP++; return s2Out(G,B,mod,x,n,lo,hi,win,muI,L,sg1,sg2,kk,small1); }   // 출력 단계의 조각 세기는 새로 (격자 단계 몫은 G.work — 캐시 적중과 무관하게 같은 세기)
+  else { const w0=WORK.n; G=s2Grid(sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0,seed); G.work=WORK.n-w0; S2G.set(gkey,G); if(S2G.size>S2G_MAX) S2G.delete(S2G.keys().next().value); S2GN.miss++; }
+  return G; }
+/* (v1.9.12) 층 격자 (SPEC_shapes2 §3). 층 0 = 위 계획(h₀, 꺾임 보정 등 그대로), 층 j ≥ 1 = 꺾임 없는 바탕으로 본 계획(s0_j = 128·h_{j−1} → h_j ≈ 4h_{j−1}).
+   층 j 는 |x| ≥ R_j (= X_j + 연산이 닿는 거리) 의 출력만 맡는다. X_j = 그 바깥에서 f(그리고 수식어가 있으면 Φ)의 6 점 보간 오차(간격 h_j)가 최댓값 대비 ε = 1e-9 아래인
+   가장 작은 반지름 — s2Probe 가 기하 표본(비 1.25)으로 직접 잼(쪽마다 따로). 층 j 의 Φ 는 층 j−1 의 고운 Φ 마디 값을 그대로 받고 그 밖만 h_j 칸으로 누적.
+   마디 수가 한 층 격자의 절반 아래일 때만 씀 (아니면 예전 경로 그대로 — 비트 동일). */
+const S2LV={min:6000}, S2LV_EPS=1e-9, S2PR=new Map();   // S2LV.min: 이보다 마디가 많은 한 층 격자만 층을 따져 봄 (시험은 XPS_CORE._s2lv 로 바꿈)
+function s2Levels(sh,p,B,mod,sg1,sg2,muI,pl0,h0,a0,b0,xa0,xb0){
+  if(pl0.h!==h0) return null;   // 400000 점 제한에 걸린 경우는 그대로
+  let fp=0; for(let i=-24;i<=24;i++){ const v=B.f(i*B.s0/8); if(v>fp) fp=v; }
+  const seff=pl0.seff, op=seff>0?Math.min(fp,1/(2.5066282746310002*seff)):fp, q=B.left+muI;
+  const tolF=mod==="SB"?Infinity:mod==="ST"?S2LV_EPS*op*q/(2*(1+muI)):S2LV_EPS*op, tolP=mod==="SB"?S2LV_EPS:mod==="ST"?S2LV_EPS*op*q/(2*fp):Infinity;
+  const pkey=sh+"|"+JSON.stringify(p)+"|";
+  const LV=[{pl:pl0,h:h0,rl:0,rr:0}]; let hp=h0, rl=0, rr=0;
+  for(let j=1;j<=6;j++){ const pj=s2Plan(128*hp,false,false,sg1,sg2); if(!(pj.h>1.5*hp)) break;
+    const r=s2Stride(pj.smooth,seff,sg2,pj.h), reach=9*(sg1+sg2)+(8*r+24)*pj.h;
+    if(Math.max(rr,reach)>=xb0&&Math.max(rl,reach)>=-xa0) break;   // 연산이 닿는 거리만으로 창을 덮음 → 이 층이 맡을 출력 없음 (표본 생략)
+    const XR=s2Probe(pkey,B,pj.h,1,xb0+reach,tolF,tolP), XL=s2Probe(pkey,B,pj.h,-1,-xa0+reach,tolF,tolP);
+    const nrr=Math.max(rr,XR+reach), nrl=Math.max(rl,XL+reach);
+    if(nrr>=xb0&&nrl>=-xa0) break;   // 이 층이 맡을 출력이 없음
+    LV.push({pl:pj,h:pj.h,rl:nrl,rr:nrr}); hp=pj.h; rl=nrl; rr=nrr; }
+  if(LV.length<2) return null;
+  // 층마다 격자 범위: 층 j 는 출력 (−R_{j+1}, R_{j+1}) ∩ 창 (마지막 층은 창 전체) + 여유 P_j
+  let cost=0;
+  for(let j=0;j<LV.length;j++){ const Lj=LV[j], hj=Lj.h, P=8*(sg1+sg2)+16*hj+(Lj.pl.small1?9*sg1+4*hj:0), nx=LV[j+1];
+    const ya=nx?Math.max(xa0,-nx.rl):xa0, yb=nx?Math.min(xb0,nx.rr):xb0; let a=ya-P, b=yb+P; if(mod){ a=Math.min(a,-hj); b=Math.max(b,hj); }
+    Lj.ya=ya; Lj.yb=yb; Lj.a=a; Lj.b=b; Lj.skip=!mod&&!(yb>ya); if(!Lj.skip) cost+=(b-a)/hj; }   // 수식어 없음: 출력 없는 층은 만들지 않음 (수식어 있으면 Φ 를 다음 층에 넘기려고 만듦 — 0 을 품음)
+  if(!(cost<0.5*(b0-a0)/h0)) return null;
+  return LV; }
+/* 층 j 의 간격 h 에서 f(·Φ) 를 6 점 보간했을 때 오차가 허용(tolF·tolP)을 넘는 가장 바깥 반지름 (쪽 s = ±1, 0…Ymax).
+   표본 y = 0, s0/8·1.25^k; 각 y 에서 마디 y + m·h (m = −2…3) 로 y + h/2 를 보간 (무게 (3, −25, 150, 150, −25, 3)/256) 해 정확한 값과 비교.
+   Φ 는 마디 사이 ∫f (칸마다 GL4) 로. 넘는 마지막 표본 × 1.25² + 3h 를 돌려줌 (사이 표본이 오차의 0 을 지나도 한 칸 여유).
+   계산량 세기에는 넣지 않음 (캐시 적중과 무관하게 결정적이도록; 격자에 비해 작음) */
+function s2Probe(pkey,B,h,s,Ymax,tolF,tolP){
+  const y0=B.s0/8, K=Math.max(1,Math.ceil(Math.log(Math.max(Ymax,y0)/y0)/Math.log(1.25))+1), key=pkey+h+"|"+s+"|"+K+"|"+tolF+"|"+tolP;
+  let X=S2PR.get(key); if(X!=null) return X;
+  const f=B.f, c=[3,-25,150,150,-25,3], cell=(u,w)=>{ let t=0; for(let q=0;q<4;q++) t+=GL4W[q]*f(u+(w-u)*GL4T[q]); return t*(w-u); };
+  let last=-1;
+  for(let k=0;k<=K;k++){ const y=k?y0*Math.pow(1.25,k-1):0, z=t=>s*(y+t*h);
+    let fail=false;
+    if(tolF<Infinity){ let e=-f(z(0.5)); for(let m=-2;m<=3;m++) e+=c[m+2]*f(z(m))/256; fail=Math.abs(e)>tolF; }
+    if(!fail&&tolP<Infinity){ const I=[]; for(let m=-2;m<=2;m++) I.push(s*cell(z(m),z(m+1)));   // 방향과 무관하게 ∫ (t 좌표)
+      const F=[-(I[0]+I[1]),-I[1],0,I[2],I[2]+I[3],I[2]+I[3]+I[4]]; let e=-s*cell(z(0),z(0.5)); for(let m=0;m<6;m++) e+=c[m]*F[m]/256; fail=Math.abs(e)>tolP; }
+    if(fail) last=k; }
+  X=last<0?0:last===K?Infinity:(last?y0*Math.pow(1.25,last-1):0)*1.5625+3*h+y0;
+  if(S2PR.size>256) S2PR.clear(); S2PR.set(key,X); return X; }
+function s2EvalLv(sh,p,B,mod,x,n,lo,hi,win,muI,sg1,sg2,stN,seff,LV){
+  const out=new Float64Array(n), base=sh+"|"+JSON.stringify(p)+"|LV"; let key=base, prev=null, N=0; S2GN.lv++;
+  for(let j=0;j<LV.length;j++){ const Lj=LV[j], pl=Lj.pl, h=Lj.h, Bj=j?Object.assign({},B,{kink:false,kd:null,xk:null}):B; if(Lj.skip) continue;
+    key+="|"+s2KeyTail(h,Lj.a,Lj.b,Lj.ya,Lj.yb,pl.smooth,seff,sg2,pl.g1);
+    const G=s2GridC(key,sh,p,Bj,mod,sg1,sg2,muI,0,stN,pl.kk,pl.small1,pl.smooth,pl.g1,pl.small,seff,h,Lj.a,Lj.b,Lj.ya,Lj.yb,prev);
+    prev={P:G.Pf,k0:G.kf,h:G.hf};
+    // 이 층이 맡는 출력: (−R_{j+1}, R_{j+1}) \ (−R_j, R_j)
+    const nx=LV[j+1], oL=nx?-nx.rl:-Infinity, oR=nx?nx.rr:Infinity, iL=j?-Lj.rl:Infinity, iR=j?Lj.rr:-Infinity;
+    const ix=[]; for(let i=0;i<n;i++){ const t=x[i]; if(t>oL&&t<oR&&!(t>iL&&t<iR)) ix.push(i); }
+    S2EP++;
+    if(ix.length){ const xs=Float64Array.from(ix,i=>x[i]), o=s2OutV(G,Bj,mod,xs,xs.length,muI,0,sg1,sg2,pl.kk,pl.small1); for(let k=0;k<ix.length;k++) out[ix[k]]=o[k]; }
+    if(win){ const seg=(u,w)=>{ const a=Math.max(lo,u), b=Math.min(hi,w); return b>a?s2OutN(G,Bj,mod,a,b,sg1,pl.kk,pl.small1):0; };
+      if(!j) N+=seg(oL,oR); else N+=seg(oL,iL)+seg(iR,oR); } }
+  if(win){ const iN=N>0?1/N:1; for(let i=0;i<n;i++) out[i]*=iN; }
+  return out; }
 /* 격자 단계 (위치 무관: 마디 x = k·h 의 값만; s2Eval 이 키 = 모양 매개변수·h·맞춘 범위 로 캐시) */
-function s2Grid(sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0){
-  let r=smooth?Math.max(1,Math.floor(Math.min(seff/8,sg2?sg2/2:Infinity)/h)):1;
+function s2Grid(sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,b,xa0,xb0,seed){
+  let r=s2Stride(smooth,seff,sg2,h);
   let k0=Math.floor(a/h); const k1=Math.ceil(b/h), M=k1-k0+1, gx=new Float64Array(M); for(let i=0;i<M;i++) gx[i]=(k0+i)*h;
-  let v=new Float64Array(M); for(let i=0;i<M;i++) v[i]=B.f(gx[i]); WORK.n+=M*(mod?2:1)*(sh==="V"?2.5:1);
+  const noF=mod==="SB"&&!!g1&&!small1;   // (v1.9.12) SB + 사다리꼴 σ₁: f 격자는 쓰이지 않음(출력 = G⊗Φ) → 값·합성곱 생략, 계산량 세기는 그대로
+  let v=new Float64Array(M); if(!noF) for(let i=0;i<M;i++) v[i]=B.f(gx[i]); WORK.n+=M*(mod?2:1)*(sh==="V"?2.5:1);
   let Phi=null, PX=null;
   if(mod){ Phi=new Float64Array(M);
     if(B.cdf){ for(let i=0;i<M;i++) Phi[i]=B.cdf(gx[i]); }
     else { const i0=-k0, cell=(u,w)=>{ let s=0; for(let q=0;q<4;q++) s+=GL4W[q]*B.f(u+(w-u)*GL4T[q]); return s*(w-u); };
-      Phi[i0]=B.left; for(let i=i0+1;i<M;i++) Phi[i]=Phi[i-1]+cell(gx[i-1],gx[i]); for(let i=i0-1;i>=0;i--) Phi[i]=Phi[i+1]-cell(gx[i],gx[i+1]); }
+      if(seed){ const q=Math.round(h/seed.h), Ms=seed.P.length; let ia=-1, ib=-1;   // (v1.9.12) 층: 안쪽 층의 고운 Φ 마디 값을 그대로, 바깥만 이 층 칸으로 누적
+        for(let i=0;i<M;i++){ const ks=(k0+i)*q-seed.k0; if(ks>=0&&ks<Ms){ Phi[i]=seed.P[ks]; if(ia<0) ia=i; ib=i; } }
+        for(let i=ib+1;i<M;i++) Phi[i]=Phi[i-1]+cell(gx[i-1],gx[i]); for(let i=ia-1;i>=0;i--) Phi[i]=Phi[i+1]-cell(gx[i],gx[i+1]); }
+      else { Phi[i0]=B.left; for(let i=i0+1;i<M;i++) Phi[i]=Phi[i-1]+cell(gx[i-1],gx[i]); for(let i=i0-1;i>=0;i--) Phi[i]=Phi[i+1]-cell(gx[i],gx[i+1]); } }
+    if(!L&&B.kink&&!B.cdf) PX=s2PhiX(Phi,k0,h,B.f);   // (v1.9.12) 꺾인 바탕: 꺾임 ±4h 의 Φ 를 보간하지 않음 (L = 0 도 — Φ‴ 끊김 → lag6 오차 ≤ 4e-7)
     if(L){ const P0=Phi.slice(); PX=s2PhiX(P0,k0,h,B.f); let dz=0; for(let i=0;i<M;i++){ Phi[i]=B.cdf?B.cdf(gx[i]-L):B.kink&&Math.abs(gx[i]-L)<4*h?PX(gx[i]-L):lag6(P0,k0,h,gx[i]-L); dz+=v[i]*(Phi[i]-P0[i]); } stN=1/(0.5+muI+dz*h); } }
   const Pf=Phi, kf=k0, hf=h;   // 고운 격자의 Φ (직접 경로용)
   const phAt=y=>B.cdf?B.cdf(y-L):PX&&B.kink&&Math.abs(y-L)<4*hf?PX(y-L):lag6(Pf,kf,hf,y);   // 꺾인 바탕 + 지연: Φ(x−L) 를 보간하지 않음 (Φ‴ 끊김 → lag6 오차 ≤ 1.8e-6; 꺾임 ±4h 밖은 보간이 정확)
-  if(g1){ const r1=sg2?1:r, m1=8*sg2+8*h*Math.max(r1,r); let t=s2Gconv(v,k0,h,g1,r1,xa0-m1,xb0+m1); v=t[0]; if(Phi){ t=s2Gconv(Phi,k0,h,g1,r1,xa0-m1,xb0+m1); Phi=t[0]; } k0=t[1]; h*=r1; if(r1>1) r=1; }
+  if(g1){ const r1=sg2?1:r, m1=8*sg2+8*h*Math.max(r1,r); let t=s2Gconv(v,k0,h,g1,r1,xa0-m1,xb0+m1,noF); v=t[0]; if(Phi){ t=s2Gconv(Phi,k0,h,g1,r1,xa0-m1,xb0+m1); Phi=t[0]; } k0=t[1]; h*=r1; if(r1>1) r=1; }
   // 작은 σ₁: 마디 값 D₁ = (보간 ⊗ G₁ − 1)[v], D_Φ (Φ 에도); 점별 값 = 해석 바탕 + lag6(D) + 꺾임 보정 (σ₂ 의 직접 경로와 같은 식)
   let f1=null, p1=null;
   if(small1){ const SK1=s2SmallK(sg1/h), D1=s2SmallD(v,SK1), DP=Phi?s2SmallD(Phi,SK1):null, xk=B.xk||0;
-    const fx1=kk?s2KinkFixF(sg1,h,SK1,[{y0:xk,A:B.kd}],[xk]):null;
-    let px1=null; if(Phi&&kk){ const kD=s2PhiX(null,0,h,B.kd,true); px1=s2KinkFixF(sg1,h,SK1,[{y0:L,A:y=>kD(y-L)}],[L]); }   // Φ(y−L) 의 Φ‴ 끊김 (y = L)
+    const fx1=kk?s2KinkFixF(sg1,h,SK1,[{y0:xk,A:B.kd}],[xk],B.s0):null;
+    let px1=null; if(Phi&&kk){ const kD=s2PhiX(null,0,h,B.kd,true); px1=s2KinkFixF(sg1,h,SK1,[{y0:L,A:y=>kD(y-L)}],[L],B.s0); }   // Φ(y−L) 의 Φ‴ 끊김 (y = L)
     f1=ys=>{ const o=new Float64Array(ys.length); for(let i=0;i<ys.length;i++) o[i]=B.f(ys[i])+lag6(D1,k0,h,ys[i]); if(fx1) fx1(ys,o); return o; };
     if(Phi) p1=ys=>{ const o=new Float64Array(ys.length); for(let i=0;i<ys.length;i++) o[i]=phAt(ys[i])+lag6(DP,k0,h,ys[i]); if(px1) px1(ys,o); return o; };
     for(let i=0;i<M;i++) v[i]+=D1[i]; if(Phi){ const Q=new Float64Array(M); for(let i=0;i<M;i++) Q[i]=Phi[i]+DP[i]; Phi=Q; }
@@ -44081,12 +44165,17 @@ function s2Grid(sh,p,B,mod,sg1,sg2,muI,L,stN,kk,small1,smooth,g1,small,seff,h,a,
   const fu=direct&&small1?(ys=>{ if(!mod) return f1(ys); const q=p1(ys); if(mod==="SB") return q; const o=f1(ys); for(let i=0;i<ys.length;i++) o[i]*=(q[i]+muI)*stN; return o; }):null;
   let kfix=null;
   if(direct&&!small1&&Dz&&B.kink&&B.kd){ const kd=B.kd, kD=s2PhiX(null,0,h,kd,true), Lp=Math.max(0,L);
-    kfix=s2KinkFixF(sg2,h,SK,[{y0:0,A:y=>kd(y)*(phAt(y)-(y>Lp?kD(y-Lp):0)+muI)*stN},{y0:Lp,A:y=>B.f(y)*kD(y-Lp)*stN}],[0,Lp]); }
-  const tk=!direct&&!mod&&g1&&kk&&B.xk!=null?s2TrapKinkF(g1,hf,h,B.kd,B.xk):null;   // DS-Shirley(f′ 꺾임 xc): 사다리꼴의 꺾임 오차(≤ 1.7e-5) 보정
-  return {v,k0,h,Pf,kf,hf,phAt,stN,direct,Dz,SK,fu,kfix,tk,g1}; }
+    kfix=s2KinkFixF(sg2,h,SK,[{y0:0,A:y=>kd(y)*(phAt(y)-(y>Lp?kD(y-Lp):0)+muI)*stN},{y0:Lp,A:y=>B.f(y)*kD(y-Lp)*stN}],[0,Lp],B.s0); }
+  const tk=!direct&&!mod&&g1&&kk&&B.xk!=null?s2TrapKinkF(g1,hf,h,B.kd,B.xk,B.s0,smooth):null;   // DS-Shirley(f′ 꺾임 xc): 사다리꼴의 꺾임 오차(≤ 1.7e-5) 보정
+  return {v,k0,h,Pf,kf,hf,phAt,stN,direct,Dz,SK,fu,kfix,tk,g1,i8:smooth}; }   // i8: 넓은 Gaussian 경로 → 출력 8 점 보간
 /* 출력 단계 (데이터 점 x·창 [lo, hi] 에 의존): 보간·꺾임 보정·창 정규화 */
 function s2Out(G,B,mod,x,n,lo,hi,win,muI,L,sg1,sg2,kk,small1){
-  const {v,k0,h,Pf,kf,hf,phAt,stN,direct,Dz,SK,fu,kfix,tk,g1}=G; let out=new Float64Array(n);
+  const out=s2OutV(G,B,mod,x,n,muI,L,sg1,sg2,kk,small1);
+  if(win){ const N=s2OutN(G,B,mod,lo,hi,sg1,kk,small1);
+    const iN=N>0?1/N:1; for(let i=0;i<n;i++) out[i]*=iN; }
+  return out; }
+function s2OutV(G,B,mod,x,n,muI,L,sg1,sg2,kk,small1){
+  const {v,k0,h,phAt,stN,direct,Dz,SK,fu,kfix,tk}=G; let out=new Float64Array(n);
   if(direct&&small1){   // 작은 σ₁: 점별 값 (+ 작은 σ₂ 의 lag6(D₂)); 꺾인 바탕 + σ₂ 는 꺾임 근처를 직접 적분
     out=fu(x);
     if(Dz){ for(let i=0;i<n;i++) out[i]+=lag6(Dz,k0,h,x[i]);
@@ -44096,14 +44185,15 @@ function s2Out(G,B,mod,x,n,lo,hi,win,muI,L,sg1,sg2,kk,small1){
     for(let i=0;i<n;i++){ const ph=phAt(x[i]); out[i]=mod==="SB"?ph:B.f(x[i])*(ph+muI)*stN; }
     if(Dz){ for(let i=0;i<n;i++) out[i]+=lag6(Dz,k0,h,x[i]);
       if(kfix) kfix(x,out); } }
-  else { for(let i=0;i<n;i++) out[i]=lag6(v,k0,h,x[i]);
+  else { const I=G.i8?lag8:lag6; for(let i=0;i<n;i++) out[i]=I(v,k0,h,x[i]);   // (v1.9.12) 넓은 Gaussian 경로는 8 점
     if(tk) tk(x,out); }
-  if(win){ let N;
-    if(direct&&small1){ N=mod==="SB"?gridInt6(Pf,kf,hf,lo,hi)+s2WinEdge(phAt,lo,hi,sg1,[0]):(B.prim&&!B.xc?B.prim(hi)-B.prim(lo):quadA(B.f,lo,hi,1e-12,[0,B.xc]))+s2WinEdge(B.f,lo,hi,sg1,[0,B.xc]); }
-    else if(!mod&&g1&&kk&&B.xk!=null) N=quadA(B.f,lo,hi,1e-12,[0,B.xc])+s2WinEdge(B.f,lo,hi,g1,[0,B.xc]);   // DS-Shirley: 창 넓이를 정확히 (격자 꺾임 오차 없이)
-    else N=direct?gridInt6(Pf,kf,hf,lo,hi):gridInt6(v,k0,h,lo,hi);
-    const iN=N>0?1/N:1; for(let i=0;i<n;i++) out[i]*=iN; }
   return out; }
+/* 창 [lo, hi] 안 ∫ 출력 (정규화 전) — 구간에 더할 수 있음 (층 격자가 구간을 나눠 더함) */
+function s2OutN(G,B,mod,lo,hi,sg1,kk,small1){
+  const {v,k0,h,Pf,kf,hf,phAt,direct,g1}=G;
+  if(direct&&small1) return mod==="SB"?gridInt6(Pf,kf,hf,lo,hi)+s2WinEdge(phAt,lo,hi,sg1,[0]):(B.prim&&!B.xc?B.prim(hi)-B.prim(lo):quadA(B.f,lo,hi,1e-12,[0,B.xc]))+s2WinEdge(B.f,lo,hi,sg1,[0,B.xc]);
+  if(!mod&&g1&&kk&&B.xk!=null) return quadA(B.f,lo,hi,1e-12,[0,B.xc])+s2WinEdge(B.f,lo,hi,g1,[0,B.xc]);   // DS-Shirley: 창 넓이를 정확히 (격자 꺾임 오차 없이)
+  return direct?gridInt6(Pf,kf,hf,lo,hi):gridInt6(v,k0,h,lo,hi); }
 /* 새 모양의 실제 FWHM: 거친 표본(2401) → 최댓값·반높이 교차를 좁은 구간에서 다시 표본(보간 오차 ≤ 1e-7 F) */
 const S2FW=new Map();
 function s2FWHM(sh,p){
@@ -45770,7 +45860,7 @@ const XPS_CORE={_hook:FIT_HOOK,_work:WORK,LM_STALL,areaSumSigma,finalize,fitJob,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,dPdU,makeEvaluator,
   nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
   tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,bgShirleyAvantageV18,bgSmartAvantageV18,avantageV19,avantageHalf,avantagePQ,avantageSmooth,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_GRID,CASA_DS_T,dsCasaAreaFactor,casaStK,compToCasa,casaToComp,casaBg,casaModelToINNO,
-  _s2g:S2GN,s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
+  _s2g:S2GN,_s2lv:S2LV,s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
 })(typeof self!=="undefined"?self:this);
 </script>
