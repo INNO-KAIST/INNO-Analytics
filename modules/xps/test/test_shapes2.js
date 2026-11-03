@@ -44,6 +44,49 @@ console.log(`     최대: 값 ${e1(worstV)} · 넓이 ${e1(worstA)} · FWHM ${e1
 { const r=REF.cases.filter(c=>c.p.mod==="ST"); let e=0; r.forEach(c=>{ e=Math.max(e,Math.abs(c.N_numeric/c.N_identity-1)); });
   ok(e<1e-9,"ST 정규화: 수치 ∫S(μ)F = A²(½ + 1/μ) (기준 쪽 확인 — 엔진은 이 항등식을 씀)",e1(e)); }
 
+/* 1b (v1.9.12) 좁은 구조 vs 적응 구적 — 엔진과 따로 쓴 기준(Cookbook 식 그대로, 정규화·Φ·합성곱 모두 적응 Gauss–Kronrod): 허용 3e-7 (최댓값 대비)
+   큰 α TLA (s0 = F 였던 v1.9.11: 1e-5–1e-4), 큰 γ 의 꺾인 ST (꺾임 보정 조각 4σ: 3.8e-4), α 20 LA 의 넓은 창 (층 격자 — SPEC_shapes2 §3) */
+console.log("== 1b 좁은 구조 (큰 α TLA · 큰 γ 꺾인 ST · 층 격자) vs 적응 구적");
+{ const PI=Math.PI, FW=1/(2*Math.sqrt(2*Math.LN2));
+  const XG=[0.991455371120812639,0.949107912342758525,0.864864423359769073,0.741531185599394440,0.586087235467691130,0.405845151377397167,0.207784955007898468,0];
+  const WK=[0.022935322010529225,0.063092092629978553,0.104790010322250184,0.140653259715525919,0.169004726639267903,0.190350578064785410,0.204432940075298892,0.209482141084727828], WG=[0.129484966168869693,0.279705391489276668,0.381830050505118945,0.417959183673469388];
+  const gk=(f,a,b)=>{ const c=(a+b)/2,h=(b-a)/2,fc=f(c); let k=fc*WK[7],g=fc*WG[3]; for(let j=0;j<7;j++){ const d=h*XG[j],t=f(c-d)+f(c+d); k+=WK[j]*t; if(j&1) g+=WG[(j-1)>>1]*t; } return [k*h,Math.abs((k-g)*h)]; };
+  const quad=(f,a,b,tol,brk)=>{ const P=[a].concat((brk||[]).filter(t=>t>a&&t<b).sort((u,v)=>u-v),[b]), L=[]; for(let i=0;i+1<P.length;i++){ const r=gk(f,P[i],P[i+1]); L.push([P[i],P[i+1],r[0],r[1]]); }
+    for(let it=0;it<5000;it++){ let e=0,im=0,S=0; L.forEach((q,i)=>{ e+=q[3]; S+=q[2]; if(q[3]>L[im][3]) im=i; }); if(e<=tol*Math.max(1e-300,Math.abs(S))) break;
+      const q=L[im],m=(q[0]+q[1])/2,r1=gk(f,q[0],m),r2=gk(f,m,q[1]); L.splice(im,1,[q[0],m,r1[0],r1[1]],[m,q[1],r2[0],r2[1]]); } return L.reduce((s,q)=>s+q[2],0); };
+  const qinf=(f,a,sg)=>quad(t=>{ const u=1-t; return f(a+sg*t/u)/(u*u); },0,1,1e-14)*sg;   // ∫_a^{a+sg·∞}
+  const erfc=z=>{ if(z<0) return 2-erfc(-z); if(z<3){ let s=0,t=z,k=0; const z2=z*z; for(;;){ const q=t/(2*k+1); s+=q; k++; t*=-z2/k; if(Math.abs(q)<1e-18*Math.abs(s)||k>300) break; } return 1-2/Math.sqrt(PI)*s; }
+    let f=0; for(let k=60;k>=1;k--) f=k/2/(z+f); return Math.exp(-z*z)/Math.sqrt(PI)/(z+f); };
+  const gau=(t,s)=>Math.exp(-0.5*(t/s)*(t/s))/(s*Math.sqrt(2*PI));
+  const l6=(T,i0,h,z)=>{ const t=(z-i0)/h; let b=Math.floor(t)-2; b=Math.max(0,Math.min(T.length-6,b)); let s=0; for(let i=0;i<6;i++){ let w=1; for(let j=0;j<6;j++) if(j!==i) w*=(t-b-j)/(i-j); s+=w*T[b+i]; } return s; };
+  const K15=(f,a,b)=>{ const c=(a+b)/2,h=(b-a)/2; let s=f(c)*WK[7]; for(let j=0;j<7;j++) s+=WK[j]*(f(c-h*XG[j])+f(c+h*XG[j])); return s*h; };
+  // Cookbook 정의 (u = x/F = −x_c): TLA = (1+4u²)^−α·(π/2 + atan 2u + π/μ), LA = (1+4u²)^−(u ≥ 0 ? α : β)
+  const CASES=[
+    {t:"TLA α 20 μ 2 F 1 wG 0.05",sh:"TLA",p:{F:1,alpha:20,mu:2,wG:0.05}},
+    {t:"TLA α 20 μ 0.3 F 0.67 wG 0.2",sh:"TLA",p:{F:0.67,alpha:20,mu:0.3,wG:0.2}},
+    {t:"TLA α 5 μ 300 F 0.67 wG 0.01",sh:"TLA",p:{F:0.67,alpha:5,mu:300,wG:0.01}},
+    {t:"SB TLA α 12 μ 2 F 1 wG 0.1",sh:"TLA",p:{F:1,alpha:12,mu:2,wG:0.1,mod:"SB"}},
+    {t:"ST(1.5) TLA α 15 μ 1 F 0.8 wG 0.05",sh:"TLA",p:{F:0.8,alpha:15,mu:1,wG:0.05,mod:"ST",stMu:1.5,stG:0}},
+    {t:"ST(3.09, γ 1.1) LA(3.5, 12.4) F 0.7 (꺾임 + 큰 γ)",sh:"LA",p:{F:0.7,alpha:3.5,beta:12.4,wG:0,mod:"ST",stMu:3.09,stG:1.1}},
+    {t:"SB LA(20, 2.5) F 0.14 wG 0.09 · 창 ±13 eV (층 격자)",sh:"LA",p:{F:0.14,alpha:20,beta:2.5,wG:0.09,mod:"SB"},W:13},
+    {t:"LA(15, 15) F 0.2 wG 0.05 · 창 ±10 eV (층 격자)",sh:"LA",p:{F:0.2,alpha:15,beta:15,wG:0.05},W:10}];
+  let worst=0;
+  for(const T of CASES){ const p=T.p, F=p.F, a=p.alpha, b=p.beta, mu=p.mu, s1=(p.wG||0)*FW, s2=p.mod==="ST"?(p.stG||0)*FW:0, muI=p.mod==="ST"?1/p.stMu:0;
+    const raw=T.sh==="TLA"?x=>{ const u=x/F; return Math.pow(1+4*u*u,-a)*(PI/2+Math.atan(2*u)+PI/mu); }:x=>{ const u=x/F; return Math.pow(1+4*u*u,-(u>=0?a:b)); };
+    const sn=F*Math.min(1,Math.sqrt(Math.pow(2,1/Math.max(a,b||0))-1)), br=[0]; [0.25,0.5,1,2,4,8,16,32].forEach(k=>br.push(-k*sn,k*sn));
+    const Z=quad(raw,-40*sn,40*sn,1e-15,br)+qinf(raw,40*sn,sn)+qinf(t=>raw(-t),40*sn,sn), f=x=>raw(x)/Z;
+    const W=T.W||Math.max(10*F,12*(s1+s2)), lo=-W, hi=W;
+    let Phi=null; if(p.mod){ const R=W+12*(s1+s2)+sn, hc=sn/256, n=Math.ceil(R/hc)+4, P=new Float64Array(2*n+1); P[0]=qinf(t=>f(-t),n*hc,sn); for(let i=1;i<=2*n;i++) P[i]=P[i-1]+K15(f,(i-1-n)*hc,(i-n)*hc); Phi=z=>l6(P,-n*hc,hc,z); }
+    const c1=(g,y)=>s1>0?quad(t=>gau(y-t,s1)*g(t),y-9.5*s1,y+9.5*s1,1e-15,br.concat([y])):g(y);
+    const u=p.mod==="SB"?y=>c1(Phi,y):p.mod==="ST"?y=>c1(f,y)*(c1(Phi,y)+muI)/(0.5+muI):y=>c1(f,y);
+    const val=s2>0?y=>quad(t=>gau(y-t,s2)*u(t),y-9.5*s2,y+9.5*s2,1e-14,br.concat([y])):u;
+    const xs=[]; const c=6*sn+9*(s1+s2); for(let i=0;i<=100;i++) xs.push(-c+2*c*i/100); for(let i=0;i<=40;i++) xs.push(lo+(hi-lo)*i/40); xs.sort((q,r)=>q-r);
+    let ref=xs.map(val);
+    if(p.mod==="SB"){ const Pn=z=>0.5*erfc(-z/(s1*Math.SQRT2)); const N=quad(t=>Phi(t)*(Pn(hi-t)-Pn(lo-t)),lo-9.5*s1,hi+9.5*s1,1e-14,br.concat([lo,hi,lo+9.5*s1,hi-9.5*s1])); ref=ref.map(v=>v/N); }
+    const cp=Object.assign({id:"t",shape:T.sh,be:0,area:1,doublet:null},p), v=C.shapeUnit(T.sh,F64(xs),C.shapeParams(cp,1),{lo,hi}); let mx=0,e=0; ref.forEach((r,i)=>{ mx=Math.max(mx,Math.abs(r)); }); ref.forEach((r,i)=>{ e=Math.max(e,Math.abs(v[i]-r)/mx); });
+    worst=Math.max(worst,e); ok(e<=3e-7,`${T.t}`,`최댓값 대비 ${e1(e)} (허용 3e-7)`); }
+  console.log(`     최대 ${e1(worst)}`); }
+
 console.log("== 2 CasaXPS 표기 왕복 · 오류 · 하위 호환");
 { const strs=["TLA(1.5,2,50)","ST(1.7)LA(1,200)","ST(1)LA(1,143)","ST(1.5,30)GL(30)","DS(0.1,50)","DS(0.3,600,40)","GL(30,50)","SGL(30,50)T(2)","GL(30)PHI(1,2)","GL(30)T(2)","TP(1,15,0)","TP(1,1,0)","SB(0)LA(1,43)","SB(0)GL(30,20)T(1.5)","ST(2)TLA(1.2,3,40)"];
   strs.forEach(s=>{ const a=C.casaToComp(s,{fwhm:1.3,be:100,area:1000,strict:true}); const n1=C.compToCasa(a.comp).notation; const b=C.casaToComp(n1,{fwhm:1.3,be:100,area:1000});
