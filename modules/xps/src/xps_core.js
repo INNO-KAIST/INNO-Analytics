@@ -122,15 +122,15 @@ function econv(v,h,tau){
 /* 계산량 세기(결과와 무관, 결정적): 평가 점 수 × 모양별 대략의 점당 비용 + 격자 점 수 — §3.3b 의 현직·갈래를 같은 계산량씩 번갈아 돌리려고 */
 const WORK={n:0,kc:0.03}, WORK_PT={GLP:0.5,V:2,LA:12,GLT:4,AGT:3,TP:1.3};
 function shapeUnit(shape,x,p,ctx){
-  const n=x.length, out=new Float64Array(n); WORK.n+=n*(shape==="LA"&&!(p.wG>1e-6)?1:WORK_PT[shape]||1);
+  const n=x.length, out=new Float64Array(n); WORK.n+=n*(shape==="LA"&&!(p.wG>0)?1:WORK_PT[shape]||1);
   if(shape==="MEAS") return tplShape(p.tpl,x,p.wG||0);
-  if(p.mod||shape==="TLA"||shape==="GLN"||shape==="SGLN"||shape==="TP"||(shape==="DS"&&(p.dsl>0||p.wG>1e-6))) return s2Eval(shape,x,p,ctx);   // SPEC_shapes2
+  if(p.mod||shape==="TLA"||shape==="GLN"||shape==="SGLN"||shape==="TP"||(shape==="DS"&&(p.dsl>0||p.wG>0))||(shape==="LA"&&p.wG>0)) return s2Eval(shape,x,p,ctx);   // SPEC_shapes2 (v1.9.11: LA + wG 도 — 예전 gridShape 의 σ 문턱·격자 축소 없음)
   if(shape==="AGT") return aglShape(x,p,ctx);
   if(shape==="GLS"){ const F=p.F,m=p.m; for(let i=0;i<n;i++) out[i]=glsVal(x[i],F,m); return out; }
   if(shape==="GLP"){ const F=p.F,m=p.m, N=glpNorm(F,m), a=4*LN2*(1-m)/(F*F), b=4*m/(F*F); for(let i=0;i<n;i++){ const t=x[i]*x[i]; out[i]=Math.exp(-a*t)/(1+b*t)/N; } return out; }
   if(shape==="V"){ for(let i=0;i<n;i++) out[i]=voigt(x[i],p.wG,p.wL); return out; }
-  if(shape==="LA"&&!(p.wG>1e-6)){ const F=p.F, a=p.alpha, b=p.beta, N=laNorm(F,a,b); for(let i=0;i<n;i++){ const t=1+4*x[i]*x[i]/(F*F); out[i]=Math.pow(t,-(x[i]>=0?a:b))/N; } return out; }
-  if(shape==="DS"&&!(p.wG>1e-6)){   // 해석: 값과 영역 적분(원시함수) 모두 닫힌 꼴
+  if(shape==="LA"&&!(p.wG>0)){ const F=p.F, a=p.alpha, b=p.beta, N=laNorm(F,a,b); for(let i=0;i<n;i++){ const t=1+4*x[i]*x[i]/(F*F); out[i]=Math.pow(t,-(x[i]>=0?a:b))/N; } return out; }
+  if(shape==="DS"&&!(p.wG>0)){   // 해석: 값과 영역 적분(원시함수) 모두 닫힌 꼴
     const g=p.wL/2, al=p.alpha; let xmin=Infinity,xmax=-Infinity; for(let i=0;i<n;i++){ if(x[i]<xmin) xmin=x[i]; if(x[i]>xmax) xmax=x[i]; }
     const lo=ctx&&ctx.lo!=null?ctx.lo:xmin, hi=ctx&&ctx.hi!=null?ctx.hi:xmax; const N=dsPrim(hi,al,g)-dsPrim(lo,al,g);
     for(let i=0;i<n;i++) out[i]=dsBase(x[i],al,g)/(N>0?N:1); return out; }
@@ -138,11 +138,8 @@ function shapeUnit(shape,x,p,ctx){
   return gridShape(shape,x,p,ctx);
 }
 /* 격자 간격: 0.04·2^-k 로 양자화(폭 매개변수가 조금 바뀌어도 격자 마디가 그대로라 목적함수가 매끄럽다) */
-function gridH(shape,p){
-  let w;
-  if(shape==="DS") w=Math.min(p.wL,p.wG>1e-6?p.wG:Infinity);
-  else if(shape==="LA") w=Math.min(p.F,p.wG>1e-6?p.wG:Infinity);
-  else w=Math.min(p.F,p.tau);
+function gridH(shape,p){   // (v1.9.11) 격자형은 GLT 만 — LA·DS 의 Gaussian 은 s2Eval (예전: h ≤ wG/16, 하한 0.0005 → 작은 wG 에서 격자 축소·σ 문턱)
+  const w=Math.min(p.F,p.tau);
   let h=0.04; while(h>w/16&&h>0.0005) h/=2;
   return h;
 }
@@ -160,37 +157,15 @@ function gridShape(shape,x,p,ctx){
   let xmin=x[0],xmax=x[0]; for(let i=1;i<n;i++){ if(x[i]<xmin) xmin=x[i]; if(x[i]>xmax) xmax=x[i]; }
   const lo=ctx&&ctx.lo!=null?Math.min(ctx.lo,xmin):xmin, hi=ctx&&ctx.hi!=null?Math.max(ctx.hi,xmax):xmax;
   let h=gridH(shape,p);
-  const sg=(p.wG||0)*FW2SIG;
-  let big=shape==="DS"?Math.max(p.wL,p.wG||0):shape==="LA"?Math.max(p.F,p.wG||0):Math.max(p.F,p.tau);
-  let P=8*big+5*sg; if(shape==="GLT") P=Math.max(P,12*p.tau+8*p.F);
+  const P=Math.max(8*Math.max(p.F,p.tau),12*p.tau+8*p.F);
   while((hi-lo+2*P)/h>400000) h*=2;
   // 마디는 상대좌표 x = k·h (k 정수) — 성분 중심 0 이 항상 마디
   const k0=Math.floor((lo-P)/h), k1=Math.ceil((hi+P)/h), M=k1-k0+1;
   const gx=new Float64Array(M); for(let i=0;i<M;i++) gx[i]=(k0+i)*h;
   let v=new Float64Array(M);
-  if(shape==="DS"){ const g=p.wL/2, al=p.alpha; for(let i=0;i<M;i++) v[i]=dsBase(gx[i],al,g); if(p.wG>1e-6) v=gconv(v,h,p.wG); }
-  else if(shape==="LA"){ const F=p.F, a=p.alpha, b=p.beta, N=laNorm(F,a,b); for(let i=0;i<M;i++){ const t=1+4*gx[i]*gx[i]/(F*F); v[i]=Math.pow(t,-(gx[i]>=0?a:b))/N; } if(p.wG>1e-6) v=gconv(v,h,p.wG); }   // α: 높은 BE 쪽 (SPEC 1.6 v1.1)
-  else if(shape==="GLT"){ const F=p.F,m=p.m,T=p.T; const base=new Float64Array(M); for(let i=0;i<M;i++) base[i]=glsVal(gx[i],F,m); const tail=econv(base,h,p.tau); for(let i=0;i<M;i++) v[i]=(1-T)*base[i]+T*tail[i]; }
-  // DS: 영역 안 적분으로 정규화
-  let norm=1;
-  if(shape==="DS"){
-    const a=ctx&&ctx.lo!=null?ctx.lo:xmin, b=ctx&&ctx.hi!=null?ctx.hi:xmax;
-    norm=gridIntegral(v,k0,h,a,b); if(!(norm>0)) norm=1;
-  }
-  for(let i=0;i<n;i++) out[i]=crAt(v,k0,h,x[i])/norm;
+  if(shape==="GLT"){ const F=p.F,m=p.m,T=p.T; const base=new Float64Array(M); for(let i=0;i<M;i++) base[i]=glsVal(gx[i],F,m); const tail=econv(base,h,p.tau); for(let i=0;i<M;i++) v[i]=(1-T)*base[i]+T*tail[i]; }
+  for(let i=0;i<n;i++) out[i]=crAt(v,k0,h,x[i]);
   return out;
-}
-/* [a,b] 적분: 안쪽 마디는 Simpson(가능하면)·사다리꼴, 양 끝 조각은 보간값으로 */
-function gridIntegral(v,k0,h,a,b){
-  const ka=Math.ceil(a/h-k0), kb=Math.floor(b/h-k0);
-  if(kb<=ka) return crAt(v,k0,h,(a+b)/2)*(b-a);
-  const xa=(k0+ka)*h, xb=(k0+kb)*h;
-  let s=0; const m=kb-ka;
-  if(m>=2){ const even=m%2===0; const e=even?kb:kb-1; for(let k=ka;k<e;k+=2) s+=h/3*(v[k]+4*v[k+1]+v[k+2]); if(!even) s+=0.5*h*(v[kb-1]+v[kb]); }
-  else s=0.5*h*(v[ka]+v[kb]);
-  // 끝 조각: 3점 Simpson (보간 중점)
-  const seg=(u,w)=>{ if(w-u<=0) return 0; return (w-u)/6*(crAt(v,k0,h,u)+4*crAt(v,k0,h,(u+w)/2)+crAt(v,k0,h,w)); };
-  return s+seg(a,xa)+seg(xb,b);
 }
 /* 실제 FWHM (수치): 넓이 1 프로파일의 반치폭. 단일 봉우리 가정 */
 function trueFWHM(shape,p){
@@ -236,7 +211,7 @@ function shapeParams(c,scale){
 /* 넓이 1 모양 캐시 (v1.9): 넓이만 바뀌는 평가(LM 의 넓이 열, 넓이 초기화)는 모양을 다시 계산하지 않는다. 비싼(격자) 모양만, 성분마다 최근 4 개.
    키 = 모양 매개변수 + 위치 + 창 + 같은 E 배열 → 값은 그대로(비트 단위 같음) */
 const UCACHE=typeof WeakMap!=="undefined"?new WeakMap():null, EID=typeof WeakMap!=="undefined"?new WeakMap():null; let EIDN=0;
-function costlyShape(shape,p){ return shape==="TLA"||shape==="GLN"||shape==="SGLN"||shape==="TP"||!!p.mod||shape==="DS"||(shape==="LA"&&p.wG>1e-6)||shape==="GLT"; }
+function costlyShape(shape,p){ return shape==="TLA"||shape==="GLN"||shape==="SGLN"||shape==="TP"||!!p.mod||shape==="DS"||(shape==="LA"&&p.wG>0)||shape==="GLT"; }
 function unitCached(c,E,e0,p,ctx){ const n=E.length;
   const calc=()=>{ const x=new Float64Array(n); for(let i=0;i<n;i++) x[i]=E[i]-e0; return shapeUnit(c.shape,x,p,ctx?{lo:ctx.emin-e0,hi:ctx.emax-e0}:null); };
   if(!UCACHE||!costlyShape(c.shape,p)||typeof E!=="object") return calc();
@@ -417,7 +392,6 @@ function aglShape(x,p,ctx){ const n=x.length, out=new Float64Array(n); let xmin=
    좌표: INNO x = E − E0 (x > 0 = 높은 BE). Cookbook 의 x_c = −x/F (FWHM 단위). LA 의 α(x_c ≤ 0), DS 꼬리, E(j,k)(x_c < 0), ∫_{x_c}^∞ 가
    모두 x_c < 0 = 높은 BE 쪽 → 꼬리·Shirley 계단은 높은 BE 쪽 (CasaXPS LA(1.53,2.43) 실측 대조와 같은 방향, SPEC_casa_v2 §2).
    ============================================================ */
-const S2_NEG=0.0015;   // Gaussian σ < 0.0015·(최소 폭) 이면 합성곱 생략 (상대 영향 ≤ σ²·|f″|/2f ≈ 1e-5)
 const GKX=[0.991455371120812639,0.949107912342758525,0.864864423359769073,0.741531185599394440,0.586087235467691130,0.405845151377397167,0.207784955007898468,0];
 const GKW=[0.022935322010529225,0.063092092629978553,0.104790010322250184,0.140653259715525919,0.169004726639267903,0.190350578064785410,0.204432940075298892,0.209482141084727828];
 const GGW=[0.129484966168869693,0.279705391489276668,0.381830050505118945,0.417959183673469388];
@@ -452,7 +426,7 @@ function s2Base(sh,p){
   const sgw=w=>w>0?w*FW2SIG:0;
   if(sh==="GLS"){ const F=p.F,m=p.m, z=2*Math.sqrt(LN2)/F; return {f:x=>glsVal(x,F,m),left:0.5,s0:F,sg:0,cdf:x=>(1-m)*0.5*erfcS(-z*x)+m*(0.5+Math.atan(2*x/F)/PI)}; }
   if(sh==="GLP"){ const F=p.F,m=p.m,N=glpNorm(F,m),a=4*LN2*(1-m)/(F*F),b=4*m/(F*F); return {f:x=>Math.exp(-a*x*x)/(1+b*x*x)/N,left:0.5,s0:F,sg:0}; }
-  if(sh==="LA"){ const F=p.F,a=Math.max(LA_ALPHA_LO,p.alpha),b=Math.max(LA_ALPHA_LO,p.beta),N=laNorm(F,a,b); return {f:x=>Math.pow(1+4*x*x/(F*F),-(x>=0?a:b))/N,left:(F/4)*SQPI*Math.exp(lgamma(b-0.5)-lgamma(b))/N,s0:F,sg:sgw(p.wG),kink:a!==b,kd:x=>{ const t=1+4*x*x/(F*F); return (Math.pow(t,-a)-Math.pow(t,-b))/N; }}; }
+  if(sh==="LA"){ const F=p.F,a=Math.max(LA_ALPHA_LO,p.alpha),b=Math.max(LA_ALPHA_LO,p.beta),N=laNorm(F,a,b); return {f:x=>Math.pow(1+4*x*x/(F*F),-(x>=0?a:b))/N,left:(F/4)*SQPI*Math.exp(lgamma(b-0.5)-lgamma(b))/N,s0:F*Math.min(1,Math.sqrt(Math.pow(2,1/Math.max(a,b))-1)),sg:sgw(p.wG),kink:a!==b,kd:x=>{ const t=1+4*x*x/(F*F); return (Math.pow(t,-a)-Math.pow(t,-b))/N; }}; }   // s0 (v1.9.11): 좁은 쪽 반높이 폭 — α 가 크면 F 보다 좁음 (예전 s0 = F 는 α 20 에서 격자 부족, SPEC_shapes2 §3)
   if(sh==="V"){ const wG=p.wG,wL=p.wL; return {f:x=>voigt(x,wG,wL),left:0.5,s0:Math.max(1e-3,0.5346*wL+Math.sqrt(0.2166*wL*wL+wG*wG)),sg:0}; }
   if(sh==="TLA"){ const F=p.F,a=Math.max(LA_ALPHA_LO,p.alpha),mu=p.mu, I1=tlaI1(a), J=tlaJ(a), c=PI/2+PI/mu, Z=2*c*I1*F;
     return {f:x=>{ const u=x/F; return Math.pow(1+4*u*u,-a)*(PI/2+Math.atan(2*u)+PI/mu)/Z; },left:F*((PI/mu)*I1+0.5*J)/Z,s0:F,sg:sgw(p.wG)}; }
@@ -587,9 +561,10 @@ function s2PhiX(P,k0,h,f,cum){
 /* TP(α,β,n): 사다리꼴 R (폭 F, 높은 BE 끝 = α, 낮은 BE 끝 = β) ⊗ Lorentzian(wL) — 닫힌 꼴, 넓이 1 = R/((α+β)F/2) */
 function tpEval(x,p){ const n=x.length, out=new Float64Array(n), F=p.F, ta=p.ta, tb=p.tb, w=p.wL||0, Z=0.5*(ta+tb)*F; if(!(Z>0)) return out;
   const c0=0.5*(ta+tb), c1=-(tb-ta)/F, a=-F/2, b=F/2;
-  if(!(w>S2_NEG*F)){ for(let i=0;i<n;i++){ const t=x[i]; out[i]=t>=a&&t<=b?(c0+c1*t)/Z:0; } return out; }
+  if(!(w>0)){ for(let i=0;i<n;i++){ const t=x[i]; out[i]=t>=a&&t<=b?(c0+c1*t)/Z:0; } return out; }   // (v1.9.11) wL 문턱 없음: 닫힌 꼴은 wL → 0 에서 사다리꼴로 연속 (예전: wL ≤ 0.0015·F 면 Lorentzian 버림 → 꼬리 최댓값 대비 ~1e-4 뜀, wL 기울기 0)
+  const tiny=w<1e-150;   // w² 아래넘침: log 비를 hypot 로 (같은 식)
   for(let i=0;i<n;i++){ const t=x[i], ua=t-a, ub=t-b;
-    const dl=(Math.atan(2*ua/w)-Math.atan(2*ub/w))/PI, dm=(w/(4*PI))*Math.log((w*w+4*ua*ua)/(w*w+4*ub*ub));
+    const dl=(Math.atan(2*ua/w)-Math.atan(2*ub/w))/PI, dm=tiny?(w/(2*PI))*Math.log(Math.hypot(w,2*ua)/Math.hypot(w,2*ub)):(w/(4*PI))*Math.log((w*w+4*ua*ua)/(w*w+4*ub*ub));
     out[i]=((c0+c1*t)*dl-c1*dm)/Z; }
   return out; }
 /* 새 모양의 값 (상대좌표 x). 넓이 1 (ℝ), 단 DS·SB 는 피팅 창 [ctx.lo, ctx.hi] 안 넓이 1 (SPEC_shapes2 §2) */

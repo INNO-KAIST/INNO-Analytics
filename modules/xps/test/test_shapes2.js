@@ -4,7 +4,7 @@
       허용: 값 ≤ 1e-5 (최댓값 대비), 넓이 ≤ 1e-6, FWHM ≤ 1e-5 (상대)
    2) 표기 왕복 · 오류 · 하위 호환(AGT GL(m)T(k) ≡ GLN tail T)
    3) 합성 잡음 스펙트럼 회복: 매개변수가 3σ 안 ≥ 90 % (모양마다 200 회; QUICK 40 회)
-   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 · 4b 퇴화 매개변수(TP wL)까지 풀었을 때 멈춤 규칙(SPEC §3.3b)
+   4) 속도: 10 성분 × 2000 채널 평가·피팅 시간 · 4b TP wL 까지 풀었을 때 같은 프로세스 옛 LM 과 비교 + 구조적 갇힘 앙상블에서 멈춤 규칙(SPEC §3.3b)이 구해 냄
    4c) 멈춤 규칙이 최종 χ² 를 나쁘게 만들지 않음 — 무작위 합성 스펙트럼 고정 표본(규칙 끔·켬 비교) */
 const path=require("path"), fs=require("fs");
 const C=require("../src/xps_core.js");
@@ -108,33 +108,41 @@ console.log("== 4 속도 (10 성분 × 2000 채널)");
   const P=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons});
   const t0=Date.now(); const r=C.fitOnce(P,{}); const tf=Date.now()-t0; const t1=Date.now(); const mc=C.monteCarlo(P,Object.assign({},r),5,{seed:3}); const tm=(Date.now()-t1)/5;
   ok(tf<5000&&tm<3000&&r.chi2/2000<1.2,`10 성분(새 모양 모두) × 2000 채널 피팅 ${(tf/1000).toFixed(1)} s (≤ 5 s) (${r.iter} 반복) · Monte Carlo ${(tm/1000).toFixed(1)} s/회 (≤ 3 s; 자유 = BE·넓이·주 폭 — CasaXPS 처럼 모양 매개변수 고정)`,`χ²/N ${(r.chi2/2000).toFixed(2)}`);
-  /* 4b 퇴화 매개변수까지 푼 경우 (SPEC §3.3b · SPEC_shapes2 §3): TP 의 wL 도 자유 → 처음 Gauss–Newton 걸음들이 wL 을 하한(0.005)으로 보내고,
-     거기서는 모형이 wL 을 보지 못해(기울기 0) LM 이 감쇠에 갇혀 기어감(옛 LM: QUICK 자료 450 + 452 반복 · 66 s, χ² 2013.57).
-     규칙(v1.9.2): 갇힌 뒤 16 번 더 가도 안 끝나면 wL 을 시작값으로 되돌려 고정 → 나머지 → 모두 다시 푸는 갈래(rescue)를 풀고, 옛 경로가 따라잡지 못하면 갈래를 택함.
-     판정: ≤ 5 s · 최종 χ² ≤ 옛 LM 의 χ²(XPS_NOSTALL=1 로 잰 값) · 멈췄으면(stalled) wL 표시 */
+  /* 4b 퇴화 매개변수까지 푼 경우 (SPEC §3.3b · SPEC_shapes2 §3): TP 의 wL 도 자유. 판정은 저장한 기준값 없이 **같은 프로세스에서 옛 LM(규칙 끔 = XPS_NOSTALL)을 함께 돌려** 비교한다
+     (v1.9.11: 예전엔 옛 LM χ² 를 숫자로 저장 — 이 문제의 LM 경로는 혼돈적이라 모형이 1e-8 만 바뀌어도 다시 재야 했다):
+     ① 최종 χ² 새 ≤ 옛·(1 + 1e-7) (예전과 같은 부등식, 기준은 언제나 지금 모형의 옛 LM) ② 갈래를 하나도 풀지 않았으면 χ²·매개변수 비트 동일(예전: seed 4 만 저장값과 같음)
+     ③ 새 ≤ 5 s (주 자료) / 10 s (seed). 옛 LM 을 시험 안에서 돌릴 수 있는 것은 v1.9.11 에서 TP 의 wL 문턱이 없어져 이 문제가 더는 퇴화가 아니기 때문
+     (옛 LM 0.6–1.6 s; v1.9.10 모형에서는 wL < 0.0015·F 에서 기울기 0 → 옛 LM 이 2차 500 번 기어감, 27–52 s). 갈래가 실제로 구해 내는지는 아래 '구조적 갇힘 앙상블'에서 본다 */
+  const oldNew=mk=>{ const Pa=mk(); C._hook.stall=false; const ta=Date.now(); let a; try{ a=C.fitOnce(Pa,{}); } finally{ C._hook.stall=true; } const tA=Date.now()-ta;
+    const Pb=mk(), tb=Date.now(), b=C.fitOnce(Pb,{}), tB=Date.now()-tb; const pa=C.getVec(Pa,a.map), pb=C.getVec(Pb,b.map);
+    return {a,b,tA,tB,rel:b.chi2/a.chi2-1,ident:a.chi2===b.chi2&&JSON.stringify(pa)===JSON.stringify(pb)}; };
+  const verdict=(o,lim)=>o.rel<=1e-7&&o.tB<lim&&(o.b.trig||o.ident);
+  const desc=o=>`χ² ${o.b.chi2.toFixed(2)} vs 옛 LM ${o.a.chi2.toFixed(2)} (같은 프로세스, ${o.a.iter1}+${o.a.iter} 반복, ${(o.tA/1000).toFixed(1)} s): ${o.rel>=0?"+":""}${o.rel.toExponential(1)} (허용 ≤ +1e-7)${o.b.trig?"":o.ident?" · 갈래 없음 → 비트 같음":" · 갈래 없는데 비트 다름"}`;
   { const cons2=C.clone(cons); cons2.c8.wL={mode:"free"};
-    const P2=C.makeProblem({be:E,y,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
-    const t2=Date.now(); const r2=C.fitOnce(P2,{}); const tf2=Date.now()-t2; const fl=((r2.stall||{}).flags||[]).map(q=>`${q.id}|${q.k}(${q.why.join("+")})`);
-    const REF=QUICK?{chi2:1974.4783700704436,it:"35+1",s:3.5}:{chi2:1940.002107709826,it:"15+7",s:1.9};   // v1.9.10 다시 잼 (아래 설명)
-    const rel=(r2.chi2-REF.chi2)/REF.chi2, okStop=r2.stop==="stalled"?fl.some(t=>t.startsWith("c8|wL")):r2.stop==="converged";
+    const mk=yy=>()=>C.makeProblem({be:E,y:yy,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
+    const o=oldNew(mk(y)), r2=o.b, fl=((r2.stall||{}).flags||[]).map(q=>`${q.id}|${q.k}(${q.why.join("+")})`);
     const br=r2.branch?` · 갈래 ${r2.branch.kind}${r2.branch.reset.length?" ("+r2.branch.reset.map(q=>q.id+"|"+q.k).join(", ")+" 되돌림)":""}`:"";
-    ok(okStop&&tf2<5000&&rel<=1e-7,`TP wL 까지 자유(퇴화): ${(tf2/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${br}${fl.length?" · 표시 "+fl.join(", "):""}`,
-      `χ² ${r2.chi2.toFixed(2)} vs 옛 LM ${REF.chi2.toFixed(4)} (${REF.it} 반복, ${REF.s} s): ${rel>=0?"+":""}${rel.toExponential(1)} (허용 ≤ +1e-7)`);
-    /* 같은 문제·다른 잡음(전체 모드만): 잡음 = C.rng(seed) 의 Poisson 근사. 옛 LM(XPS_NOSTALL=1)의 χ²·반복·시간을 기준으로 — 3·5·6 은 옛 LM 이 2차 500 번까지 기어감, 4 는 갇히지 않음(비트 같음).
-       기준값은 '옛 LM' = 규칙 끈 같은 엔진의 결과라 **모형이 바뀌면 다시 재야 한다**(이 퇴화 문제의 LM 경로는 혼돈적: HEAD 의 DS-Shirley 모형에 1e-8 상대 섭동만 줘도
-       네 seed 의 옛 LM 끝점이 모두 달라짐). v1.9.10 (σ₁ 문턱 제거·DS-Shirley 꺾임 보정 — 이 문제에서 바뀐 성분은 DS-Shirley 하나, 최댓값 대비 5e-8)에서 XPS_NOSTALL 로 다시 잼:
-       v1.9.9 기준은 3 1980.2495 (128+500, 29.6 s) · 4 1974.7419 (50+2, 2.9 s) · 5 2112.2358 (263+500, 35.0 s) · 6 2070.9979 (74+500, 27.4 s);
-       주 자료 1940.0021061926182 (15+7, 3.1 s), QUICK 2013.5711049269707 (450+452, 65.8 s). 허용(≤ 10 s · ≤ +1e-7)은 그대로 */
-    if(!QUICK) [[3,1937.2921028281705,"44+500",40.3],[4,1975.7096817489492,"28+2",2.9],[5,2061.125739792668,"108+500",51.5],[6,2069.838469517457,"46+500",40.9]].forEach(([sd,ref,it,sec])=>{
-      const Rs=C.rng(sd), ys=Float64Array.from(mu,v=>Math.max(0,Math.round(v+100+Math.sqrt(v+100)*Rs.g())));
-      const Ps=C.makeProblem({be:E,y:ys,c:1},{lo:E[0],hi:E[1999],bg:{type:"active",c0:100,k:0,s:0,_auto:false,cons:{k:{mode:"fixed"},s:{mode:"fixed"}}},comps:C.clone(comps).map(c=>{ c.be+=0.02; return c; }),cons:cons2});
-      const t3=Date.now(); const rs=C.fitOnce(Ps,{}); const tf3=Date.now()-t3, rl=rs.chi2/ref-1;
-      ok(rl<=1e-7&&tf3<10000&&(rs.trig||rs.chi2===ref),`  같은 문제·잡음 seed ${sd}: ${(tf3/1000).toFixed(1)} s (≤ 10 s) · ${rs.iter1}+${rs.iter} 반복 · 갈래 ${rs.trig}${rs.branch?" ("+rs.branch.kind+")":""}`,
-        `χ² ${rs.chi2.toFixed(2)} vs 옛 LM ${ref.toFixed(2)} (${it} 반복, ${sec} s): ${rl>=0?"+":""}${rl.toExponential(1)}`); }); } }
+    ok(verdict(o,5000),`TP wL 까지 자유: ${(o.tB/1000).toFixed(1)} s (≤ 5 s) · ${r2.iter1}+${r2.iter} 반복 · 정지 ${r2.stop}${br}${fl.length?" · 표시 "+fl.join(", "):""}`,desc(o));
+    /* 같은 문제·다른 잡음(전체 모드만): 잡음 = C.rng(seed) 의 Poisson 근사 */
+    if(!QUICK) [3,4,5,6].forEach(sd=>{ const Rs=C.rng(sd), ys=Float64Array.from(mu,v=>Math.max(0,Math.round(v+100+Math.sqrt(v+100)*Rs.g())));
+      const q=oldNew(mk(ys)), rs=q.b;
+      ok(verdict(q,10000),`  같은 문제·잡음 seed ${sd}: ${(q.tB/1000).toFixed(1)} s (≤ 10 s) · ${rs.iter1}+${rs.iter} 반복 · 갈래 ${rs.trig}${rs.branch?" ("+rs.branch.kind+")":""}`,desc(q)); }); }
+  /* 4b 구조적 갇힘 앙상블 (전체 모드만): 폭이 한계에 붙어 LM 이 감쇠에 갇히는 무작위 문제(test/stall_gen.js seed 279 · 423 · 150 — rescue 로 χ² 21–93 % 낮아진 seed)를
+     자료에 1e-9 상대 섭동(C.rng(9000+k), k = 0…7)을 줘 24 개로. 옛 LM 이 갇히는지 자체가 혼돈적이다(실측: k = 0…6 에서 옛 LM 이 갇혀 갈래가 구한 것
+     v1.9.11 모형 5/21, v1.9.10 모형 4/21 — 나머지는 옛 LM 이 덫을 비켜 가 갈래가 필요 없음). 그래서 'seed X 는 구해져야 한다' 대신
+     ① 모든 피팅: 새 ≤ 옛·(1 + 1e-7), 갈래 없으면 비트 동일, 새 ≤ 10 s ② 앙상블에서 갈래(rescue)가 채택되어 옛보다 1e-3 넘게 낮은 피팅 ≥ 1
+     (모형이 바뀌어 경로가 다시 섞여도, 실측 비율 p ≈ 0.21 이면 24 개 모두 실패할 확률 0.79²⁴ ≈ 0.4 %; 지금 모형에서는 결정적) */
+  if(!QUICK){ const G=require("./stall_gen.js"); let n=0, rescued=[], bad=[], tmax=0;
+    for(const sd of [279,423,150]) for(let k=0;k<8;k++){ const g0=G.gen(C,sd), Rk=C.rng(9000+k), yk=k?Float64Array.from(g0.spec.y,v=>v*(1+1e-9*Rk.g())):g0.spec.y;
+      const q=oldNew(()=>C.makeProblem(Object.assign({},g0.spec,{y:yk}),g0.st)); n++; tmax=Math.max(tmax,q.tB);
+      if(!verdict(q,10000)) bad.push(`${sd}/${k} ${q.rel.toExponential(1)} ${q.tB} ms${q.b.trig||q.ident?"":" 비트 다름"}`);
+      if(q.b.branch&&q.b.branch.kind==="rescue"&&q.rel<-1e-3) rescued.push(`${sd}/${k} ${q.rel.toExponential(1)} (${q.b.branch.reset.map(t=>t.id+"|"+t.k).join(",")})`); }
+    ok(!bad.length&&rescued.length>=1,`  구조적 갇힘 앙상블 ${n} 피팅: 모두 새 ≤ 옛·(1+1e-7) · 갈래 없으면 비트 같음 · ≤ 10 s (최대 ${(tmax/1000).toFixed(1)} s) · rescue 로 구해진 것 ${rescued.length} (≥ 1)`,
+      (rescued.join(" · ")||"없음")+(bad.length?" · 실패 "+bad.join(", "):"")); } }
 
 /* 4c 멈춤 규칙이 최종 χ² 를 나쁘게 만들지 않음 (SPEC §3.3b): 무작위 합성 스펙트럼(test/stall_gen.js) 의 고정 표본을 같은 프로세스에서
    규칙 끔(옛 LM)·켬으로 피팅 → 최종 χ² 새 ≤ 옛·(1 + 1e-7), 갈래를 풀지 않은 피팅은 비트 단위로 같음. 표본 = 갈래가 생기는 seed(바닥에 못 닿아 현직이 이김 —
-   rescue·kick, 1차·2차) + 갇혔다가 grace 안에 끝나는 seed + 갇히지 않는 seed. 3989·3132 = 현직이 1차를 끝까지 간 뒤 바닥의 갈래 채택 → 2차를 두 끝점에서(옛 2차 = 옛 최종). 1차 현직을 도중에 버리는 경우는 §4b 와 잡음 seed 3·5·6.
+   rescue·kick, 1차·2차) + 갇혔다가 grace 안에 끝나는 seed + 갇히지 않는 seed. 3989·3132 = 현직이 1차를 끝까지 간 뒤 바닥의 갈래 채택 → 2차를 두 끝점에서(옛 2차 = 옛 최종). 1차 현직을 도중에 버리는 경우는 v1.9.10 모형의 §4b 잡음 seed 5 (v1.9.11 모형에서는 그 문제가 퇴화가 아니어서 갈래 없음 — 구조적 갇힘은 §4b 앙상블).
    전체 1100 개는 node test/stall_neverworse.js (2 코어 약 40 분) */
 console.log("== 4c 멈춤 규칙 — 최종 χ² 가 옛 LM 보다 나빠지지 않음 (고정 표본)");
 { const G=require("./stall_gen.js");
