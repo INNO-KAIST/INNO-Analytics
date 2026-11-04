@@ -2196,9 +2196,11 @@ function finalize(P,r){
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
   let best=null; const chis=[];
-  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); } });
+  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13). 피팅 결과는 그대로(비트 동일)
+  const pars=[]; let nfree=0;
+  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); pars.push(null); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){

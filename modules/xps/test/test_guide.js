@@ -588,6 +588,171 @@ const V8={}; const synthR=(...a)=>SYNTHR(...a);
   ok(C.multipletInfo("Yb","4d")&&!/Auto suggest handles/.test(t)&&/LCF/.test(t)&&/manual|by hand/.test(t),"Yb 4d: Auto suggest is not claimed to handle Yb²⁺ (core treats Yb 4d as a multiplet) — LCF or a manual doublet",yb.closed);
 }
 
+/* ---------- 11 v1.9.13 C 1s adventitious-carbon recipe (SPEC §17.10) ---------- */
+console.log("== 11 v1.9.13 C 1s recipe: literature table, synthetic recovery, Δ, no double shift, weak-line F-test, carbonate option");
+const V13={};
+function synthC(lines,seed,o){ o=o||{}; const rg=U.rng(seed); const lo=o.lo!=null?o.lo:276, hi=o.hi!=null?o.hi:298, step=0.05, n=Math.round((hi-lo)/step)+1, E=Float64Array.from({length:n},(_,i)=>lo+i*step), ctx={emin:E[0],emax:E[n-1]};
+  const P=new Float64Array(n); lines.forEach(([be,A,F])=>{ const c=C.casaToComp("GL(30)",{be,fwhm:F,area:A}).comp; const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; });
+  const Q=C.cumtrapz(E,P); const y=Float64Array.from(P,(p,i)=>rg.pois((o.base||800)+2*(E[i]-lo)+0.04*Q[i]+p)); return {E,y}; }
+const c1sRun=(S,o)=>{ o=o||{}; const M=G.recipeModel("c1s",Object.assign({shift:0,be:S.E,y:S.y},o)); const P=C.makeProblem({be:S.E,y:S.y,c:1},M); const s=G.c1sFit(P,{drop:o.drop}); const fin=C.finalize(s.P,s.r); return {M,s,fin}; };
+{ // (a) data: offsets/ranges = the literature table (SPEC §17.10), shape GL(30) everywhere (one fixed L fraction), widths tied 1:1, flags
+  const R=G.RECIPE_C1S, L=Object.fromEntries(R.lines.map(l=>[l.key,l]));
+  const tab=L.co.rng.join()==="1.2,1.8"&&L.cdo.rng.join()==="2.8,3.5"&&L.oco.rng.join()==="3.8,4.5"&&L.co3.rng.join()==="4.5,5.1"&&R.ref===284.8&&R.sp2ref===284.4;
+  // the ranges contain every checked source value: Biesinger/Morgan Table 1 ends, G&H 2017 Table 1 ends, B&B PMA, Morgan Table 3 carbonates (except K₂CO₃)
+  const inR=(k,v)=>v>=L[k].rng[0]-1e-9&&v<=L[k].rng[1]+1e-9; const src=[["co",1.3],["co",1.7],["co",1.2],["co",1.54],["co",1.81-0.01],["co",289.04-285.00-2.45],["cdo",2.8],["cdo",3.0],["cdo",3.5],["oco",3.8],["oco",4.3],["oco",3.96],["oco",4.54-0.04],["oco",289.04-285.00],
+    ["co3",289.8-284.8],["co3",289.5-284.8],["co3",289.6-284.8],["co3",289.4-284.8]];
+  const M=G.recipeModel("c1s",{}), q=M.cons; const ref=M.comps.find(c=>c.rrole==="ref");
+  const struct=M.comps.every(c=>c.shape==="GLP"&&Math.abs(c.m-0.3)<1e-12&&q[c.id].m.mode==="fixed")&&M.comps.filter(c=>c!==ref).every(c=>q[c.id].F.mode==="link"&&q[c.id].F.ref===ref.id&&q[c.id].F.k===1)&&M.bg.type==="active"&&M.comps.length===4;
+  const fB=G.c1sFlags(R,{present:["Ba","O"]}), fN=G.c1sFlags(R,{present:["Co","O"]}), fO=G.c1sFlags(R,{present:["Co"],flags:{co3:true}});
+  const M3=G.recipeModel("c1s",{present:["Sr"]}), c3=M3.comps.find(c=>c.rk==="co3");
+  const sp2=G.recipeModel("c1s",{flags:{sp2:true}}), s2=sp2.comps.find(c=>c.rk==="sp2"), pi=sp2.comps.find(c=>c.rk==="pi"), co2=sp2.comps.find(c=>c.rk==="co");
+  ok(tab&&src.every(([k,v])=>inR(k,v))&&struct&&fB.co3&&!fN.co3&&fO.co3&&c3&&M3.cons[c3.id].F.mode==="free"&&s2&&s2.shape==="LA"&&Math.abs(s2.be-284.4)<1e-9&&pi&&Math.abs(co2.be-(284.4+1.9))<1e-9&&sp2.recipe.target===284.4&&G.complexInfo("C","1s")==null,
+    "C 1s recipe data: ranges hold the checked literature values; GL(30) on every line (L fraction fixed, shared), FWHM tied 1:1 to C–C/C–H; carbonate on with Ba/Sr, off otherwise, user override; sp² = LA at 284.4 + π–π*, oxidized + 0.4; no R9 'complex region' note",
+    `Ba→${fB.co3} Co→${fN.co3} override→${fO.co3} sp² ${s2&&s2.be}`);
+}
+{ // (b) synthetic: four lines + noise, raw C–C 284.36 (true Δ +0.44): positions/areas within 3σ, Δ within 3σ of +0.44
+  const rows=[]; for(const sd of [1,2,3,4]){ const cc=284.36+(sd-2.5)*0.04, T=[[cc,30000,1.3],[cc+1.45,8000,1.3],[cc+3.0,2000,1.3],[cc+4.0,3500,1.3]]; const S=synthC(T,100+sd);
+    const {s,fin}=c1sRun(S,{present:[]}); const key=["cc","co","cdo","oco"]; let worst=0;
+    key.forEach((k,j)=>{ const i=s.P.comps.findIndex(c=>c.rk===k); if(i<0){ worst=99; return; } const q=fin.summ[i]; worst=Math.max(worst,Math.abs(q.be-T[j][0])/q.sig.be,Math.abs(q.area-T[j][1])/q.sig.area); });
+    const iR=s.P.comps.findIndex(c=>c.rrole==="ref"); const dz=Math.abs(s.info.delta-(284.8-cc))/fin.summ[iR].sig.be;
+    rows.push({worst,dz,delta:s.info.delta,true:284.8-cc,chi:fin.stats.chi2nu,dropped:s.info.dropped.length}); }
+  V13.synth=rows;
+  ok(rows.every(r=>r.worst<=3&&r.dz<=3&&r.dropped===0&&r.chi<1.3),"C 1s recipe on 4 synthetic spectra (C–C, C–O +1.45, C=O +3.0, O–C=O +4.0, GL(30), Poisson): every position and area within 3σ, Δ within 3σ of the truth, no line dropped",rows.map(r=>`Δ ${r.delta.toFixed(3)} (true ${r.true.toFixed(3)}, ${r.dz.toFixed(1)}σ) worst ${r.worst.toFixed(1)}σ χ²ν ${r.chi.toFixed(2)}`).join(" | "));
+}
+{ // (c) no double shift: the same data with an earlier correction (Δ0 = 0.44, and Δ0 = the recipe's own Δ, and a wrong Δ0 = −1.0) give the same Δ
+  const S=synthC([[284.36,30000,1.3],[285.81,8000,1.3],[287.36,2000,1.3],[288.36,3500,1.3]],7);
+  const ds=[0,0.44,-1.0].map(sh=>{ const M=G.recipeModel("c1s",{shift:sh,be:S.E,y:S.y,present:[]}); const s=G.c1sFit(C.makeProblem({be:S.E,y:S.y,c:1},M),{}); return s.info.delta; });
+  const M2=G.recipeModel("c1s",{shift:ds[0],be:S.E,y:S.y,present:[]}); const d2=G.c1sFit(C.makeProblem({be:S.E,y:S.y,c:1},M2),{}).info.delta;
+  V13.noDouble=ds.concat([d2]);
+  ok(V13.noDouble.every(d=>Math.abs(d-ds[0])<0.002)&&Math.abs(ds[0]-0.44)<0.05,"re-applying the recipe after a correction (Δ0 = 0, 0.44, −1.0, its own Δ) gives the same Δ (fit on measured BE; Δ replaces, not adds)",V13.noDouble.map(d=>d.toFixed(4)).join(" · "));
+}
+{ // (d) weak-line test: no C=O in the truth → C=O dropped (F-test p > 0.05) in ≥ 5 of 6 seeds; with a real C=O (5 % of the area) → kept in 6/6; Drop off → kept + reported
+  const res={abs:[],real:[]}; for(const sd of [11,12,13,14,15,16]){ const Sa=synthC([[284.4,30000,1.3],[285.9,8000,1.3],[288.4,3500,1.3]],sd); const a=c1sRun(Sa,{present:[]}).s.info;
+    res.abs.push(a.dropped.some(d=>d.key==="cdo")); const Sr=synthC([[284.4,30000,1.3],[285.9,8000,1.3],[287.4,2300,1.3],[288.4,3500,1.3]],sd); const b=c1sRun(Sr,{present:[]}).s.info; res.real.push(!b.dropped.some(d=>d.key==="cdo")&&b.tests.some(t=>t.key==="cdo"&&t.p<0.05)); }
+  const Sa=synthC([[284.4,30000,1.3],[285.9,8000,1.3],[288.4,3500,1.3]],11); const keep=c1sRun(Sa,{present:[],drop:false}).s.info; const t=keep.tests.find(x=>x.key==="cdo");
+  V13.weak={abs:res.abs,real:res.real,keep:t&&{p:t.p,F:t.F,z:t.z}};
+  ok(res.abs.filter(Boolean).length>=5&&res.real.every(Boolean)&&!keep.dropped.length&&t&&t.p>0.05,"weak-line F-test: absent C=O dropped in ≥ 5/6 seeds (α = 0.05), a real 5 % C=O kept in 6/6; 'Drop weak' off keeps it and reports p",`absent dropped ${res.abs.filter(Boolean).length}/6 · real kept ${res.real.filter(Boolean).length}/6 · kept-model p ${t&&t.p.toFixed(2)}`);
+}
+{ // (e) carbonate option: data with BaCO₃-like carbonate (+4.75 eV) — on (Ba loaded): carbonate recovered within 3σ, χ²ν ≈ 1; off: the O–C=O line is pushed to its window end
+  const T=[[284.5,30000,1.3],[286.0,7000,1.3],[287.5,1500,1.3],[288.5,2500,1.3],[289.25,5000,1.6]]; const S=synthC(T,21);
+  const on=c1sRun(S,{present:["Ba"]}), off=c1sRun(S,{present:[]}); const i3=on.s.P.comps.findIndex(c=>c.rk==="co3"); const q3=on.fin.summ[i3];
+  const io=off.s.P.comps.findIndex(c=>c.rk==="oco"); const qo=off.s.P.comps[io], wo=off.s.P.cons[qo.id].be;
+  const dOff=G.diagnose({E:off.s.P.E,y:off.s.P.y,fin:off.fin,el:"C",orb:"1s",bgType:"active",recipe:G.RECIPE_C1S});
+  V13.co3={on:{area:q3&&q3.area,sig:q3&&q3.sig.area,be:q3&&q3.be,chi:on.fin.stats.chi2nu},off:{chi:off.fin.stats.chi2nu,oco:qo.be,hi:wo.hi,warn:warnIds(dOff)}};
+  ok(q3&&Math.abs(q3.area-5000)<=3*q3.sig.area&&Math.abs(q3.be-289.25)<=3*q3.sig.be&&on.fin.stats.chi2nu<1.3&&(off.fin.stats.chi2nu>on.fin.stats.chi2nu+0.1||Math.abs(qo.be-wo.hi)<1e-3||warnIds(dOff).length>0),
+    "carbonate option: on → CO₃²⁻ recovered within 3σ (area and position), χ²ν < 1.3; off → the misfit shows (higher χ²ν, O–C=O at its window end or a Fit check warning)",JSON.stringify(V13.co3,(k,v)=>typeof v==="number"?+v.toFixed(3):v));
+}
+/* ---------- 12 v1.9.13 O 1s recipe and the C 1s ↔ O 1s link (SPEC §17.11) ---------- */
+console.log("== 12 v1.9.13 O 1s recipe: data, C 1s ↔ O 1s link recovers the truth, O–C=O vs CO₃²⁻");
+{ const R=G.RECIPE_O1S, L=Object.fromEntries(R.lines.map(l=>[l.key,l]));
+  // literature values inside the line windows (C 1s 284.8 scale): B&B (285.00 → −0.20) PMA C=O 532.21, PMAA 532.39, PVA 532.74, PMA C–O 533.69, PMMA 533.77, PMAA 533.78; Graf 2025 OH/carbonate 531.0; Cole Y(OH)₃ 531.4
+  const inR=(k,v)=>v>=L[k].rng[0]-1e-9&&v<=L[k].rng[1]+1e-9; const lit=[["cdo",532.21-0.2],["cdo",532.39-0.2],["co",532.74-0.2],["w",533.69-0.2],["w",533.77-0.2],["w",533.78-0.2],["oh",531.0],["oh",531.4]];
+  const lat=["Y","La","Ti","Co","Fe","Sr","Ba"].every(e=>G.O1S_LAT[e]&&G.O1S_LAT[e].be>=527&&G.O1S_LAT[e].be<=531)&&G.O1S_LAT.Y.be===529.2&&G.O1S_LAT.La.be===530.5&&G.O1S_LAT.Co.be===529.5&&Math.abs(G.O1S_LAT.Ba.be-(527.8-0.6))<1e-9&&!G.O1S_LAT.Ta;
+  const M=G.recipeModel("o1s",{present:["Ba","Co","Ta","C","O"]}); const q=M.cons; const l1=M.comps.find(c=>c.rk==="lat1"), l2=M.comps.find(c=>c.rk==="lat2"), oh=M.comps.find(c=>c.rk==="oh");
+  const struct=M.comps.every(c=>c.shape==="GLP"&&q[c.id].m.mode==="fixed")&&q[l2.id].F.ref===l1.id&&M.comps.filter(c=>c.rrole==="surf"&&c!==oh).every(c=>q[c.id].F.ref===oh.id)&&M.recipe.latStarts.join()==="527.2,529.5";
+  const one=G.recipeModel("o1s",{present:["Co","O"]}); const ex=G.o1sExpect({R:2,sfRel:0.1,comps:{co:{a:100,s:5},cdo:{a:50,s:5},oco:{a:40,s:4},co3:{a:10,s:2}}});
+  const exOK=Math.abs(ex.co.E-200)<1e-9&&Math.abs(ex.cdo.E-180)<1e-9&&Math.abs(ex.w.E-80)<1e-9&&Math.abs(ex.oh.E-60)<1e-9&&ex.oh.lower&&ex.w.lower&&!ex.co.lower&&Math.abs(ex.co.s-Math.hypot(10,20))<1e-9;
+  const h=G.o1sExpect({R:2,sfRel:0,comps:{oco:{a:40,s:0},co3:{a:10,s:0}}},"co3");
+  ok(lit.every(([k,v])=>inR(k,v))&&lat&&struct&&one.comps.filter(c=>c.rrole==="lat").length===1&&exOK&&Math.abs(h.oh.E-300)<1e-9&&h.w.E===0&&G.complexInfo("O","1s")==null,
+    "O 1s recipe data: line windows hold the literature values; lattice table (Y 529.2, La 530.5, Co/Fe/Sr 529.5, Ti 529.8, BaO 527.2 — no Ta value); 2 lattice lines with two metals (Ba 527.2, Co 529.5), FWHM tied (lattice / surface), GL(30) fixed; O per carbon C–O 1 · C=O 1 · O–C=O 1 + 1 · CO₃²⁻ 3 (hypothesis moves the high-BE area)",JSON.stringify(M.recipe.latStarts));
+}
+{ const Rr=2.93; const rows=[];
+  for(const kind of ["oco","co3"]) for(const sd of [1,2,3]){
+    const Chi=4000, cl=[[284.8,30000,1.3],[286.3,6000,1.3],[287.8,1500,1.3],[kind==="oco"?288.8:289.6,Chi,kind==="oco"?1.3:1.5]];
+    const Sc=synthC(cl,200+sd,{lo:278,hi:297}); const cr=c1sRun(Sc,{present:kind==="co3"?["Ba"]:[],flags:{co3:kind==="co3",oco:kind==="oco"},drop:false});
+    const comps={}; cr.s.P.comps.forEach((c,i)=>{ if(["co","cdo","oco","co3"].includes(c.rk)) comps[c.rk]={a:c.area,s:cr.fin.summ[i].sig.area}; });
+    const link={R:Rr,sfRel:0.10,comps}; const O={lat1:40000,oh:8000+Rr*3*(kind==="co3"?Chi:0),cdo:Rr*(1500+(kind==="oco"?Chi:0)),co:Rr*6000,w:Rr*(kind==="oco"?Chi:0)};
+    const So=synthC([[529.5,O.lat1,1.2],[531.4,O.oh,1.8],[532.1,O.cdo,1.8],[532.6,O.co,1.8],[533.5,O.w,1.8]].filter(x=>x[1]>0),300+sd,{lo:524,hi:538,base:1500});
+    const build={shift:0,flags:{},present:["Co"],link}; const M=G.recipeModel("o1s",Object.assign({be:So.E,y:So.y},build));
+    const s=G.o1sFit(C.makeProblem({be:So.E,y:So.y,c:1},M),{build}); const fin=C.finalize(s.P,s.r); const ex=s.info.expect;
+    const A=k=>{ const i=s.P.comps.findIndex(c=>c.rk===k); return i<0?null:{a:fin.summ[i].area,s:fin.summ[i].sig.area}; };
+    const lat=A("lat1"); const orgT=O.cdo+O.co+O.w, orgF=["cdo","co","w"].reduce((t,k)=>t+(A(k)?A(k).a:0),0), orgS=Math.hypot(...["cdo","co","w"].map(k=>ex[k]?ex[k].s:0));
+    rows.push({kind,lat:Math.abs(lat.a-O.lat1)/lat.s,org:Math.abs(orgF-orgT)/orgS,verdict:s.info.hyp&&s.info.hyp.verdict,dA:s.info.hyp&&s.info.hyp.dAICc,chi:fin.stats.chi2nu,ok:kind==="oco"?/O–C=O favoured/.test(s.info.hyp.verdict):/CO₃²⁻ favoured/.test(s.info.hyp.verdict)}); }
+  V13.o1s=rows;
+  ok(rows.every(r=>r.lat<=3&&r.org<=3&&r.ok&&r.chi<1.3),"O 1s + C 1s link on synthetic pairs (3 seeds × O–C=O or CO₃²⁻ truth): lattice area within 3σ, organic O (C=O + C–O + 533.5) within 3σ of the C 1s band, the high-BE C 1s line assigned correctly by AICc in 6/6",rows.map(r=>`${r.kind}: lat ${r.lat.toFixed(1)}σ org ${r.org.toFixed(1)}σ ΔAICc ${r.dA.toFixed(0)} ${r.verdict} χ²ν ${r.chi.toFixed(2)}`).join(" | "));
+}
+/* ---------- 13 v1.9.13 Fit check: shared L fraction, merge first + Bound positions, correlated residuals (SPEC §17.12) ---------- */
+console.log("== 13 v1.9.13 Fit check: shared L fraction, merge first + 'Bound positions', χ²ν < 1 with correlated residuals");
+{ // (a) user O 1s-like model: two free lines on one peak with free per-line L fractions → merge first, its actions Remove + Bound positions; L-frac items carry 'shared'
+  const rg=U.rng(31); const step=0.05,lo=525,hi=537,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+  const P0=new Float64Array(n); [[529.6,40000,1.2],[531.6,20000,1.8]].forEach(([be,A,F])=>{ const v=C.compEval(C.newComp("GLS",be,{F,m:0.3,area:A}),E,ctx); for(let i=0;i<n;i++) P0[i]+=v[i]; });
+  const y=Float64Array.from(P0,p=>rg.pois(1500+p)); const sp={be:E,y,c:1};
+  const a=C.newComp("GLS",529.6,{F:1.2,m:0.3,area:40000,id:"a"}), b=C.newComp("GLS",531.5,{F:1.6,m:0.3,area:12000,id:"b"}), c=C.newComp("GLS",531.8,{F:1.6,m:0.2,area:8000,id:"c"});
+  const P=C.makeProblem(sp,{lo,hi,bg:{type:"linear",n:5},comps:[a,b,c],cons:{}}); const r=C.fitOnce(P,{}); const fin=C.finalize(P,r);
+  const d=G.diagnose({E:P.E,y:P.y,fin,el:"O",orb:"1s",bgType:"linear"}); const mg=d.find(x=>x.id==="merge");
+  const mfix=d.filter(x=>x.act&&x.act.type==="shareM"); const oldFix=d.filter(x=>x.act&&x.act.type==="fix"&&x.act.k==="m");
+  let bnd=null; if(mg){ const m={lo,hi,bg:P.bg,comps:C.clone(fin.comps),cons:C.clone(P.cons)}; const act=mg.acts.find(x=>x.type==="bound"); G.applyAction(m,act); const [p1,p2]=act.ids.map(id=>m.comps.find(q=>q.id===id)).sort((x,y)=>x.be-y.be);
+    const q1=m.cons[p1.id].be, q2=m.cons[p2.id].be; const P2=C.makeProblem(sp,m); const r2=C.fitOnce(P2,{}); const f2=C.finalize(P2,r2); const d2=G.diagnose({E:P2.E,y:P2.y,fin:f2,el:"O",orb:"1s",bgType:"linear"});
+    const s1=P2.comps.find(q=>q.id===p1.id), s2=P2.comps.find(q=>q.id===p2.id); bnd={gap:q2.lo-q1.hi,sep:act.sep,refit:act.refit,tied:Object.values(m.cons).some(q=>q.F&&q.F.mode==="link"),after:s2.be-s1.be,merge2:d2.some(x=>x.id==="merge")}; }
+  V13.merge={first:d[0]&&d[0].id,labels:d.map(x=>x.label),acts:mg&&mg.acts.map(x=>x.label),bnd,shareM:mfix.length,oldFix:oldFix.length};
+  ok(mg&&d[0].id==="merge"&&mg.acts.length===2&&/^Remove/.test(mg.acts[0].label)&&mg.acts[1].type==="bound"&&/cause/.test(mg.tip),"merge listed first, as the cause, with [Remove …] and [Bound positions]",JSON.stringify(V13.merge.labels.slice(0,3)));
+  ok(bnd&&bnd.gap>=bnd.sep-1e-6&&bnd.refit&&bnd.tied&&bnd.after>=bnd.sep-1e-6&&!bnd.merge2,"'Bound positions': BE ranges split ≥ ½·mean FWHM apart, FWHM tied, refit requested; after the refit the two lines no longer merge",JSON.stringify(bnd));
+  ok(oldFix.length===0,"no per-line 'Fix L frac. at …' action while several GL lines carry an L fraction (replaced by 'Fix L frac. (shared)')",`shared actions ${mfix.length}`);
+}
+{ // (b) shareM applyAction: every GL line → one fixed value (area-weighted mean); a free m correlated with an area offers it
+  const cs=[C.newComp("GLS",530,{F:1.2,m:0.0,area:300,id:"x"}),C.newComp("GLS",531.5,{F:1.8,m:0.4,area:100,id:"z"})]; const m={comps:cs,cons:{}};
+  const msg=G.applyAction(m,{type:"shareM",ids:["x","z"],v:0.1,label:"Fix L frac. (shared)"});
+  const fin={comps:C.clone(cs),free:[{id:"x",k:"area",lo:0,hi:Infinity},{id:"x",k:"m",lo:0,hi:1},{id:"z",k:"area",lo:0,hi:Infinity}],cov:{np:3,corr:[1,0.97,0,0.97,1,0,0,0,1],atB:[false,false,false]},summ:[],stats:{}};
+  const E=Float64Array.from({length:50},(_,i)=>528+i*0.1), y=Float64Array.from(E,()=>100);
+  const d=G.diagnose({E,y,fin,bgType:"linear"}); const it=d.find(x=>x.id==="corr"); const v=(0*300+0.4*100)/400;
+  ok(msg&&cs.every(c=>c.m===0.1&&m.cons[c.id].m.mode==="fixed")&&it&&it.act&&it.act.type==="shareM"&&Math.abs(it.act.v-v)<1e-3&&it.act.ids.length===2&&/shared/.test(it.act.label),"'Fix L frac. (shared)': a free L fraction correlated with an area offers it; applying it fixes every GL line at one value (area-weighted mean)",it&&it.label);
+}
+{ // (c) R12: χ²ν < 1 with ρ₁ > 0.3 → info with the √((1+ρ₁)/(1−ρ₁)) factor and a Monte Carlo action; white noise → nothing
+  const rg=U.rng(41); const step=0.05,lo=280,hi=292,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+  const P0=C.compEval(C.newComp("GLS",285,{F:1.2,m:0.3,area:30000}),E,ctx); const raw=Float64Array.from(P0,p=>rg.pois(2000+p)); const sm=Float64Array.from(raw,(v,i)=>i&&i<n-1?(raw[i-1]+2*v+raw[i+1])/4:v);   // [1 2 1]/4 smoothing
+  const run=y=>{ const P=C.makeProblem({be:E,y,c:1},{lo,hi,bg:{type:"linear",n:5},comps:[C.newComp("GLS",285,{F:1.2,m:0.3,area:30000})],cons:{}}); const fin=C.finalize(P,C.fitOnce(P,{})); return {fin,d:G.diagnose({E:P.E,y:P.y,fin,bgType:"linear"})}; };
+  const s=run(sm), w=run(raw); const it=s.d.find(x=>x.id==="corrnoise"); const st=s.fin.stats;
+  V13.r12={chi:st.chi2nu,rho:st.rho1,label:it&&it.label,white:w.d.some(x=>x.id==="corrnoise"),wchi:w.fin.stats.chi2nu,wrho:w.fin.stats.rho1};
+  ok(it&&it.sev==="info"&&st.chi2nu<1&&st.rho1>0.3&&new RegExp(Math.sqrt((1+st.rho1)/(1-st.rho1)).toFixed(2)).test(it.tip)&&/Zięba/.test(it.tip)&&it.act&&it.act.type==="mc"&&!V13.r12.white,"R12: smoothed data (χ²ν < 1, ρ₁ > 0.3) → info with σ × √((1+ρ₁)/(1−ρ₁)) (Zięba 2010) and a Monte Carlo action; raw Poisson data → no item",JSON.stringify(V13.r12,(k,v)=>typeof v==="number"?+v.toFixed(3):v));
+}
+
+{ // (d) R13 multi-start same-minimum < 1/3 → warning (recipe offered when one exists); ≥ 1/3 → nothing
+  const E=Float64Array.from({length:120},(_,i)=>525+i*0.1), y=Float64Array.from(E,()=>100); const base={comps:[C.newComp("GLS",530,{F:1.2,m:0.3,area:100,id:"a"})],free:[],cov:{np:0,corr:[],atB:[]},summ:[],stats:{}};
+  const lo=G.diagnose({E,y,fin:Object.assign({},base,{multi:{N:24,near:2,frac:2/24}}),el:"O",orb:"1s",bgType:"linear"}), hi=G.diagnose({E,y,fin:Object.assign({},base,{multi:{N:24,near:12,frac:0.5}}),el:"O",orb:"1s",bgType:"linear"});
+  const it=lo.find(x=>x.id==="multi");
+  ok(it&&it.sev==="warn"&&/2\/24/.test(it.label)&&/not unique/.test(it.tip)&&it.act&&it.act.recipe==="o1s"&&!hi.some(x=>x.id==="multi"),"R13: Multi-start 'same minimum 2/24' → warning (model not unique; bounds, ties, recipe), with 'Apply recipe' for O 1s; 12/24 → none",it&&it.label);
+}
+{ // (e) R14 high free L fraction next to a free line / window end; R15 L fractions differ; both offer the shared fix; the O 1s recipe (GL(30) fixed) gives neither
+  const E=Float64Array.from({length:221},(_,i)=>525+i*0.05), y=Float64Array.from(E,()=>100);
+  const cs=[C.newComp("GLS",529.6,{F:1.2,m:0.0,area:300,id:"A"}),C.newComp("GLS",530.8,{F:1.8,m:0.3,area:500,id:"D"}),C.newComp("GLS",531.73,{F:1.8,m:0.733,area:400,id:"Cc"})];
+  const free=[["A","be"],["A","m"],["D","be"],["Cc","be"],["Cc","m"]].map(([id,k])=>({id,k,lo:k==="m"?0:520,hi:k==="m"?1:540}));
+  const d=G.diagnose({E,y,fin:{comps:cs,free,cov:{np:0,corr:[],atB:[]},summ:[],stats:{}},el:"O",orb:"1s",bgType:"linear"}); const lt=d.find(x=>x.id==="ltail"), md=d.find(x=>x.id==="mdiff");
+  const one=G.diagnose({E,y,fin:{comps:[C.newComp("GLS",530,{F:1.2,m:0.7,area:300,id:"S"})],free:[{id:"S",k:"m",lo:0,hi:1}],cov:{np:0,corr:[],atB:[]},summ:[],stats:{}},bgType:"linear"});
+  const M=G.recipeModel("o1s",{present:["Co"]}); const rec=G.diagnose({E,y,fin:{comps:M.comps,free:[],cov:{np:0,corr:[],atB:[]},summ:[],stats:{}},bgType:"active"});
+  ok(lt&&lt.sev==="warn"&&lt.ids[0]==="Cc"&&lt.act&&lt.act.type==="shareM"&&md&&md.act&&md.act.type==="shareM"&&/0\.00–0\.73/.test(md.label)&&!one.some(x=>x.id==="ltail")&&!rec.some(x=>x.id==="ltail"||x.id==="mdiff"),
+    "R14: free L frac. 0.73 with a free line within 2 FWHM → warning (tail stands in for a missing line); R15: L fractions 0.00–0.73 differ → warning; both offer 'Fix L frac. (shared)'; an isolated line and the O 1s recipe (GL(30) fixed) give neither",[lt&&lt.label,md&&md.label].join(" | "));
+}
+{ // (f) O 1s 'Low lattice' (528.5, Graf 2025 Table 1 perovskite lattice; not default): compared by AICc with the model without it
+  const mk=(withLow,sd)=>{ const ls=[[529.5,30000,1.2],[531.4,15000,1.8],[532.6,6000,1.8],[533.5,3000,1.8]]; if(withLow) ls.push([528.6,12000,1.2]); return synthC(ls,400+sd,{lo:524,hi:538,base:1500}); };
+  const def=G.o1sFlags(G.RECIPE_O1S,{present:["Ba","Co"]}).latlo===false; const rows=[];
+  for(const w of [true,false]){ const S=mk(w,1); const build={shift:0,flags:{latlo:true,lat2:false},present:["Co"]}; const M=G.recipeModel("o1s",Object.assign({be:S.E,y:S.y},build));
+    const s=G.o1sFit(C.makeProblem({be:S.E,y:S.y,c:1},M),{build}); rows.push({w,v:s.info.latlo&&s.info.latlo.verdict,d:s.info.latlo&&s.info.latlo.dAICc}); }
+  V13.latlo=rows;
+  ok(def&&/supported/.test(rows[0].v)&&!/supported/.test(rows[1].v),"O 1s 'Low lattice' option: off by default; with a true 528.6 eV line ΔAICc supports it, without one it is not supported",rows.map(r=>`${r.w?"with":"without"}: ${r.v} (ΔAICc ${r.d.toFixed(1)})`).join(" | "));
+}
+
+{ // (g) R13 branches: χ²ν > 2 with few starts → 'model misfit' (no more starts; binding bounds and positive residual runs with BE); equal χ² with different parameters → not unique
+  const rg=U.rng(51); const step=0.05,lo=525,hi=536,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+  const P0=new Float64Array(n); [[528.6,15000,1.2],[529.5,30000,1.2],[531.4,15000,1.8]].forEach(([be,A,F])=>{ const v=C.compEval(C.newComp("GLS",be,{F,m:0.3,area:A}),E,ctx); for(let i=0;i<n;i++) P0[i]+=v[i]; });
+  const y=Float64Array.from(P0,p=>rg.pois(1500+p)); const a=C.newComp("GLS",529.4,{F:1.2,m:0.3,area:30000,id:"a"}), b=C.newComp("GLS",531.4,{F:1.8,m:0.3,area:15000,id:"b"});
+  const P=C.makeProblem({be:E,y,c:1},{lo,hi,bg:{type:"linear",n:5},comps:[a,b],cons:{a:{be:{mode:"free",lo:529.2,hi:530.0},F:{mode:"free",lo:0.8,hi:1.5}}}}); const fin=C.finalize(P,C.fitOnce(P,{}));
+  const st=C.startPoints(P,8,1); const fj=C.fitJob(P,st,{}); const nu=fj.chi2/Math.max(1,fj.N-fj.nfree);
+  fin.multi={N:8,near:1,frac:1/8,chi2nu:nu,thr:Math.max(1,nu),sameP:1};
+  const d=G.diagnose({E:P.E,y:P.y,fin,el:"O",orb:"1s",bgType:"linear"}); const it=d.find(x=>x.id==="multi");
+  const E2=Float64Array.from({length:50},(_,i)=>528+i*0.1), y2=Float64Array.from(E2,()=>100); const base={comps:[C.newComp("GLS",530,{F:1.2,m:0.3,area:100,id:"q"})],free:[],cov:{np:0,corr:[],atB:[]},summ:[],stats:{chi2nu:1.0}};
+  const dP=G.diagnose({E:E2,y:y2,fin:Object.assign({},base,{multi:{N:24,near:20,frac:20/24,chi2nu:1.0,thr:1,sameP:4}}),bgType:"linear"}).find(x=>x.id==="multi");
+  const dOK=G.diagnose({E:E2,y:y2,fin:Object.assign({},base,{multi:{N:24,near:20,frac:20/24,chi2nu:1.0,thr:1,sameP:19}}),bgType:"linear"}).find(x=>x.id==="multi");
+  V13.r13={label:it&&it.label,pars:fj.pars.length,nfree:fj.nfree,nu};
+  ok(fj.pars.length===8&&fj.pars.every(v=>!v||v.length===fj.nfree)&&nu>2&&it&&/misfit/.test(it.label)&&/will not help/.test(it.tip)&&/at a bound/.test(it.tip)&&/528\.[4-9]|528\.[0-9]/.test(it.tip)&&dP&&/different parameters/.test(dP.label)&&!dOK,
+    "R13: fitJob returns each start's parameter vector; χ²ν > 2 with 1/8 starts → 'model misfit' (more starts will not help; binding bounds and the residual run near 528.6 eV named); 20/24 equal χ² but 4 with the same parameters → 'not unique'; 19/20 → nothing",it&&it.label+" | "+(dP&&dP.label));
+}
+{ // (h) O 1s 'Low lattice' off but needed → the fit tests adding it and suggests ticking it (ΔAICc > 2)
+  const S=synthC([[528.6,12000,1.2],[529.5,30000,1.2],[531.4,15000,1.8],[532.6,6000,1.8],[533.5,3000,1.8]],411,{lo:524,hi:538,base:1500});
+  const build={shift:0,flags:{lat2:false},present:["Co"]}; const M=G.recipeModel("o1s",Object.assign({be:S.E,y:S.y},build)); const s=G.o1sFit(C.makeProblem({be:S.E,y:S.y,c:1},M),{build});
+  const L=s.info.latlo; V13.latloSug=L&&{v:L.verdict,d:L.dAICc,be:L.with&&L.with.be};
+  ok(!M.comps.some(c=>c.rk==="latlo")&&L&&L.suggest&&/supported/.test(L.verdict)&&L.with.be>528.3&&L.with.be<528.9&&G.RECIPE_O1S.lines[0].Fhi===2.0,"O 1s: with 'Low lattice' off, the fit also tries it and suggests it when ΔAICc > 2 (true 528.6 eV line found); lattice FWHM range up to 2.0 eV",JSON.stringify(V13.latloSug));
+}
+
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
 if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
-module.exports={FP,SYN,POS,TM,LT,V8};
+module.exports={FP,SYN,POS,TM,LT,V8,V13};

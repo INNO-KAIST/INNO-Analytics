@@ -36,7 +36,7 @@ const SEV_ORDER={bad:0,warn:1,info:2};
    ------------------------------------------------------------ */
 const SAT_TM2P=["Cr","Mn","Fe","Co","Ni","Cu"], SAT_RE3D=["Ce","Pr","Nd"];
 function complexInfo(el,orb){
-  const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).map(r=>r.id); const m=C.multipletInfo(el,orb);
+  const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).filter(r=>r.kind!=="c1s"&&r.kind!=="o1s").map(r=>r.id); const m=C.multipletInfo(el,orb);   // v1.9.13: C 1s / O 1s recipes are not 'complex regions' (no R9 note)
   if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — physically a plain 4d doublet, but Auto suggest models every Yb 4d as a multiplet: use LCF or add one doublet by hand":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
   if(orb==="2p"&&SAT_TM2P.includes(el)) return {kind:"satellite",why:`${el} 2p: multiplet splitting and shake-up satellites of the open 3d shell (closed-shell states such as Cu⁺/Cu⁰ excepted) — one doublet per chemical state does not describe the envelope`,closed:el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null,recipes:rc};
   if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc,note:rc.length&&recipeById(rc[0]).kind==="emp"?RE_LCF:null};
@@ -245,10 +245,241 @@ Object.keys(HAASCH).forEach(id=>{ const h=HAASCH[id]; const lo=Math.floor(Math.m
     how:`Empirical envelope (single crystal ${cmp}(110), areas free): Haasch's ${h.rows.length} components with their BE and FWHM (CasaXPS, Tougaard background; shape not given — GL(30), the CasaXPS default, is used), held at the published spacings; the set is aligned to the data (±3 eV, positions converted from C 1s 285.0 to 284.8 eV), then one common position (± 0.3 eV) and every component area are free. The components are a description of the envelope of one compound, not chemical states — for chemical-state or valence analysis use reference-spectrum LCF.`,
     cite:`R.T. Haasch, E. Breckenfeld, L.W. Martin, Surf. Sci. Spectra 21, ${h.pg} (2014)${h.doi?", doi:"+h.doi:""} (${cmp}(110), Kratos Axis Ultra, mono Al Kα, C 1s 285.0 eV)`,
     pitfalls:`Empirical envelope (single crystal, areas free): no component areas were published, so no area ratio or doublet constraint is imposed and the areas carry no chemical meaning — use the summed area for quantification and measured reference spectra (Store as reference → LCF) for chemical states. Haasch used a Tougaard background; here the in-fit Shirley + slope is the default (change it in the background row if the window ends are not on background).`+(h.el==="Nd"&&h.orb==="3d"?" Nd 3d overlaps the O KLL Auger under Al Kα (O KLL KE ≈ 511 / 492 / 477 eV → BE ≈ 976 / 995 / 1010 eV): with oxygen present part of this envelope is O Auger intensity — use Nd 4d, or Mg Kα.":"")+(h.el==="Pr"&&h.orb==="3d"?" The Pr 3d5/2 satellite (932.8 eV) coincides with Cu 2p3/2 (932.7 eV).":"")}); });
+/* ------------------------------------------------------------
+   2d) v1.9.13 C 1s adventitious-carbon recipe (SPEC §17.10). Offsets from C–C/C–H and the equal-FWHM rule: Biesinger, Appl. Surf. Sci. 597,
+       153681 (2022) as tabulated by Morgan, Surf. Interface Anal. (2024) doi:10.1002/sia.7360 Table 1; Greczynski & Hultman, ChemPhysChem 18,
+       1507 (2017) Table 1; Beamson & Briggs (1992) poly(methyl acrylate) via NIST SRD 20; carbonate C 1s: Morgan 2024 Table 3; sp²: Morgan,
+       C 7, 51 (2021). Ranges = union of the checked sources (not one paper's 'typical'). Shape: CasaXPS GL(30) for every line (one fixed
+       Lorentzian share — no free per-line L fraction); widths of the adventitious-carbon lines tied 1:1 to C–C/C–H (Biesinger: 'A*1').
+       Positions: relative windows (rOff) re-centred on the fitted reference line after the fit (c1sFit), as CasaXPS 'A + a, A + b'.
+   ------------------------------------------------------------ */
+const C1S_CO3_EL=["Ba","Sr","Ca","La","Li","Na"];
+const RECIPE_C1S={kind:"c1s", id:"c1s", el:"C", orb:"1s", name:"C 1s (adventitious carbon)", ref:284.8, sp2ref:284.4, win:[-4.5,8.0], win2:[-4.5,9.0],
+  bg:PAR_BG, casa:"GL(30)", beTol:0.6, align:0.6, search:6, co3El:C1S_CO3_EL, alpha:0.05,
+  lines:[
+   {key:"cc",  name:"C–C/C–H", ref:true, F:1.2, Flo:0.6, Fhi:2.0},
+   {key:"co",  name:"C–O",     off:1.5, rng:[1.2,1.8]},
+   {key:"cdo", name:"C=O",     off:3.0, rng:[2.8,3.5], opt:"cdo"},
+   {key:"oco", name:"O–C=O",   off:4.0, rng:[3.8,4.5], opt:"oco"},
+   {key:"co3", name:"CO₃²⁻",   off:4.8, rng:[4.5,5.1], opt:"co3", ownF:true, F:1.5, Flo:0.8, Fhi:2.6}],
+  sp2Line:{key:"sp2", name:"C=C sp²", ref:true, la:true, F:0.6, Flo:0.2, Fhi:1.6},
+  piLine:{key:"pi", name:"π–π*", off:6.6, rng:[6.0,7.2], ownF:true, F:2.5, Flo:1.2, Fhi:4.5},
+  flags:[
+   {id:"cdo",label:"C=O",def:true,tip:"C=O at C–C + 2.8…3.5 eV (Biesinger 2022: +2.8–3.0; Morgan 2024: +3.0–3.5 eV; Morgan 2024 Table 1). Usually weak and the least determined line — the weak-component test removes it when the data do not need it."},
+   {id:"oco",label:"O–C=O",def:true,tip:"O–C=O at C–C + 3.8…4.5 eV (Biesinger 2022 / Morgan 2024: +3.8–4.3; Greczynski & Hultman 2017 Table 1: +3.96–4.54; Beamson & Briggs poly(methyl acrylate) 289.04 − 285.00 = +4.04 eV)."},
+   {id:"co3",label:"CO₃²⁻",def:null,tip:"Inorganic carbonate at C–C + 4.5…5.1 eV (Morgan 2024 Table 3, at adventitious C 284.8: Li₂CO₃ 289.8, BaCO₃ 289.5, CaCO₃ 289.6, CoCO₃ 289.4 eV; K₂CO₃ is lower, 288.5 eV — inside the O–C=O window). Default on when a carbonate-forming cation (Ba, Sr, Ca, La, Li, Na) is loaded in this sample. It overlaps O–C=O: C 1s alone cannot separate them — check O 1s (carbonate ≈ 531.5 eV) and the cation's surface (carbonate) component. Own width (a separate phase, not part of the adventitious layer)."},
+   {id:"sp2",label:"sp²",def:false,tip:"Graphitic main line (graphene, carbon supports): asymmetric C=C sp² line (LA) at 284.4 eV instead of a symmetric C–C/C–H at 284.8 (Morgan, C 7, 51 (2021) §3.1: 284.3–284.6 eV reported, asymmetric shape, π–π* shake-up around 291 eV). Adds a π–π* line; oxidized carbon is placed at its adventitious-carbon position on the corrected scale (offset + 0.4 eV from the sp² line). The charge correction then sets the sp² line to 284.4 eV — a conductive graphitic sample in contact with the spectrometer usually needs none (Δ ≈ 0); a large Δ means poor contact or a non-graphitic main line. The LA asymmetry ranges are fit ranges, not literature values."},
+   {id:"weak",label:"Drop weak",def:true,tip:"After the fit, each oxidized line is tested against the model without it (F-test on the data-variance χ², α = 0.05; the covariance z = area/σ is shown too). The least significant line with p > 0.05 is removed and the fit repeated until all remaining lines are significant (backward elimination). The removed lines are listed in the message ('Keep all' restores them). Off: keep every line and only report the test."}],
+  how:"One action: build the adventitious-carbon model (C–C/C–H + C–O + C=O + O–C=O, optional CO₃²⁻; every line CasaXPS GL(30), widths tied 1:1 to C–C/C–H), fit it (staged fit; the position windows of the oxidized lines are kept relative to the fitted C–C/C–H and re-centred until it moves < 0.005 eV), test the weak lines (F-test), then set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). The fit runs on the measured BE, so an earlier correction is replaced, never added (no double shift). C–C/C–H start = maximum of the C 1s signal (assumes C–C/C–H is the largest line — true for adventitious carbon; for a carbonate- or polymer-dominated C 1s set the reference by hand).",
+  cite:"M.C. Biesinger, Appl. Surf. Sci. 597, 153681 (2022) (adventitious-carbon model; offsets and 'A*1' widths as tabulated in D.J. Morgan, Surf. Interface Anal. (2024), doi:10.1002/sia.7360, Table 1); Morgan 2024 Table 3 (metal carbonates, C 1s at adventitious C 284.8 eV); G. Greczynski, L. Hultman, ChemPhysChem 18, 1507 (2017), Table 1; G. Beamson, D. Briggs, High Resolution XPS of Organic Polymers (1992), poly(methyl acrylate) via NIST SRD 20; D.J. Morgan, C 7, 51 (2021) (sp² carbon)",
+  pitfalls:"284.8 eV is a convention, not a constant: Biesinger (2022) found 284.91 ± 0.25 eV over many samples with a second reference; Greczynski & Hultman (ChemPhysChem 2017) showed that the adventitious C 1s follows the sample work function (C–C/C–H 284.08–285.52 eV on one series, E_B + φ = 289.50 ± 0.15 eV), so a C 1s-referenced BE is uncertain by ±0.2–0.3 eV or more — report the reference you used (component and value). χ²ν < 1 means σ (Poisson or the scale estimated from the residuals) is overestimated, often by smoothing or oversampling (see Fit check): compare models by relative χ²/AICc, not by χ²ν ≈ 1. C=O is usually weak and poorly determined; carbonate overlaps O–C=O (check O 1s and the cation). Ru 3d3/2 (284.2 eV) lies on C 1s — with Ru present the C 1s reference and the Ru area are both affected (Fit check overlap warning). On graphitic carbon use the sp² option."};
+/* carbonate-forming cation loaded in the sample → carbonate line on by default */
+function c1sCo3Default(present){ const P=present instanceof Set?present:new Set(present||[]); return C1S_CO3_EL.some(e=>P.has(e)); }
+function c1sFlags(R,o){ const f={}; R.flags.forEach(q=>{ const v=o&&o.flags?o.flags[q.id]:null; f[q.id]=v!=null?!!v:q.id==="co3"?c1sCo3Default(o&&o.present):!!q.def; }); return f; }
+/* lines of the model for the flags; sp²: the reference becomes the LA sp² line, oxidized offsets + (ref − sp2ref), plus π–π* */
+function c1sLines(R,fl){ const d=fl.sp2?+(R.ref-R.sp2ref).toFixed(4):0, out=[];
+  R.lines.forEach(l=>{ if(l.opt&&!fl[l.opt]) return; if(l.ref){ out.push(fl.sp2?R.sp2Line:l); return; }
+    out.push(Object.assign({},l,{off:+(l.off+d).toFixed(4),rng:[+(l.rng[0]+d).toFixed(4),+(l.rng[1]+d).toFixed(4)]})); });
+  if(fl.sp2) out.push(R.piLine); return out; }
+function c1sAllLines(R){ return R.lines.concat([R.sp2Line,R.piLine]); }
+/* Model (raw BE). o = {shift, be, y, flags, present, target (reference BE, default 284.8; sp² → 284.4)} */
+function c1sModel(R,o){
+  const C=CORE(); o=o||{}; const sh=o.shift||0, fl=c1sFlags(R,o), lines=c1sLines(R,fl);
+  const tgt=fl.sp2?R.sp2ref:(o.target!=null?+o.target:R.ref); const nom=tgt-sh;
+  const tag=Math.random().toString(36).slice(2,6);
+  const mk=cc=>lines.map(l=>{ const id="rc1s_"+l.key+"_"+tag, be=l.ref?cc:cc+l.off; let c;
+    if(l.la){ c=C.newComp("LA",be,{F:l.F,alpha:1.0,beta:10,wG:0.5,id}); }
+    else c=C.casaToComp(R.casa,{be,fwhm:l.ownF?l.F:R.lines[0].F,area:1,id}).comp;
+    c.name=l.name; c.el="C"; c.line="1s"; c.recipe=R.id; c.rk=l.key; c.rrole=l.ref?"ref":l.key==="pi"?"pi":"ox"; if(l.rng) c.rOff=l.rng.slice(); c.afloor=0.02; c.area=1; return c; });
+  // reference start: maximum of the smoothed, Smart-subtracted signal within ±search eV of the nominal position (independent of Δ when found), then a
+  // ±align eV NNLS search with all lines (weights 1/√y) for the start and the starting areas
+  let cc=nom, found=false, score=null, areas=null; const clipped=[];
+  // the search slice is re-centred on the maximum until it stays (≤ 4 passes), so the start depends on the data only, not on Δ (no double shift, SPEC §17.10)
+  if(o.be&&o.y){ let ctr=nom; for(let it=0;it<4;it++){ const reg=C.sliceRegion(o.be,o.y,ctr-R.search,ctr+R.search); if(!reg||reg.E.length<8) break;
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E));
+    let im=-1, vm=-Infinity; for(let i=0;i<E.length;i++){ const v=ys[i]-B[i]; if(v>vm){ vm=v; im=i; } } if(im<0) break; cc=E[im]; found=true; if(Math.abs(cc-ctr)<1e-9) break; ctr=cc; } }
+  if(found){ const reg=C.sliceRegion(o.be,o.y,cc+R.win[0],cc+(fl.sp2?R.win2:R.win)[1]); if(reg&&reg.E.length>=8){
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), n=E.length, ctx={emin:E[0],emax:E[n-1]};
+    const B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E)), w=Float64Array.from(ys,v=>1/Math.sqrt(Math.max(v,1e-9))), rhs=Float64Array.from(y,(v,i)=>(v-B[i])*w[i]);
+    let best=null; const K=Math.round(R.align/0.05);
+    for(let k=-K;k<=K;k++){ const c0=cc+0.05*k; const cols=mk(c0).map(c=>Float64Array.from(C.compEval(c,E,ctx),(v,i)=>v*w[i])); const a=C.nnls(cols,rhs);
+      let ss=0; for(let i=0;i<n;i++){ let m=0; for(let j=0;j<cols.length;j++) m+=a[j]*cols[j][i]; ss+=(rhs[i]-m)*(rhs[i]-m); }
+      if(!best||ss<best.ss-1e-12*Math.abs(ss)) best={c0,ss,a}; }
+    cc=best.c0; score=best.ss; areas=best.a; } }
+  let lo=cc+R.win[0], hi=cc+(fl.sp2?R.win2:R.win)[1];
+  if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
+  const comps=mk(cc); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  const ref=comps.find(c=>c.rrole==="ref"), cons={};
+  const wAnc=fl.sp2?comps.find(c=>c.rrole==="ox"&&!lines[comps.indexOf(c)].ownF):ref;
+  comps.forEach((c,i)=>{ const l=lines[i], q=cons[c.id]={};
+    C.paramNames(c).forEach(k=>{ if(k!=="be"&&k!=="area"&&!C.derivedParam(c,k)) q[k]={mode:"fixed"}; });   // GL(30): L fraction fixed and shared (SPEC §17.10)
+    q.be=l.ref?{mode:"free",lo:+(cc-R.beTol).toFixed(4),hi:+(cc+R.beTol).toFixed(4)}:{mode:"free",lo:+(cc+l.rng[0]).toFixed(4),hi:+(cc+l.rng[1]).toFixed(4)};
+    if(l.la){ q.F={mode:"free",lo:l.Flo,hi:l.Fhi}; q.alpha={mode:"free",lo:0.5,hi:2.5}; q.wG={mode:"free",lo:0.1,hi:1.2}; }
+    else if(l.ownF||c===wAnc) q.F={mode:"free",lo:+(c.F*(l.ownF?l.Flo/l.F:R.lines[0].Flo/R.lines[0].F)).toFixed(5),hi:+(c.F*(l.ownF?l.Fhi/l.F:R.lines[0].Fhi/R.lines[0].F)).toFixed(5)};
+    else q.F={mode:"link",ref:wAnc.id,k:1,b:0}; });
+  const lab=lines.map(l=>l.name).join(" + ");
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"c1s",kind:"c1s",flags:fl,label:lab,align:+(cc-nom).toFixed(4),alignLim:0,score,clipped,name:R.name,target:tgt,found}};
+}
+/* regularised incomplete beta I_x(a, b) (continued fraction, modified Lentz) → upper tail of the F distribution */
+function betaCF(a,b,x){ const MAXIT=300, EPS=1e-14, FPMIN=1e-300; let qab=a+b, qap=a+1, qam=a-1, c=1, d=1-qab*x/qap; if(Math.abs(d)<FPMIN) d=FPMIN; d=1/d; let h=d;
+  for(let m=1;m<=MAXIT;m++){ const m2=2*m; let aa=m*(b-m)*x/((qam+m2)*(a+m2)); d=1+aa*d; if(Math.abs(d)<FPMIN) d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN) c=FPMIN; d=1/d; h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2)); d=1+aa*d; if(Math.abs(d)<FPMIN) d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN) c=FPMIN; d=1/d; const del=d*c; h*=del; if(Math.abs(del-1)<EPS) break; }
+  return h; }
+function betaI(a,b,x){ const C=CORE(); if(x<=0) return 0; if(x>=1) return 1;
+  const bt=Math.exp(C.lgamma(a+b)-C.lgamma(a)-C.lgamma(b)+a*Math.log(x)+b*Math.log(1-x));
+  return x<(a+1)/(a+b+2)?bt*betaCF(a,b,x)/a:1-bt*betaCF(b,a,1-x)/b; }
+/* P(F' > F) for F(d1, d2) */
+function fTestP(F,d1,d2){ if(!(F>0)) return 1; return betaI(d2/2,d1/2,d2/(d2+d1*F)); }
+/* re-centre the relative position windows (rOff) on the fitted reference line and refit until it moves < 0.005 eV (≤ 5 refits) */
+function relWin(P){ const ref=P.comps.find(c=>c.rrole==="ref"); if(!ref) return null; P.cons=P.cons||{};
+  P.comps.forEach(c=>{ if(!c.rOff) return; const q=P.cons[c.id]=P.cons[c.id]||{}; if(q.be&&q.be.mode!=="free") return;
+    const lo=+(ref.be+c.rOff[0]).toFixed(4), hi=+(ref.be+c.rOff[1]).toFixed(4); q.be={mode:"free",lo,hi}; if(c.be<lo) c.be=lo; if(c.be>hi) c.be=hi; }); return ref.be; }
+function winBase(P){ const ref=P.comps.find(c=>c.rrole==="ref"), x=P.comps.find(c=>c.rOff&&P.cons[c.id]&&P.cons[c.id].be&&P.cons[c.id].be.mode==="free"); return x?P.cons[x.id].be.lo-x.rOff[0]:ref?ref.be:null; }
+function c1sRefit(P,r,opt){ const C=CORE(); let n=0; for(let it=0;it<5;it++){ const ref=P.comps.find(c=>c.rrole==="ref"); const wb=winBase(P);
+    if(!ref||wb==null||Math.abs(ref.be-wb)<0.005) break; relWin(P); r=C.fitOnce(P,Object.assign({},opt,{initAreas:false})); n++; } return {r,n}; }
+/* C 1s recipe fit (SPEC §17.10): staged fit → relative windows → weak-component test (F-test on χ²_d, backward elimination) → reference position.
+   o = {drop (default true), alpha (0.05), ...fit options} → {P, r, info} */
+function c1sFit(prob,o){
+  const C=CORE(); o=Object.assign({},o||{}); const drop=o.drop!==false, alpha=o.alpha||RECIPE_C1S.alpha; delete o.drop; delete o.alpha; const tgt=o.target; delete o.target;
+  const s=stagedFit(prob,o); let P=s.P, r=s.r; let rf=c1sRefit(P,r,o); r=rf.r; let passes=rf.n;
+  const dropped=[]; let tests=[];
+  const testAll=()=>{ const st=C.fitStats(P,r), fin=C.finalize(P,r); const out=[];
+    P.comps.forEach((c,i)=>{ if(c.rrole!=="ox"&&c.rrole!=="pi") return;
+      const cand=C.clone(C.stripProb(P)); cand.E=P.E; cand.y=P.y; relinkWithout(cand,new Set([c.id]));
+      let r2=null, st2=null; try{ r2=C.fitOnce(cand,Object.assign({},o,{initAreas:false})); r2=c1sRefit(cand,r2,o).r; st2=C.fitStats(cand,r2); }catch(e){ return; }
+      const dp=st.p-st2.p, d2=Math.max(1,st.N-st.p); const F=dp>0?((st2.chi2d-st.chi2d)/dp)/(st.chi2d/d2):0; const p=dp>0?fTestP(F,dp,d2):1;
+      const sg=fin.summ[i]&&fin.summ[i].sig?fin.summ[i].sig.area:null;
+      out.push({key:c.rk,id:c.id,name:c.name,area:c.area,z:sg>0?c.area/sg:null,F,p,dp,cand,r2}); });
+    return out; };
+  for(let g=0;g<6;g++){ tests=testAll(); if(!drop||!tests.length) break; const w=tests.reduce((a,t)=>!a||t.p>a.p?t:a,null); if(!(w.p>alpha)) break;
+    dropped.push({key:w.key,name:w.name,F:w.F,p:w.p,z:w.z}); P=w.cand; r=w.r2; passes++; }
+  const ref=P.comps.find(c=>c.rrole==="ref"), fl=(prob.recipeFlags)||{};
+  const target=tgt!=null?tgt:(P.comps.some(c=>c.rk==="sp2")?RECIPE_C1S.sp2ref:RECIPE_C1S.ref);
+  const info={alpha,drop,passes,tests:tests.map(t=>({key:t.key,name:t.name,area:t.area,z:t.z,F:t.F,p:t.p,dp:t.dp})),dropped,refKey:ref&&ref.rk,refId:ref&&ref.id,refBE:ref?ref.be:null,target,delta:ref?+(target-ref.be).toFixed(6):null,staged:s.staged,flags:fl};
+  return {P,r,info};
+}
+function c1sJob(prob,opt){ const C=CORE(); const s=c1sFit(prob,opt); const out=C.finalize(s.P,s.r); out.cons=s.P.cons; out.c1s=s.info; out.staged=s.info.staged; return out; }
+
+/* ------------------------------------------------------------
+   2e) v1.9.13 O 1s recipe (SPEC §17.11): lattice O (1–2 lines) + surface O (OH⁻/CO₃²⁻ · C=O / O=C–O · C–O · H₂O / C–O of O–C=O), positions on the
+       charge-corrected scale (no second correction). Sources: Graf, Isaacs, Morgan, Surf. Interface Anal. (2025) doi:10.1002/sia.70036 Table 1,
+       §2.3–2.7; Cole et al. Surf. Sci. Spectra 27 (2020) (Y₂O₃, Y(OH)₃); Karslıoğlu et al. JESRP 225 (2018) Table 1 (Ba, Fermi-edge scale);
+       Beamson & Briggs (1992) via NIST SRD 20 (PVA, PMA, PMMA, PMAA O 1s, aliphatic C 1s 285.00 → −0.20 eV here).
+       C 1s ↔ O 1s link: O expected on each carbon species (C–O ×1, C=O ×1, O–C=O ×1 at ≈532 + ×1 at ≈533.5, CO₃²⁻ ×3 at ≈531.5) from the C 1s
+       areas × (S·T·λ)_O / (S·T·λ)_C (the Quantification tab's factors) → area bands on the matching O 1s lines.
+   ------------------------------------------------------------ */
+const O1S_LAT={   // lattice O 1s start (eV, C 1s 284.8 scale) per metal — only values found in the cited sources
+  Y:{be:529.2,src:"Y₂O₃, Cole et al. 2020 (FWHM 1.45)"}, La:{be:530.5,src:"La₂O₃, Graf et al. 2025 §2.5"}, Ti:{be:529.8,src:"Ti–O, Graf et al. 2025 §2.7"},
+  Co:{be:529.5,src:"M–O (M = Co, Fe, Sr) in oxide, Graf et al. 2025 Table 1"}, Fe:{be:529.5,src:"M–O (M = Co, Fe, Sr), Graf et al. 2025 Table 1"}, Sr:{be:529.5,src:"M–O (M = Co, Fe, Sr), Graf et al. 2025 Table 1"},
+  Ba:{be:527.2,src:"BaO 527.8 eV (Karslıoğlu 2018 Table 1, Pt Fermi edge) − 0.6 eV (the Ba 4d recipe's scale estimate)"}};
+const O1S_LAT_RANGE=[527.0,531.0];   // spans the tabulated lattice values above (BaO 527.2 … La₂O₃ 530.5) ± 0.2–0.5
+const RECIPE_O1S={kind:"o1s", id:"o1s", el:"O", orb:"1s", name:"O 1s (oxide + surface O)", window:[525.5,536.5], bg:PAR_BG, casa:"GL(30)", beTol:0.6, sfRel:0.10, band:2,
+  lines:[
+   {key:"lat1", name:"Lattice O",   lat:true, F:1.2, Flo:0.8, Fhi:2.0},
+   {key:"lat2", name:"Lattice O 2", lat:true, opt:"lat2"},
+   {key:"latlo",name:"Lattice O (low)", lat:true, opt:"latlo", be:528.5, rng:[528.0,529.2]},
+   {key:"oh",   name:"OH⁻/CO₃²⁻",   be:531.5, rng:[531.0,532.0], surf:true, F:1.8, Flo:1.2, Fhi:2.4, nO:"oh"},
+   {key:"cdo",  name:"C=O / O=C–O", be:532.1, rng:[531.8,532.3], opt:"org", nO:"cdo"},
+   {key:"co",   name:"C–O",         be:532.6, rng:[532.35,533.1], opt:"org", nO:"co"},
+   {key:"w",    name:"H₂O / C–O of O–C=O", be:533.5, rng:[533.1,533.9], opt:"w", nO:"w"}],
+  flags:[
+   {id:"lat2",label:"2 lattice",def:null,tip:"Two lattice-oxygen lines (one tied FWHM) — on by default when two or more metal regions are loaded in this sample (two oxide environments, e.g. a perovskite A–O / B–O or two phases). Lattice starts: tabulated value of a loaded metal where one was found (Y₂O₃ 529.2 (Cole 2020); La₂O₃ 530.5, Ti–O 529.8, M–O for Co/Fe/Sr 529.5, perovskite lattice 528.5 eV (Graf, Isaacs, Morgan 2025); BaO 527.2 (Karslıoğlu 2018, Fermi-edge scale − 0.6)); otherwise found in the data (NNLS search 527–531 eV). Graf 2025 Table 1 also lists perovskite lattice O at 528.5 eV (LaSrCoO₃). Every lattice line may move over 527.0–531.0 eV (the span of these values): the start is the literature value, the data set the position."},
+   {id:"latlo",label:"Low lattice",def:false,tip:"Optional extra lattice line at 528.0–529.2 eV, start 528.5 eV = 'lattice oxygen in perovskite' (LaSrCoO₃) in Graf, Isaacs, Morgan 2025 Table 1 — the only checked source; a low-BE lattice O is also reported for some Ba-containing oxides, but no Ba-specific value was verified, so it is not in the default model. When ticked, the fit is repeated without it and both are compared by AICc (reported in the message and the Fit check row); width tied to the lattice line."},
+   {id:"org",label:"Organic O",def:true,tip:"C=O / O=C–O oxygen at 531.8–532.3 and C–O at 532.35–533.1 eV (split at ≈ 532.3 so the two cannot swap) (Beamson & Briggs 1992 via NIST SRD 20, at C 1s 284.8: poly(methyl acrylate) C=O 532.01, poly(methacrylic acid) 532.19, poly(vinyl alcohol) C–OH 532.54 eV)."},
+   {id:"w",label:"533.5",def:true,tip:"Line at 533.1–533.9 eV: the single-bonded O of O–C=O (Beamson & Briggs: PMA 533.49, PMMA 533.57, PMAA 533.58 eV at C 1s 284.8) and adsorbed water (largely desorbed below 10⁻⁹ mbar — Graf et al. 2025 §2.4)."},
+   {id:"link",label:"Link C 1s",def:true,tip:"Constrain the organic / carbonate O 1s areas to the O expected from the C 1s fit of this sample: C–O ×1, C=O ×1, O–C=O ×2 (one at ≈532, one at ≈533.5 eV), CO₃²⁻ ×3 (≈531.5 eV), each × the C 1s area × (S·T·λ)O / (S·T·λ)C (Quantification tab factors). Band = expected ± 2σ, σ from the C 1s area σ (covariance) and the sensitivity-factor ratio uncertainty (default 10 % — an assumption, not a literature value; set it for your instrument). OH⁻/CO₃²⁻ and the 533.5 eV line are bounded from below only (hydroxide and water add to them)."}],
+  how:"Lattice O (1–2 lines, FWHM tied, 0.8–2.0 eV: Graf et al. 2025 §2.3 give ≈ 1.2–1.6 eV for oxides and 1.6–2.0 eV for hydroxides; the upper end allows mixed / disordered oxides — a lattice line wider than that is better described by a second environment ('2 lattice', 'Low lattice')) + surface O (OH⁻/CO₃²⁻ 531.0–532.0, C=O / O=C–O 531.8–532.3, C–O 532.35–533.1, H₂O / C–O of O–C=O 533.1–533.9 eV; wider, FWHM tied among them; hydroxides 1.6–2.0 eV, Graf 2025 §2.3). Every line CasaXPS GL(30) (one fixed Lorentzian share). Window 525.5–536.5 eV with an in-fit Shirley + slope. Positions are on the charge-corrected scale of the sample (C 1s recipe first) — no second correction here. With a C 1s fit of the same sample the organic and carbonate O areas are bounded by the O expected from the C 1s areas, and the high-BE C 1s line (O–C=O or CO₃²⁻) is tested both ways (χ²_d and AICc).",
+  cite:"A. Graf, M.A. Isaacs, D.J. Morgan, Surf. Interface Anal. (2025), doi:10.1002/sia.70036 (Table 1, §2.3–2.7); S.L. Cole et al., Surf. Sci. Spectra 27, 024010 (2020); O. Karslıoğlu et al., J. Electron Spectrosc. Relat. Phenom. 225 (2018) Table 1; G. Beamson, D. Briggs, High Resolution XPS of Organic Polymers (1992) via NIST SRD 20; H. Idriss, Surf. Sci. 712, 121894 (2021)",
+  pitfalls:"A line near 531 eV is not 'oxygen vacancies': a vacancy has no electron to eject — the 531–532 eV intensity is hydroxide, carbonate, organic O or a screened-state shoulder (H. Idriss, Surf. Sci. 712, 121894 (2021), doi:10.1016/j.susc.2021.121894; Graf et al. 2025 §2.6). Background: a kink or rise near 534 eV makes a static Smart/Shirley background swallow surface O — use the in-fit Shirley and a window up to ≈ 536 eV. Overlaps: Sb 3d5/2 (≈ 528 eV), V 2p1/2 (≈ 520–525 eV tail), Pd 3p3/2 (≈ 532 eV) and the Na KLL Auger (Al Kα) lie in or near this window (Fit check overlap warning). Lattice O positions depend on the cation and the structure (perovskite lattice ≈ 528.5 eV, Graf 2025 Table 1); a lattice line at its range end usually means a missing environment or a charge-correction error. Positions assume the C 1s charge correction is right (±0.2–0.3 eV, see C 1s recipe)."};
+RECIPE_O1S.options=[]; RECIPE_O1S.derived=[]; RECIPES.push(RECIPE_O1S);
+const O1S_NONMETAL=new Set(["C","O","N","F","S","Cl","P","Si","B","H","Br","I","Se"]);
+function o1sMetals(present){ const P=present instanceof Set?[...present]:(present||[]); return P.filter(e=>e&&!O1S_NONMETAL.has(e)); }
+function o1sFlags(R,o){ const f={}; R.flags.forEach(q=>{ const v=o&&o.flags?o.flags[q.id]:null; f[q.id]=v!=null?!!v:q.id==="lat2"?o1sMetals(o&&o.present).length>=2:q.id==="link"?!!(o&&o.link):!!q.def; }); return f; }
+/* lattice starts for the loaded metals: distinct tabulated values (0.1 eV), lowest first; null = find in the data */
+function o1sLatStarts(present,n){ const v=[...new Set(o1sMetals(present).map(e=>O1S_LAT[e]?O1S_LAT[e].be:null).filter(x=>x!=null).map(x=>+x.toFixed(1)))].sort((a,b)=>a-b);
+  const out=[]; for(let i=0;i<n;i++) out.push(v[i]!=null?v[i]:null); return out; }
+/* O expected on each O 1s line from the C 1s areas. link = {R (=(S·T·λ)O/(S·T·λ)C), sfRel, comps:{co,cdo,oco,co3:{a,s}}}; hyp "oco"|"co3" moves the
+   high-BE C 1s area (O–C=O + CO₃²⁻) to one assignment → {oh,cdo,co,w:{E,s,lower}} (areas in O 1s units) */
+function o1sExpect(link,hyp){ const g=k=>(link&&link.comps&&link.comps[k])||{a:0,s:0}; let oco=g("oco"), co3=g("co3");
+  if(hyp){ const a=oco.a+co3.a, s=Math.hypot(oco.s,co3.s); if(hyp==="oco"){ oco={a,s}; co3={a:0,s:0}; } else { co3={a,s}; oco={a:0,s:0}; } }
+  const R_=link.R, sf=link.sfRel!=null?link.sfRel:RECIPE_O1S.sfRel, co=g("co"), cdo=g("cdo");
+  const mk=(terms,lower)=>{ const E=R_*terms.reduce((s,[m,x])=>s+m*x.a,0); const sC=R_*Math.sqrt(terms.reduce((s,[m,x])=>s+m*m*x.s*x.s,0)); return {E,s:Math.hypot(sC,E*sf),lower:!!lower}; };
+  return {oh:mk([[3,co3]],true),cdo:mk([[1,cdo],[1,oco]],false),co:mk([[1,co]],false),w:mk([[1,oco]],true)}; }
+/* Model (raw BE). o = {shift, be, y, flags, present, link (o1sExpect input or null), hyp, keepAll (keep lines with no expected O)} */
+function o1sModel(R,o){
+  const C=CORE(); o=o||{}; const sh=o.shift||0, fl=o1sFlags(R,o); const nLat=fl.lat2?2:1; const starts=o1sLatStarts(o.present,nLat);
+  const ex=fl.link&&o.link?o1sExpect(o.link,o.hyp):null;
+  let lines=R.lines.filter(l=>!l.opt||fl[l.opt]);
+  if(ex&&!o.keepAll) lines=lines.filter(l=>!(l.nO&&ex[l.nO]&&!ex[l.nO].lower&&!(ex[l.nO].E+R.band*ex[l.nO].s>0)));   // a two-sided band of 0 → the line is not there
+  let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
+  if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
+  const tag=Math.random().toString(36).slice(2,6); let latBE=starts.slice();
+  const mk=lb=>{ let j=0; return lines.map(l=>{ const id="ro1s_"+l.key+"_"+tag; const be=(l.lat&&l.be==null?lb[j++]:l.be)-sh; const F=l.lat?R.lines[0].F:R.lines[2].F;
+    const c=C.casaToComp(R.casa,{be,fwhm:F,area:1,id}).comp; c.name=l.name; c.el="O"; c.line="1s"; c.recipe=R.id; c.rk=l.key; c.rrole=l.lat?"lat":"surf"; c.afloor=0.02; c.area=1; return c; }); };
+  let areas=null, score=null;
+  if(o.be&&o.y){ const reg=C.sliceRegion(o.be,o.y,lo,hi); if(reg&&reg.E.length>=8){
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), n=E.length, ctx={emin:E[0],emax:E[n-1]};
+    const B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E)), w=Float64Array.from(ys,v=>1/Math.sqrt(Math.max(v,1e-9))), rhs=Float64Array.from(y,(v,i)=>(v-B[i])*w[i]);
+    const solve=lb=>{ const cols=mk(lb).map(c=>Float64Array.from(C.compEval(c,E,ctx),(v,i)=>v*w[i])); const a=C.nnls(cols,rhs); let ss=0; for(let i=0;i<n;i++){ let m=0; for(let j=0;j<cols.length;j++) m+=a[j]*cols[j][i]; ss+=(rhs[i]-m)*(rhs[i]-m); } return {ss,a}; };
+    // unknown lattice starts: NNLS grid 527.2–530.8 eV (0.1 eV), second line ≥ 0.4 eV above the first
+    const grid=[]; for(let x=O1S_LAT_RANGE[0]+0.2;x<=O1S_LAT_RANGE[1]-0.2+1e-9;x+=0.1) grid.push(+x.toFixed(2));
+    // every lattice start is searched on the data (NNLS grid): a literature value is a property of one compound (e.g. BaO 527.2 eV is clean BaO, rarely
+    // the lattice of an air-exposed Ba-containing oxide), and a start 2 eV off traps the local optimiser; the tabulated values stay in recipe.latStarts
+    const unk=latBE.map((v,i)=>i);
+    if(unk.length){ let best=null; const tryLB=lb=>{ const t=solve(lb); if(!best||t.ss<best.ss) best={lb:lb.slice(),ss:t.ss}; };
+      if(unk.length===1){ grid.forEach(x=>{ const lb=latBE.slice(); lb[unk[0]]=x; if(lb.length===2&&Math.abs(lb[0]-lb[1])<0.4) return; tryLB(lb); }); }
+      else grid.forEach(x=>grid.forEach(z=>{ if(z<x+0.4) return; tryLB([x,z]); }));
+      latBE=best.lb.slice().sort((a,b)=>a-b); }
+    const t=solve(latBE); areas=t.a; score=t.ss; } }
+  if(latBE.some(v=>v==null)) latBE=latBE.map((v,i)=>v!=null?v:529.5+0.8*i);   // no data: generic M–O start (Graf 2025 Table 1)
+  const comps=mk(latBE); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  const cons={}; const lat1=comps.find(c=>c.rk==="lat1"), sA=comps.find(c=>c.rrole==="surf"&&c.rk==="oh")||comps.find(c=>c.rrole==="surf");
+  comps.forEach((c,i)=>{ const l=lines[i], q=cons[c.id]={};
+    C.paramNames(c).forEach(k=>{ if(k!=="be"&&k!=="area"&&!C.derivedParam(c,k)) q[k]={mode:"fixed"}; });   // GL(30): one fixed L fraction for all lines (SPEC §17.11)
+    if(l.lat&&l.rng) q.be={mode:"free",lo:+(l.rng[0]-sh).toFixed(4),hi:+(l.rng[1]-sh).toFixed(4)};
+    else if(l.lat) q.be={mode:"free",lo:+(O1S_LAT_RANGE[0]-sh).toFixed(4),hi:+(O1S_LAT_RANGE[1]-sh).toFixed(4)};   // lattice: start = literature value of a loaded metal, position set by the data
+    else q.be={mode:"free",lo:+(l.rng[0]-sh).toFixed(4),hi:+(l.rng[1]-sh).toFixed(4)};
+    if(c===lat1) q.F={mode:"free",lo:+(c.F*R.lines[0].Flo/R.lines[0].F).toFixed(5),hi:+(c.F*R.lines[0].Fhi/R.lines[0].F).toFixed(5)};
+    else if(l.lat) q.F={mode:"link",ref:lat1.id,k:1,b:0};
+    else if(c===sA) q.F={mode:"free",lo:+(c.F*R.lines[2].Flo/R.lines[2].F).toFixed(5),hi:+(c.F*R.lines[2].Fhi/R.lines[2].F).toFixed(5)};
+    else q.F={mode:"link",ref:sA.id,k:1,b:0};
+    if(ex&&l.nO&&ex[l.nO]){ const e=ex[l.nO], a0=Math.max(0,e.E-R.band*e.s), a1=e.lower?Infinity:e.E+R.band*e.s; q.area=isFinite(a1)?{mode:"free",lo:+a0.toPrecision(8),hi:+a1.toPrecision(8)}:{mode:"free",lo:+a0.toPrecision(8)};
+      c.area=Math.min(Math.max(c.area,a0),isFinite(a1)?a1:Infinity); if(!(c.area>0)) c.area=Math.max(a1>0?0.5*(a0+a1):1e-6,1e-6); c.rlink=1; } });
+  const lab=lines.map(l=>l.name).join(" + ")+(ex?" · C 1s link":"");
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"o1s",kind:"o1s",flags:fl,label:lab,align:0,alignLim:0,score,clipped,name:R.name,latStarts:starts,latBE,expect:ex,hyp:o.hyp||null}};
+}
+/* O 1s fit (SPEC §17.11): staged fit of the model; with a C 1s link and a high-BE C 1s line, the two assignments (O–C=O vs CO₃²⁻) are fitted with the same
+   line set and compared (χ²_d, AICc). o = {build: o1sModel options (without be/y), ...fit options} → {P, r, info} */
+function o1sFit(prob,o){
+  const C=CORE(); o=Object.assign({},o||{}); const build=o.build||null; delete o.build;
+  const s=stagedFit(prob,o); const P=s.P, r=s.r;
+  const info={staged:s.staged,expect:build&&build.link&&o1sFlags(RECIPE_O1S,build).link?o1sExpect(build.link,build.hyp):null,hyp:null,link:build?build.link||null:null};
+  const tot=P.comps.reduce((a,c)=>a+Math.max(0,c.area),0)||1, A=k=>P.comps.filter(c=>c.rk===k).reduce((a,c)=>a+Math.max(0,c.area),0);
+  const lat=P.comps.filter(c=>c.rrole==="lat").reduce((a,c)=>a+Math.max(0,c.area),0);
+  info.residual={total:tot,lattice:lat,latPct:100*lat/tot,oh:A("oh"),ohExcess:info.expect?A("oh")-info.expect.oh.E:null};
+  if(!P.comps.some(c=>c.rk==="latlo")&&build){ try{ const fl2=Object.assign({},o1sFlags(RECIPE_O1S,build),{latlo:true}); const M2=o1sModel(RECIPE_O1S,Object.assign({},build,{flags:fl2,be:prob.E,y:prob.y}));
+      const P2=C.makeProblem({be:prob.E,y:prob.y,c:prob.c},{lo:prob.E[0]-1e-9,hi:prob.E[prob.E.length-1]+1e-9,bg:M2.bg,comps:M2.comps,cons:M2.cons,weight:prob.weight}); const r2=stagedFit(P2,o);
+      const a=C.fitStats(r2.P,r2.r), b=C.fitStats(P,r); const lw=r2.P.comps.find(c=>c.rk==="latlo");
+      info.latlo={with:{AICc:a.AICc,chi2d:a.chi2d,p:a.p,be:lw?lw.be:null},without:{AICc:b.AICc,chi2d:b.chi2d,p:b.p},dAICc:b.AICc-a.AICc,suggest:true,verdict:b.AICc-a.AICc>2?"low lattice line supported (ΔAICc > 2) — tick 'Low lattice'":b.AICc-a.AICc< -2?"model without it preferred":"not distinguishable (|ΔAICc| ≤ 2)"}; }catch(e){ info.latlo={error:String(e.message||e)}; } }
+  const lo_=P.comps.find(c=>c.rk==="latlo"); if(lo_){ try{ const cand=C.clone(C.stripProb(P)); cand.E=P.E; cand.y=P.y; relinkWithout(cand,new Set([lo_.id])); const r2=stagedFit(cand,o); const a=C.fitStats(P,r), b=C.fitStats(r2.P,r2.r);
+      info.latlo={with:{AICc:a.AICc,chi2d:a.chi2d,p:a.p},without:{AICc:b.AICc,chi2d:b.chi2d,p:b.p},dAICc:b.AICc-a.AICc,verdict:b.AICc-a.AICc>2?"low lattice line supported (ΔAICc > 2)":b.AICc-a.AICc< -2?"model without it preferred":"not distinguishable (|ΔAICc| ≤ 2)"}; }catch(e){ info.latlo={error:String(e.message||e)}; } }
+  const hi=build&&build.link&&build.link.comps?((build.link.comps.oco||{}).a||0)+((build.link.comps.co3||{}).a||0):0;
+  if(build&&build.link&&o1sFlags(RECIPE_O1S,build).link&&hi>0){ const res={};
+    ["oco","co3"].forEach(h=>{ try{ const M=o1sModel(RECIPE_O1S,Object.assign({},build,{be:prob.E,y:prob.y,hyp:h,keepAll:true}));
+      const Ph=C.makeProblem({be:prob.E,y:prob.y,c:prob.c},{lo:prob.E[0]-1e-9,hi:prob.E[prob.E.length-1]+1e-9,bg:M.bg,comps:M.comps,cons:M.cons,weight:prob.weight});
+      const sh_=stagedFit(Ph,o); const st=C.fitStats(sh_.P,sh_.r); res[h]={chi2d:st.chi2d,AICc:st.AICc,BIC:st.BIC,chi2nu:st.chi2nu,p:st.p,N:st.N,conv:sh_.r.conv}; }catch(e){ res[h]={error:String(e.message||e)}; } });
+    const d=res.oco.AICc!=null&&res.co3.AICc!=null?res.co3.AICc-res.oco.AICc:null;   // > 0 → O–C=O favoured
+    { const st=C.fitStats(P,r); res.fitted={chi2d:st.chi2d,AICc:st.AICc,chi2nu:st.chi2nu,p:st.p}; }   // the split as fitted in C 1s (both lines), for reference
+    info.hyp=Object.assign(res,{dAICc:d,verdict:d==null?"n/a":Math.abs(d)<2?"not distinguishable (|ΔAICc| < 2)":d>0?"O–C=O favoured":"CO₃²⁻ favoured"}); }
+  return {P,r,info};
+}
+function o1sJob(prob,opt){ const C=CORE(); const s=o1sFit(prob,opt); const out=C.finalize(s.P,s.r); out.cons=s.P.cons; out.o1s=s.info; out.staged=s.info.staged; return out; }
+
 /* spin–orbit Δ per oxidation state (Bêche et al. 2008: ≈18.6 eV for Ce⁴⁺/CeO₂, ≈18.2 eV for Ce³⁺/CePO₄) */
 function dEof(R,state){ return (R.dEs&&R.dEs[state])||R.dE; }
 RECIPES_ENV.forEach(R=>{ R.options=[]; R.derived=[]; RECIPES.push(R); });
 RECIPES_PAR.forEach(R=>{ R.options=[]; R.derived=[]; R.flags=R.flags||[]; RECIPES.push(R); });
+[RECIPE_C1S].forEach(R=>{ R.options=[]; R.derived=[]; RECIPES.push(R); });   // v1.9.13 (RECIPE_O1S is pushed where it is defined, §2e)
 /* ---- parametric / empirical recipes: species lines → absolute (charge-corrected, C 1s 284.8 eV) positions and links ---- */
 function parDefaults(R){ return R.species.filter(s=>s.def).map(s=>s.key); }
 function parFlags(R,o){ const f={}; (R.flags||[]).forEach(q=>{ f[q.id]=o&&o.flags&&o.flags[q.id]!=null?!!o.flags[q.id]:!!q.def; }); return f; }
@@ -392,6 +623,7 @@ function recipeLineF(R,c){
   if(!R||!c||c.recipe!==R.id) return null;
   if(R.lines){ const l=R.lines.find(x=>x.key===c.rk); return l?{Fhi:l.Fhi}:null; }
   if(R.kind==="env") return c.renv?{Fhi:Infinity}:null;
+  if(R.kind==="c1s"||R.kind==="o1s"){ const l=(R.kind==="c1s"?c1sAllLines(R):R.lines).find(x=>x.key===c.rk); return l&&l.Fhi!=null?{Fhi:l.Fhi}:null; }
   if((R.kind==="par"||R.kind==="emp")&&c.rsp){ const L=parLines(R,[c.rsp],{plasmon:true,auger:true},null); const l=L.find(x=>x.key===c.rk); if(!l) return null;
     if(l.Ffix) return R.wScale?{Fhi:l.F*R.wScale[1]}:null; return {Fhi:l.Fhi!=null?l.Fhi:Infinity}; }
   return null; }
@@ -404,6 +636,8 @@ function recipeModel(id,o){
   const C=CORE(); const R=recipeById(id); if(!R) throw new Error("unknown recipe "+id);
   if(R.kind==="env") return envModel(R,o||{});
   if(R.kind==="par"||R.kind==="emp") return parModel(R,o||{});
+  if(R.kind==="c1s") return c1sModel(R,o||{});
+  if(R.kind==="o1s") return o1sModel(R,o||{});
   o=o||{}; const sh=o.shift||0; const op=R.options.find(x=>x.id===o.opt)||R.options[R.options.length-1];
   const lines=R.lines.filter(l=>op.keys.includes(l.key));
   let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
@@ -512,6 +746,12 @@ function diagnose(ctx,th){
       return {type:"dropSet",ids:ids_,label:"Remove "+(s?s.short||s.label:nm(id))+(ids_.length>1?` (${ids_.length} lines)`:"")}; }
     if(Rc) return {type:"dropSet",ids:[id],label:"Remove "+nm(id)};
     return {type:"drop",id,label:"Remove "+nm(id)}; };
+  /* v1.9.13: one shared L fraction (m) — pinning one line's m while the others vary is inconsistent (SPEC §17.12). Value = the recipe's (GL(30) → 0.3)
+     when the lines are recipe lines, otherwise the area-weighted mean of the current values */
+  const mComps=comps.filter(c=>c.m!=null&&!C.derivedParam(c,"m")&&(c.shape==="GLS"||c.shape==="GLP"||c.shape==="GLT"||c.shape==="AGT"));
+  const shareM=()=>{ if(mComps.length<1) return null; const aw=mComps.reduce((s,c)=>s+Math.max(0,c.area||0),0); const v=aw>0?mComps.reduce((s,c)=>s+Math.max(0,c.area||0)*c.m,0)/aw:mComps.reduce((s,c)=>s+c.m,0)/mComps.length;
+    return {type:"shareM",ids:mComps.map(c=>c.id),v:+v.toFixed(3),label:"Fix L frac. (shared)"}; };
+  const SHM_TIP=" 'Fix L frac. (shared)' sets every GL line to one fixed L fraction (the area-weighted mean of the current values) — the Lorentzian share is an instrument/lifetime property common to the lines of one region; pinning one line's value while the others vary makes that line differ in shape only, which trades off against its area and position.";
   const areaDead=new Set();
   // R3a area at 0 (lower bound) → handled as a component finding
   free.forEach((f,j)=>{ if(f.k!=="area"||f.ci<0) return; const p=val(f.id,"area"); if(p!=null&&(atB[j]||p<=Math.max(0,f.lo)+1e-6*tot)) areaDead.add(f.id); });
@@ -550,6 +790,7 @@ function diagnose(ctx,th){
       hint=" A doublet ratio at its limit usually compensates for an overlapping line; fix it at the statistical value (2j+1 ratio) and look at the residual.";
     } else if(f.id==="bg"){ hint=" The in-fit background parameter reached its limit: the window ends are probably not on background (widen the window or use a static Shirley/Smart background)."; }
     else hint=" A shape parameter at a physical limit is often fine (e.g. L frac. 0 = pure Gaussian); fix it there to remove a free parameter.";
+    if(f.k==="m"&&mComps.length>1){ act=shareM(); hint=" A per-line L fraction at its limit usually compensates for something else (a merged or missing line, a wrong background)."+SHM_TIP; }
     if(shapeP&&!act) act={type:"fix",id:f.id,k:f.k,v:p,label:`Fix ${lab(f.k)} at ${fmt(p,3)}`};
     push({key:"bound|"+f.id+"|"+f.k,id:"bound",sev,ids:f.id==="bg"?[]:[f.id],
       label:`${nm(f.id)} ${lab(f.k)} at ${side} bound (${fmt(bv+add,f.k==="be"?2:3)})`,
@@ -572,6 +813,7 @@ function diagnose(ctx,th){
           return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
         const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[q.id]]||{}).rstate).v:ctx.dEref;
         if(ref!=null&&isFree(q.id,"dE")) act={type:"fix",id:q.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=" The doublet is not resolved (Δ < 1.2 eV), so its two halves trade off against position and width; fix Δ at the literature value and keep the area ratio fixed."; sevOv="info"; }
+      else if((fa.k==="m"||fb.k==="m")&&mComps.length>1){ act=shareM(); hint=" A free per-line L fraction trades off against the area (a broader Lorentzian tail holds more area at the same height)."+SHM_TIP; }
       else if(fa.k==="area"&&fb.k==="area") hint=" The two areas trade off against each other — their sum is well determined, each alone is not. Report the sum, or constrain widths/positions from literature.";
       else hint=" One of the two parameters should be fixed or linked (literature value) — the data cannot separate them.";
       const inRec=fa.id!=="bg"&&fb.id!=="bg"&&comps[byId[fa.id]].recipe&&comps[byId[fa.id]].recipe===comps[byId[fb.id]].recipe;
@@ -608,8 +850,9 @@ function diagnose(ctx,th){
     if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;   // a dead line is reported once, by R3 (v1.9.8: this skip used to sit inside the comment above)
     const d=Math.abs(comps[i].be-comps[j].be), w=(fw(i)+fw(j))/2; if(!(d<th.merge*w)) continue;
     const sm=comps[i].area<=comps[j].area?comps[i]:comps[j], bg_=sm===comps[i]?comps[j]:comps[i];
+    const bnd={type:"bound",ids:[comps[i].id,comps[j].id],sep:+(th.merge*w).toFixed(3),label:"Bound positions",refit:true};
     push({key:"merge|"+comps[i].id+"|"+comps[j].id,id:"merge",sev:"warn",ids:[comps[i].id,comps[j].id],label:`${nm(comps[i].id)} and ${nm(comps[j].id)} merge (ΔBE ${fmt(d,2)} eV)`,
-      tip:`The two lines are ${fmt(d,3)} eV apart, less than ${th.merge} × their mean FWHM (${fmt(w,2)} eV): they describe one peak. Remove the smaller one (${nm(sm.id)}), or fix its position from literature relative to ${nm(bg_.id)}.`,act:dropAct(sm.id)}); }
+      tip:`The two lines are ${fmt(d,3)} eV apart, less than ${th.merge} × their mean FWHM (${fmt(w,2)} eV): they describe one peak. This is usually the cause of the correlated pairs and bound hits of these lines listed below — fix it first. Remove the smaller one (${nm(sm.id)}), or 'Bound positions': each line gets its own BE range (recipe range where the line has one, otherwise ± 0.5 eV around its current position, split so that the two stay ≥ ${fmt(th.merge*w,2)} eV apart), the smaller line's FWHM is tied to the larger one's, and the fit is repeated.`,act:dropAct(sm.id),acts:[dropAct(sm.id),bnd]}); }
   // R5 stop reason
   if(fin.stop==="stalled"||fin.stop==="maxIter"||fin.conv===false){ const fl=((fin.stall&&fin.stall.flags)||[]).map(q=>`${nm(q.id)} ${lab(q.k)} (${q.why.join(", ")})`);
     push({key:"stop",id:"stop",sev:"warn",ids:[],label:fin.stop==="stalled"?"Fit stalled":"Fit did not converge",tip:(fin.stop==="stalled"?"LM stopped early: only heavily damped steps were possible (SPEC §3.3b).":"The iteration limit was reached before χ² settled.")+(fl.length?" Poorly determined: "+fl.join("; ")+".":"")+" With many overlapping lines, 'Staged fit' (heights → positions → all) reaches a minimum more reliably; also fix or link the flagged parameters.",act:comps.length>=3?{type:"staged",label:"Staged fit"}:null}); }
@@ -657,9 +900,40 @@ function diagnose(ctx,th){
   const rm=ctx.recipeMeta; if(rm&&rm.alignLim>0&&rm.align!=null&&Math.abs(rm.align)>=rm.alignLim-0.026){ const lim=rm.alignLim;
     push({key:"alignlim",id:"alignlim",sev:"warn",ids:[],label:`Recipe alignment at its ±${fmt(lim,1)} eV search limit (${rm.align>0?"+":""}${fmt(rm.align,2)} eV)`,
       tip:`The recipe lines were shifted by ${rm.align>0?"+":""}${fmt(rm.align,2)} eV to match the data — the end of the ±${fmt(lim,1)} eV search range, so the best match may lie further out. Usual causes: a wrong or missing charge correction (check C 1s / the reference line), differential charging, or a different compound (for Ba 4d, ±1 eV cannot tell a global offset from BaO → Ba(OH)₂, +1.2 eV — confirm with O 1s / C 1s). Correct the charge reference and apply the recipe again; the fitted positions are otherwise held near the wrong start.`,act:null}); }
+  // R12 (v1.9.13) χ²ν < 1 with neighbour-correlated residuals → smoothed / oversampled data (SPEC §17.12)
+  { const st=fin.stats||{}; const rho=st.rho1, cn=st.chi2nu; if(cn!=null&&rho!=null&&cn<1&&rho>0.3){ const fac=Math.sqrt((1+rho)/(1-Math.min(rho,0.95)));
+    push({key:"corrnoise",id:"corrnoise",sev:"info",ids:[],label:`χ²ν ${fmt(cn,2)} < 1 with correlated residuals (ρ₁ ${fmt(rho,2)})`,
+      tip:`χ²ν = ${fmt(cn,3)} below 1 together with a lag-1 residual autocorrelation ρ₁ = ${fmt(rho,2)}${st.runsZ!=null?` and runs z = ${fmt(st.runsZ,1)}`:""} is the signature of smoothed or oversampled data (step smaller than the resolution, or data smoothed/interpolated by the acquisition software), not of a misfit: neighbouring points are not independent, so the per-point variance looks small while the information is less than N points carry. Uncertainties from the covariance are then too small: for AR(1)-correlated residuals the variance of a mean grows by (1 + ρ₁)/(1 − ρ₁) (effective number of points n(1 − ρ₁)/(1 + ρ₁) — A. Zięba, Metrol. Meas. Syst. 17, 3 (2010), Eq. 15), so scale σ by √((1 + ρ₁)/(1 − ρ₁)) = ${fmt(fac,2)}. The results table already shows that factor and the Monte Carlo uncertainty adds AR(1) noise with this ρ₁ (SPEC §3.4) — use Monte Carlo for reporting. Compare models by relative χ²/AICc, not by χ²ν ≈ 1.`,act:{type:"mc",label:"Monte Carlo"}}); } }
+  // R13 (v1.9.13) multi-start (SPEC §17.12): same minimum = Δχ² < max(1, χ²ν) (UI); χ²ν > 2 with few starts → the model is wrong (misfit), not a search
+  // problem; few starts → rugged surface; equal χ² but different parameters (same-parameter count) → not unique
+  const mu_=fin.multi; if(mu_&&mu_.N>=6&&mu_.frac!=null){ const rid=(recipesFor(ctx.el,ctx.orb)[0]||{}).id, ract=rid&&!(ctx.recipe&&ctx.recipe.id===rid)?{type:"recipe",recipe:rid,label:"Apply recipe"}:null;
+    const nu=mu_.chi2nu!=null?mu_.chi2nu:(fin.stats&&fin.stats.chi2nu), thrT=mu_.thr!=null?` (Δχ² < max(1, χ²ν) = ${fmt(mu_.thr,2)})`:"";
+    if(mu_.frac<1/3&&nu!=null&&nu>2){ const bb=[]; free.forEach((f,j)=>{ if(f.k==="area") return; const p=val(f.id,f.k); if(p==null||!isFinite(f.lo)||!isFinite(f.hi)) return; if(atB[j]||Math.min(p-f.lo,f.hi-p)<=th.boundRel*(f.hi-f.lo)) bb.push(`${nm(f.id)} ${lab(f.k)} ${fmt(p+(f.k==="be"?sh:0),f.k==="be"?2:3)}`); });
+      const runs=[]; if(fin.mu&&fin.v){ let k0=-1, zs=0; for(let i=0;i<=n;i++){ const z=i<n?(y[i]-fin.mu[i])/Math.sqrt(fin.v[i]):-1; if(z>0){ if(k0<0){ k0=i; zs=0; } zs+=z; } else if(k0>=0){ const m=Math.floor((k0+i-1)/2); runs.push({be:E[m]+sh,z:zs/Math.sqrt(i-k0),w:(i-k0)*step}); k0=-1; } } runs.sort((a,b)=>b.z-a.z); }
+      const top=runs.slice(0,3).filter(q=>q.z>2);
+      push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Model misfit: χ²ν ${fmt(nu,2)}, same minimum ${mu_.near}/${mu_.N}`,
+        tip:`χ²ν = ${fmt(nu,2)} (> 2) and only ${mu_.near} of ${mu_.N} starts reached the best minimum${thrT}: the model is wrong — a component is missing, or a bound or width limit is binding — so the starts end in different poor compromises. More starts will not help. `+(bb.length?`Parameters at a bound: ${bb.slice(0,6).join("; ")}. `:"No nonlinear parameter is at a bound. ")+(top.length?`Largest positive residual runs (data above the model): ${top.map(q=>`${fmt(q.be,2)} eV (z ${fmt(q.z,1)}, ${fmt(q.w,2)} eV wide)`).join(", ")} — add a line there or widen the binding range.`:"")+(rid?` The region recipe sets literature lines and ranges.`:""),act:ract}); }
+    else if(mu_.frac<1/3) push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Multi-start: same minimum in ${mu_.near}/${mu_.N} starts`,
+      tip:`Only ${mu_.near} of ${mu_.N} starting points ended at the best minimum${thrT}: the χ² surface has several minima of similar depth, so the model is not unique — components can trade places (a wide line taking a lattice-like maximum, a Lorentzian tail standing in for a missing line). Constrain it: BE ranges ('Bounded' in a component's BE field, or 'Bound positions'), tied widths and one shared L fraction`+(rid?`, or the region recipe (${(recipeById(rid)||{}).name}), which sets literature ranges and ties`:"")+`. Then run Multi-start again — a well-posed model reaches the same minimum from most starts.`,act:ract});
+    else if(mu_.sameP!=null&&mu_.near>=2&&mu_.sameP<0.5*mu_.near) push({key:"multiP",id:"multi",sev:"warn",ids:[],label:`Multi-start: equal χ², different parameters (${mu_.sameP}/${mu_.near})`,
+      tip:`${mu_.near} of ${mu_.N} starts reached the best χ²${thrT}, but only ${mu_.sameP} of them have every position, width and shape parameter within 1σ of the best solution: solutions with different parameters fit equally well — the model is not unique. Report only quantities that agree between the solutions (sums of overlapping lines), or constrain the model (ranges, tied widths, shared L fraction`+(rid?`, the region recipe`:"")+`).`,act:ract}); }
+  // R14 (v1.9.13) a high L fraction next to a free line or a window end: the Lorentzian tail stands in for a missing line (SPEC §17.12)
+  comps.forEach((c,i)=>{ if(c.m==null||!isFree(c.id,"m")||!(c.m>0.6)) return; const w2=2*fw(i);
+    const nb=comps.filter((o,j)=>j!==i&&isFree(o.id,"be")&&Math.abs(o.be-c.be)<=w2).sort((x,y)=>Math.abs(x.be-c.be)-Math.abs(y.be-c.be)); const edge=Math.min(c.be-E[0],E[n-1]-c.be)<=w2;
+    if(!nb.length&&!edge) return; const a=shareM();
+    push({key:"ltail|"+c.id,id:"ltail",sev:"warn",ids:[c.id].concat(nb.map(o=>o.id)),label:`${nm(c.id)}: high L frac. (${fmt(c.m,2)}) near ${nb.length?nm(nb[0].id):"the window end"}`,
+      tip:`${nm(c.id)} has a free L fraction of ${fmt(c.m,3)} (> 0.6) while ${nb.length?nb.map(o=>nm(o.id)).join(", ")+" (free position)":"a window end"} lies within 2 FWHM (${fmt(w2,2)} eV). A long Lorentzian tail can take up the intensity of a missing line or of the background near the edge — a known artifact; the fitted area and the neighbour's position then trade off. Use one shared L fraction for the region (typical GL(30) ≈ 0.3) and add or bound the missing line (e.g. the recipe's lines).`+(a?SHM_TIP:""),act:a}); });
+  // R15 (v1.9.13) L fractions that differ between the lines of one region
+  { const fm=mComps.filter(c=>isFree(c.id,"m")); const vs=mComps.map(c=>c.m); const spread=vs.length>1?Math.max(...vs)-Math.min(...vs):0;
+    if(mComps.length>1&&spread>0.2&&fm.length){ push({key:"mdiff",id:"mdiff",sev:"warn",ids:mComps.map(c=>c.id),label:`L fractions differ (${fmt(Math.min(...vs),2)}–${fmt(Math.max(...vs),2)})`,
+      tip:`The GL lines of this region have L fractions from ${fmt(Math.min(...vs),3)} to ${fmt(Math.max(...vs),3)} (spread > 0.2). The Lorentzian share is set mostly by the instrument and the core-hole lifetime, which are common to the lines of one region; different values let lines differ in shape only, which trades off against areas and positions (a Gaussian line next to a Lorentzian-tailed one).`+SHM_TIP,act:shareM()}); } }
   // R10 peak overlaps with other elements present (v1.9.7, SPEC §17.8)
   if(ctx.present) overlapFindings(ctx.el,ctx.orb,ctx.present,{hv:ctx.hv,lo:E[0]+sh,hi:E[n-1]+sh}).forEach(push);
   out.sort((a,b)=>SEV_ORDER[a.sev]-SEV_ORDER[b.sev]);
+  // v1.9.13: a merge is the usual cause of the correlated pairs / L-frac. bound hits of the same lines → listed first; those items say so (SPEC §17.12)
+  const mg=out.filter(x=>x.id==="merge"); if(mg.length){ const mids=new Set([].concat(...mg.map(x=>x.ids)));
+    out.forEach(x=>{ if(x.id==="merge") return; if((x.id==="corr"||x.id==="bound")&&x.ids.some(id=>mids.has(id))){ x.tip+=" Note: these lines also merge (first item) — that is the likely cause; fixing the shape or this pair does not cure it."; x.byMerge=true; } });
+    const rest=out.filter(x=>x.id!=="merge"); rest.sort((a,b)=>(SEV_ORDER[a.sev]-SEV_ORDER[b.sev])||((a.byMerge&&a.act&&a.act.type==="shareM"?1:0)-(b.byMerge&&b.act&&b.act.type==="shareM"?1:0))); out.length=0; out.push(...mg,...rest); }
   return out;
 }
 /* ------------------------------------------------------------
@@ -727,6 +1001,17 @@ function applyAction(model,act,o){
   if(act.type==="offset"){ const c=byId[act.id], a=byId[act.ref]; if(!c||!a) return null; q(act.id).be={mode:"link",ref:act.ref,k:1,b:+(c.be-a.be).toFixed(4)}; return "Separation fixed"; }
   if(act.type==="window"){ const be0=o.be0!=null?o.be0:-Infinity, be1=o.be1!=null?o.be1:Infinity; if(act.side==="low") model.lo=Math.max(be0,model.lo-act.by); else model.hi=Math.min(be1,model.hi+act.by); return "Window widened"; }
   if(act.type==="bg"){ model.bg=Object.assign({},model.bg,{type:act.bg}); if(act.bg!=="active"){ delete model.bg.conv; } return "Background changed"; }
+  if(act.type==="shareM"){ const ids=(act.ids||[]).filter(id=>byId[id]); if(!ids.length) return null; ids.forEach(id=>{ byId[id].m=act.v; q(id).m={mode:"fixed"}; }); return "L fraction fixed (shared)"; }
+  if(act.type==="bound"){ const [a,b]=(act.ids||[]).map(id=>byId[id]).filter(Boolean).sort((x,y)=>x.be-y.be); if(!a||!b) return null;
+    // centre = the line's start value (position before the last fit, act.start — the UI passes it from the undo history) or its current value
+    const st0=c=>act.start&&act.start[c.id]!=null?act.start[c.id]:c.be;
+    const rng=c=>{ const R0=c.recipe?recipeById(c.recipe):null; const q0=(model.cons[c.id]||{}).be; if(R0&&q0&&q0.mode==="free"&&q0.lo!=null&&q0.hi!=null) return [q0.lo,q0.hi]; return [st0(c)-0.5,st0(c)+0.5]; };
+    const ra=rng(a), rb=rng(b), h=Math.max(0.05,(act.sep||0.3)/2); let mid=(st0(a)+st0(b))/2; if(!(st0(b)>st0(a))) mid=(a.be+b.be)/2;
+    const la=[ra[0],Math.min(ra[1],mid-h)], lb=[Math.max(rb[0],mid+h),rb[1]]; if(la[1]<=la[0]) la[0]=la[1]-0.5; if(lb[1]<=lb[0]) lb[1]=lb[0]+0.5;
+    [[a,la],[b,lb]].forEach(([c,r])=>{ q(c.id).be={mode:"free",lo:+r[0].toFixed(4),hi:+r[1].toFixed(4)}; c.be=Math.min(Math.max(c.be,r[0]),r[1]); });
+    const big=a.area>=b.area?a:b, sm=big===a?b:a; ["F","wG","wL"].forEach(k=>{ if(sm[k]!=null&&big[k]!=null&&sm.shape===big.shape&&!C.derivedParam(sm,k)){ const qq=(model.cons[sm.id]||{})[k]; if(qq&&qq.mode==="fixed") return; q(sm.id)[k]={mode:"link",ref:big.id,k:1,b:0}; sm[k]=big[k]; } });
+    if(sm.m!=null&&big.m!=null&&sm.shape===big.shape){ const qm=(model.cons[sm.id]||{}).m; if(!qm||qm.mode!=="fixed"){ q(sm.id).m={mode:"link",ref:big.id,k:1,b:0}; sm.m=big.m; } }
+    return "Positions bounded"; }
   if(act.type==="add"){ const anc=cs.reduce((a,c)=>!a||c.area>a.area?c:a,null); const c=C.newComp(anc?anc.shape:"GLS",act.be,{F:act.F,el:anc?anc.el:"",line:anc?anc.line:""});
     if(anc&&anc.m!=null) c.m=anc.m; const hh=C.trueFWHM(c.shape,C.shapeParams(c,1)).ymax; c.area=Math.max(1e-6,(act.h||1)/(hh||1));
     q(c.id).be={mode:"free",lo:+(act.be-1).toFixed(4),hi:+(act.be+1).toFixed(4)}; q(c.id).F={mode:"free",lo:0.3,hi:Math.max(4,act.F*2)}; if(anc&&anc.m!=null) q(c.id).m={mode:"link",ref:anc.id,k:1,b:0};
@@ -809,6 +1094,6 @@ function stagedFit(prob,opt){
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }
 
-const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
+const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPE_C1S,RECIPE_O1S,c1sModel,c1sFit,c1sJob,c1sFlags,c1sLines,c1sCo3Default,fTestP,betaI,o1sModel,o1sFit,o1sJob,o1sFlags,o1sLatStarts,o1sExpect,O1S_LAT,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_GUIDE; else root.XPS_GUIDE=XPS_GUIDE;
 })(typeof self!=="undefined"?self:this);

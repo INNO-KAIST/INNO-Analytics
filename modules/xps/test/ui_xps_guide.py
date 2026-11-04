@@ -8,7 +8,9 @@ usage: python3 test/ui_xps_guide.py <injected html> <figure folder>
 6 v1.9.6 Ni 2p3/2 envelopes (synthetic NiO 60 % + Ni(OH)₂ 40 %): species tick boxes (defaults Ni · NiO · Ni(OH)₂), PE select, untick Ni →
   Recipe → 11 peaks (5 + 6) → Staged fit → NiO / Ni(OH)₂ fractions ±3 %; Cu 2p / Fe 2p recipe tooltips carry the citation and pitfalls
 7 v1.9.7 La 3d (Sunding, synthetic La(OH)₃ c4f¹L 57 % + MNN Auger): species / flag row, Recipe → 3 pairs + Auger line → Staged fit →
-  c4f¹L ±2 %; Ba 3d + Co 2p in one sample: one-line overlap banner (details in title) and a Fit check overlap warning after a fit"""
+  c4f¹L ±2 %; Ba 3d + Co 2p in one sample: one-line overlap banner (details in title) and a Fit check overlap warning after a fit
+8 v1.9.13 C 1s recipe (sample with Ba: carbonate box on) → one click: fit + whole-sample Δ (truth +0.44); clicking again keeps Δ (no double shift);
+  O 1s recipe with the C 1s link → O–C=O vs CO₃²⁻ verdict; per-region message bar; 'Bounded' BE mode; merge → 'Bound positions' → refit"""
 import sys, os, json, tempfile, math, random, re
 from playwright.sync_api import sync_playwright
 
@@ -114,6 +116,20 @@ f_co = write('[GuideB] Co2p.txt', bb, [pois(2500 + 20000 * gls(e - 779.8, 1.6) +
 bb3 = [772 + 0.05 * i for i in range(581)]
 f_ba = write('[GuideB] Ba3d.txt', bb3, [pois(2500 + 20000 * (0.6 * gls(e - 779.8, 1.6) + 0.4 * gls(e - 795.0, 1.6))) for e in bb3])
 
+# v1.9.13 sample [GuideK]: C 1s uncorrected (C–C at 284.36 measured = 284.80 − 0.44), O 1s (same offset), Ba 4d (to switch the carbonate box on)
+def glp30(F):
+    return glp_unit(F, 0.3)
+G13 = glp30(1.3)
+bk = [278 + 0.05 * i for i in range(381)]
+CK = [(284.36, 30000), (285.81, 7000), (287.36, 1600), (289.11, 4000)]   # carbonate, no O–C=O
+f_kc = write('[GuideK] C1s.txt', bk, [pois(800 + sum(A * G13(e - b0) for b0, A in CK)) for e in bk])
+G12, G18 = glp30(1.2), glp30(1.8)
+bo = [524 + 0.05 * i for i in range(281)]
+OK_ = [(529.06, 30000, G12), (530.96, 8000 + 3 * 2.93 * 4000, G18), (531.66, 2.93 * 1600, G18), (532.16, 2.93 * 7000, G18)]
+f_ko = write('[GuideK] O1s.txt', bo, [pois(1500 + sum(A * g(e - b0) for b0, A, g in OK_)) for e in bo])
+bb4 = [84 + 0.05 * i for i in range(251)]
+f_kb = write('[GuideK] Ba4d.txt', bb4, [pois(1500 + 20000 * (0.6 * gls(e - 89.6, 1.6) + 0.4 * gls(e - 92.2, 1.6))) for e in bb4])
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     pg = b.new_page(viewport={'width': 1500, 'height': 950})
@@ -133,11 +149,11 @@ with sync_playwright() as p:
         J("(r)=>{ const st=XPS_UI._state(); const x=st.specs.find(q=>q.region===r); st.sel=x.uid; st.ui.tab='fit'; st.ui.selComp=null; XPS_UI.rerender(); }", region)
         pg.wait_for_timeout(200)
 
-    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe, f_la, f_co, f_ba])
-    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=8', timeout=20000)
+    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe, f_la, f_co, f_ba, f_kc, f_ko, f_kb])
+    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=11', timeout=20000)
     regs = J("XPS_UI._state().specs.map(s=>s.region)")
     ce = [r for r in regs if 'Ce' in r][0]
-    c1 = [r for r in regs if 'C 1s' in r or 'C1s' in r][0]
+    c1 = [r for r in regs if ('C 1s' in r or 'C1s' in r) and 'GuideK' not in r][0]
     select(ce)
     # 1 banner + recipe entry
     s1 = J("(()=>{ const b=document.querySelector('.xps-rcp-b'); const a=document.querySelector('#xpsRcpA'), o=document.querySelector('#xpsRcpO'); const auto=document.querySelector('#xpsAuto'); return {b:b&&b.textContent, bt:b&&b.title, a:!!a, opts:o?Array.from(o.options).map(x=>x.textContent):[], near:!!(a&&auto&&a.parentElement===auto.parentElement), at:a&&a.title}; })()")
@@ -240,6 +256,73 @@ with sync_playwright() as p:
     check('7d Co 2p with Ba 3d in the same sample: one-line overlap banner (title: Ba 4d / joint model) and a Fit check overlap warning after the fit',
           s13 and len(s13['t']) < 90 and 'Ba 3d5/2' in s13['t'] and 'Ba 4d' in s13['tip'] and s14 and s14['warn'] and 'Ba 3d5/2' in s14['label'] and len(s14['label']) < 90 and 'Ba 4d' in s14['tip'], [s13 and s13['t'], s14 and s14['label']])
     pg.screenshot(path=os.path.join(out, 'guide_06_overlap.png'), full_page=False)
+    # 8 v1.9.13 C 1s / O 1s recipes
+    def selu(uid):
+        J("(u)=>{ const st=XPS_UI._state(); st.sel=u; st.ui.tab='fit'; st.ui.selComp=null; XPS_UI.rerender(); }", uid)
+        pg.wait_for_timeout(200)
+    uids = J("XPS_UI._state().specs.filter(s=>/GuideK/.test(s.region+' '+(s.file||'')+' '+(s.name||''))).map(s=>[s.uid,s.reg.el+' '+s.reg.orb])")
+    uk = {b: a for a, b in uids}
+    selu(uk['C 1s'])
+    s20 = J("(()=>{ const r=document.querySelector('#xpsRcpPar'); const a=document.querySelector('#xpsRcpA'); return {fl:r?Array.from(r.querySelectorAll('[data-rfl]')).map(b=>[b.dataset.rfl,b.checked]):null, at:a&&a.title||''}; })()")
+    check('8a C 1s: Recipe button (title: one action, Biesinger, Greczynski, pitfalls) and flag row; CO₃²⁻ on because Ba is loaded in the sample',
+          s20['fl'] and dict(s20['fl']).get('co3') is True and dict(s20['fl']).get('weak') is True and 'Biesinger' in s20['at'] and 'Greczynski' in s20['at'] and 'Pitfalls' in s20['at'], s20['fl'])
+    J("document.querySelector('#xpsRcpA').click()"); idle()
+    s21 = J("(()=>{ const p=XPS_UI._pr(), sp=XPS_UI._cur(); const st=XPS_UI._state(); const k=Object.keys(st.samples).find(k=>/GuideK/.test(k)); const sm=st.samples[k]; return {rk:p.comps.map(c=>c.rk), sh:sm&&sm.shift, ref:sm&&sm.ref&&sm.ref.compId, refc:(p.comps.find(c=>c.rrole==='ref')||{}).id, chi:p.result&&p.result.stats.chi2nu, der:Array.from(document.querySelectorAll('#xpsChk [data-der]')).map(x=>x.dataset.der), msg:(document.querySelector('#xpsMsg .cur .tx')||{}).textContent, rg:(document.querySelector('#xpsMsg .cur .rg')||{}).textContent, chip:(document.querySelector('#xpsChg .chip b')||{}).textContent}; })()")
+    check('8b one click: C 1s model (C–C, C–O, C=O, O–C=O, CO₃²⁻) fitted and the whole sample corrected, Δ ≈ +0.44 eV (±0.03), reference = the fitted C–C; message labelled with the region',
+          s21['rk'][:2] == ['cc', 'co'] and 'co3' in s21['rk'] and s21['sh'] is not None and abs(s21['sh'] - 0.44) <= 0.03 and s21['ref'] == s21['refc'] and 'c1sref' in s21['der'] and 'C 1s recipe' in (s21['msg'] or '') and (s21['rg'] or '').startswith('C 1s') and 'Δ +0.4' in (s21['chip'] or ''), s21)
+    J("document.querySelector('#xpsRcpA').click()"); idle()
+    sh2 = J("(()=>{ const st=XPS_UI._state(); const k=Object.keys(st.samples).find(k=>/GuideK/.test(k)); return st.samples[k].shift; })()")
+    check('8c clicking the C 1s recipe again (already corrected) keeps Δ (no double shift)', abs(sh2 - s21['sh']) < 0.002, [s21['sh'], sh2])
+    selu(uk['O 1s'])
+    s22 = J("(()=>{ const r=document.querySelector('#xpsRcpPar'); return {fl:r?Array.from(r.querySelectorAll('[data-rfl]')).map(b=>[b.dataset.rfl,b.checked]):null, sf:!!document.querySelector('#xpsRcpSF'), at:(document.querySelector('#xpsRcpA')||{}).title||''}; })()")
+    J("document.querySelector('#xpsRcpA').click()"); idle()
+    s23 = J("(()=>{ const p=XPS_UI._pr(), r=p.result; const d=Array.from(document.querySelectorAll('#xpsChk [data-der]')).map(x=>[x.dataset.der,x.textContent]); return {rk:p.comps.map(c=>c.rk), hyp:r&&r.o1s&&r.o1s.hyp&&r.o1s.hyp.verdict, link:!!(r&&r.o1s&&r.o1s.expect), d, chi:r&&r.stats.chi2nu, msg:(document.querySelector('#xpsMsg .cur .tx')||{}).textContent, rg:(document.querySelector('#xpsMsg .cur .rg')||{}).textContent}; })()")
+    check('8d O 1s recipe: Link C 1s box + SF ± field; fit with the C 1s link → derived lattice share and the high-BE C 1s verdict (truth: carbonate → CO₃²⁻ favoured); message labelled O 1s',
+          s22['fl'] and dict(s22['fl']).get('link') is True and s22['sf'] and 'Idriss' in s22['at'] and s23['link'] and s23['hyp'] and 'CO₃²⁻ favoured' in s23['hyp'] and any(x[0] == 'o1shyp' for x in s23['d']) and (s23['rg'] or '').startswith('O 1s'), s23)
+    selu(uk['C 1s'])
+    s24 = J("(()=>({tx:(document.querySelector('#xpsMsg .cur .tx')||{}).textContent, rg:(document.querySelector('#xpsMsg .cur .rg')||{}).textContent}))()")
+    check('8e per-region message: back on C 1s the bar shows the C 1s message (not the O 1s result)', (s24['rg'] or '').startswith('C 1s') and 'O 1s recipe' not in (s24['tx'] or ''), s24)
+    # Bounded BE mode + merge → Bound positions (O 1s, manual model)
+    selu(uk['O 1s'])
+    J("(()=>{ const p=XPS_UI._pr(); const C=window.XPS_CORE; const mk=(be,F,A,nm)=>{ const c=C.newComp('GLS',be,{F,area:A}); c.name=nm; return c; }; p.comps=[mk(529.0,1.2,30000,'A'),mk(530.9,1.8,20000,'B'),mk(531.1,1.8,15000,'C'),mk(532.2,1.8,20000,'D')]; p.comps.forEach((c,i)=>c.slot=i); p.cons={}; p.bg={type:'active',n:5,c0:null,k:null,s:0,cons:{s:{mode:'free'}}}; p.recipe=null; p.ver++; XPS_UI.rerender(); })()")
+    J("(()=>{ const p=XPS_UI._pr(); const st=XPS_UI._state(); st.ui.selComp=p.comps[0].id; XPS_UI.rerender(); })()"); pg.wait_for_timeout(200)
+    J("(()=>{ const b=document.querySelector('.pf [data-cm=\"be\"]'); b.click(); })()"); pg.wait_for_timeout(200)
+    s25 = J("(()=>{ const p=XPS_UI._pr(); const q=p.cons[p.comps[0].id].be; const b=document.querySelector('.pf [data-cm=\"be\"]'); return {q, lab:b&&b.textContent, rng:(document.querySelector('.pf .bnds')||{}).textContent, ced:!!document.querySelector('.ced [data-blo]')}; })()")
+    check("8f 'Bounded' BE mode: one click on Free → ± 0.5 eV range around the current value, shown inline, range editor open", s25['q'] and s25['q'].get('mode') == 'free' and abs(s25['q']['hi'] - s25['q']['lo'] - 1.0) < 1e-6 and s25['lab'] == '±' and s25['rng'] and s25['ced'], s25)
+    J("XPS_UI._fit('one')"); idle()
+    s26 = J("(()=>{ const it=Array.from(document.querySelectorAll('#xpsChk li')); return it.map(l=>({t:l.querySelector('.tx').textContent, b:Array.from(l.querySelectorAll('button')).map(x=>x.textContent)})); })()")
+    mi = [i for i, x in enumerate(s26) if 'merge' in x['t']]
+    ok_m = bool(mi) and mi[0] == 0 and any(b.startswith('Remove') for b in s26[0]['b']) and 'Bound positions' in s26[0]['b']
+    if ok_m:
+        J("(()=>{ const b=Array.from(document.querySelectorAll('#xpsChk li')[0].querySelectorAll('button')).find(x=>x.textContent==='Bound positions'); b.click(); })()"); pg.wait_for_timeout(400); idle()
+    s27 = J("(()=>({tied:Object.values(XPS_UI._pr().cons).some(q=>q&&q.F&&q.F.mode==='link'), merge:Array.from(document.querySelectorAll('#xpsChk li')).some(l=>/B and C merge|C and B merge/.test(l.textContent)), fresh:!!(XPS_UI._pr().result&&!XPS_UI._pr().result.stale), items:Array.from(document.querySelectorAll('#xpsChk li .tx')).map(x=>x.textContent), be:XPS_UI._pr().comps.map(c=>[c.name,+c.be.toFixed(2)]), cons:XPS_UI._pr().comps.map(c=>XPS_UI._pr().cons[c.id]&&XPS_UI._pr().cons[c.id].be)}))()")
+    gap = None
+    try:
+        cb, cc_ = s27['cons'][1], s27['cons'][2]
+        gap = cc_['lo'] - cb['hi']
+        sepd = s27['be'][2][1] - s27['be'][1][1]
+    except Exception:
+        sepd = None
+    check("8g B/C merge → listed first with [Remove …] [Bound positions]; Bound positions → own BE ranges split apart, FWHM tied, refit runs; B–C separation grows from 0.20 eV to ≥ the split",
+          ok_m and s27['fresh'] and s27['tied'] and gap is not None and gap > 0.3 and sepd is not None and sepd >= gap - 1e-6, [s26[:2], s27])
+    J("XPS_UI._state().ui.starts=8"); J("XPS_UI._fit('multi')"); idle()
+    s28 = J("(()=>{ const r=XPS_UI._pr().result; const m=r&&r.multi; const box=Array.from(document.querySelectorAll('div[title]')).find(d=>/Same minimum/.test(d.textContent)&&/max\\(1, χ²ν\\)/.test(d.title)); return m?{N:m.N, near:m.near, thr:m.thr, nu:m.chi2nu, chi:r.stats.chi2nu, sameP:m.sameP, box:!!box, txt:box&&box.textContent}:null; })()")
+    check('8h Multi-start (8): same-minimum threshold = max(1, χ²ν of the best start), same-parameter count reported; tooltip explains both',
+          s28 and s28['N'] == 8 and abs(s28['thr'] - max(1, s28['nu'])) < 1e-9 and s28['sameP'] is not None and s28['sameP'] <= s28['near'] and s28['box'] and 'same param.' in (s28['txt'] or ''), s28)
+    # 8i Model Comparison: auto-names tell models apart (+slope, fixed / linked counts, recipe); inline rename; ΔAICc/ΔBIC tooltip
+    J("document.querySelector('#xpsSnap').click()"); pg.wait_for_timeout(150)
+    J("(()=>{ const p=XPS_UI._pr(); p.bg.cons={s:{mode:'fixed'}}; p.bg.s=0; p.ver++; XPS_UI.rerender(); })()")
+    J("XPS_UI._fit('one')"); idle()
+    J("document.querySelector('#xpsSnap').click()"); pg.wait_for_timeout(150)
+    J("(()=>{ const st=XPS_UI._state(); st.ui.tab='result'; XPS_UI.rerender(); })()"); pg.wait_for_timeout(300)
+    s29 = J("(()=>{ const ins=Array.from(document.querySelectorAll('[data-mnm]')); const th=Array.from(document.querySelectorAll('th')).find(t=>/ΔAICc/.test(t.textContent)); return {names:ins.map(i=>i.value), tip:th&&th.title}; })()")
+    J("(()=>{ const i=document.querySelector('[data-mnm=\"1\"]'); i.value='no slope'; i.dispatchEvent(new Event('change')); })()"); pg.wait_for_timeout(150)
+    nm2 = J("XPS_UI._pr().models.map(m=>m.name)")
+    check('8i Model Comparison: auto-names differ (+slope vs not; fixed / linked counts), inline rename stored, ΔAICc/ΔBIC tooltip (< 2 prefer fewer parameters, Kass & Raftery 2–6 / > 10, correlated noise)',
+          len(s29['names']) == 2 and s29['names'][0] != s29['names'][1] and '+slope' in s29['names'][0] and '+slope' not in s29['names'][1] and 'fixed' in s29['names'][0] and 'linked' in s29['names'][0]
+          and nm2[1] == 'no slope' and s29['tip'] and 'Kass' in s29['tip'] and '< 2' in s29['tip'] and 'orrelated noise' in s29['tip'], [s29['names'], nm2])
+    J("(()=>{ const st=XPS_UI._state(); st.ui.tab='fit'; XPS_UI.rerender(); })()"); pg.wait_for_timeout(200)
+    pg.screenshot(path=os.path.join(out, 'guide_07_c1s_o1s.png'), full_page=False)
     # 5 terse labels · 390 px · console
     labs = J("Array.from(document.querySelectorAll('#xpsChk li .tx')).map(x=>x.textContent)")
     select(ce)

@@ -12,14 +12,17 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;"
 const $q=(r,s)=>r.querySelector(s), $a=(r,s)=>[...r.querySelectorAll(s)];
 /* 알림: XPS 화면이 있으면 그래프 아래 알림 줄(최근 것 + 이전 6 개), 없으면 앱의 toast. act = {label, fn} 이면 버튼 */
 let MSGS=[];
-const note=(m,k,act)=>{ try{ const el=ROOT&&ROOT.querySelector&&ROOT.querySelector("#xpsMsg");
-  if(el){ MSGS.unshift({m:String(m),k:k||"",act:act||null,t:Date.now()}); MSGS=MSGS.slice(0,7); drawMsg(); return; }
+/* v1.9.13: sp (optional) binds the message to a spectrum — the bar shows the latest message of the selected spectrum (or a sample-wide one) and labels
+   region-bound messages with the region name, so a fit result of O 1s is never shown as if it were the C 1s result (SPEC §17.12) */
+const note=(m,k,act,sp)=>{ try{ const el=ROOT&&ROOT.querySelector&&ROOT.querySelector("#xpsMsg");
+  if(el){ MSGS.unshift({m:String(m),k:k||"",act:act||null,t:Date.now(),uid:sp&&sp.uid||null,reg:sp?(sp.region||"")+(sp.file?" · "+sp.file:""):""}); MSGS=MSGS.slice(0,12); drawMsg(); return; }
   if(typeof toast==="function") toast(m,k); else console.log(m); }catch(e){} };
 function drawMsg(){ const el=ROOT&&$q(ROOT,"#xpsMsg"); if(!el) return; if(!MSGS.length){ el.innerHTML=""; el.hidden=true; return; } el.hidden=false;
-  const m=MSGS[0], old=MSGS.slice(1);
-  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="xpsMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="xpsMsgX" title="Close">×</button></div>
-    ${old.length?`<details class="old"><summary>Earlier messages (${old.length})</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
-  $q(el,"#xpsMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); };
+  const sel=typeof S!=="undefined"&&S?S.sel:null; const m=MSGS.find(x=>!x.uid||x.uid===sel)||MSGS[0], old=MSGS.filter(x=>x!==m).slice(0,6);
+  const rl=x=>x.uid?`<span class="rg${x.uid!==sel?" other":""}" title="${esc("Message of "+x.reg+(x.uid!==sel?" — not the spectrum shown":""))}">${esc((x.reg||"").split(" · ")[0])}</span>`:"";
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span>${rl(m)}<span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="xpsMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="xpsMsgX" title="Close">×</button></div>
+    ${old.length?`<details class="old"><summary>Earlier messages (${old.length})</summary>${old.map(o=>`<div class="${esc(o.k)}">${rl(o)}${esc(o.m)}</div>`).join("")}</details>`:""}`;
+  $q(el,"#xpsMsgX").onclick=()=>{ MSGS=MSGS.filter(x=>x!==m); drawMsg(); };
   const b=$q(el,"#xpsMsgA"); if(b) b.onclick=()=>{ const f=m.act&&m.act.fn; m.act=null; drawMsg(); if(f) f(); };
 }
 const f=(v,d)=>v==null||!isFinite(v)?"—":(+v).toFixed(d==null?2:d);
@@ -483,6 +486,8 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   else if(d.cmd==="sens") out=C.sensJob(d.spec,d.model,d.variants);
   else if(d.cmd==="batch") out=C.batchJob(d.spec,d.model,d.opt);
   else if(d.cmd==="staged") out=self.XPS_GUIDE.stagedJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="c1s") out=self.XPS_GUIDE.c1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="o1s") out=self.XPS_GUIDE.o1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="xj") out=XJ[d.job](d.args,(fr,t)=>self.postMessage({id:d.id,prog:fr,txt:t||""}));
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
@@ -493,7 +498,7 @@ function pool(jobs,onDone,onProg){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):j.cmd==="c1s"?GD().c1sJob(j.prob,j.opt):j.cmd==="o1s"?GD().o1sJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -523,16 +528,22 @@ async function runFit(kind,spArg){
     prob.comps=best.comps; prob.bg=best.bg;
     setProg("불확도 계산…",K/(K+1));
     const [fin]=await pool([{cmd:"final",prob,opt:{}}],null,d=>setProg(`다듬기·불확도 — 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
-    const near=chis.filter(x=>x-best.chi2<1).length;
-    fin.multi=N>1?{N,chis,near,frac:near/N}:null;
-    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
+    // v1.9.13 (SPEC §17.12 R13): 'same minimum' = Δχ² < max(1, χ²ν_best) — the covariance is scaled by χ²ν, so Δχ²/χ²ν < 1 is the same 1σ criterion when
+    // σ is underestimated; 'same parameters' = every nonlinear free parameter (not areas, not background) within its 1σ (final covariance) of the best start
+    const dofB=Math.max(1,(best.N||prob.E.length)-(best.nfree||0)), nuB=best.chi2/dofB, thr=Math.max(1,nuB);
+    const near=chis.filter(x=>x-best.chi2<thr).length;
+    let sameP=null; { const pars=[].concat(...ok.map(o=>o.pars||[])), mpB=C.buildMap(prob); const nl=mpB.free.map((q,j)=>q.k!=="area"&&q.ci>=0?j:-1).filter(j=>j>=0);
+      const bi=chis.indexOf(best.chi2); const pb=bi>=0?pars[bi]:null; const sg=fin.cov&&fin.cov.sig;
+      if(pb&&sg&&pars.length===chis.length&&nl.length){ sameP=0; pars.forEach((v,i)=>{ if(!v||!(chis[i]-best.chi2<thr)) return; if(nl.every(j=>{ const s_=sg[j]; return s_>0&&isFinite(s_)?Math.abs(v[j]-pb[j])<=s_:Math.abs(v[j]-pb[j])<=1e-6*(Math.abs(pb[j])+1); })) sameP++; }); } }
+    fin.multi=N>1?{N,chis,near,frac:near/N,thr,chi2nu:nuB,sameP,fracP:sameP!=null?sameP/N:null}:null;
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn",null,sp); return; }
     fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
     if(best.stop==="stalled"&&fin.stop!=="stalled"){ fin.stop="stalled"; fin.stall=best.stall||fin.stall||null; }   // 시작점 피팅에서 멈췄으면 그것을 알림 (SPEC §3.3b)
     if(best.branch&&!fin.branch) fin.branch=best.branch;   // 시작점 피팅에서 갇힌 매개변수를 되돌려 풀었으면 그것도 (SPEC §3.3b)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
-    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn");
+    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn",null,sp);
   }catch(e){ hideProg(); RUN=null; note("피팅 중단: "+(e.message||e),"warn"); }
 }
 async function runMC(){
@@ -547,7 +558,7 @@ async function runMC(){
     const samples=[].concat(...outs.filter(Boolean).map(o=>o.samples)); const fails=outs.reduce((s,o)=>s+(o?o.fails:0),0);
     p.result.mc={summ:C.mcSummarize(samples),n:samples.length,fails,rho:outs[0]?outs[0].rho:null,phi:outs[0]?outs[0].phi:null,when:new Date().toISOString(),
       areaSum:samples.length?areaSumStats(samples):null};
-    save(); hideProg(); S.ui.tab="result"; rerender(); note(`Monte Carlo ${samples.length}회 완료${fails?` (실패 ${fails})`:""}`,"ok");
+    save(); hideProg(); S.ui.tab="result"; rerender(); note(`Monte Carlo ${samples.length}회 완료${fails?` (실패 ${fails})`:""}`,"ok",null,sp);
   }catch(e){ hideProg(); RUN=null; note("Monte Carlo 중단: "+(e.message||e),"warn"); }
 }
 function areaSumStats(samples){ const a=samples.map(s=>s.reduce((t,q)=>t+q.area,0)); const m=a.reduce((x,y)=>x+y,0)/a.length; return {mean:m,sd:Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/Math.max(1,a.length-1))}; }
@@ -1072,7 +1083,7 @@ function fitStrip(r,sp){
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
     r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
-  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="Fraction of starts reaching the minimum (Δχ²<1)">Same minimum<b>${r.multi.near}/${r.multi.N}</b></div>`);
+  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum: Δχ² < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
   if(r.optimizer==="simplex") parts.push(`<div title="Nelder–Mead simplex; count = χ² evaluations">Simplex<b>${r.iter} eval.</b></div>`);
   let w="";
@@ -1089,10 +1100,12 @@ function fitStrip(r,sp){
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=3;   // v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
+const CHECK_V=4;   // v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
 const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
+  if(R.kind==="c1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("One action: build the adventitious-carbon model, fit it, test the weak lines and set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
+  if(R.kind==="o1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Build and fit the O 1s model (lattice + surface O) on the charge-corrected scale; with a C 1s recipe fit of this sample the organic / carbonate O areas are bounded by the C 1s areas and the high-BE C 1s line is tested as O–C=O and as CO₃²⁻. "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
   if(R.kind==="par"||R.kind==="emp") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe. "+R.how+" Window "+R.window[0]+"–"+R.window[1]+" eV, in-fit Shirley + slope. Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
   if(R.kind==="env") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" envelopes of the species ticked below: each species = its published peaks at fixed spacing, area % and FWHM; free per species: one position (± "+R.beTol+" eV around the charge-corrected literature BE) and one area. Window "+R.window[0]+"–"+R.window[1]+" eV (2p3/2), Shirley fitted with the envelopes. Species fractions appear in Fit check after the fit. Pitfalls: "+R.pitfalls+" "+TM_PIT+" Source: "+R.cite)}">Recipe</button>`;
   return `<select class="xps-sel" id="xpsRcpO" title="${esc(R.name+" — literature starting model with doublet links (ΔE shared, u/v area 2/3, equal widths), window and background. "+R.cite)}">${R.options.map(o=>`<option value="${o.id}" ${o.id===cur_?"selected":""}>${esc(o.label)}</option>`).join("")}</select><button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe (anchored to the charge correction; lines aligned to the data within ±3 eV). Pitfalls: "+R.pitfalls)}">Recipe</button>`; }
@@ -1103,13 +1116,29 @@ function envOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD(
 /* v1.9.7 parametric / empirical recipes (SPEC §17.8): species tick boxes · flags (Fix ratio, Plasmon, MNN Auger, FWHM×) */
 function parOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD().parDefaults(R); const fl={}; (R.flags||[]).forEach(q=>{ const v=ui.rcpFl&&ui.rcpFl[R.id]&&ui.rcpFl[R.id][q.id]; fl[q.id]=v!=null?!!v:!!q.def; });
   return {species:sel.slice(),flags:fl,hv:sp&&sp.hv}; }
-function rcpOpts(sp,R,fallback){ return R.kind==="env"?envOpts(sp,R):(R.kind==="par"||R.kind==="emp")?parOpts(sp,R):(fallback||S.ui.rcpOpt||"mix"); }
+function rcpOpts(sp,R,fallback){ return R.kind==="c1s"?c1sOpts(sp,R):R.kind==="o1s"?o1sOpts(sp,R):R.kind==="env"?envOpts(sp,R):(R.kind==="par"||R.kind==="emp")?parOpts(sp,R):(fallback||S.ui.rcpOpt||"mix"); }
 function recipeParRow(sp,R){ const o=parOpts(sp,R); const multi=R.species.length>1;
   const box=s=>{ const l0=s.lines[0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+s.lines.length+" "+(R.dE?"spin–orbit pair":"line")+(s.lines.length>1?"s":"")+", main line "+l0.be+" eV ("+(R.c1s!=null?"C 1s "+R.c1s+" eV":R.off?"Fermi-edge scale":"source scale")+")"+(s.ratio?", c4f⁰ : c4f¹L = "+s.ratio.join(":")+" (Sunding Table 5)":"")+". Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
   const fls=(R.flags||[]).filter(q=>!q.al||!sp||Math.abs((sp.hv||1486.6)-1486.6)<2);
   if(!multi&&!fls.length) return "";
   return `<div class="xps-row xps-rcp-env" id="xpsRcpPar">${multi?R.species.map(box).join(""):`<span class="muted xs" title="${esc(R.how)}">${esc(R.kind==="emp"?"Empirical envelope (single crystal, areas free)":R.species[0].label)} ⓘ</span>`}${fls.map(q=>`<label class="xps-rcp-sp" title="${esc(q.tip)}"><input type="checkbox" data-rfl="${q.id}" ${o.flags[q.id]?"checked":""}>${esc(q.label)}</label>`).join("")}</div>`; }
-function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(R&&(R.kind==="par"||R.kind==="emp")) return recipeParRow(sp,R); if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
+/* v1.9.13 C 1s / O 1s recipes (SPEC §17.10–17.11): flag rows (ids as the parametric row, so bindGuide stores them the same way) */
+function c1sOpts(sp,R){ const st=(S.ui.rcpFl&&S.ui.rcpFl[R.id])||{}; const pres=[...presentEls(sp)]; return {flags:GD().c1sFlags(R,{flags:st,present:pres}),present:pres}; }
+/* the C 1s spectrum of the sample to link to: a fresh C 1s recipe fit first, then any fitted C 1s, then any C 1s */
+function c1sOf(sp){ const L=chgCands(SK(sp)); const rc=s=>{ const r=fitted(s); return r&&r.comps.some(c=>c.recipe==="c1s")?2:r?1:0; }; return L.slice().sort((a,b)=>rc(b)-rc(a))[0]||null; }
+/* O expected from C 1s (SPEC §17.11): C 1s recipe areas (+ covariance σ) and R = (S·T·λ)O / (S·T·λ)C from the Quantification tab's settings */
+function c1sLink(sp,cs,sfRel){ const r=cs&&fitted(cs); if(!r||!r.comps.some(c=>c.recipe==="c1s")) return null; const comps={};
+  r.comps.forEach((c,i)=>{ if(["co","cdo","oco","co3"].includes(c.rk)) comps[c.rk]={a:Math.max(0,r.summ[i].area),s:(r.summ[i].sig&&r.summ[i].sig.area)||0}; });
+  const row=(s_,el,orb,BE)=>{ const ov=S.quant.rows[s_.uid+"|"+el]||{}; const lk=rsfLookup(el,orb,S.quant.lib,s_.hv); const Sv=ov.rsf!=null?+ov.rsf:(lk?lk.v:null); return {el,area:1,S:Sv,BE,hv:s_.hv||1486.6,PE:s_.meta&&s_.meta.passEnergy,tf:tfFor(s_)}; };
+  const rC=row(cs,"C","1s",285), rO=row(sp,"O","1s",531); if(!(rC.S>0)||!(rO.S>0)) return null;
+  const q=C.quantify([rC,rO],{imfp:S.quant.imfp}); const R=q[1].den/q[0].den; if(!(R>0)) return null;
+  return {R,sfRel,comps,from:cs.uid,src:`${S.quant.lib} S, ${S.quant.imfp.model} λ`,SC:rC.S,SO:rO.S}; }
+function o1sOpts(sp,R){ const st=(S.ui.rcpFl&&S.ui.rcpFl[R.id])||{}; const pres=[...presentEls(sp)]; const sf=S.ui.rcpSF!=null?+S.ui.rcpSF:10; const cs=c1sOf(sp); const link=c1sLink(sp,cs,sf/100);
+  return {flags:GD().o1sFlags(R,{flags:st,present:pres,link}),present:pres,link,cs}; }
+function recipeCORow(sp,R){ const o=R.kind==="c1s"?c1sOpts(sp,R):o1sOpts(sp,R);
+  const fls=R.flags.filter(q=>R.kind!=="o1s"||q.id!=="link"||o.link);
+  return `<div class="xps-row xps-rcp-env" id="xpsRcpPar">${fls.map(q=>`<label class="xps-rcp-sp" title="${esc(q.tip)}"><input type="checkbox" data-rfl="${q.id}" ${o.flags[q.id]?"checked":""}>${esc(q.label)}</label>`).join("")}${R.kind==="o1s"&&o.link?`<span class="xps-f" title="${esc("Uncertainty of the O/C sensitivity-factor ratio (S·T·λ) used for the C 1s ↔ O 1s link, in %. Default 10 % is an assumption, not a literature value — set it for your instrument and RSF library. It widens the area bands together with the C 1s area σ.")}">SF ± <input type="number" class="w56" id="xpsRcpSF" min="0" max="100" step="1" value="${S.ui.rcpSF!=null?S.ui.rcpSF:10}"> %</span>`:""}</div>`; }
+function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(R&&(R.kind==="c1s"||R.kind==="o1s")) return recipeCORow(sp,R); if(R&&(R.kind==="par"||R.kind==="emp")) return recipeParRow(sp,R); if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
   const has10=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[2]!=null))), has20=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[3]!=null)));
   const box=s=>{ const t=(s.sets||[s]).map(x=>x.peaks.length).reduce((a,b)=>a+b,0); const be=(s.sets?s.sets[0]:s).peaks[0][0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+t+" peaks"+(s.sets?" in "+s.sets.length+" sets ("+s.sets.map(x=>x.label).join(", ")+")":"")+", main line "+be+" eV (charge-corrected). Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
   return `<div class="xps-row xps-rcp-env" id="xpsRcpEnv">${R.species.map(box).join("")}<select class="xps-sel" id="xpsRcpPE" title="${esc("Pass energy column of the published FWHMs (Biesinger: PE 10 and/or PE 20 eV). "+(has10&&has20?"Where only one column exists for a peak, that one is used.":"This table has PE "+(has10?"10":"20")+" widths only.")+" Default from the spectrum's pass energy (≤ 15 eV → 10).")}"><option value="10" ${o.pe===10?"selected":""}>PE 10</option><option value="20" ${o.pe===20?"selected":""}>PE 20</option></select><label class="xps-rcp-sp" title="One common FWHM scale (0.6–1.6×) for all envelope peaks — Biesinger notes the widths can be adjusted for other instruments or pass energies. Off: widths fixed at the table values."><input type="checkbox" id="xpsRcpW" ${o.wscale?"checked":""}>FWHM×</label>${R.stoich?`<label class="xps-rcp-sp" title="Fe₃O₄: tie the Fe³⁺ set to the Fe²⁺ set — area 2 : 1 (stoichiometric) and fixed separation (literature 1.8 eV). Off: the two sets are free (the table itself has 68.5 : 31.4)."><input type="checkbox" id="xpsRcpS" ${o.stoich?"checked":""}>Fe₃O₄ 1:2</label>`:""}</div>`; }
@@ -1118,6 +1147,8 @@ function recipeBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!r.el) r
   if(inUse){ const m=p.recipe||{}; return `<div class="muted xs" style="margin:2px 0 4px" title="${esc(rc.pitfalls+"\n"+rc.cite)}">Recipe model: ${esc(rc.name)}${m.label?" · "+esc(m.label):""}${m.align!=null&&Math.abs(m.align)>0.05?` · aligned ${m.align>0?"+":""}${f(m.align,2)} eV`:""} ⓘ</div>`; }
   return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":"")+(ci.note?" "+ci.note:""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?(rc.kind==="emp"?" — empirical envelope available (Recipe)":" — literature recipe available (Recipe)"):""} ⓘ</div>`; }
 function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&GD().recipeById(id); if(!R) return; let M;
+  if(R.kind==="c1s") return applyC1s(sp,opt&&typeof opt==="object"?opt:c1sOpts(sp,R));
+  if(R.kind==="o1s") return applyO1s(sp,opt&&typeof opt==="object"?opt:o1sOpts(sp,R));
   const env=R.kind==="env", par=R.kind==="par"||R.kind==="emp"; const eo=env||par?(opt&&typeof opt==="object"?opt:rcpOpts(sp,R)):null;
   try{ M=GD().recipeModel(id,env||par?Object.assign({shift:shOf(sp),be:sp.be,y:sp.y},eo):{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
   pushHist(p,"Recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
@@ -1127,6 +1158,64 @@ function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&G
   if(env){ note(`${R.name}: ${M.recipe.species.length} species, ${M.comps.length} peaks, window ${f(M.lo+shOf(sp),1)}–${f(M.hi+shOf(sp),1)} eV, Shirley in fit, FWHM PE ${M.recipe.pe}${M.recipe.wscale?" ×scale":""}.`+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.","ok",{label:"Staged fit",fn:()=>runStaged(sp)}); return; }
   const a=M.recipe.align, far=Math.abs(a)>0.5;
   note(`${R.name} · ${M.recipe.label}: ${M.comps.length} pairs, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the charge-corrected literature positions — check the charge correction (differential charging?).`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); }
+/* v1.9.13 C 1s recipe (SPEC §17.10): one action = model → fit (Worker 'c1s': staged fit, relative windows, weak-line F-test) → whole-sample charge
+   correction with the fitted reference line. The fit is on measured BE, so Δ replaces any earlier correction (no double shift). */
+async function applyC1s(sp,o){
+  if(RUN){ note("Already computing","warn"); return; }
+  const p=pr(sp), R=GD().recipeById("c1s"), sm=smpOf(sp), k=SK(sp); o=o||c1sOpts(sp,R);
+  const tg=o.flags.sp2?R.sp2ref:(sm.c1sSp2?R.ref:(sm.target!=null?sm.target:R.ref));
+  let M; try{ M=GD().recipeModel("c1s",{shift:shOf(sp),be:sp.be,y:sp.y,flags:o.flags,present:o.present,target:tg}); }catch(e){ note(e.message,"warn",null,sp); return; }
+  if(!M.recipe.found){ note("C 1s recipe: no C 1s peak found near "+f(tg-shOf(sp),1)+" eV (measured) — check the spectrum","warn",null,sp); return; }
+  pushHist(p,"C 1s recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; touch(p); rerender();
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; }
+  const t0=performance.now(), ver=p.ver;
+  try{ setProg("C 1s recipe: staged fit, weak-line test…",null);
+    const [fin]=await pool([{cmd:"c1s",prob,opt:{drop:o.flags.weak!==false,target:tg}}],null,d=>setProg(`C 1s recipe… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
+    if(!fin) throw new Error("no result");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
+    const slot={}; p.comps.forEach(c=>slot[c.id]=c.slot); p.comps=fin.comps; p.comps.forEach(c=>{ if(c.slot==null) c.slot=slot[c.id]!=null?slot[c.id]:slotFor(p); }); p.cons=fin.cons;
+    p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; hideProg();
+    const info=fin.c1s, ref=p.comps.find(c=>c.id===info.refId)||p.comps.find(c=>c.rrole==="ref"); const old=sm.shift||0;
+    if(o.flags.sp2){ sm.target=R.sp2ref; sm.c1sSp2=true; } else if(sm.c1sSp2){ sm.target=R.ref; delete sm.c1sSp2; }
+    sm.refUid=sp.uid; sm.refComp=ref.id;
+    setShift(sp,tg-ref.be,{uid:sp.uid,compId:ref.id,be:ref.be,name:ref.name||"",file:sp.file||"",target:tg},`C 1s recipe ‘${ref.name}’ ${f(ref.be,2)} → ${f(tg,2)} eV · ${sp.file||sp.name}`);
+    const sg=v=>(v>0?"+":"")+f(v,2); const dr=info.dropped||[];
+    const msg=`C 1s recipe: ${ref.name} ${f(ref.be,2)} eV (measured) → ${f(tg,2)} eV · Δ ${sg(sm.shift)} eV, whole sample ${smpDisp(k).name}${Math.abs(old-sm.shift)>0.0005?` (was ${sg(old)})`:""} · ${p.comps.length} lines, χ²ν ${f(fin.stats.chi2nu,2)}`
+      +(dr.length?` · dropped ${dr.map(d=>`${d.name} (F-test p ${f(d.p,2)})`).join(", ")}`:"")+(o.flags.co3?" · CO₃²⁻ overlaps O–C=O: check O 1s":"")+(o.flags.sp2?" · sp² reference 284.4 eV":"");
+    note(msg,fin.conv&&fin.stop!=="stalled"?"ok":"warn",dr.length?{label:"Keep all",fn:()=>applyC1s(sp,Object.assign({},o,{flags:Object.assign({},o.flags,{weak:false})}))}:null,sp);
+  }catch(e){ hideProg(); RUN=null; note("C 1s recipe stopped: "+(e.message||e),"warn",null,sp); }
+}
+/* v1.9.13 O 1s recipe (SPEC §17.11): positions on the corrected scale; the C 1s ↔ O 1s link needs a C 1s recipe fit of the sample */
+async function applyO1s(sp,o){
+  if(RUN){ note("Already computing","warn"); return; }
+  const p=pr(sp), R=GD().recipeById("o1s"); o=o||o1sOpts(sp,R); const cs=o.cs!==undefined?o.cs:c1sOf(sp); const cst=chgState(sp);
+  const cFit=cs&&fitted(cs), cRec=cFit&&cFit.comps.some(c=>c.recipe==="c1s");
+  if(cs&&(!cRec||cst.st==="none"||cst.st==="stale")&&!o.force){
+    note(`O 1s recipe: ${!cFit?"the C 1s of this sample is not fitted":!cRec?"the C 1s of this sample was not fitted with the C 1s recipe":"the charge correction is "+(cst.st==="none"?"missing":"stale")} — O 1s positions are on the corrected scale and the C 1s ↔ O 1s link uses the C 1s recipe areas. Run the C 1s recipe first.`,"warn",
+      {label:"Run C 1s recipe",fn:async()=>{ await applyC1s(cs); if(fitted(cs)) applyO1s(sp); }},sp); return; }
+  const sh=shOf(sp), build={shift:sh,flags:o.flags,present:o.present,link:o.flags.link?o.link:null};
+  let M; try{ M=GD().recipeModel("o1s",Object.assign({be:sp.be,y:sp.y},build)); }catch(e){ note(e.message,"warn",null,sp); return; }
+  pushHist(p,"O 1s recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; touch(p); rerender();
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; }
+  const t0=performance.now(), ver=p.ver;
+  try{ setProg("O 1s recipe: staged fit"+(build.link?", O–C=O vs CO₃²⁻ test":"")+"…",null);
+    const [fin]=await pool([{cmd:"o1s",prob,opt:{build}}],null,d=>setProg(`O 1s recipe… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
+    if(!fin) throw new Error("no result");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
+    const slot={}; p.comps.forEach(c=>slot[c.id]=c.slot); p.comps=fin.comps; p.comps.forEach(c=>{ if(c.slot==null) c.slot=slot[c.id]!=null?slot[c.id]:slotFor(p); }); p.cons=fin.cons;
+    p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; save(); hideProg(); rerender();
+    const I=fin.o1s, h=I.hyp; const rs=I.residual;
+    const msg=`O 1s recipe: ${p.comps.length} lines, χ²ν ${f(fin.stats.chi2nu,2)} · lattice O ${f(rs.latPct,1)} % of O`+(rs.ohExcess!=null?` · OH⁻ beyond CO₃²⁻ ${f(100*rs.ohExcess/rs.total,1)} %`:"")
+      +(I.latlo&&I.latlo.with?` · low lattice line: ${I.latlo.verdict} (ΔAICc ${f(I.latlo.dAICc,1)})`:"")+(h?` · high-BE C 1s line: ${h.verdict} (AICc O–C=O ${f(h.oco.AICc,1)} vs CO₃²⁻ ${f(h.co3.AICc,1)})`:"")+(!cs?" · no C 1s in this sample (no link)":"")+(!sh&&cst.st==="none"?" · not charge-corrected: positions are measured BE":"");
+    note(msg,fin.conv&&fin.stop!=="stalled"?"ok":"warn",null,sp);
+  }catch(e){ hideProg(); RUN=null; note("O 1s recipe stopped: "+(e.message||e),"warn",null,sp); }
+}
 async function runStaged(spArg){
   const sp=spArg&&spArg.uid?spArg:cur(); if(!sp) return; const p=pr(sp);
   if(!p.comps.length){ note("No components — use Auto suggest or Recipe first","warn"); return; }
@@ -1136,11 +1225,11 @@ async function runStaged(spArg){
   try{ setProg("Staged fit: heights → positions → all, plus the normal fit…",null);
     const [fin]=await pool([{cmd:"staged",prob,opt:{}}],null,d=>setProg(`Staged fit… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     if(!fin) throw new Error("no result");
-    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn"); return; }
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
     p.ver++; save(); hideProg(); rerender();
-    const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn");
+    const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn",null,sp);
   }catch(e){ hideProg(); RUN=null; note("Staged fit stopped: "+(e.message||e),"warn"); }
 }
 /* elements present for the overlap rules (SPEC §17.8): regions of the same sample + elements accepted in its survey */
@@ -1155,27 +1244,37 @@ function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free)
   try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,recipeMeta:rc&&p.recipe&&p.recipe.id===rc.recipe?p.recipe:null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
   r.check={sh,v:CHECK_V,items,pk}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
+  if(R.kind==="c1s"&&r.c1s){ const I=r.c1s, ref=r.comps.find(c=>c.id===I.refId); const sg=v=>(v>0?"+":"")+f(v,2);
+    const tt=(I.tests||[]).map(t=>`${t.name}: F ${f(t.F,1)} (${t.dp} par.), p ${t.p<1e-4?t.p.toExponential(1):f(t.p,3)}, area/σ ${t.z!=null?f(t.z,1):"—"}`).concat((I.dropped||[]).map(d=>`${d.name}: dropped (F ${f(d.F,2)}, p ${f(d.p,3)})`)).join("\n");
+    return `<div class="xps-chk-d"><span data-der="c1sref" title="${esc(`Charge reference: ${ref?ref.name:"C–C/C–H"} fitted at ${f(I.refBE,3)} eV (measured) → ${f(I.target,2)} eV, Δ = ${sg(I.delta)} eV for the whole sample. Report the reference used: 284.8 eV is a convention (±0.2–0.3 eV or more; Biesinger 2022, Greczynski & Hultman 2017).`)}">Ref → ${f(I.target,2)} <b>Δ ${sg(I.delta)}</b> eV</span><span data-der="c1sweak" title="${esc("Weak-line test (F-test on the data-variance χ², α = "+I.alpha+"; area/σ from the covariance):\n"+tt)}">F-test: ${(I.tests||[]).length} kept${(I.dropped||[]).length?` · ${I.dropped.length} dropped`:""}</span><span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
+  if(R.kind==="o1s"&&r.o1s){ const I=r.o1s, rs=I.residual, h=I.hyp, ex=I.expect;
+    const et=ex?Object.entries(ex).map(([k,e])=>`${k}: expected ${g(e.E,4)} ± ${g(e.s,3)}${e.lower?" (lower bound only)":""}`).join("\n"):"no C 1s link";
+    return `<div class="xps-chk-d"><span data-der="o1slat" title="${esc("Lattice O = sum of the lattice lines / all O 1s lines. "+et)}">Lattice O <b>${f(rs.latPct,1)}</b> %</span>${rs.ohExcess!=null?`<span data-der="o1soh" title="${esc("OH⁻/CO₃²⁻ line area minus the carbonate O expected from C 1s (3 O per CO₃²⁻), as % of all O — the hydroxide (and other ≈ 531.5 eV O) not explained by carbonate.")}">OH⁻ excess <b>${f(100*rs.ohExcess/rs.total,1)}</b> %</span>`:""}${h?`<span data-der="o1shyp" title="${esc(`High-BE C 1s line (O–C=O + CO₃²⁻ area) assigned two ways, same O 1s line set: as O–C=O (2 O: ≈532 + ≈533.5 eV) χ²_d ${f(h.oco.chi2d,1)}, AICc ${f(h.oco.AICc,1)}, χ²ν ${f(h.oco.chi2nu,3)}; as CO₃²⁻ (3 O at ≈531.5 eV) χ²_d ${f(h.co3.chi2d,1)}, AICc ${f(h.co3.AICc,1)}, χ²ν ${f(h.co3.chi2nu,3)}${h.fitted?`; split as fitted in C 1s (O–C=O and CO₃²⁻ lines separately): AICc ${f(h.fitted.AICc,1)}`:""}. ΔAICc (CO₃²⁻ − O–C=O) = ${f(h.dAICc,1)}; |ΔAICc| < 2: not distinguishable.`)}">C 1s high-BE: <b>${esc(h.verdict)}</b></span>`:""}${I.latlo&&I.latlo.with?`<span data-der="o1slow" title="${esc(`Low lattice line (528.0–529.2 eV) compared with the same model without it: AICc ${f(I.latlo.with.AICc,1)} (with, ${I.latlo.with.p} par.) vs ${f(I.latlo.without.AICc,1)} (without, ${I.latlo.without.p} par.); ΔAICc = ${f(I.latlo.dAICc,1)} — > 2 supports the line.`)}">Low lattice: <b>${esc(I.latlo.verdict.split(" (")[0])}</b></span>`:""}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
   const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null||d.flag); if(!dv.length) return "";
   return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" class="${d.fixed?"fx":d.flag?"fl":""}" title="${esc(d.tip)}">${esc(d.label)} <b>${d.flag&&d.v>=100?"≥ ":""}${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %${d.fixed?` <span class="muted xs">fixed</span>`:""}${d.flag?` <span class="badge wr" title="${esc(d.flag)}">!</span>`:""}</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
 function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
   const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
   const st=s?`<span class="muted xs" title="${esc(`Staged fit (SPEC §17.4): stage χ² ${s.stages.map(q=>g(q.chi2,5)).join(" → ")}; data-variance χ²_d staged ${g(s.chi2dStaged,6)} vs normal fit ${g(s.chi2dNormal,6)} — the lower one is kept`)}">staged: kept ${esc(s.used)} ⓘ</span>`:"";
-  const rows=items.map((x,i)=>`<li class="${x.sev}"><span class="ic">${x.sev==="info"?"i":"!"}</span><span class="tx" title="${esc(x.tip)}">${esc(x.label)} ⓘ</span>${x.act?`<button class="btn xs" data-chk="${i}">${esc(x.act.label)}</button>`:""}</li>`).join("");
+  const rows=items.map((x,i)=>`<li class="${x.sev}"><span class="ic">${x.sev==="info"?"i":"!"}</span><span class="tx" title="${esc(x.tip)}">${esc(x.label)} ⓘ</span>${(x.acts||(x.act?[x.act]:[])).length?`<span class="acts">${(x.acts||[x.act]).map((a,j)=>`<button class="btn xs" data-chk="${i}" data-ai="${j}">${esc(a.label)}</button>`).join("")}</span>`:""}</li>`).join("");
   return `<div class="xps-chk" id="xpsChk"><div class="xps-chk-h"><span title="${esc(CHECK_HELP)}">Fit check ⓘ</span>${nW?`<span class="badge wr">${nW}</span>`:`<span class="badge ok">OK</span>`}${st}</div>${derivedHTML(p)}${rows?`<ul>${rows}</ul>`:`<div class="muted xs">No issues found.</div>`}</div>`; }
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
+  if(act.type==="mc"){ runMC(); return; }
   if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_?rcpOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
+  if(act.type==="bound"&&!act.start){ const h=(p.hist||[]).slice().reverse().find(x=>x.comps&&act.ids.every(id=>x.comps.some(c=>c.id===id))); if(h){ act=Object.assign({},act,{start:{}}); act.ids.forEach(id=>{ act.start[id]=h.comps.find(c=>c.id===id).be; }); } }   // start values = positions before the last fit
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
   try{ msg=GD().applyAction(m,act,{be0:sp.be[0],be1:sp.be[sp.n-1]}); }catch(e){ note(e.message,"warn"); return; }
   if(msg==null){ p.hist.pop(); note("Could not apply: "+act.label,"warn"); return; }
   p.lo=m.lo; p.hi=m.hi; p.bg=m.bg; p.comps=m.comps; p.cons=m.cons;
   p.comps.forEach(c=>{ if(c.slot==null){ if(!c.name) c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } });
   if(act.type==="bg") S.ui.knotMode=false;
-  touch(p); rerender(); note(`${act.label}: done — press Fit to refit`,"ok",{label:"Fit",fn:()=>runFit("one",sp)}); }
+  if(act.refit){ touch(p); rerender(); note(`${act.label}: done — refitting`,"ok",null,sp); runFit("one",sp); return; }
+  touch(p); rerender(); note(`${act.label}: done — press Fit to refit`,"ok",{label:"Fit",fn:()=>runFit("one",sp)},sp); }
 function bindGuide(el,sp,p){
   const st=$q(el,"#xpsStaged"); if(st) st.onclick=()=>runStaged(sp);
   const ro=$q(el,"#xpsRcpO"); if(ro) ro.onchange=()=>{ S.ui.rcpOpt=ro.value; save(); };
   const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>{ const R_=GD().recipeById(ra.dataset.rcp); applyRecipe(sp,ra.dataset.rcp,R_?rcpOpts(sp,R_,ro&&ro.value):(ro&&ro.value)||S.ui.rcpOpt||"mix"); };
+  const sfi=$q(el,"#xpsRcpSF"); if(sfi) sfi.onchange=()=>{ const v=+sfi.value; if(isFinite(v)&&v>=0){ S.ui.rcpSF=v; save(); } };
   const pv=$q(el,"#xpsRcpPar"); if(pv&&ra){ const id=ra.dataset.rcp; const put=(k,v)=>{ S.ui[k]=Object.assign({},S.ui[k]); S.ui[k][id]=v; save(); };
     $a(pv,"[data-rsp]").forEach(b=>b.onchange=()=>{ put("rcpSp",$a(pv,"[data-rsp]").filter(x=>x.checked).map(x=>x.dataset.rsp)); });
     $a(pv,"[data-rfl]").forEach(b=>b.onchange=()=>{ const cur=Object.assign({},(S.ui.rcpFl||{})[id]); cur[b.dataset.rfl]=b.checked; put("rcpFl",cur); }); }
@@ -1184,7 +1283,7 @@ function bindGuide(el,sp,p){
     const pe=$q(ev,"#xpsRcpPE"); if(pe) pe.onchange=()=>put("rcpPE",+pe.value);
     const w=$q(ev,"#xpsRcpW"); if(w) w.onchange=()=>put("rcpW",w.checked);
     const s_=$q(ev,"#xpsRcpS"); if(s_) s_.onchange=()=>put("rcpSt",s_.checked); }
-  const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.act); });
+  const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.acts?x.acts[+b.dataset.ai||0]:x.act); });
 }
 function compCard(sp,p,c,ci){
   const sel=S.ui.selComp===c.id, sh=shOf(sp); const r=p.result&&!p.result.stale?p.result:null;
@@ -1195,7 +1294,7 @@ function compCard(sp,p,c,ci){
     const sig=sm&&sm.sig?(k==="be"?sm.sig.be:k==="area"?sm.sig.area:null):null;
     const lab=c.shape==="MEAS"&&k==="wG"?"Broadening":c.shape==="MEAS"&&k==="be"?"BE (max)":c.shape==="LA"&&k==="alpha"?"α (hi BE)":c.shape==="LA"&&k==="beta"?"β (lo BE)":c.shape==="DS"&&k==="alpha"?"α (asym.)":c.shape==="TLA"&&k==="alpha"?"α (power)":k==="tk"&&c.tail==="PHI"?"Tail k (len.)":(C.PDEF[k]||{lab:k}).lab;
     const tip=c.shape==="MEAS"&&k==="wG"?"Extra Gaussian broadening (FWHM, eV) applied to the reference shape. Fixed = off":c.shape==="MEAS"&&k==="be"?"Position of the reference maximum. Fixed = LCF (no shift); Free = shift δ fitted":c.shape==="LA"&&(k==="alpha"||k==="beta")?"Lorentzian power-law exponent — smaller = longer tail on that side (α: high-BE side, β: low-BE side; metals: α < β)":(S2TIP(c,k)||((C.PDEF[k]||{}).lab||k)+" "+((C.PDEF[k]||{}).u||""))+(der?` — set by CasaXPS ${k==="stG"?"γ = "+c.stN:"n = "+c.casaN} (width = n·F/144.87)`:"");
-    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+(v==null?C.shapeParams(c,1)[k]||0:v)).toFixed(d)}" ${cs.mode==="link"||der?"disabled":""}>${der?`<button class="cm fixed" disabled title="Width from CasaXPS n — clear n to fit it">n</button>`:`<button class="cm ${cs.mode}" data-cm="${k}" title="Free → Fixed → Linked">${CMLAB[cs.mode]}</button>`}</div>`; };
+    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+(v==null?C.shapeParams(c,1)[k]||0:v)).toFixed(d)}" ${cs.mode==="link"||der?"disabled":""}>${der?`<button class="cm fixed" disabled title="Width from CasaXPS n — clear n to fit it">n</button>`:`${k==="be"&&cs.mode==="free"&&cs.lo!=null&&cs.hi!=null&&isFinite(cs.lo)&&isFinite(cs.hi)?`<button class="cm bnd" data-cm="${k}" title="${esc(`Bounded: ${f(cs.lo+sh,2)} – ${f(cs.hi+sh,2)} eV (charge-corrected). Click: Bounded → Fixed → Linked → Free. Edit the range in the row below.`)}">±</button><span class="bnds muted xs" data-bndr="${c.id}">${f(cs.lo+sh,2)}–${f(cs.hi+sh,2)}</span>`:`<button class="cm ${cs.mode}" data-cm="${k}" title="${k==="be"?`Free → Bounded (± ${S.ui.bndW||0.5} eV around the current value, range editable) → Fixed → Linked`:"Free → Fixed → Linked"}">${CMLAB[cs.mode]}</button>`}`}</div>`; };
   const open=sel||S.ui.openAll;
   const head=`<div class="ch" data-sel="${c.id}"><span class="sw" style="background:${colorOf(c)}"></span><input class="nmi" data-nm="${c.id}" value="${esc(c.name||"")}" placeholder="Name"><span class="sum">${c.shape==="MEAS"?"Ref":esc(c.shape)}${c.doublet?" ·D":""} · ${f(c.be+sh,2)} eV${sm&&sm.fwhm?` · ${f(sm.fwhm,2)} eV`:""}</span><button class="btn xs" data-dl="${c.id}" title="Delete">×</button></div>`;
   if(!open) return `<div class="comp" data-c="${c.id}">${head}</div>`;
@@ -1262,9 +1361,12 @@ function bindComps(el,sp,p){
     const c=p.comps.find(x=>x.id===card.dataset.c); if(!c) return;
     $a(card,"input[data-p]").forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.p; let v=+inp.value; if(!isFinite(v)) return; if(k==="be") v-=sh; pushHist(p,"값 수정"); C.setP(c,k,v); propagate(p); touch(p); drawPlot(); });
     $a(card,"[data-cm]").forEach(b=>b.onclick=()=>{ const k=b.dataset.cm; const cs=(p.cons[c.id]=p.cons[c.id]||{}); const curm=(cs[k]||C.defaultCons(c,k)||{mode:"free"}).mode;
+      // v1.9.13: BE has a 'Bounded' step (free with lo/hi = current ± S.ui.bndW, default 0.5 eV) between Free and Fixed (SPEC §17.12)
+      const q0=cs[k]||{}; const bounded=k==="be"&&curm==="free"&&q0.lo!=null&&q0.hi!=null&&isFinite(q0.lo)&&isFinite(q0.hi);
+      if(k==="be"&&curm==="free"&&!bounded){ const w=+S.ui.bndW>0?+S.ui.bndW:0.5; cs[k]={mode:"free",lo:+(c.be-w).toFixed(4),hi:+(c.be+w).toFixed(4)}; S.ui.ced={id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); return; }
       const order=["free","fixed","link"]; let nx=order[(order.indexOf(curm)+1)%3];
       if(nx==="link"&&!p.comps.some(o=>o.id!==c.id&&C.paramNames(o).includes(k))) nx="free";
-      const prev=cs[k]||{}; cs[k]=Object.assign({},prev,{mode:nx});
+      const prev=cs[k]||{}; cs[k]=Object.assign({},prev,{mode:nx}); if(k==="be"&&nx==="free"){ delete cs[k].lo; delete cs[k].hi; }
       if(nx==="link"){ const ref=p.comps.find(o=>o.id!==c.id&&C.paramNames(o).includes(k)); cs[k].ref=prev.ref||ref.id; if(k==="be"){ cs[k].k=1; cs[k].b=+(c.be-(p.comps.find(o=>o.id===cs[k].ref)||ref).be).toFixed(3); } else { const rv=C.getP(p.comps.find(o=>o.id===cs[k].ref)||ref,k); cs[k].k=rv?+(C.getP(c,k)/rv).toPrecision(4):1; cs[k].b=0; } }
       S.ui.ced=nx==="fixed"?null:{id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); });
     const shp=$q(card,"[data-shape]"); if(shp) shp.onchange=()=>{ pushHist(p,"모양"); const i=p.comps.indexOf(c); const n=C.convertShape(c,shp.value); if(n.shape==="AGT") n.ch=chOf(sp); n.slot=c.slot; n.noQuant=c.noQuant; p.comps[i]=n; const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(n).includes(k)) delete cs[k]; }); touch(p); renderPanel(); drawPlot(); };
@@ -1279,7 +1381,13 @@ function bindComps(el,sp,p){
   });
 }
 function propagate(p){ try{ const prob={comps:p.comps,cons:p.cons,bg:p.bg}; const map=C.buildMap(prob); C.applyLinks(prob,map); }catch(e){ note(e.message,"warn"); } }
-function snapshotModel(sp,p){ const r=p.result; if(!r||r.stale) return; p.models=p.models||[]; const nm=`Model ${p.models.length+1} (${p.comps.length} comp., ${C.BG_TYPES[p.bg.type]})`;
+/* v1.9.13: auto-name = what distinguishes the model — components, background (+slope for the in-fit Shirley with a free slope), fixed / linked
+   parameter counts, recipe (SPEC §17.12); renamed inline in the comparison table */
+function modelName(p,i){ const fx=[],lk=[]; Object.values(p.cons||{}).forEach(q=>Object.values(q||{}).forEach(c=>{ if(c&&c.mode==="fixed") fx.push(1); else if(c&&c.mode==="link") lk.push(1); }));
+  const bg=C.BG_TYPES[p.bg.type]+(p.bg.type==="active"&&p.bg.cons&&p.bg.cons.s&&p.bg.cons.s.mode!=="fixed"?" +slope":"");
+  const rc=p.comps.find(c=>c.recipe), R=rc&&GD()?GD().recipeById(rc.recipe):null;
+  return `Model ${i} (${R?R.name.replace(/ \(.*$/,"")+" recipe, ":""}${p.comps.length} comp., ${bg}, ${fx.length} fixed, ${lk.length} linked)`; }
+function snapshotModel(sp,p){ const r=p.result; if(!r||r.stale) return; p.models=p.models||[]; const nm=modelName(p,p.models.length+1);
   p.models.push({name:nm,when:new Date().toISOString(),lo:p.lo,hi:p.hi,bg:C.clone(p.bg),comps:C.clone(p.comps),cons:C.clone(p.cons),stats:{N:r.stats.N,p:r.stats.p,chi2:r.stats.chi2,chi2nu:r.stats.chi2nu,AICc:r.stats.AICc,BIC:r.stats.BIC,rho1:r.stats.rho1},c:sp.c||null});
   save(); note("모형 비교 목록에 저장: "+nm,"ok"); }
 /* 템플릿 (브라우저에 저장) */
@@ -1438,9 +1546,11 @@ function exportSens(sp,p){ const S_=p.sens; if(!S_) return; const sh=shOf(sp); c
     lines.push([i,v.f.bg+(v.f.kn?" knot"+v.f.kn:""),v.f.n==null?"":v.f.n,(v.lo+sh).toFixed(3),(v.hi+sh).toFixed(3),x&&x.ok?1:0,x&&x.ok?x.chi2nu.toFixed(4):"",...rc.map(c=>get(c,"areaPct")),...rc.map(c=>get(c,"be")),...rc.map(c=>get(c,"fwhm"))].map(csvE).join(",")); });
   download(safe(SK(sp)+"_"+sp.region)+"_sensitivity.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 
+const MCMP_TIP="Differences to the best model in this table (same region and data only). ΔAICc < 2: indistinguishable — prefer the model with fewer parameters; 4–7: considerably less support; > 10: essentially none (Burnham & Anderson 2002). ΔBIC 0–2: not worth more than a bare mention, 2–6: positive, 6–10: strong, > 10: very strong evidence against the higher-BIC model (Kass & Raftery, J. Am. Stat. Assoc. 90, 773 (1995)). Correlated noise (lag-1 residual correlation ρ₁ high, χ²ν < 1 — smoothed or oversampled data) inflates these differences: the N points carry less information than N independent points, so read them with the Fit check note on correlated residuals.";
 function modelsHTML(p){ const L=p.models||[]; if(!L.length) return ""; const same=L.filter(m=>Math.abs(m.lo-p.lo)<1e-6&&Math.abs(m.hi-p.hi)<1e-6); const amin=Math.min(...L.map(m=>m.stats.AICc)), bmin=Math.min(...L.map(m=>m.stats.BIC));
-  return `<details class="xps-d" open><summary>Model Comparison (${L.length})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>Model</th><th class="num">p</th><th class="num">χ²ν</th><th class="num">ΔAICc</th><th class="num">ΔBIC</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr><td>${esc(m.name)}${Math.abs(m.lo-p.lo)>1e-6||Math.abs(m.hi-p.hi)>1e-6?` <span class="badge wr">Different range</span>`:""}</td><td class="num">${m.stats.p}</td><td class="num">${f(m.stats.chi2nu,3)}</td><td class="num">${f(m.stats.AICc-amin,1)}</td><td class="num">${f(m.stats.BIC-bmin,1)}</td><td><button class="btn xs" data-mload="${i}">Load</button> <button class="btn xs" data-mdel="${i}">×</button></td></tr>`).join("")}</tbody></table><div class="muted xs" style="margin-top:4px">같은 영역·같은 데이터에서만 비교 의미가 있습니다. ΔAICc &lt; 2 는 사실상 구별 불가, &gt; 10 은 강한 근거. 성분을 늘려 χ² 가 조금 줄어도 AICc 가 커지면 과적합입니다.${same.length<L.length?" (영역이 다른 모형 포함)":""}</div></div></details>`; }
-function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ const m=p.models[+b.dataset.mload]; pushHist(p,"모형 불러오기"); p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=C.clone(m.bg); p.lo=m.lo; p.hi=m.hi; touch(p); S.ui.tab="fit"; rerender(); note("불러왔습니다 — 다시 피팅하면 결과가 갱신됩니다"); }); $a(el,"[data-mdel]").forEach(b=>b.onclick=()=>{ p.models.splice(+b.dataset.mdel,1); save(); renderPanel(); }); }
+  return `<details class="xps-d" open><summary>Model Comparison (${L.length})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>Model</th><th class="num">p</th><th class="num">χ²ν</th><th class="num" title="${esc(MCMP_TIP)}">ΔAICc ⓘ</th><th class="num" title="${esc(MCMP_TIP)}">ΔBIC ⓘ</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr><td><input class="mnm" data-mnm="${i}" value="${esc(m.name)}" title="Rename this model (Enter or leave the field to keep it)">${Math.abs(m.lo-p.lo)>1e-6||Math.abs(m.hi-p.hi)>1e-6?` <span class="badge wr">Different range</span>`:""}</td><td class="num">${m.stats.p}</td><td class="num">${f(m.stats.chi2nu,3)}</td><td class="num">${f(m.stats.AICc-amin,1)}</td><td class="num">${f(m.stats.BIC-bmin,1)}</td><td><button class="btn xs" data-mload="${i}">Load</button> <button class="btn xs" data-mdel="${i}">×</button></td></tr>`).join("")}</tbody></table><div class="muted xs" style="margin-top:4px">같은 영역·같은 데이터에서만 비교 의미가 있습니다. ΔAICc &lt; 2 는 사실상 구별 불가, &gt; 10 은 강한 근거. 성분을 늘려 χ² 가 조금 줄어도 AICc 가 커지면 과적합입니다.${same.length<L.length?" (영역이 다른 모형 포함)":""}</div></div></details>`; }
+function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ const m=p.models[+b.dataset.mload]; pushHist(p,"모형 불러오기"); p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=C.clone(m.bg); p.lo=m.lo; p.hi=m.hi; touch(p); S.ui.tab="fit"; rerender(); note("불러왔습니다 — 다시 피팅하면 결과가 갱신됩니다"); }); $a(el,"[data-mdel]").forEach(b=>b.onclick=()=>{ p.models.splice(+b.dataset.mdel,1); save(); renderPanel(); });
+  $a(el,"[data-mnm]").forEach(i=>{ i.onchange=()=>{ const m=p.models[+i.dataset.mnm]; const v=i.value.trim(); if(m&&v){ m.name=v; save(); } }; i.onkeydown=e=>{ if(e.key==="Enter") i.blur(); }; }); }
 
 /* ============================================================
    정량 패널
