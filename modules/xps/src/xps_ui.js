@@ -532,8 +532,8 @@ async function runFit(kind,spArg){
     const [fin]=await pool([{cmd:"final",prob,opt:{}}],null,d=>setProg(`다듬기·불확도 — 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     // v1.9.13 (SPEC §17.12 R13): 'same minimum' = Δχ² < max(1, χ²ν_best) — the covariance is scaled by χ²ν, so Δχ²/χ²ν < 1 is the same 1σ criterion when
     // σ is underestimated; 'same parameters' = every nonlinear free parameter (not areas, not background) within its 1σ (final covariance) of the best start
-    const dofB=Math.max(1,(best.N||prob.E.length)-(best.nfree||0)), nuB=best.chi2/dofB, thr=Math.max(1,nuB);
-    const near=chis.filter(x=>x-best.chi2<thr).length;
+    // v1.11: chis = 시작점마다 최종 해의 χ²_d (fitJob · startChi2; v1.10 까지 1차 끝점의 chi2p1) — 계산은 core.sameMinimum (Auto build 와 같음)
+    const sm=C.sameMinimum(chis,best.N||prob.E.length,best.nfree||0), nuB=sm.nu, thr=sm.thr, near=sm.near;
     let sameP=null; { const pars=[].concat(...ok.map(o=>o.pars||[])), mpB=C.buildMap(prob); const nl=mpB.free.map((q,j)=>q.k!=="area"&&q.ci>=0?j:-1).filter(j=>j>=0);
       const bi=chis.indexOf(best.chi2); const pb=bi>=0?pars[bi]:null; const sg=fin.cov&&fin.cov.sig;
       if(pb&&sg&&pars.length===chis.length&&nl.length){ sameP=0; pars.forEach((v,i)=>{ if(!v||!(chis[i]-best.chi2<thr)) return; if(nl.every(j=>{ const s_=sg[j]; return s_>0&&isFinite(s_)?Math.abs(v[j]-pb[j])<=s_:Math.abs(v[j]-pb[j])<=1e-6*(Math.abs(pb[j])+1); })) sameP++; }); } }
@@ -729,7 +729,7 @@ function build(root){
   ROOT=root;
   root.innerHTML=`<div class="xps">
     <div class="card xps-top">
-      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="VGD · VAMAS (.vms) · Avantage xls/xlsx/avg · Text. Multiple files or folders can also be dropped onto the page">Open files<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="VGD · VAMAS (.vms) · Avantage xls/xlsx/avg · Text. Multiple files or folders can also be dropped onto the page">Open files<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">or drop files here</span></div>
       <div class="seg xps-ws-sw" id="xpsWs" role="tablist" aria-label="XPS workspace"></div>
       <div class="grp" style="margin-left:auto"><button class="btn sm" id="xpsSaveP" title="Save spectra, fits and charge correction as one JSON file">Save work</button><label class="btn sm" style="cursor:pointer" title="Open a saved JSON work file">Open work<input type="file" id="xpsLoadP" accept=".json" style="display:none"></label><button class="btn sm" id="xpsClear" title="Remove the list and all work (press twice to confirm)">Clear all</button></div>
       <div class="xps-chg" id="xpsChg"></div>
@@ -1086,7 +1086,7 @@ function fitStrip(r,sp){
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
     r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
-  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum: Δχ² < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
+  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum, each start compared at its final solution by χ²_d (data-based variance, the same weights for every start): Δχ²_d < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
   if(r.optimizer==="simplex") parts.push(`<div title="Nelder–Mead simplex; count = χ² evaluations">Simplex<b>${r.iter} eval.</b></div>`);
   let w="";

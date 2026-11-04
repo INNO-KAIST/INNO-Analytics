@@ -1264,7 +1264,8 @@ function fitOnce(prob,opt){
     if(!viaInc&&r1.stop==="stalled"&&r.stop!=="stalled"){ r.stop="stalled"; if(!r.stall) r.stall=r1.stall; }
     if(!viaInc&&r1.branch&&!r.branch) r.branch=r1.branch; }
   r.trig=(r1.tries||0)+(r!==r1?(r.tries||0):0); if(pick) r.pick=pick;   // trig: 갈래를 푼 횟수(0 이면 옛 LM 과 같은 경로)
-  r.v=v; r.map=map; r.chi2p1=chi2p1; r.iter1=it1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
+  r.v=v; r.map=map; r.chi2p1=chi2p1; r.iter1=it1;   // 1차 χ²(데이터로 정한 분산 χ²_d) — 1차 끝점의 값(최종 해의 값이 아님: 시작점 비교는 startChi2)
+  r.onePass=r===r1;   // 2차 없음(가중 const·casa, irls 끔) → 1차 끝점 = 최종 해, chi2p1 = 최종 해의 χ²_d
   if(FIT_HOOK.fit) FIT_HOOK.fit(prob,r,opt);   // 시험용 기록 고리 (test/fitlog_hook.js; 화면에서는 비어 있음)
   return r;
 }
@@ -1285,14 +1286,25 @@ function startPoints(prob,N,seed){
 }
 function applyStart(prob,o){ if(!o) return; Object.entries(o).forEach(([key,v])=>{ const [ci,k]=key.split("|"); setP(prob.comps[+ci],k,v); }); }
 function stripProb(prob){ const o=Object.assign({},prob); delete o._Bst; return o; }
+/* 시작점 비교값 (v1.11, SPEC §3.3): 끝난(최종) 해의 χ²_d — 데이터만으로 정한 분산(평활 데이터, §3.5)이라 모든 시작점에 같은 가중이고,
+   1차 χ²(chi2p1)와 같은 정의이되 1차 끝점이 아니라 최종 해에서 잰다. 1차는 일찍 끝날 수 있어(먼 시작) 같은 최종 해(χ²_d 188.4)가
+   chi2p1 188 · 1310 · 13 594 로 갈렸다(v1.10 Auto build 개발, test_xps §2c). 2차 χ²(분산 v = μ₁)는 시작점마다 가중이 달라 비교 못 함.
+   2차가 없는 피팅(onePass)은 chi2p1 이 곧 최종 해의 χ²_d (다시 계산하지 않음 — 옛 결과와 비트 동일) */
+function chi2dOf(prob,mu){ const y=prob.y, n=y.length; const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let s=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; s+=d*d/vd[i]; } return s; }
+function startChi2(prob,r){ const x=r.onePass?r.chi2p1:chi2dOf(prob,r.mu); return isFinite(x)?x:Infinity; }
+/* 같은 최솟값 (SPEC §17.12 R13 · §18.3): 가장 낮은 값(처음 나온 것) 과의 차 < max(1, χ²_d/ν) 인 시작점 수. Fit 의 Multi-start · fitMulti · Auto build 가 같이 씀 */
+function sameMinimum(xs,N,nfree){ let bi=-1; for(let i=0;i<xs.length;i++) if(isFinite(xs[i])&&(bi<0||xs[i]<xs[bi])) bi=i;
+  if(bi<0) return {bi:-1,best:Infinity,nu:Infinity,thr:Infinity,near:0};
+  const best=xs[bi], nu=best/Math.max(1,N-nfree), thr=Math.max(1,nu); let near=0; for(const x of xs) if(x-best<thr) near++;
+  return {bi,best,nu,thr,near}; }
 function fitMulti(prob,opt){
   opt=opt||{}; const N=Math.max(1,opt.starts||1); const pts=startPoints(prob,N,opt.seed||1);
-  let best=null; const all=[];
-  // 시작점 비교는 1차 χ²(모든 시작점에 같은 가중)로 — 2차 분산 v=μ₁ 은 시작점마다 달라 2차 χ² 는 서로 비교할 수 없다 (SPEC 3.3)
-  pts.forEach((pt,s)=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); all.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ all.push(Infinity); } if(opt.progress) opt.progress(s+1,N,best&&best.r.chi2p1); });
+  let best=null; const all=[], all1=[];
+  // 시작점 비교는 최종 해의 χ²_d 로 (startChi2; v1.10 까지는 1차 끝점의 chi2p1)
+  pts.forEach((pt,s)=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); const x=startChi2(P,r); r.chi2s=x; all.push(x); all1.push(r.chi2p1); if(!best||x<best.r.chi2s) best={P,r}; }catch(e){ all.push(Infinity); all1.push(Infinity); } if(opt.progress) opt.progress(s+1,N,best&&best.r.chi2s); });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  const near=all.filter(x=>x-best.r.chi2p1<1).length;
-  best.r.multi={N,chi2:all,near,frac:near/N};
+  const sm=sameMinimum(all,prob.E.length,buildMap(best.P).free.length);   // v1.11: 문턱 max(1, χ²_d/ν) — 화면 R13 과 같음 (v1.10 까지 1)
+  best.r.multi={N,chi2:all,chi2p1:all1,near:sm.near,frac:sm.near/N,thr:sm.thr,chi2nu:sm.nu};
   return best;
 }
 
@@ -1349,8 +1361,7 @@ function fitStats(prob,res){
     for(let i=1;i<n-1;i++){ const d=y[i]-mu[i]; s2+=d*d; if(!Bc||Math.abs(y[i]-Bc[i])>1e-12*Math.max(1,Math.abs(y[i]))) ne++; }
     casa={rms:Math.sqrt(s2),dof:Math.max(1,ne-p),n:ne}; }
   // 모형 비교용 χ²_d: 데이터만으로 정한 분산(평활 데이터) — 모형마다 같은 가중 (SPEC 3.5 v1.1)
-  let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
-  const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
+  const chi2d=chi2dOf(prob,mu);
   const AICc=n*Math.log(chi2d/n)+2*p+(n-p-1>0?2*p*(p+1)/(n-p-1):Infinity), BIC=n*Math.log(chi2d/n)+p*Math.log(n);
   return {N:n,p,dof,chi2,chi2d,chi2nu:chi2/dof,R2:ss>0?1-sr/ss:null,rmsNorm:Math.sqrt(chi2/n),DW:a0>0?dw/a0:null,rho1,ar1Inflate:rho1>0?Math.sqrt((1+rho1)/(1-Math.min(rho1,0.95))):1,runs,runsZ:zR,AICc,BIC,resid:r,casa};
 }
@@ -2195,12 +2206,13 @@ function finalize(P,r){
 }
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
-  let best=null; const chis=[];
-  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13). 피팅 결과는 그대로(비트 동일)
+  let best=null; const chis=[], chis1=[];
+  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13)
+  // v1.11: chis = 시작점마다 최종 해의 χ²_d (startChi2) — 최선 고르기와 '같은 최솟값' 모두 이것으로; chis1 = 1차 끝점의 chi2p1 (진단용, 고르기에 안 씀)
   const pars=[]; let nfree=0;
-  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); pars.push(null); } });
+  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); const x=startChi2(P,r); r.chi2s=x; chis.push(x); chis1.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||x<best.r.chi2s) best={P,r}; }catch(e){ chis.push(Infinity); chis1.push(Infinity); pars.push(null); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2s,chis,chis1,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 최종 해의 χ²_d (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){
@@ -2415,7 +2427,7 @@ function casaModelToINNO(cm,hv,o){
 const XPS_CORE={_hook:FIT_HOOK,_work:WORK,LM_STALL,areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,shirleyFallback,checkData,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,dPdU,makeEvaluator,
-  nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
+  nnls,rng,fitOnce,fitMulti,chi2dOf,startChi2,sameMinimum,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
   tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,bgShirleyAvantageV18,bgSmartAvantageV18,avantageV19,avantageHalf,avantagePQ,avantageSmooth,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_GRID,CASA_DS_T,dsCasaAreaFactor,casaStK,compToCasa,casaToComp,casaBg,casaModelToINNO,
   _s2g:S2GN,_s2lv:S2LV,s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;

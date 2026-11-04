@@ -108,5 +108,13 @@ body=('<!-- INNO-ED:BEGIN js -->\n<script id="ed-js">\n'+edjs+'</script>\n<!-- I
       '<!-- INNO-DIFF:BEGIN js -->\n'+''.join('<script id="'+i+'">\n'+t+'</script>\n' for i,t in dfjs)+'<!-- INNO-DIFF:END -->\n')
 k=s.index('<script>window.INNO_UX') if '<script>window.INNO_UX' in s else s.rindex('</body>')
 s=s[:k]+body+s[k:]
+# 머리 막대 버전 (2026-11-04): 손으로 고치던 'STEM / EDS v0.1' 이 오래 멈춰 있었음 → 빌드 때마다 docs/HISTORY.md 에서 읽어 넣는다.
+# 앱 버전 = HISTORY 의 '<!-- APP_VERSION: x.y -->', XPS 버전·날짜 = 맨 위 '## XPS vX (YYYY-MM-DD)' 머리. 날짜는 빌드 시각이 아니라 이력의 날짜(같은 입력 → 같은 출력).
+_hist=open(os.path.join(HERE,'..','docs','HISTORY.md'),encoding='utf-8').read()
+_av=re.search(r'<!-- APP_VERSION: ([0-9.]+) -->',_hist); _xv=re.search(r'^## XPS v([0-9.]+) \((\d{4}-\d{2}-\d{2})\)',_hist,re.M)
+assert _av and _xv, 'HISTORY.md 에 APP_VERSION 표지 또는 ## XPS vX (날짜) 머리가 없음'
+_lab='v'+_av.group(1)+' · XPS '+_xv.group(1)
+R('머리 버전',r'<span class="ver"[^>]*>[^<]*</span>','<span class="ver" title="INNO Analytics v'+_av.group(1)+' — XPS module v'+_xv.group(1)+' ('+_xv.group(2)+'). Version history: docs/HISTORY.md">'+_lab+'</span>')
+R('창 제목',r'<title>INNO Analytics[^<]*</title>','<title>INNO Analytics</title>')
 open(outp,'w',encoding='utf-8').write(s)
 print('ok',len(s))

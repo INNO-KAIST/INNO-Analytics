@@ -12,7 +12,7 @@ function build(root){
   root.innerHTML=`<div class="imx">
     <div class="card im-top">
       <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF, ND2, CZI, PNG, JPEG, DM3/DM4, MRC, EMD, GWY, Nanoscope, ARDF, IBW, SXM, NPY, text … — you can also drop several files or whole folders here">Open files<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
-        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">or drop files here</span></div>
       <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF (calibration and stacks included)">Save TIFF</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
     </div>
     <div class="im-main">

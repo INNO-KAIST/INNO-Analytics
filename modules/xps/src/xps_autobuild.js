@@ -232,8 +232,9 @@ function multiStart(S,o){ const C=CORE(); const N=(o&&o.starts)||AB_TH.starts; c
   // 시작점끼리는 끝난 해의 χ²_d(데이터 분산, §3.5 — 모든 해에 같은 가중)로 비교. 1차 χ²(chi2p1)는 쓰지 않음: 먼 시작에서 1차가 일찍 끝나
   // 같은 최종 해(χ² 188)인데 chi2p1 이 188 · 1310 · 13 594 로 갈렸다(개발 중 seed 1021) — 같은 최솟값을 '다르다'고 셈
   pts.forEach(pt=>{ const Q=clonePs(S.P); C.applyStart(Q,pt); try{ const r=C.fitOnce(Q,{}); const st=C.fitStats(Q,r); res.push({x:isFinite(st.chi2d)?st.chi2d:Infinity,Q,r,st}); }catch(e){ res.push({x:Infinity}); } });
-  const best=res.reduce((a,b)=>b.x<a.x?b:a,res[0]); const nfree=(S.r.map||C.buildMap(S.P)).free.length; const nu=best.x/Math.max(1,S.st.N-nfree); const thr=Math.max(1,nu);
-  const near=res.filter(q=>q.x-best.x<thr).length; return {N,near,frac:near/N,thr,chi2nu:nu,best,cur:S.st.chi2d}; }
+  // v1.11: 같은 최솟값 계산은 core.sameMinimum (Fit 의 Multi-start 와 같은 함수); st.chi2d = core.chi2dOf = startChi2 와 같은 값
+  const sm=C.sameMinimum(res.map(q=>q.x),S.st.N,(S.r.map||C.buildMap(S.P)).free.length); const best=res[sm.bi<0?0:sm.bi];
+  return {N,near:sm.near,frac:sm.near/N,thr:sm.thr,chi2nu:sm.nu,best,cur:S.st.chi2d}; }
 function multiAdopt(S,o){ const ms=multiStart(S,o); S.ms=ms; if(!(ms.best&&ms.best.Q&&ms.best.x<ms.cur-ms.thr)) return null; const C=CORE();
   const T={P:ms.best.Q,r:ms.best.r,st:ms.best.st}; T.ms=null; const d=cmpIC(S,T);
   return {kind:"multi",key:"multi",cls:"cap",label:`Adopt the lower minimum found by multi-start (χ²_d ${fx(ms.cur,1)} → ${fx(ms.best.x,1)})`,S2:T,d,info:{},sameMin:{near:ms.near,N:ms.N}}; }

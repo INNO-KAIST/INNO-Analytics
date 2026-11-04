@@ -187,7 +187,12 @@ const SYN={};
 { const R=G.recipeById("ce3d"); const P4={v:0.296,v2:0.405,v3:0.299}, P3={v0:0.288,v1:0.712};   // area shares within each state: one accessible 10-line decomposition (SPEC §17.3)
   function synth(f,seed){ const rg=U.rng(seed); const step=0.1, lo=870, hi=930, n=Math.round((hi-lo)/step)+1; const E=Float64Array.from({length:n},(_,i)=>lo+i*step), ctx={emin:E[0],emax:E[n-1]};
     const off=(rg.u()-0.5)*0.6, dE=18.5+(rg.u()-0.5)*0.4, A=150000;
-    const truth=R.lines.map(l=>{ const fr=l.state==="Ce3+"?f*P3[l.key]:(1-f)*P4[l.key]; const c=C.newComp("GLS",l.be+off+(rg.u()-0.5)*0.3,{F:l.F*(1+(rg.u()-0.5)*0.2),m:0.3,area:A*fr}); c.doublet={dE,r:2/3,q:1}; c.rk=l.key; return c; }).filter(c=>c.area>0);
+    /* v1.11: Ce³⁺ pairs get their own ΔE = ΔE(Ce⁴⁺) − 0.3 eV → 18.0–18.4 eV, inside the recipe's Ce³⁺ range 17.9–18.5 (Bêche 2008; Morgan Ce₂O₃ 18.3–18.5).
+       Until v1.10 every pair used the Ce⁴⁺ draw 18.3–18.7, so in half the spectra the true Ce³⁺ ΔE lay above the recipe's 18.5 limit and the recipe fit
+       had to put it on that bound — a bound hit made by the generator, not by the recipe. With QUICK=1 (2 spectra per fraction) 3 of the 4 Ce³⁺-containing
+       spectra had ΔE > 18.5 (18.60, 18.70, 18.50) and 'recipe 5 vs naive 5 bound hits' failed. Derived from the same draw, so the random stream is unchanged;
+       for f = 0 the Ce³⁺ lines (newComp makes area 0 into 1) keep the old ΔE, so the Ce⁴⁺-only spectra stay bit-identical */
+    const truth=R.lines.map(l=>{ const fr=l.state==="Ce3+"?f*P3[l.key]:(1-f)*P4[l.key]; const c=C.newComp("GLS",l.be+off+(rg.u()-0.5)*0.3,{F:l.F*(1+(rg.u()-0.5)*0.2),m:0.3,area:A*fr}); c.doublet={dE:l.state==="Ce3+"&&fr>0?dE-0.3:dE,r:2/3,q:1}; c.rk=l.key; return c; }).filter(c=>c.area>0);
     const P=new Float64Array(n); truth.forEach(c=>{ const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; }); const Q=C.cumtrapz(E,P);
     const y=Float64Array.from(P,(p,i)=>rg.pois((2500+8*(E[i]-lo)+0.10*Q[i]+p)*2)/2);
     return {E,y,c:2,f,u3:truth.filter(c=>c.rk==="v3").reduce((s,c)=>s+c.area*0.4,0)/A}; }
@@ -751,6 +756,19 @@ console.log("== 13 v1.9.13 Fit check: shared L fraction, merge first + 'Bound po
   const build={shift:0,flags:{lat2:false},present:["Co"]}; const M=G.recipeModel("o1s",Object.assign({be:S.E,y:S.y},build)); const s=G.o1sFit(C.makeProblem({be:S.E,y:S.y,c:1},M),{build});
   const L=s.info.latlo; V13.latloSug=L&&{v:L.verdict,d:L.dAICc,be:L.with&&L.with.be};
   ok(!M.comps.some(c=>c.rk==="latlo")&&L&&L.suggest&&/supported/.test(L.verdict)&&L.with.be>528.3&&L.with.be<528.9&&G.RECIPE_O1S.lines[0].Fhi===2.0,"O 1s: with 'Low lattice' off, the fit also tries it and suggests it when ΔAICc > 2 (true 528.6 eV line found); lattice FWHM range up to 2.0 eV",JSON.stringify(V13.latloSug));
+}
+
+{ // (j) v1.11 O 1s overlap rules (the recipe pitfalls as Fit check rules): energies from the library / cited sources; fire with the partner present, in the window, Na KLL for Al Kα only
+  const lv=(e,q)=>L.core[e].lv[q], ak=(e,ln)=>(L.auger.find(a=>a.el===e&&a.line===ln)||{}).ke; const O=Object.fromEntries(G.OVERLAPS.map(r=>[r.id,r]));
+  const eOK=O.SbO.b.be===lv("Sb","3d5/2")&&O.PdO.b.be===lv("Pd","3p3/2")&&/537\.5/.test(O.SbO.tip)&&lv("Sb","3d3/2")===537.5&&/559\.9/.test(O.PdO.tip)&&lv("Pd","3p1/2")===559.9&&/519\.8/.test(O.VO.tip)&&lv("V","2p1/2")===519.8
+    &&O.NaKLLO.b.ke.join()===[ak("Na","KL1"),ak("Na","KL2")].join()&&O.NaKLLO.al===true&&["SbO","PdO","VO","NaKLLO"].every(id=>O[id].a.el==="O"&&O[id].a.orb==="1s"&&O[id].src.length>20);
+  const all=["Sb","Pd","V","Na"], fAl=G.overlapFindings("O","1s",all,{lo:524,hi:538,hv:1486.6}), fMg=G.overlapFindings("O","1s",all,{lo:524,hi:538,hv:1253.6}), fNo=G.overlapFindings("O","1s",["Ba","Co"],{lo:524,hi:538,hv:1486.6});
+  const fNar=G.overlapFindings("O","1s",all,{lo:527,hi:533,hv:1486.6}), fSb=G.overlapFindings("Sb","3d",["O"],{lo:524,hi:545}), fV=G.overlapFindings("V","2p",["O"],{lo:510,hi:536}), fV0=G.overlapFindings("V","2p",["O"],{lo:510,hi:527});
+  const na=fAl.find(x=>x.rule==="NaKLLO");
+  V13.ovlO1s=fAl.map(x=>x.label);
+  ok(eOK&&fAl.map(x=>x.rule).sort().join()==="NaKLLO,PdO,SbO,VO"&&na&&/535\.6/.test(na.label)&&fMg.map(x=>x.rule).sort().join()==="PdO,SbO,VO"&&!fNo.length&&fNar.map(x=>x.rule).sort().join()==="PdO,SbO"
+     &&fSb.map(x=>x.rule).join()==="SbO"&&fV.map(x=>x.rule).join()==="VO"&&!fV0.length&&[...fAl,...fSb,...fV].every(x=>x.label.length<90&&/Source: /.test(x.tip))&&fAl.filter(x=>x.rule!=="NaKLLO").every(x=>x.sev==="warn")&&na.sev==="info",
+    "O 1s overlap rules: Sb 3d5/2 528.2 · Pd 3p3/2 532.3 (Booklet) · V⁵⁺ 2p1/2 524.7 (NIST SRD 20) · Na KLL KE 951 → 535.6 eV (Al Kα only; library KE); partner absent / outside the window → none; Sb 3d and V 2p regions with O present → the same rules",V13.ovlO1s.join(" | "));
 }
 
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);

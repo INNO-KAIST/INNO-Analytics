@@ -70,7 +70,8 @@ console.log("== 2b 다중 시작이 국소 최소에서 벗어나는지");
   const prob={E,y,c:0.3,bg:{type:"linear",n:5},comps:bad,cons:{}};
   const r1=C.fitOnce(Object.assign({},prob,{comps:C.clone(bad)}),{});
   const b=C.fitMulti(Object.assign({},prob,{comps:C.clone(bad)}),{starts:16,seed:3});
-  ok(b.r.chi2p1<=r1.chi2p1+1e-6,"다중 시작 χ² ≤ 단일 시작 χ² (1차 목적함수)",`단일 ${r1.chi2p1.toFixed(1)} → 다중 ${b.r.chi2p1.toFixed(1)} (같은 해 비율 ${(100*b.r.multi.frac).toFixed(0)} %)`);
+  const x1=C.startChi2(Object.assign({},prob,{comps:C.clone(bad)}),r1);   // v1.11: 시작점 비교 = 최종 해의 χ²_d (1차 끝점의 chi2p1 아님)
+  ok(b.r.chi2s<=x1*(1+1e-12),"다중 시작 χ²_d ≤ 단일 시작 χ²_d (최종 해에서, 모든 시작에 같은 가중)",`단일 ${x1.toFixed(1)} → 다중 ${b.r.chi2s.toFixed(1)} (같은 해 비율 ${(100*b.r.multi.frac).toFixed(0)} %)`);
   const be=b.P.comps.map(c=>c.be).sort((x,y)=>x-y); ok(Math.abs(be[0]-529.6)<0.05&&Math.abs(be[1]-531.4)<0.1,"다중 시작이 참 위치 근처로",be.map(v=>v.toFixed(3)).join(", ")); }
 
 console.log("== 3 파일 읽기 회귀");
@@ -360,6 +361,38 @@ console.log("== 10 결함 수정 회귀 (10-19 감사): 템플릿 왕복 · 정�
   const pb={E,y,c:1,bg:{type:"linear",n:5},comps:[C.newComp("GLS",85,{F:1.0,area:3000,id:"a"})],cons:{a:{be:{mode:"fixed"}}}};
   const r=C.fitOnce(pb,{}); const sm=C.compSummary(pb,r,C.covariance(pb,r)); const j=C.fitJob({E,y,c:1,bg:{type:"linear",n:5},comps:[C.newComp("GLS",85.3,{F:1.0,area:3000,id:"a"})],cons:{}},[null],{});
   ok(sm[0].sig.be===null&&sm[0].sig.area>0&&j.iter>0,"고정 BE 의 σ(BE) = null (표시 '—', 0.000 아님) · fitJob 반복 수 보고",`σ(BE) ${sm[0].sig.be}, iter ${j.iter}`); }
+
+console.log("== 11 다중 시작: 시작점을 최종 해의 χ²_d 로 비교 (v1.11, SPEC §3.3)");
+{ // 11a 회귀: v1.10 Auto build 개발 중(합성 seed 1021, 선 1 + 피팅 안 Shirley·기울기) 같은 최종 해(χ²_d 188.4)가 1차 끝점의 chi2p1 로는 188 · 1310 · 13 594
+  const B=require("./autobuild_bench.js"); const FX={"model":{"comps":[{"id":"c2034hb","name":"","shape":"GLS","be":539.000046012968,"area":44985.773603861126,"el":"","line":"","doublet":null,"color":null,"F":1.3033954660723317,"m":0.23270532498867963}],"bg":{"type":"active","n":5,"c0":58987.327817771285,"k":0.1696359398452813,"s":-968.9186975596224,"cons":{"s":{"mode":"free"}}},"cons":{"c2034hb":{"F":{"mode":"free","lo":0.3,"hi":4},"be":{"mode":"free","lo":534.9525216390612,"hi":543.0525216390612}}},"lo":534.9525216390612,"hi":543.0525216390612},"starts":[null,{"0|be":539.9676294611234,"0|F":2.0806124348547415,"0|m":0.582877833454404},{"0|be":538.183106696977,"0|F":2.567200505696049,"0|m":0.9294392451605139},{"0|be":539.0702841741415,"0|F":1.6965642155882192,"0|m":0.7707677215803415},{"0|be":539.684782273348,"0|F":1.910468983600074,"0|m":0.7146951207347835},{"0|be":538.3759826255684,"0|F":0.6948169263309818,"0|m":0.25406028871657327},{"0|be":538.0490495879637,"0|F":1.2815264559879735,"0|m":0.10320785047952086},{"0|be":540.301133923359,"0|F":2.3979715207426424,"0|m":0.20019149120586613},{"0|be":539.5001964017007,"0|F":1.0878814605818454,"0|m":0.6627192866095962},{"0|be":538.983391047396,"0|F":1.4162603529270386,"0|m":0.4932403145551992},{"0|be":537.8779141593877,"0|F":0.9667672400582343,"0|m":0.3429004715871997},{"0|be":539.2258479826914,"0|F":1.6078500972513587,"0|m":0.024539660293764125}]};
+  const P=C.makeProblem(B.gen(1021).spec,FX.model); const j=C.fitJob(P,FX.starts,{});
+  const c1=j.chis1, cx=j.chis, near=(a,v,t)=>Math.abs(a-v)<=t;
+  const smN=C.sameMinimum(cx,j.N,j.nfree), smO=C.sameMinimum(c1,j.N,j.nfree);
+  ok(near(c1[0],1310.2,0.5)&&near(c1[6],13593.7,0.5)&&near(c1[11],188.4,0.05)&&[0,6,11].every(i=>near(cx[i],188.4,0.05)&&Math.abs(cx[i]-cx[11])<0.01),
+    "회귀(seed 1021): 같은 최종 해(χ²_d 188.4)의 1차 χ² 가 1310 · 13 594 · 188 — 최종 해의 χ²_d 는 셋 다 188.4 (차 < 0.01, 문턱 1 의 1 %)",`chi2p1 ${[0,6,11].map(i=>c1[i].toFixed(1)).join(" · ")} → χ²_d ${[0,6,11].map(i=>cx[i].toFixed(3)).join(" · ")}`);
+  ok(smO.near===1&&smN.near===9&&near(j.chi2,188.4,0.05)&&j.chi2===cx[smN.bi],"회귀(seed 1021): 같은 최솟값 1/12 (chi2p1, v1.10) → 9/12 (최종 χ²_d); fitJob.chi2 = 고른 시작의 최종 χ²_d",`옛 ${smO.near}/12 → ${smN.near}/12, thr ${smN.thr.toFixed(2)}`); }
+{ // 11b 고르기가 옛 규칙(1차 끝점의 chi2p1 최소)보다 나빠지지 않음: 두 규칙이 고른 시작점에서 최종(finalJob) χ²_d 비교 — 새 ≤ 옛·(1 + 1e-7)
+  const U=require("./synth_util.js"); const rows=[];
+  const fin=(P,pt)=>{ const Q=C.clone(C.stripProb(P)); Q.E=P.E; Q.y=P.y; C.applyStart(Q,pt); C.fitOnce(Q,{}); return C.finalJob(Q,{}).stats.chi2d; };
+  const run=(name,P,pts)=>{ const j=C.fitJob(P,pts,{}); const am=a=>a.reduce((b,x,i)=>x<a[b]?i:b,0); const io=am(j.chis1), inw=am(j.chis);
+    const fo=fin(P,pts[io]), fn=inw===io?fo:fin(P,pts[inw]); rows.push({name,io,inw,fo,fn,ok:fn<=fo*(1+1e-7)&&j.chis[inw]<=j.chis[io]}); };
+  { const R=C.rng(7); const n=301, E=Float64Array.from({length:n},(_,i)=>525+i*0.05); const ctx={emin:E[0],emax:E[n-1]};   // = §2b
+    const mu=new Float64Array(n).fill(20000); [C.newComp("GLS",529.6,{F:1.0,m:0.2,area:30000}),C.newComp("GLS",531.4,{F:1.4,m:0.2,area:12000})].forEach(c=>{ const v=C.compEval(c,E,ctx); for(let i=0;i<n;i++) mu[i]+=v[i]; });
+    const y=Float64Array.from(mu,m=>m+Math.sqrt(m/0.3)*R.g()); const P={E,y,c:0.3,bg:{type:"linear",n:5},comps:[C.newComp("GLS",532.9,{F:0.4,m:0.2,id:"a"}),C.newComp("GLS",533.6,{F:0.4,m:0.2,id:"b"})],cons:{}};
+    run("§2b two lines (16)",P,C.startPoints(P,16,3)); }
+  { const B=require("./autobuild_bench.js"), FX={"model":{"comps":[{"id":"c2034hb","name":"","shape":"GLS","be":539.000046012968,"area":44985.773603861126,"el":"","line":"","doublet":null,"color":null,"F":1.3033954660723317,"m":0.23270532498867963}],"bg":{"type":"active","n":5,"c0":58987.327817771285,"k":0.1696359398452813,"s":-968.9186975596224,"cons":{"s":{"mode":"free"}}},"cons":{"c2034hb":{"F":{"mode":"free","lo":0.3,"hi":4},"be":{"mode":"free","lo":534.9525216390612,"hi":543.0525216390612}}},"lo":534.9525216390612,"hi":543.0525216390612},"starts":[null,{"0|be":539.9676294611234,"0|F":2.0806124348547415,"0|m":0.582877833454404},{"0|be":538.183106696977,"0|F":2.567200505696049,"0|m":0.9294392451605139},{"0|be":539.0702841741415,"0|F":1.6965642155882192,"0|m":0.7707677215803415},{"0|be":539.684782273348,"0|F":1.910468983600074,"0|m":0.7146951207347835},{"0|be":538.3759826255684,"0|F":0.6948169263309818,"0|m":0.25406028871657327},{"0|be":538.0490495879637,"0|F":1.2815264559879735,"0|m":0.10320785047952086},{"0|be":540.301133923359,"0|F":2.3979715207426424,"0|m":0.20019149120586613},{"0|be":539.5001964017007,"0|F":1.0878814605818454,"0|m":0.6627192866095962},{"0|be":538.983391047396,"0|F":1.4162603529270386,"0|m":0.4932403145551992},{"0|be":537.8779141593877,"0|F":0.9667672400582343,"0|m":0.3429004715871997},{"0|be":539.2258479826914,"0|F":1.6078500972513587,"0|m":0.024539660293764125}]}; run("seed 1021 (12)",C.makeProblem(B.gen(1021).spec,FX.model),FX.starts); }
+  { // O 1s 같은 5 선(창 전체 BE 범위) 24 시작 — 옛 규칙은 1차 χ² 가 낮았던 시작(최종 χ²_d 544)을, 새 규칙은 최종 374 를 고름
+    const rg=U.rng(412), lo=524, hi=538, n=Math.round((hi-lo)/0.05)+1, E=Float64Array.from({length:n},(_,i)=>lo+i*0.05), ctx={emin:E[0],emax:E[n-1]}; const P0=new Float64Array(n);
+    [[528.6,12000,1.2],[529.5,30000,1.2],[531.4,15000,1.8],[532.6,6000,1.8],[533.5,3000,1.8]].forEach(([be,A,F])=>{ const v=C.compEval(C.newComp("GLS",be,{F,m:0.3,area:A}),E,ctx); for(let i=0;i<n;i++) P0[i]+=v[i]; });
+    const y=Float64Array.from(P0,p=>rg.pois(1500+p)); const st=[528.8,529.6,531.2,532.4,533.6], F0=[1.2,1.2,1.6,1.6,1.6], A0=[12000,30000,15000,6000,3000];
+    const comps=st.map((be,i)=>C.newComp("GLS",be,{F:F0[i],m:0.3,area:A0[i],id:"o"+i})), cons={}; comps.forEach(c=>{ cons[c.id]={be:{mode:"free",lo:526,hi:536},F:{mode:"free",lo:0.6,hi:3}}; });
+    const P=C.makeProblem({be:E,y,c:1},{lo,hi,bg:{type:"shirley",n:5},comps,cons}); run("O 1s-like 5 lines (24)",P,C.startPoints(P,24,1)); }
+  ok(rows.every(r=>r.ok)&&rows.some(r=>r.fn<r.fo*(1-1e-3)),"최선 시작 고르기: 최종 χ²_d 가 옛 규칙(chi2p1) 이 고른 해 이하 — 모든 문제, 적어도 하나는 더 낮음",rows.map(r=>`${r.name}: #${r.io} ${r.fo.toFixed(1)} → #${r.inw} ${r.fn.toFixed(1)}`).join(" | ")); }
+{ // 11c 2차 없는 피팅(irls 끔 · 가중 const): startChi2 = chi2p1 그대로(옛 결과와 비트 동일), 그리고 chi2dOf 로 다시 잰 값과 같음
+  const R=C.rng(5); const n=201, E=Float64Array.from({length:n},(_,i)=>80+i*0.05); const mu=C.compEval(C.newComp("GLS",85,{F:1.2,area:4000}),E,{emin:80,emax:90}); const y=Float64Array.from(mu,v=>v+300+Math.sqrt(v+300)*R.g());
+  const pb={E,y,c:1,bg:{type:"linear",n:5},comps:[C.newComp("GLS",85.3,{F:1.0,area:3000,id:"a"})],cons:{}}; const r=C.fitOnce(pb,{irls:false});
+  const pc=Object.assign({},pb,{weight:"const",comps:[C.newComp("GLS",85.3,{F:1.0,area:3000,id:"a"})]}); const rc=C.fitOnce(pc,{});
+  ok(r.onePass&&C.startChi2(pb,r)===r.chi2p1&&Math.abs(C.chi2dOf(pb,r.mu)/r.chi2p1-1)<1e-9&&rc.onePass&&Math.abs(C.chi2dOf(pc,rc.mu)/rc.chi2p1-1)<1e-9,"2차 없는 피팅: startChi2 = chi2p1 (= 다시 잰 χ²_d, 상대 < 1e-9)",`${r.chi2p1.toFixed(4)} vs ${C.chi2dOf(pb,r.mu).toFixed(4)}`); }
 
 console.log(`\n${pass} 통과 · ${fail} 실패`); if(fail){ console.log(fails.map(s=>" - "+s).join("\n")); process.exit(1); }
 })().catch(e=>{ console.error(e); process.exit(2); });
