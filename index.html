@@ -746,6 +746,8 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .pf .cm{flex:none;border:1px solid var(--line2);background:var(--surface);border-radius:5px;font-size:10.5px;padding:1px 4px;cursor:pointer;color:var(--muted);min-width:28px}
 .xps .pf .cm.fixed{background:var(--chip);color:var(--ink);font-weight:600}
 .xps .pf .cm.link{background:var(--info-soft);color:var(--info);font-weight:600;border-color:color-mix(in srgb,var(--info) 40%,var(--line2))}
+.xps .pf .cm.bnd{background:var(--ok-soft);color:var(--ok);font-weight:700;border-color:color-mix(in srgb,var(--ok) 40%,var(--line2))}
+.xps .pf .bnds{margin-left:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .xps .pf .sg{font-size:10.5px;color:var(--faint);white-space:nowrap}
 .xps .pf.atb input{border-color:var(--warn)!important;background:var(--warn-soft)!important}
 .xps .ced{grid-column:1 / -1;border:1px dashed var(--line2);border-radius:7px;padding:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11.5px;color:var(--ink2)}
@@ -812,6 +814,9 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .xps-steps li{margin-bottom:4px}
 /* 알림 줄 */
 .xps .xps-msg{margin-top:8px}
+.xps .xps-tbl .mnm{width:100%;min-width:180px;border:1px solid transparent;background:transparent;color:inherit;font:inherit;padding:1px 3px;border-radius:4px}.xps .xps-tbl .mnm:hover,.xps .xps-tbl .mnm:focus{border-color:var(--line2);background:var(--surface)}
+.xps .xps-msg .rg{flex:none;font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--info-soft);color:var(--info);margin-right:6px;white-space:nowrap}.xps .xps-msg .rg.other{background:var(--warn-soft);color:var(--warn)}
+.xps .xps-chk li .acts{display:inline-flex;gap:4px;flex-wrap:wrap}
 .xps .xps-msg .cur{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);border-radius:9px;padding:6px 8px 6px 10px;font-size:12.5px;line-height:1.5;color:var(--ink);background:var(--surface)}
 .xps .xps-msg .cur .ic{flex:none;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;background:var(--info-soft);color:var(--info);margin-top:1px}
 .xps .xps-msg .cur.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}.xps .xps-msg .cur.ok .ic{background:var(--ok-soft);color:var(--ok)}
@@ -45641,9 +45646,11 @@ function finalize(P,r){
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
   let best=null; const chis=[];
-  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); } });
+  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13). 피팅 결과는 그대로(비트 동일)
+  const pars=[]; let nfree=0;
+  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); pars.push(null); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){
@@ -45903,7 +45910,7 @@ const SEV_ORDER={bad:0,warn:1,info:2};
    ------------------------------------------------------------ */
 const SAT_TM2P=["Cr","Mn","Fe","Co","Ni","Cu"], SAT_RE3D=["Ce","Pr","Nd"];
 function complexInfo(el,orb){
-  const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).map(r=>r.id); const m=C.multipletInfo(el,orb);
+  const C=CORE(); if(!el||!orb) return null; const rc=recipesFor(el,orb).filter(r=>r.kind!=="c1s"&&r.kind!=="o1s").map(r=>r.id); const m=C.multipletInfo(el,orb);   // v1.9.13: C 1s / O 1s recipes are not 'complex regions' (no R9 note)
   if(m) return {kind:"multiplet",why:`${el} ${orb}: exchange (multiplet) splitting with the open ${m.kind} shell is comparable to or larger than the spin–orbit splitting — the envelope is many lines, not one doublet per chemical state`+(el==="Eu"?"; Eu²⁺ and Eu³⁺ each give their own multiplet (Phys. Rev. B 51, 10146 (1995))":""),closed:el==="Yb"?"Yb²⁺ (4f¹⁴) — physically a plain 4d doublet, but Auto suggest models every Yb 4d as a multiplet: use LCF or add one doublet by hand":(m.closed||null),recipes:rc,note:m.kind==="4f"?RE_NOTE(el,orb,rc):null};
   if(orb==="2p"&&SAT_TM2P.includes(el)) return {kind:"satellite",why:`${el} 2p: multiplet splitting and shake-up satellites of the open 3d shell (closed-shell states such as Cu⁺/Cu⁰ excepted) — one doublet per chemical state does not describe the envelope`,closed:el==="Cu"?"Cu⁺·Cu⁰ (3d¹⁰)":null,recipes:rc};
   if(orb==="3d"&&SAT_RE3D.includes(el)) return {kind:"satellite",why:`${el} 3d: 4f final-state (screening) satellites — several peaks per oxidation state, overlapping across the two spin–orbit halves`,closed:null,recipes:rc,note:rc.length&&recipeById(rc[0]).kind==="emp"?RE_LCF:null};
@@ -46112,10 +46119,241 @@ Object.keys(HAASCH).forEach(id=>{ const h=HAASCH[id]; const lo=Math.floor(Math.m
     how:`Empirical envelope (single crystal ${cmp}(110), areas free): Haasch's ${h.rows.length} components with their BE and FWHM (CasaXPS, Tougaard background; shape not given — GL(30), the CasaXPS default, is used), held at the published spacings; the set is aligned to the data (±3 eV, positions converted from C 1s 285.0 to 284.8 eV), then one common position (± 0.3 eV) and every component area are free. The components are a description of the envelope of one compound, not chemical states — for chemical-state or valence analysis use reference-spectrum LCF.`,
     cite:`R.T. Haasch, E. Breckenfeld, L.W. Martin, Surf. Sci. Spectra 21, ${h.pg} (2014)${h.doi?", doi:"+h.doi:""} (${cmp}(110), Kratos Axis Ultra, mono Al Kα, C 1s 285.0 eV)`,
     pitfalls:`Empirical envelope (single crystal, areas free): no component areas were published, so no area ratio or doublet constraint is imposed and the areas carry no chemical meaning — use the summed area for quantification and measured reference spectra (Store as reference → LCF) for chemical states. Haasch used a Tougaard background; here the in-fit Shirley + slope is the default (change it in the background row if the window ends are not on background).`+(h.el==="Nd"&&h.orb==="3d"?" Nd 3d overlaps the O KLL Auger under Al Kα (O KLL KE ≈ 511 / 492 / 477 eV → BE ≈ 976 / 995 / 1010 eV): with oxygen present part of this envelope is O Auger intensity — use Nd 4d, or Mg Kα.":"")+(h.el==="Pr"&&h.orb==="3d"?" The Pr 3d5/2 satellite (932.8 eV) coincides with Cu 2p3/2 (932.7 eV).":"")}); });
+/* ------------------------------------------------------------
+   2d) v1.9.13 C 1s adventitious-carbon recipe (SPEC §17.10). Offsets from C–C/C–H and the equal-FWHM rule: Biesinger, Appl. Surf. Sci. 597,
+       153681 (2022) as tabulated by Morgan, Surf. Interface Anal. (2024) doi:10.1002/sia.7360 Table 1; Greczynski & Hultman, ChemPhysChem 18,
+       1507 (2017) Table 1; Beamson & Briggs (1992) poly(methyl acrylate) via NIST SRD 20; carbonate C 1s: Morgan 2024 Table 3; sp²: Morgan,
+       C 7, 51 (2021). Ranges = union of the checked sources (not one paper's 'typical'). Shape: CasaXPS GL(30) for every line (one fixed
+       Lorentzian share — no free per-line L fraction); widths of the adventitious-carbon lines tied 1:1 to C–C/C–H (Biesinger: 'A*1').
+       Positions: relative windows (rOff) re-centred on the fitted reference line after the fit (c1sFit), as CasaXPS 'A + a, A + b'.
+   ------------------------------------------------------------ */
+const C1S_CO3_EL=["Ba","Sr","Ca","La","Li","Na"];
+const RECIPE_C1S={kind:"c1s", id:"c1s", el:"C", orb:"1s", name:"C 1s (adventitious carbon)", ref:284.8, sp2ref:284.4, win:[-4.5,8.0], win2:[-4.5,9.0],
+  bg:PAR_BG, casa:"GL(30)", beTol:0.6, align:0.6, search:6, co3El:C1S_CO3_EL, alpha:0.05,
+  lines:[
+   {key:"cc",  name:"C–C/C–H", ref:true, F:1.2, Flo:0.6, Fhi:2.0},
+   {key:"co",  name:"C–O",     off:1.5, rng:[1.2,1.8]},
+   {key:"cdo", name:"C=O",     off:3.0, rng:[2.8,3.5], opt:"cdo"},
+   {key:"oco", name:"O–C=O",   off:4.0, rng:[3.8,4.5], opt:"oco"},
+   {key:"co3", name:"CO₃²⁻",   off:4.8, rng:[4.5,5.1], opt:"co3", ownF:true, F:1.5, Flo:0.8, Fhi:2.6}],
+  sp2Line:{key:"sp2", name:"C=C sp²", ref:true, la:true, F:0.6, Flo:0.2, Fhi:1.6},
+  piLine:{key:"pi", name:"π–π*", off:6.6, rng:[6.0,7.2], ownF:true, F:2.5, Flo:1.2, Fhi:4.5},
+  flags:[
+   {id:"cdo",label:"C=O",def:true,tip:"C=O at C–C + 2.8…3.5 eV (Biesinger 2022: +2.8–3.0; Morgan 2024: +3.0–3.5 eV; Morgan 2024 Table 1). Usually weak and the least determined line — the weak-component test removes it when the data do not need it."},
+   {id:"oco",label:"O–C=O",def:true,tip:"O–C=O at C–C + 3.8…4.5 eV (Biesinger 2022 / Morgan 2024: +3.8–4.3; Greczynski & Hultman 2017 Table 1: +3.96–4.54; Beamson & Briggs poly(methyl acrylate) 289.04 − 285.00 = +4.04 eV)."},
+   {id:"co3",label:"CO₃²⁻",def:null,tip:"Inorganic carbonate at C–C + 4.5…5.1 eV (Morgan 2024 Table 3, at adventitious C 284.8: Li₂CO₃ 289.8, BaCO₃ 289.5, CaCO₃ 289.6, CoCO₃ 289.4 eV; K₂CO₃ is lower, 288.5 eV — inside the O–C=O window). Default on when a carbonate-forming cation (Ba, Sr, Ca, La, Li, Na) is loaded in this sample. It overlaps O–C=O: C 1s alone cannot separate them — check O 1s (carbonate ≈ 531.5 eV) and the cation's surface (carbonate) component. Own width (a separate phase, not part of the adventitious layer)."},
+   {id:"sp2",label:"sp²",def:false,tip:"Graphitic main line (graphene, carbon supports): asymmetric C=C sp² line (LA) at 284.4 eV instead of a symmetric C–C/C–H at 284.8 (Morgan, C 7, 51 (2021) §3.1: 284.3–284.6 eV reported, asymmetric shape, π–π* shake-up around 291 eV). Adds a π–π* line; oxidized carbon is placed at its adventitious-carbon position on the corrected scale (offset + 0.4 eV from the sp² line). The charge correction then sets the sp² line to 284.4 eV — a conductive graphitic sample in contact with the spectrometer usually needs none (Δ ≈ 0); a large Δ means poor contact or a non-graphitic main line. The LA asymmetry ranges are fit ranges, not literature values."},
+   {id:"weak",label:"Drop weak",def:true,tip:"After the fit, each oxidized line is tested against the model without it (F-test on the data-variance χ², α = 0.05; the covariance z = area/σ is shown too). The least significant line with p > 0.05 is removed and the fit repeated until all remaining lines are significant (backward elimination). The removed lines are listed in the message ('Keep all' restores them). Off: keep every line and only report the test."}],
+  how:"One action: build the adventitious-carbon model (C–C/C–H + C–O + C=O + O–C=O, optional CO₃²⁻; every line CasaXPS GL(30), widths tied 1:1 to C–C/C–H), fit it (staged fit; the position windows of the oxidized lines are kept relative to the fitted C–C/C–H and re-centred until it moves < 0.005 eV), test the weak lines (F-test), then set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). The fit runs on the measured BE, so an earlier correction is replaced, never added (no double shift). C–C/C–H start = maximum of the C 1s signal (assumes C–C/C–H is the largest line — true for adventitious carbon; for a carbonate- or polymer-dominated C 1s set the reference by hand).",
+  cite:"M.C. Biesinger, Appl. Surf. Sci. 597, 153681 (2022) (adventitious-carbon model; offsets and 'A*1' widths as tabulated in D.J. Morgan, Surf. Interface Anal. (2024), doi:10.1002/sia.7360, Table 1); Morgan 2024 Table 3 (metal carbonates, C 1s at adventitious C 284.8 eV); G. Greczynski, L. Hultman, ChemPhysChem 18, 1507 (2017), Table 1; G. Beamson, D. Briggs, High Resolution XPS of Organic Polymers (1992), poly(methyl acrylate) via NIST SRD 20; D.J. Morgan, C 7, 51 (2021) (sp² carbon)",
+  pitfalls:"284.8 eV is a convention, not a constant: Biesinger (2022) found 284.91 ± 0.25 eV over many samples with a second reference; Greczynski & Hultman (ChemPhysChem 2017) showed that the adventitious C 1s follows the sample work function (C–C/C–H 284.08–285.52 eV on one series, E_B + φ = 289.50 ± 0.15 eV), so a C 1s-referenced BE is uncertain by ±0.2–0.3 eV or more — report the reference you used (component and value). χ²ν < 1 means σ (Poisson or the scale estimated from the residuals) is overestimated, often by smoothing or oversampling (see Fit check): compare models by relative χ²/AICc, not by χ²ν ≈ 1. C=O is usually weak and poorly determined; carbonate overlaps O–C=O (check O 1s and the cation). Ru 3d3/2 (284.2 eV) lies on C 1s — with Ru present the C 1s reference and the Ru area are both affected (Fit check overlap warning). On graphitic carbon use the sp² option."};
+/* carbonate-forming cation loaded in the sample → carbonate line on by default */
+function c1sCo3Default(present){ const P=present instanceof Set?present:new Set(present||[]); return C1S_CO3_EL.some(e=>P.has(e)); }
+function c1sFlags(R,o){ const f={}; R.flags.forEach(q=>{ const v=o&&o.flags?o.flags[q.id]:null; f[q.id]=v!=null?!!v:q.id==="co3"?c1sCo3Default(o&&o.present):!!q.def; }); return f; }
+/* lines of the model for the flags; sp²: the reference becomes the LA sp² line, oxidized offsets + (ref − sp2ref), plus π–π* */
+function c1sLines(R,fl){ const d=fl.sp2?+(R.ref-R.sp2ref).toFixed(4):0, out=[];
+  R.lines.forEach(l=>{ if(l.opt&&!fl[l.opt]) return; if(l.ref){ out.push(fl.sp2?R.sp2Line:l); return; }
+    out.push(Object.assign({},l,{off:+(l.off+d).toFixed(4),rng:[+(l.rng[0]+d).toFixed(4),+(l.rng[1]+d).toFixed(4)]})); });
+  if(fl.sp2) out.push(R.piLine); return out; }
+function c1sAllLines(R){ return R.lines.concat([R.sp2Line,R.piLine]); }
+/* Model (raw BE). o = {shift, be, y, flags, present, target (reference BE, default 284.8; sp² → 284.4)} */
+function c1sModel(R,o){
+  const C=CORE(); o=o||{}; const sh=o.shift||0, fl=c1sFlags(R,o), lines=c1sLines(R,fl);
+  const tgt=fl.sp2?R.sp2ref:(o.target!=null?+o.target:R.ref); const nom=tgt-sh;
+  const tag=Math.random().toString(36).slice(2,6);
+  const mk=cc=>lines.map(l=>{ const id="rc1s_"+l.key+"_"+tag, be=l.ref?cc:cc+l.off; let c;
+    if(l.la){ c=C.newComp("LA",be,{F:l.F,alpha:1.0,beta:10,wG:0.5,id}); }
+    else c=C.casaToComp(R.casa,{be,fwhm:l.ownF?l.F:R.lines[0].F,area:1,id}).comp;
+    c.name=l.name; c.el="C"; c.line="1s"; c.recipe=R.id; c.rk=l.key; c.rrole=l.ref?"ref":l.key==="pi"?"pi":"ox"; if(l.rng) c.rOff=l.rng.slice(); c.afloor=0.02; c.area=1; return c; });
+  // reference start: maximum of the smoothed, Smart-subtracted signal within ±search eV of the nominal position (independent of Δ when found), then a
+  // ±align eV NNLS search with all lines (weights 1/√y) for the start and the starting areas
+  let cc=nom, found=false, score=null, areas=null; const clipped=[];
+  // the search slice is re-centred on the maximum until it stays (≤ 4 passes), so the start depends on the data only, not on Δ (no double shift, SPEC §17.10)
+  if(o.be&&o.y){ let ctr=nom; for(let it=0;it<4;it++){ const reg=C.sliceRegion(o.be,o.y,ctr-R.search,ctr+R.search); if(!reg||reg.E.length<8) break;
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E));
+    let im=-1, vm=-Infinity; for(let i=0;i<E.length;i++){ const v=ys[i]-B[i]; if(v>vm){ vm=v; im=i; } } if(im<0) break; cc=E[im]; found=true; if(Math.abs(cc-ctr)<1e-9) break; ctr=cc; } }
+  if(found){ const reg=C.sliceRegion(o.be,o.y,cc+R.win[0],cc+(fl.sp2?R.win2:R.win)[1]); if(reg&&reg.E.length>=8){
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), n=E.length, ctx={emin:E[0],emax:E[n-1]};
+    const B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E)), w=Float64Array.from(ys,v=>1/Math.sqrt(Math.max(v,1e-9))), rhs=Float64Array.from(y,(v,i)=>(v-B[i])*w[i]);
+    let best=null; const K=Math.round(R.align/0.05);
+    for(let k=-K;k<=K;k++){ const c0=cc+0.05*k; const cols=mk(c0).map(c=>Float64Array.from(C.compEval(c,E,ctx),(v,i)=>v*w[i])); const a=C.nnls(cols,rhs);
+      let ss=0; for(let i=0;i<n;i++){ let m=0; for(let j=0;j<cols.length;j++) m+=a[j]*cols[j][i]; ss+=(rhs[i]-m)*(rhs[i]-m); }
+      if(!best||ss<best.ss-1e-12*Math.abs(ss)) best={c0,ss,a}; }
+    cc=best.c0; score=best.ss; areas=best.a; } }
+  let lo=cc+R.win[0], hi=cc+(fl.sp2?R.win2:R.win)[1];
+  if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
+  const comps=mk(cc); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  const ref=comps.find(c=>c.rrole==="ref"), cons={};
+  const wAnc=fl.sp2?comps.find(c=>c.rrole==="ox"&&!lines[comps.indexOf(c)].ownF):ref;
+  comps.forEach((c,i)=>{ const l=lines[i], q=cons[c.id]={};
+    C.paramNames(c).forEach(k=>{ if(k!=="be"&&k!=="area"&&!C.derivedParam(c,k)) q[k]={mode:"fixed"}; });   // GL(30): L fraction fixed and shared (SPEC §17.10)
+    q.be=l.ref?{mode:"free",lo:+(cc-R.beTol).toFixed(4),hi:+(cc+R.beTol).toFixed(4)}:{mode:"free",lo:+(cc+l.rng[0]).toFixed(4),hi:+(cc+l.rng[1]).toFixed(4)};
+    if(l.la){ q.F={mode:"free",lo:l.Flo,hi:l.Fhi}; q.alpha={mode:"free",lo:0.5,hi:2.5}; q.wG={mode:"free",lo:0.1,hi:1.2}; }
+    else if(l.ownF||c===wAnc) q.F={mode:"free",lo:+(c.F*(l.ownF?l.Flo/l.F:R.lines[0].Flo/R.lines[0].F)).toFixed(5),hi:+(c.F*(l.ownF?l.Fhi/l.F:R.lines[0].Fhi/R.lines[0].F)).toFixed(5)};
+    else q.F={mode:"link",ref:wAnc.id,k:1,b:0}; });
+  const lab=lines.map(l=>l.name).join(" + ");
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"c1s",kind:"c1s",flags:fl,label:lab,align:+(cc-nom).toFixed(4),alignLim:0,score,clipped,name:R.name,target:tgt,found}};
+}
+/* regularised incomplete beta I_x(a, b) (continued fraction, modified Lentz) → upper tail of the F distribution */
+function betaCF(a,b,x){ const MAXIT=300, EPS=1e-14, FPMIN=1e-300; let qab=a+b, qap=a+1, qam=a-1, c=1, d=1-qab*x/qap; if(Math.abs(d)<FPMIN) d=FPMIN; d=1/d; let h=d;
+  for(let m=1;m<=MAXIT;m++){ const m2=2*m; let aa=m*(b-m)*x/((qam+m2)*(a+m2)); d=1+aa*d; if(Math.abs(d)<FPMIN) d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN) c=FPMIN; d=1/d; h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2)); d=1+aa*d; if(Math.abs(d)<FPMIN) d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN) c=FPMIN; d=1/d; const del=d*c; h*=del; if(Math.abs(del-1)<EPS) break; }
+  return h; }
+function betaI(a,b,x){ const C=CORE(); if(x<=0) return 0; if(x>=1) return 1;
+  const bt=Math.exp(C.lgamma(a+b)-C.lgamma(a)-C.lgamma(b)+a*Math.log(x)+b*Math.log(1-x));
+  return x<(a+1)/(a+b+2)?bt*betaCF(a,b,x)/a:1-bt*betaCF(b,a,1-x)/b; }
+/* P(F' > F) for F(d1, d2) */
+function fTestP(F,d1,d2){ if(!(F>0)) return 1; return betaI(d2/2,d1/2,d2/(d2+d1*F)); }
+/* re-centre the relative position windows (rOff) on the fitted reference line and refit until it moves < 0.005 eV (≤ 5 refits) */
+function relWin(P){ const ref=P.comps.find(c=>c.rrole==="ref"); if(!ref) return null; P.cons=P.cons||{};
+  P.comps.forEach(c=>{ if(!c.rOff) return; const q=P.cons[c.id]=P.cons[c.id]||{}; if(q.be&&q.be.mode!=="free") return;
+    const lo=+(ref.be+c.rOff[0]).toFixed(4), hi=+(ref.be+c.rOff[1]).toFixed(4); q.be={mode:"free",lo,hi}; if(c.be<lo) c.be=lo; if(c.be>hi) c.be=hi; }); return ref.be; }
+function winBase(P){ const ref=P.comps.find(c=>c.rrole==="ref"), x=P.comps.find(c=>c.rOff&&P.cons[c.id]&&P.cons[c.id].be&&P.cons[c.id].be.mode==="free"); return x?P.cons[x.id].be.lo-x.rOff[0]:ref?ref.be:null; }
+function c1sRefit(P,r,opt){ const C=CORE(); let n=0; for(let it=0;it<5;it++){ const ref=P.comps.find(c=>c.rrole==="ref"); const wb=winBase(P);
+    if(!ref||wb==null||Math.abs(ref.be-wb)<0.005) break; relWin(P); r=C.fitOnce(P,Object.assign({},opt,{initAreas:false})); n++; } return {r,n}; }
+/* C 1s recipe fit (SPEC §17.10): staged fit → relative windows → weak-component test (F-test on χ²_d, backward elimination) → reference position.
+   o = {drop (default true), alpha (0.05), ...fit options} → {P, r, info} */
+function c1sFit(prob,o){
+  const C=CORE(); o=Object.assign({},o||{}); const drop=o.drop!==false, alpha=o.alpha||RECIPE_C1S.alpha; delete o.drop; delete o.alpha; const tgt=o.target; delete o.target;
+  const s=stagedFit(prob,o); let P=s.P, r=s.r; let rf=c1sRefit(P,r,o); r=rf.r; let passes=rf.n;
+  const dropped=[]; let tests=[];
+  const testAll=()=>{ const st=C.fitStats(P,r), fin=C.finalize(P,r); const out=[];
+    P.comps.forEach((c,i)=>{ if(c.rrole!=="ox"&&c.rrole!=="pi") return;
+      const cand=C.clone(C.stripProb(P)); cand.E=P.E; cand.y=P.y; relinkWithout(cand,new Set([c.id]));
+      let r2=null, st2=null; try{ r2=C.fitOnce(cand,Object.assign({},o,{initAreas:false})); r2=c1sRefit(cand,r2,o).r; st2=C.fitStats(cand,r2); }catch(e){ return; }
+      const dp=st.p-st2.p, d2=Math.max(1,st.N-st.p); const F=dp>0?((st2.chi2d-st.chi2d)/dp)/(st.chi2d/d2):0; const p=dp>0?fTestP(F,dp,d2):1;
+      const sg=fin.summ[i]&&fin.summ[i].sig?fin.summ[i].sig.area:null;
+      out.push({key:c.rk,id:c.id,name:c.name,area:c.area,z:sg>0?c.area/sg:null,F,p,dp,cand,r2}); });
+    return out; };
+  for(let g=0;g<6;g++){ tests=testAll(); if(!drop||!tests.length) break; const w=tests.reduce((a,t)=>!a||t.p>a.p?t:a,null); if(!(w.p>alpha)) break;
+    dropped.push({key:w.key,name:w.name,F:w.F,p:w.p,z:w.z}); P=w.cand; r=w.r2; passes++; }
+  const ref=P.comps.find(c=>c.rrole==="ref"), fl=(prob.recipeFlags)||{};
+  const target=tgt!=null?tgt:(P.comps.some(c=>c.rk==="sp2")?RECIPE_C1S.sp2ref:RECIPE_C1S.ref);
+  const info={alpha,drop,passes,tests:tests.map(t=>({key:t.key,name:t.name,area:t.area,z:t.z,F:t.F,p:t.p,dp:t.dp})),dropped,refKey:ref&&ref.rk,refId:ref&&ref.id,refBE:ref?ref.be:null,target,delta:ref?+(target-ref.be).toFixed(6):null,staged:s.staged,flags:fl};
+  return {P,r,info};
+}
+function c1sJob(prob,opt){ const C=CORE(); const s=c1sFit(prob,opt); const out=C.finalize(s.P,s.r); out.cons=s.P.cons; out.c1s=s.info; out.staged=s.info.staged; return out; }
+
+/* ------------------------------------------------------------
+   2e) v1.9.13 O 1s recipe (SPEC §17.11): lattice O (1–2 lines) + surface O (OH⁻/CO₃²⁻ · C=O / O=C–O · C–O · H₂O / C–O of O–C=O), positions on the
+       charge-corrected scale (no second correction). Sources: Graf, Isaacs, Morgan, Surf. Interface Anal. (2025) doi:10.1002/sia.70036 Table 1,
+       §2.3–2.7; Cole et al. Surf. Sci. Spectra 27 (2020) (Y₂O₃, Y(OH)₃); Karslıoğlu et al. JESRP 225 (2018) Table 1 (Ba, Fermi-edge scale);
+       Beamson & Briggs (1992) via NIST SRD 20 (PVA, PMA, PMMA, PMAA O 1s, aliphatic C 1s 285.00 → −0.20 eV here).
+       C 1s ↔ O 1s link: O expected on each carbon species (C–O ×1, C=O ×1, O–C=O ×1 at ≈532 + ×1 at ≈533.5, CO₃²⁻ ×3 at ≈531.5) from the C 1s
+       areas × (S·T·λ)_O / (S·T·λ)_C (the Quantification tab's factors) → area bands on the matching O 1s lines.
+   ------------------------------------------------------------ */
+const O1S_LAT={   // lattice O 1s start (eV, C 1s 284.8 scale) per metal — only values found in the cited sources
+  Y:{be:529.2,src:"Y₂O₃, Cole et al. 2020 (FWHM 1.45)"}, La:{be:530.5,src:"La₂O₃, Graf et al. 2025 §2.5"}, Ti:{be:529.8,src:"Ti–O, Graf et al. 2025 §2.7"},
+  Co:{be:529.5,src:"M–O (M = Co, Fe, Sr) in oxide, Graf et al. 2025 Table 1"}, Fe:{be:529.5,src:"M–O (M = Co, Fe, Sr), Graf et al. 2025 Table 1"}, Sr:{be:529.5,src:"M–O (M = Co, Fe, Sr), Graf et al. 2025 Table 1"},
+  Ba:{be:527.2,src:"BaO 527.8 eV (Karslıoğlu 2018 Table 1, Pt Fermi edge) − 0.6 eV (the Ba 4d recipe's scale estimate)"}};
+const O1S_LAT_RANGE=[527.0,531.0];   // spans the tabulated lattice values above (BaO 527.2 … La₂O₃ 530.5) ± 0.2–0.5
+const RECIPE_O1S={kind:"o1s", id:"o1s", el:"O", orb:"1s", name:"O 1s (oxide + surface O)", window:[525.5,536.5], bg:PAR_BG, casa:"GL(30)", beTol:0.6, sfRel:0.10, band:2,
+  lines:[
+   {key:"lat1", name:"Lattice O",   lat:true, F:1.2, Flo:0.8, Fhi:2.0},
+   {key:"lat2", name:"Lattice O 2", lat:true, opt:"lat2"},
+   {key:"latlo",name:"Lattice O (low)", lat:true, opt:"latlo", be:528.5, rng:[528.0,529.2]},
+   {key:"oh",   name:"OH⁻/CO₃²⁻",   be:531.5, rng:[531.0,532.0], surf:true, F:1.8, Flo:1.2, Fhi:2.4, nO:"oh"},
+   {key:"cdo",  name:"C=O / O=C–O", be:532.1, rng:[531.8,532.3], opt:"org", nO:"cdo"},
+   {key:"co",   name:"C–O",         be:532.6, rng:[532.35,533.1], opt:"org", nO:"co"},
+   {key:"w",    name:"H₂O / C–O of O–C=O", be:533.5, rng:[533.1,533.9], opt:"w", nO:"w"}],
+  flags:[
+   {id:"lat2",label:"2 lattice",def:null,tip:"Two lattice-oxygen lines (one tied FWHM) — on by default when two or more metal regions are loaded in this sample (two oxide environments, e.g. a perovskite A–O / B–O or two phases). Lattice starts: tabulated value of a loaded metal where one was found (Y₂O₃ 529.2 (Cole 2020); La₂O₃ 530.5, Ti–O 529.8, M–O for Co/Fe/Sr 529.5, perovskite lattice 528.5 eV (Graf, Isaacs, Morgan 2025); BaO 527.2 (Karslıoğlu 2018, Fermi-edge scale − 0.6)); otherwise found in the data (NNLS search 527–531 eV). Graf 2025 Table 1 also lists perovskite lattice O at 528.5 eV (LaSrCoO₃). Every lattice line may move over 527.0–531.0 eV (the span of these values): the start is the literature value, the data set the position."},
+   {id:"latlo",label:"Low lattice",def:false,tip:"Optional extra lattice line at 528.0–529.2 eV, start 528.5 eV = 'lattice oxygen in perovskite' (LaSrCoO₃) in Graf, Isaacs, Morgan 2025 Table 1 — the only checked source; a low-BE lattice O is also reported for some Ba-containing oxides, but no Ba-specific value was verified, so it is not in the default model. When ticked, the fit is repeated without it and both are compared by AICc (reported in the message and the Fit check row); width tied to the lattice line."},
+   {id:"org",label:"Organic O",def:true,tip:"C=O / O=C–O oxygen at 531.8–532.3 and C–O at 532.35–533.1 eV (split at ≈ 532.3 so the two cannot swap) (Beamson & Briggs 1992 via NIST SRD 20, at C 1s 284.8: poly(methyl acrylate) C=O 532.01, poly(methacrylic acid) 532.19, poly(vinyl alcohol) C–OH 532.54 eV)."},
+   {id:"w",label:"533.5",def:true,tip:"Line at 533.1–533.9 eV: the single-bonded O of O–C=O (Beamson & Briggs: PMA 533.49, PMMA 533.57, PMAA 533.58 eV at C 1s 284.8) and adsorbed water (largely desorbed below 10⁻⁹ mbar — Graf et al. 2025 §2.4)."},
+   {id:"link",label:"Link C 1s",def:true,tip:"Constrain the organic / carbonate O 1s areas to the O expected from the C 1s fit of this sample: C–O ×1, C=O ×1, O–C=O ×2 (one at ≈532, one at ≈533.5 eV), CO₃²⁻ ×3 (≈531.5 eV), each × the C 1s area × (S·T·λ)O / (S·T·λ)C (Quantification tab factors). Band = expected ± 2σ, σ from the C 1s area σ (covariance) and the sensitivity-factor ratio uncertainty (default 10 % — an assumption, not a literature value; set it for your instrument). OH⁻/CO₃²⁻ and the 533.5 eV line are bounded from below only (hydroxide and water add to them)."}],
+  how:"Lattice O (1–2 lines, FWHM tied, 0.8–2.0 eV: Graf et al. 2025 §2.3 give ≈ 1.2–1.6 eV for oxides and 1.6–2.0 eV for hydroxides; the upper end allows mixed / disordered oxides — a lattice line wider than that is better described by a second environment ('2 lattice', 'Low lattice')) + surface O (OH⁻/CO₃²⁻ 531.0–532.0, C=O / O=C–O 531.8–532.3, C–O 532.35–533.1, H₂O / C–O of O–C=O 533.1–533.9 eV; wider, FWHM tied among them; hydroxides 1.6–2.0 eV, Graf 2025 §2.3). Every line CasaXPS GL(30) (one fixed Lorentzian share). Window 525.5–536.5 eV with an in-fit Shirley + slope. Positions are on the charge-corrected scale of the sample (C 1s recipe first) — no second correction here. With a C 1s fit of the same sample the organic and carbonate O areas are bounded by the O expected from the C 1s areas, and the high-BE C 1s line (O–C=O or CO₃²⁻) is tested both ways (χ²_d and AICc).",
+  cite:"A. Graf, M.A. Isaacs, D.J. Morgan, Surf. Interface Anal. (2025), doi:10.1002/sia.70036 (Table 1, §2.3–2.7); S.L. Cole et al., Surf. Sci. Spectra 27, 024010 (2020); O. Karslıoğlu et al., J. Electron Spectrosc. Relat. Phenom. 225 (2018) Table 1; G. Beamson, D. Briggs, High Resolution XPS of Organic Polymers (1992) via NIST SRD 20; H. Idriss, Surf. Sci. 712, 121894 (2021)",
+  pitfalls:"A line near 531 eV is not 'oxygen vacancies': a vacancy has no electron to eject — the 531–532 eV intensity is hydroxide, carbonate, organic O or a screened-state shoulder (H. Idriss, Surf. Sci. 712, 121894 (2021), doi:10.1016/j.susc.2021.121894; Graf et al. 2025 §2.6). Background: a kink or rise near 534 eV makes a static Smart/Shirley background swallow surface O — use the in-fit Shirley and a window up to ≈ 536 eV. Overlaps: Sb 3d5/2 (≈ 528 eV), V 2p1/2 (≈ 520–525 eV tail), Pd 3p3/2 (≈ 532 eV) and the Na KLL Auger (Al Kα) lie in or near this window (Fit check overlap warning). Lattice O positions depend on the cation and the structure (perovskite lattice ≈ 528.5 eV, Graf 2025 Table 1); a lattice line at its range end usually means a missing environment or a charge-correction error. Positions assume the C 1s charge correction is right (±0.2–0.3 eV, see C 1s recipe)."};
+RECIPE_O1S.options=[]; RECIPE_O1S.derived=[]; RECIPES.push(RECIPE_O1S);
+const O1S_NONMETAL=new Set(["C","O","N","F","S","Cl","P","Si","B","H","Br","I","Se"]);
+function o1sMetals(present){ const P=present instanceof Set?[...present]:(present||[]); return P.filter(e=>e&&!O1S_NONMETAL.has(e)); }
+function o1sFlags(R,o){ const f={}; R.flags.forEach(q=>{ const v=o&&o.flags?o.flags[q.id]:null; f[q.id]=v!=null?!!v:q.id==="lat2"?o1sMetals(o&&o.present).length>=2:q.id==="link"?!!(o&&o.link):!!q.def; }); return f; }
+/* lattice starts for the loaded metals: distinct tabulated values (0.1 eV), lowest first; null = find in the data */
+function o1sLatStarts(present,n){ const v=[...new Set(o1sMetals(present).map(e=>O1S_LAT[e]?O1S_LAT[e].be:null).filter(x=>x!=null).map(x=>+x.toFixed(1)))].sort((a,b)=>a-b);
+  const out=[]; for(let i=0;i<n;i++) out.push(v[i]!=null?v[i]:null); return out; }
+/* O expected on each O 1s line from the C 1s areas. link = {R (=(S·T·λ)O/(S·T·λ)C), sfRel, comps:{co,cdo,oco,co3:{a,s}}}; hyp "oco"|"co3" moves the
+   high-BE C 1s area (O–C=O + CO₃²⁻) to one assignment → {oh,cdo,co,w:{E,s,lower}} (areas in O 1s units) */
+function o1sExpect(link,hyp){ const g=k=>(link&&link.comps&&link.comps[k])||{a:0,s:0}; let oco=g("oco"), co3=g("co3");
+  if(hyp){ const a=oco.a+co3.a, s=Math.hypot(oco.s,co3.s); if(hyp==="oco"){ oco={a,s}; co3={a:0,s:0}; } else { co3={a,s}; oco={a:0,s:0}; } }
+  const R_=link.R, sf=link.sfRel!=null?link.sfRel:RECIPE_O1S.sfRel, co=g("co"), cdo=g("cdo");
+  const mk=(terms,lower)=>{ const E=R_*terms.reduce((s,[m,x])=>s+m*x.a,0); const sC=R_*Math.sqrt(terms.reduce((s,[m,x])=>s+m*m*x.s*x.s,0)); return {E,s:Math.hypot(sC,E*sf),lower:!!lower}; };
+  return {oh:mk([[3,co3]],true),cdo:mk([[1,cdo],[1,oco]],false),co:mk([[1,co]],false),w:mk([[1,oco]],true)}; }
+/* Model (raw BE). o = {shift, be, y, flags, present, link (o1sExpect input or null), hyp, keepAll (keep lines with no expected O)} */
+function o1sModel(R,o){
+  const C=CORE(); o=o||{}; const sh=o.shift||0, fl=o1sFlags(R,o); const nLat=fl.lat2?2:1; const starts=o1sLatStarts(o.present,nLat);
+  const ex=fl.link&&o.link?o1sExpect(o.link,o.hyp):null;
+  let lines=R.lines.filter(l=>!l.opt||fl[l.opt]);
+  if(ex&&!o.keepAll) lines=lines.filter(l=>!(l.nO&&ex[l.nO]&&!ex[l.nO].lower&&!(ex[l.nO].E+R.band*ex[l.nO].s>0)));   // a two-sided band of 0 → the line is not there
+  let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
+  if(o.be&&o.be.length){ const a=o.be[0], b=o.be[o.be.length-1]; if(lo<a){ clipped.push("low"); lo=a; } if(hi>b){ clipped.push("high"); hi=b; } }
+  const tag=Math.random().toString(36).slice(2,6); let latBE=starts.slice();
+  const mk=lb=>{ let j=0; return lines.map(l=>{ const id="ro1s_"+l.key+"_"+tag; const be=(l.lat&&l.be==null?lb[j++]:l.be)-sh; const F=l.lat?R.lines[0].F:R.lines[2].F;
+    const c=C.casaToComp(R.casa,{be,fwhm:F,area:1,id}).comp; c.name=l.name; c.el="O"; c.line="1s"; c.recipe=R.id; c.rk=l.key; c.rrole=l.lat?"lat":"surf"; c.afloor=0.02; c.area=1; return c; }); };
+  let areas=null, score=null;
+  if(o.be&&o.y){ const reg=C.sliceRegion(o.be,o.y,lo,hi); if(reg&&reg.E.length>=8){
+    const E=Float64Array.from(reg.E), y=Float64Array.from(reg.y), n=E.length, ctx={emin:E[0],emax:E[n-1]};
+    const B=C.bgStatic(E,y,{type:"smart",n:5}), ys=C.smoothQ(E,y,C.smoothHW(E)), w=Float64Array.from(ys,v=>1/Math.sqrt(Math.max(v,1e-9))), rhs=Float64Array.from(y,(v,i)=>(v-B[i])*w[i]);
+    const solve=lb=>{ const cols=mk(lb).map(c=>Float64Array.from(C.compEval(c,E,ctx),(v,i)=>v*w[i])); const a=C.nnls(cols,rhs); let ss=0; for(let i=0;i<n;i++){ let m=0; for(let j=0;j<cols.length;j++) m+=a[j]*cols[j][i]; ss+=(rhs[i]-m)*(rhs[i]-m); } return {ss,a}; };
+    // unknown lattice starts: NNLS grid 527.2–530.8 eV (0.1 eV), second line ≥ 0.4 eV above the first
+    const grid=[]; for(let x=O1S_LAT_RANGE[0]+0.2;x<=O1S_LAT_RANGE[1]-0.2+1e-9;x+=0.1) grid.push(+x.toFixed(2));
+    // every lattice start is searched on the data (NNLS grid): a literature value is a property of one compound (e.g. BaO 527.2 eV is clean BaO, rarely
+    // the lattice of an air-exposed Ba-containing oxide), and a start 2 eV off traps the local optimiser; the tabulated values stay in recipe.latStarts
+    const unk=latBE.map((v,i)=>i);
+    if(unk.length){ let best=null; const tryLB=lb=>{ const t=solve(lb); if(!best||t.ss<best.ss) best={lb:lb.slice(),ss:t.ss}; };
+      if(unk.length===1){ grid.forEach(x=>{ const lb=latBE.slice(); lb[unk[0]]=x; if(lb.length===2&&Math.abs(lb[0]-lb[1])<0.4) return; tryLB(lb); }); }
+      else grid.forEach(x=>grid.forEach(z=>{ if(z<x+0.4) return; tryLB([x,z]); }));
+      latBE=best.lb.slice().sort((a,b)=>a-b); }
+    const t=solve(latBE); areas=t.a; score=t.ss; } }
+  if(latBE.some(v=>v==null)) latBE=latBE.map((v,i)=>v!=null?v:529.5+0.8*i);   // no data: generic M–O start (Graf 2025 Table 1)
+  const comps=mk(latBE); if(areas){ const amax=Math.max(...areas,0)||1; comps.forEach((c,i)=>{ c.area=Math.max(areas[i],0.02*amax,1e-6); }); }
+  const cons={}; const lat1=comps.find(c=>c.rk==="lat1"), sA=comps.find(c=>c.rrole==="surf"&&c.rk==="oh")||comps.find(c=>c.rrole==="surf");
+  comps.forEach((c,i)=>{ const l=lines[i], q=cons[c.id]={};
+    C.paramNames(c).forEach(k=>{ if(k!=="be"&&k!=="area"&&!C.derivedParam(c,k)) q[k]={mode:"fixed"}; });   // GL(30): one fixed L fraction for all lines (SPEC §17.11)
+    if(l.lat&&l.rng) q.be={mode:"free",lo:+(l.rng[0]-sh).toFixed(4),hi:+(l.rng[1]-sh).toFixed(4)};
+    else if(l.lat) q.be={mode:"free",lo:+(O1S_LAT_RANGE[0]-sh).toFixed(4),hi:+(O1S_LAT_RANGE[1]-sh).toFixed(4)};   // lattice: start = literature value of a loaded metal, position set by the data
+    else q.be={mode:"free",lo:+(l.rng[0]-sh).toFixed(4),hi:+(l.rng[1]-sh).toFixed(4)};
+    if(c===lat1) q.F={mode:"free",lo:+(c.F*R.lines[0].Flo/R.lines[0].F).toFixed(5),hi:+(c.F*R.lines[0].Fhi/R.lines[0].F).toFixed(5)};
+    else if(l.lat) q.F={mode:"link",ref:lat1.id,k:1,b:0};
+    else if(c===sA) q.F={mode:"free",lo:+(c.F*R.lines[2].Flo/R.lines[2].F).toFixed(5),hi:+(c.F*R.lines[2].Fhi/R.lines[2].F).toFixed(5)};
+    else q.F={mode:"link",ref:sA.id,k:1,b:0};
+    if(ex&&l.nO&&ex[l.nO]){ const e=ex[l.nO], a0=Math.max(0,e.E-R.band*e.s), a1=e.lower?Infinity:e.E+R.band*e.s; q.area=isFinite(a1)?{mode:"free",lo:+a0.toPrecision(8),hi:+a1.toPrecision(8)}:{mode:"free",lo:+a0.toPrecision(8)};
+      c.area=Math.min(Math.max(c.area,a0),isFinite(a1)?a1:Infinity); if(!(c.area>0)) c.area=Math.max(a1>0?0.5*(a0+a1):1e-6,1e-6); c.rlink=1; } });
+  const lab=lines.map(l=>l.name).join(" + ")+(ex?" · C 1s link":"");
+  return {lo,hi,bg:C.clone(R.bg),comps,cons,recipe:{id:R.id,opt:"o1s",kind:"o1s",flags:fl,label:lab,align:0,alignLim:0,score,clipped,name:R.name,latStarts:starts,latBE,expect:ex,hyp:o.hyp||null}};
+}
+/* O 1s fit (SPEC §17.11): staged fit of the model; with a C 1s link and a high-BE C 1s line, the two assignments (O–C=O vs CO₃²⁻) are fitted with the same
+   line set and compared (χ²_d, AICc). o = {build: o1sModel options (without be/y), ...fit options} → {P, r, info} */
+function o1sFit(prob,o){
+  const C=CORE(); o=Object.assign({},o||{}); const build=o.build||null; delete o.build;
+  const s=stagedFit(prob,o); const P=s.P, r=s.r;
+  const info={staged:s.staged,expect:build&&build.link&&o1sFlags(RECIPE_O1S,build).link?o1sExpect(build.link,build.hyp):null,hyp:null,link:build?build.link||null:null};
+  const tot=P.comps.reduce((a,c)=>a+Math.max(0,c.area),0)||1, A=k=>P.comps.filter(c=>c.rk===k).reduce((a,c)=>a+Math.max(0,c.area),0);
+  const lat=P.comps.filter(c=>c.rrole==="lat").reduce((a,c)=>a+Math.max(0,c.area),0);
+  info.residual={total:tot,lattice:lat,latPct:100*lat/tot,oh:A("oh"),ohExcess:info.expect?A("oh")-info.expect.oh.E:null};
+  if(!P.comps.some(c=>c.rk==="latlo")&&build){ try{ const fl2=Object.assign({},o1sFlags(RECIPE_O1S,build),{latlo:true}); const M2=o1sModel(RECIPE_O1S,Object.assign({},build,{flags:fl2,be:prob.E,y:prob.y}));
+      const P2=C.makeProblem({be:prob.E,y:prob.y,c:prob.c},{lo:prob.E[0]-1e-9,hi:prob.E[prob.E.length-1]+1e-9,bg:M2.bg,comps:M2.comps,cons:M2.cons,weight:prob.weight}); const r2=stagedFit(P2,o);
+      const a=C.fitStats(r2.P,r2.r), b=C.fitStats(P,r); const lw=r2.P.comps.find(c=>c.rk==="latlo");
+      info.latlo={with:{AICc:a.AICc,chi2d:a.chi2d,p:a.p,be:lw?lw.be:null},without:{AICc:b.AICc,chi2d:b.chi2d,p:b.p},dAICc:b.AICc-a.AICc,suggest:true,verdict:b.AICc-a.AICc>2?"low lattice line supported (ΔAICc > 2) — tick 'Low lattice'":b.AICc-a.AICc< -2?"model without it preferred":"not distinguishable (|ΔAICc| ≤ 2)"}; }catch(e){ info.latlo={error:String(e.message||e)}; } }
+  const lo_=P.comps.find(c=>c.rk==="latlo"); if(lo_){ try{ const cand=C.clone(C.stripProb(P)); cand.E=P.E; cand.y=P.y; relinkWithout(cand,new Set([lo_.id])); const r2=stagedFit(cand,o); const a=C.fitStats(P,r), b=C.fitStats(r2.P,r2.r);
+      info.latlo={with:{AICc:a.AICc,chi2d:a.chi2d,p:a.p},without:{AICc:b.AICc,chi2d:b.chi2d,p:b.p},dAICc:b.AICc-a.AICc,verdict:b.AICc-a.AICc>2?"low lattice line supported (ΔAICc > 2)":b.AICc-a.AICc< -2?"model without it preferred":"not distinguishable (|ΔAICc| ≤ 2)"}; }catch(e){ info.latlo={error:String(e.message||e)}; } }
+  const hi=build&&build.link&&build.link.comps?((build.link.comps.oco||{}).a||0)+((build.link.comps.co3||{}).a||0):0;
+  if(build&&build.link&&o1sFlags(RECIPE_O1S,build).link&&hi>0){ const res={};
+    ["oco","co3"].forEach(h=>{ try{ const M=o1sModel(RECIPE_O1S,Object.assign({},build,{be:prob.E,y:prob.y,hyp:h,keepAll:true}));
+      const Ph=C.makeProblem({be:prob.E,y:prob.y,c:prob.c},{lo:prob.E[0]-1e-9,hi:prob.E[prob.E.length-1]+1e-9,bg:M.bg,comps:M.comps,cons:M.cons,weight:prob.weight});
+      const sh_=stagedFit(Ph,o); const st=C.fitStats(sh_.P,sh_.r); res[h]={chi2d:st.chi2d,AICc:st.AICc,BIC:st.BIC,chi2nu:st.chi2nu,p:st.p,N:st.N,conv:sh_.r.conv}; }catch(e){ res[h]={error:String(e.message||e)}; } });
+    const d=res.oco.AICc!=null&&res.co3.AICc!=null?res.co3.AICc-res.oco.AICc:null;   // > 0 → O–C=O favoured
+    { const st=C.fitStats(P,r); res.fitted={chi2d:st.chi2d,AICc:st.AICc,chi2nu:st.chi2nu,p:st.p}; }   // the split as fitted in C 1s (both lines), for reference
+    info.hyp=Object.assign(res,{dAICc:d,verdict:d==null?"n/a":Math.abs(d)<2?"not distinguishable (|ΔAICc| < 2)":d>0?"O–C=O favoured":"CO₃²⁻ favoured"}); }
+  return {P,r,info};
+}
+function o1sJob(prob,opt){ const C=CORE(); const s=o1sFit(prob,opt); const out=C.finalize(s.P,s.r); out.cons=s.P.cons; out.o1s=s.info; out.staged=s.info.staged; return out; }
+
 /* spin–orbit Δ per oxidation state (Bêche et al. 2008: ≈18.6 eV for Ce⁴⁺/CeO₂, ≈18.2 eV for Ce³⁺/CePO₄) */
 function dEof(R,state){ return (R.dEs&&R.dEs[state])||R.dE; }
 RECIPES_ENV.forEach(R=>{ R.options=[]; R.derived=[]; RECIPES.push(R); });
 RECIPES_PAR.forEach(R=>{ R.options=[]; R.derived=[]; R.flags=R.flags||[]; RECIPES.push(R); });
+[RECIPE_C1S].forEach(R=>{ R.options=[]; R.derived=[]; RECIPES.push(R); });   // v1.9.13 (RECIPE_O1S is pushed where it is defined, §2e)
 /* ---- parametric / empirical recipes: species lines → absolute (charge-corrected, C 1s 284.8 eV) positions and links ---- */
 function parDefaults(R){ return R.species.filter(s=>s.def).map(s=>s.key); }
 function parFlags(R,o){ const f={}; (R.flags||[]).forEach(q=>{ f[q.id]=o&&o.flags&&o.flags[q.id]!=null?!!o.flags[q.id]:!!q.def; }); return f; }
@@ -46259,6 +46497,7 @@ function recipeLineF(R,c){
   if(!R||!c||c.recipe!==R.id) return null;
   if(R.lines){ const l=R.lines.find(x=>x.key===c.rk); return l?{Fhi:l.Fhi}:null; }
   if(R.kind==="env") return c.renv?{Fhi:Infinity}:null;
+  if(R.kind==="c1s"||R.kind==="o1s"){ const l=(R.kind==="c1s"?c1sAllLines(R):R.lines).find(x=>x.key===c.rk); return l&&l.Fhi!=null?{Fhi:l.Fhi}:null; }
   if((R.kind==="par"||R.kind==="emp")&&c.rsp){ const L=parLines(R,[c.rsp],{plasmon:true,auger:true},null); const l=L.find(x=>x.key===c.rk); if(!l) return null;
     if(l.Ffix) return R.wScale?{Fhi:l.F*R.wScale[1]}:null; return {Fhi:l.Fhi!=null?l.Fhi:Infinity}; }
   return null; }
@@ -46271,6 +46510,8 @@ function recipeModel(id,o){
   const C=CORE(); const R=recipeById(id); if(!R) throw new Error("unknown recipe "+id);
   if(R.kind==="env") return envModel(R,o||{});
   if(R.kind==="par"||R.kind==="emp") return parModel(R,o||{});
+  if(R.kind==="c1s") return c1sModel(R,o||{});
+  if(R.kind==="o1s") return o1sModel(R,o||{});
   o=o||{}; const sh=o.shift||0; const op=R.options.find(x=>x.id===o.opt)||R.options[R.options.length-1];
   const lines=R.lines.filter(l=>op.keys.includes(l.key));
   let lo=R.window[0]-sh, hi=R.window[1]-sh; const clipped=[];
@@ -46379,6 +46620,12 @@ function diagnose(ctx,th){
       return {type:"dropSet",ids:ids_,label:"Remove "+(s?s.short||s.label:nm(id))+(ids_.length>1?` (${ids_.length} lines)`:"")}; }
     if(Rc) return {type:"dropSet",ids:[id],label:"Remove "+nm(id)};
     return {type:"drop",id,label:"Remove "+nm(id)}; };
+  /* v1.9.13: one shared L fraction (m) — pinning one line's m while the others vary is inconsistent (SPEC §17.12). Value = the recipe's (GL(30) → 0.3)
+     when the lines are recipe lines, otherwise the area-weighted mean of the current values */
+  const mComps=comps.filter(c=>c.m!=null&&!C.derivedParam(c,"m")&&(c.shape==="GLS"||c.shape==="GLP"||c.shape==="GLT"||c.shape==="AGT"));
+  const shareM=()=>{ if(mComps.length<1) return null; const aw=mComps.reduce((s,c)=>s+Math.max(0,c.area||0),0); const v=aw>0?mComps.reduce((s,c)=>s+Math.max(0,c.area||0)*c.m,0)/aw:mComps.reduce((s,c)=>s+c.m,0)/mComps.length;
+    return {type:"shareM",ids:mComps.map(c=>c.id),v:+v.toFixed(3),label:"Fix L frac. (shared)"}; };
+  const SHM_TIP=" 'Fix L frac. (shared)' sets every GL line to one fixed L fraction (the area-weighted mean of the current values) — the Lorentzian share is an instrument/lifetime property common to the lines of one region; pinning one line's value while the others vary makes that line differ in shape only, which trades off against its area and position.";
   const areaDead=new Set();
   // R3a area at 0 (lower bound) → handled as a component finding
   free.forEach((f,j)=>{ if(f.k!=="area"||f.ci<0) return; const p=val(f.id,"area"); if(p!=null&&(atB[j]||p<=Math.max(0,f.lo)+1e-6*tot)) areaDead.add(f.id); });
@@ -46417,6 +46664,7 @@ function diagnose(ctx,th){
       hint=" A doublet ratio at its limit usually compensates for an overlapping line; fix it at the statistical value (2j+1 ratio) and look at the residual.";
     } else if(f.id==="bg"){ hint=" The in-fit background parameter reached its limit: the window ends are probably not on background (widen the window or use a static Shirley/Smart background)."; }
     else hint=" A shape parameter at a physical limit is often fine (e.g. L frac. 0 = pure Gaussian); fix it there to remove a free parameter.";
+    if(f.k==="m"&&mComps.length>1){ act=shareM(); hint=" A per-line L fraction at its limit usually compensates for something else (a merged or missing line, a wrong background)."+SHM_TIP; }
     if(shapeP&&!act) act={type:"fix",id:f.id,k:f.k,v:p,label:`Fix ${lab(f.k)} at ${fmt(p,3)}`};
     push({key:"bound|"+f.id+"|"+f.k,id:"bound",sev,ids:f.id==="bg"?[]:[f.id],
       label:`${nm(f.id)} ${lab(f.k)} at ${side} bound (${fmt(bv+add,f.k==="be"?2:3)})`,
@@ -46439,6 +46687,7 @@ function diagnose(ctx,th){
           return (fa.k==="dE"&&unres(fa.id))||(fb.k==="dE"&&unres(fb.id))||(fa.id===fb.id&&unres(fa.id)); })()){
         const q=fa.k==="dE"?fa:fb.k==="dE"?fb:fa; const ref=ctx.recipe&&ctx.recipe.dE?dEof(ctx.recipe,(comps[byId[q.id]]||{}).rstate).v:ctx.dEref;
         if(ref!=null&&isFree(q.id,"dE")) act={type:"fix",id:q.id,k:"dE",v:ref,label:`Fix Δ at ${fmt(ref,2)} eV`}; hint=" The doublet is not resolved (Δ < 1.2 eV), so its two halves trade off against position and width; fix Δ at the literature value and keep the area ratio fixed."; sevOv="info"; }
+      else if((fa.k==="m"||fb.k==="m")&&mComps.length>1){ act=shareM(); hint=" A free per-line L fraction trades off against the area (a broader Lorentzian tail holds more area at the same height)."+SHM_TIP; }
       else if(fa.k==="area"&&fb.k==="area") hint=" The two areas trade off against each other — their sum is well determined, each alone is not. Report the sum, or constrain widths/positions from literature.";
       else hint=" One of the two parameters should be fixed or linked (literature value) — the data cannot separate them.";
       const inRec=fa.id!=="bg"&&fb.id!=="bg"&&comps[byId[fa.id]].recipe&&comps[byId[fa.id]].recipe===comps[byId[fb.id]].recipe;
@@ -46475,8 +46724,9 @@ function diagnose(ctx,th){
     if(areaDead.has(comps[i].id)||areaDead.has(comps[j].id)) continue;   // a dead line is reported once, by R3 (v1.9.8: this skip used to sit inside the comment above)
     const d=Math.abs(comps[i].be-comps[j].be), w=(fw(i)+fw(j))/2; if(!(d<th.merge*w)) continue;
     const sm=comps[i].area<=comps[j].area?comps[i]:comps[j], bg_=sm===comps[i]?comps[j]:comps[i];
+    const bnd={type:"bound",ids:[comps[i].id,comps[j].id],sep:+(th.merge*w).toFixed(3),label:"Bound positions",refit:true};
     push({key:"merge|"+comps[i].id+"|"+comps[j].id,id:"merge",sev:"warn",ids:[comps[i].id,comps[j].id],label:`${nm(comps[i].id)} and ${nm(comps[j].id)} merge (ΔBE ${fmt(d,2)} eV)`,
-      tip:`The two lines are ${fmt(d,3)} eV apart, less than ${th.merge} × their mean FWHM (${fmt(w,2)} eV): they describe one peak. Remove the smaller one (${nm(sm.id)}), or fix its position from literature relative to ${nm(bg_.id)}.`,act:dropAct(sm.id)}); }
+      tip:`The two lines are ${fmt(d,3)} eV apart, less than ${th.merge} × their mean FWHM (${fmt(w,2)} eV): they describe one peak. This is usually the cause of the correlated pairs and bound hits of these lines listed below — fix it first. Remove the smaller one (${nm(sm.id)}), or 'Bound positions': each line gets its own BE range (recipe range where the line has one, otherwise ± 0.5 eV around its current position, split so that the two stay ≥ ${fmt(th.merge*w,2)} eV apart), the smaller line's FWHM is tied to the larger one's, and the fit is repeated.`,act:dropAct(sm.id),acts:[dropAct(sm.id),bnd]}); }
   // R5 stop reason
   if(fin.stop==="stalled"||fin.stop==="maxIter"||fin.conv===false){ const fl=((fin.stall&&fin.stall.flags)||[]).map(q=>`${nm(q.id)} ${lab(q.k)} (${q.why.join(", ")})`);
     push({key:"stop",id:"stop",sev:"warn",ids:[],label:fin.stop==="stalled"?"Fit stalled":"Fit did not converge",tip:(fin.stop==="stalled"?"LM stopped early: only heavily damped steps were possible (SPEC §3.3b).":"The iteration limit was reached before χ² settled.")+(fl.length?" Poorly determined: "+fl.join("; ")+".":"")+" With many overlapping lines, 'Staged fit' (heights → positions → all) reaches a minimum more reliably; also fix or link the flagged parameters.",act:comps.length>=3?{type:"staged",label:"Staged fit"}:null}); }
@@ -46524,9 +46774,40 @@ function diagnose(ctx,th){
   const rm=ctx.recipeMeta; if(rm&&rm.alignLim>0&&rm.align!=null&&Math.abs(rm.align)>=rm.alignLim-0.026){ const lim=rm.alignLim;
     push({key:"alignlim",id:"alignlim",sev:"warn",ids:[],label:`Recipe alignment at its ±${fmt(lim,1)} eV search limit (${rm.align>0?"+":""}${fmt(rm.align,2)} eV)`,
       tip:`The recipe lines were shifted by ${rm.align>0?"+":""}${fmt(rm.align,2)} eV to match the data — the end of the ±${fmt(lim,1)} eV search range, so the best match may lie further out. Usual causes: a wrong or missing charge correction (check C 1s / the reference line), differential charging, or a different compound (for Ba 4d, ±1 eV cannot tell a global offset from BaO → Ba(OH)₂, +1.2 eV — confirm with O 1s / C 1s). Correct the charge reference and apply the recipe again; the fitted positions are otherwise held near the wrong start.`,act:null}); }
+  // R12 (v1.9.13) χ²ν < 1 with neighbour-correlated residuals → smoothed / oversampled data (SPEC §17.12)
+  { const st=fin.stats||{}; const rho=st.rho1, cn=st.chi2nu; if(cn!=null&&rho!=null&&cn<1&&rho>0.3){ const fac=Math.sqrt((1+rho)/(1-Math.min(rho,0.95)));
+    push({key:"corrnoise",id:"corrnoise",sev:"info",ids:[],label:`χ²ν ${fmt(cn,2)} < 1 with correlated residuals (ρ₁ ${fmt(rho,2)})`,
+      tip:`χ²ν = ${fmt(cn,3)} below 1 together with a lag-1 residual autocorrelation ρ₁ = ${fmt(rho,2)}${st.runsZ!=null?` and runs z = ${fmt(st.runsZ,1)}`:""} is the signature of smoothed or oversampled data (step smaller than the resolution, or data smoothed/interpolated by the acquisition software), not of a misfit: neighbouring points are not independent, so the per-point variance looks small while the information is less than N points carry. Uncertainties from the covariance are then too small: for AR(1)-correlated residuals the variance of a mean grows by (1 + ρ₁)/(1 − ρ₁) (effective number of points n(1 − ρ₁)/(1 + ρ₁) — A. Zięba, Metrol. Meas. Syst. 17, 3 (2010), Eq. 15), so scale σ by √((1 + ρ₁)/(1 − ρ₁)) = ${fmt(fac,2)}. The results table already shows that factor and the Monte Carlo uncertainty adds AR(1) noise with this ρ₁ (SPEC §3.4) — use Monte Carlo for reporting. Compare models by relative χ²/AICc, not by χ²ν ≈ 1.`,act:{type:"mc",label:"Monte Carlo"}}); } }
+  // R13 (v1.9.13) multi-start (SPEC §17.12): same minimum = Δχ² < max(1, χ²ν) (UI); χ²ν > 2 with few starts → the model is wrong (misfit), not a search
+  // problem; few starts → rugged surface; equal χ² but different parameters (same-parameter count) → not unique
+  const mu_=fin.multi; if(mu_&&mu_.N>=6&&mu_.frac!=null){ const rid=(recipesFor(ctx.el,ctx.orb)[0]||{}).id, ract=rid&&!(ctx.recipe&&ctx.recipe.id===rid)?{type:"recipe",recipe:rid,label:"Apply recipe"}:null;
+    const nu=mu_.chi2nu!=null?mu_.chi2nu:(fin.stats&&fin.stats.chi2nu), thrT=mu_.thr!=null?` (Δχ² < max(1, χ²ν) = ${fmt(mu_.thr,2)})`:"";
+    if(mu_.frac<1/3&&nu!=null&&nu>2){ const bb=[]; free.forEach((f,j)=>{ if(f.k==="area") return; const p=val(f.id,f.k); if(p==null||!isFinite(f.lo)||!isFinite(f.hi)) return; if(atB[j]||Math.min(p-f.lo,f.hi-p)<=th.boundRel*(f.hi-f.lo)) bb.push(`${nm(f.id)} ${lab(f.k)} ${fmt(p+(f.k==="be"?sh:0),f.k==="be"?2:3)}`); });
+      const runs=[]; if(fin.mu&&fin.v){ let k0=-1, zs=0; for(let i=0;i<=n;i++){ const z=i<n?(y[i]-fin.mu[i])/Math.sqrt(fin.v[i]):-1; if(z>0){ if(k0<0){ k0=i; zs=0; } zs+=z; } else if(k0>=0){ const m=Math.floor((k0+i-1)/2); runs.push({be:E[m]+sh,z:zs/Math.sqrt(i-k0),w:(i-k0)*step}); k0=-1; } } runs.sort((a,b)=>b.z-a.z); }
+      const top=runs.slice(0,3).filter(q=>q.z>2);
+      push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Model misfit: χ²ν ${fmt(nu,2)}, same minimum ${mu_.near}/${mu_.N}`,
+        tip:`χ²ν = ${fmt(nu,2)} (> 2) and only ${mu_.near} of ${mu_.N} starts reached the best minimum${thrT}: the model is wrong — a component is missing, or a bound or width limit is binding — so the starts end in different poor compromises. More starts will not help. `+(bb.length?`Parameters at a bound: ${bb.slice(0,6).join("; ")}. `:"No nonlinear parameter is at a bound. ")+(top.length?`Largest positive residual runs (data above the model): ${top.map(q=>`${fmt(q.be,2)} eV (z ${fmt(q.z,1)}, ${fmt(q.w,2)} eV wide)`).join(", ")} — add a line there or widen the binding range.`:"")+(rid?` The region recipe sets literature lines and ranges.`:""),act:ract}); }
+    else if(mu_.frac<1/3) push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Multi-start: same minimum in ${mu_.near}/${mu_.N} starts`,
+      tip:`Only ${mu_.near} of ${mu_.N} starting points ended at the best minimum${thrT}: the χ² surface has several minima of similar depth, so the model is not unique — components can trade places (a wide line taking a lattice-like maximum, a Lorentzian tail standing in for a missing line). Constrain it: BE ranges ('Bounded' in a component's BE field, or 'Bound positions'), tied widths and one shared L fraction`+(rid?`, or the region recipe (${(recipeById(rid)||{}).name}), which sets literature ranges and ties`:"")+`. Then run Multi-start again — a well-posed model reaches the same minimum from most starts.`,act:ract});
+    else if(mu_.sameP!=null&&mu_.near>=2&&mu_.sameP<0.5*mu_.near) push({key:"multiP",id:"multi",sev:"warn",ids:[],label:`Multi-start: equal χ², different parameters (${mu_.sameP}/${mu_.near})`,
+      tip:`${mu_.near} of ${mu_.N} starts reached the best χ²${thrT}, but only ${mu_.sameP} of them have every position, width and shape parameter within 1σ of the best solution: solutions with different parameters fit equally well — the model is not unique. Report only quantities that agree between the solutions (sums of overlapping lines), or constrain the model (ranges, tied widths, shared L fraction`+(rid?`, the region recipe`:"")+`).`,act:ract}); }
+  // R14 (v1.9.13) a high L fraction next to a free line or a window end: the Lorentzian tail stands in for a missing line (SPEC §17.12)
+  comps.forEach((c,i)=>{ if(c.m==null||!isFree(c.id,"m")||!(c.m>0.6)) return; const w2=2*fw(i);
+    const nb=comps.filter((o,j)=>j!==i&&isFree(o.id,"be")&&Math.abs(o.be-c.be)<=w2).sort((x,y)=>Math.abs(x.be-c.be)-Math.abs(y.be-c.be)); const edge=Math.min(c.be-E[0],E[n-1]-c.be)<=w2;
+    if(!nb.length&&!edge) return; const a=shareM();
+    push({key:"ltail|"+c.id,id:"ltail",sev:"warn",ids:[c.id].concat(nb.map(o=>o.id)),label:`${nm(c.id)}: high L frac. (${fmt(c.m,2)}) near ${nb.length?nm(nb[0].id):"the window end"}`,
+      tip:`${nm(c.id)} has a free L fraction of ${fmt(c.m,3)} (> 0.6) while ${nb.length?nb.map(o=>nm(o.id)).join(", ")+" (free position)":"a window end"} lies within 2 FWHM (${fmt(w2,2)} eV). A long Lorentzian tail can take up the intensity of a missing line or of the background near the edge — a known artifact; the fitted area and the neighbour's position then trade off. Use one shared L fraction for the region (typical GL(30) ≈ 0.3) and add or bound the missing line (e.g. the recipe's lines).`+(a?SHM_TIP:""),act:a}); });
+  // R15 (v1.9.13) L fractions that differ between the lines of one region
+  { const fm=mComps.filter(c=>isFree(c.id,"m")); const vs=mComps.map(c=>c.m); const spread=vs.length>1?Math.max(...vs)-Math.min(...vs):0;
+    if(mComps.length>1&&spread>0.2&&fm.length){ push({key:"mdiff",id:"mdiff",sev:"warn",ids:mComps.map(c=>c.id),label:`L fractions differ (${fmt(Math.min(...vs),2)}–${fmt(Math.max(...vs),2)})`,
+      tip:`The GL lines of this region have L fractions from ${fmt(Math.min(...vs),3)} to ${fmt(Math.max(...vs),3)} (spread > 0.2). The Lorentzian share is set mostly by the instrument and the core-hole lifetime, which are common to the lines of one region; different values let lines differ in shape only, which trades off against areas and positions (a Gaussian line next to a Lorentzian-tailed one).`+SHM_TIP,act:shareM()}); } }
   // R10 peak overlaps with other elements present (v1.9.7, SPEC §17.8)
   if(ctx.present) overlapFindings(ctx.el,ctx.orb,ctx.present,{hv:ctx.hv,lo:E[0]+sh,hi:E[n-1]+sh}).forEach(push);
   out.sort((a,b)=>SEV_ORDER[a.sev]-SEV_ORDER[b.sev]);
+  // v1.9.13: a merge is the usual cause of the correlated pairs / L-frac. bound hits of the same lines → listed first; those items say so (SPEC §17.12)
+  const mg=out.filter(x=>x.id==="merge"); if(mg.length){ const mids=new Set([].concat(...mg.map(x=>x.ids)));
+    out.forEach(x=>{ if(x.id==="merge") return; if((x.id==="corr"||x.id==="bound")&&x.ids.some(id=>mids.has(id))){ x.tip+=" Note: these lines also merge (first item) — that is the likely cause; fixing the shape or this pair does not cure it."; x.byMerge=true; } });
+    const rest=out.filter(x=>x.id!=="merge"); rest.sort((a,b)=>(SEV_ORDER[a.sev]-SEV_ORDER[b.sev])||((a.byMerge&&a.act&&a.act.type==="shareM"?1:0)-(b.byMerge&&b.act&&b.act.type==="shareM"?1:0))); out.length=0; out.push(...mg,...rest); }
   return out;
 }
 /* ------------------------------------------------------------
@@ -46594,6 +46875,17 @@ function applyAction(model,act,o){
   if(act.type==="offset"){ const c=byId[act.id], a=byId[act.ref]; if(!c||!a) return null; q(act.id).be={mode:"link",ref:act.ref,k:1,b:+(c.be-a.be).toFixed(4)}; return "Separation fixed"; }
   if(act.type==="window"){ const be0=o.be0!=null?o.be0:-Infinity, be1=o.be1!=null?o.be1:Infinity; if(act.side==="low") model.lo=Math.max(be0,model.lo-act.by); else model.hi=Math.min(be1,model.hi+act.by); return "Window widened"; }
   if(act.type==="bg"){ model.bg=Object.assign({},model.bg,{type:act.bg}); if(act.bg!=="active"){ delete model.bg.conv; } return "Background changed"; }
+  if(act.type==="shareM"){ const ids=(act.ids||[]).filter(id=>byId[id]); if(!ids.length) return null; ids.forEach(id=>{ byId[id].m=act.v; q(id).m={mode:"fixed"}; }); return "L fraction fixed (shared)"; }
+  if(act.type==="bound"){ const [a,b]=(act.ids||[]).map(id=>byId[id]).filter(Boolean).sort((x,y)=>x.be-y.be); if(!a||!b) return null;
+    // centre = the line's start value (position before the last fit, act.start — the UI passes it from the undo history) or its current value
+    const st0=c=>act.start&&act.start[c.id]!=null?act.start[c.id]:c.be;
+    const rng=c=>{ const R0=c.recipe?recipeById(c.recipe):null; const q0=(model.cons[c.id]||{}).be; if(R0&&q0&&q0.mode==="free"&&q0.lo!=null&&q0.hi!=null) return [q0.lo,q0.hi]; return [st0(c)-0.5,st0(c)+0.5]; };
+    const ra=rng(a), rb=rng(b), h=Math.max(0.05,(act.sep||0.3)/2); let mid=(st0(a)+st0(b))/2; if(!(st0(b)>st0(a))) mid=(a.be+b.be)/2;
+    const la=[ra[0],Math.min(ra[1],mid-h)], lb=[Math.max(rb[0],mid+h),rb[1]]; if(la[1]<=la[0]) la[0]=la[1]-0.5; if(lb[1]<=lb[0]) lb[1]=lb[0]+0.5;
+    [[a,la],[b,lb]].forEach(([c,r])=>{ q(c.id).be={mode:"free",lo:+r[0].toFixed(4),hi:+r[1].toFixed(4)}; c.be=Math.min(Math.max(c.be,r[0]),r[1]); });
+    const big=a.area>=b.area?a:b, sm=big===a?b:a; ["F","wG","wL"].forEach(k=>{ if(sm[k]!=null&&big[k]!=null&&sm.shape===big.shape&&!C.derivedParam(sm,k)){ const qq=(model.cons[sm.id]||{})[k]; if(qq&&qq.mode==="fixed") return; q(sm.id)[k]={mode:"link",ref:big.id,k:1,b:0}; sm[k]=big[k]; } });
+    if(sm.m!=null&&big.m!=null&&sm.shape===big.shape){ const qm=(model.cons[sm.id]||{}).m; if(!qm||qm.mode!=="fixed"){ q(sm.id).m={mode:"link",ref:big.id,k:1,b:0}; sm.m=big.m; } }
+    return "Positions bounded"; }
   if(act.type==="add"){ const anc=cs.reduce((a,c)=>!a||c.area>a.area?c:a,null); const c=C.newComp(anc?anc.shape:"GLS",act.be,{F:act.F,el:anc?anc.el:"",line:anc?anc.line:""});
     if(anc&&anc.m!=null) c.m=anc.m; const hh=C.trueFWHM(c.shape,C.shapeParams(c,1)).ymax; c.area=Math.max(1e-6,(act.h||1)/(hh||1));
     q(c.id).be={mode:"free",lo:+(act.be-1).toFixed(4),hi:+(act.be+1).toFixed(4)}; q(c.id).F={mode:"free",lo:0.3,hi:Math.max(4,act.F*2)}; if(anc&&anc.m!=null) q(c.id).m={mode:"link",ref:anc.id,k:1,b:0};
@@ -46676,7 +46968,7 @@ function stagedFit(prob,opt){
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }
 
-const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
+const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPE_C1S,RECIPE_O1S,c1sModel,c1sFit,c1sJob,c1sFlags,c1sLines,c1sCo3Default,fTestP,betaI,o1sModel,o1sFit,o1sJob,o1sFlags,o1sLatStarts,o1sExpect,O1S_LAT,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_GUIDE; else root.XPS_GUIDE=XPS_GUIDE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -48338,14 +48630,17 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;"
 const $q=(r,s)=>r.querySelector(s), $a=(r,s)=>[...r.querySelectorAll(s)];
 /* 알림: XPS 화면이 있으면 그래프 아래 알림 줄(최근 것 + 이전 6 개), 없으면 앱의 toast. act = {label, fn} 이면 버튼 */
 let MSGS=[];
-const note=(m,k,act)=>{ try{ const el=ROOT&&ROOT.querySelector&&ROOT.querySelector("#xpsMsg");
-  if(el){ MSGS.unshift({m:String(m),k:k||"",act:act||null,t:Date.now()}); MSGS=MSGS.slice(0,7); drawMsg(); return; }
+/* v1.9.13: sp (optional) binds the message to a spectrum — the bar shows the latest message of the selected spectrum (or a sample-wide one) and labels
+   region-bound messages with the region name, so a fit result of O 1s is never shown as if it were the C 1s result (SPEC §17.12) */
+const note=(m,k,act,sp)=>{ try{ const el=ROOT&&ROOT.querySelector&&ROOT.querySelector("#xpsMsg");
+  if(el){ MSGS.unshift({m:String(m),k:k||"",act:act||null,t:Date.now(),uid:sp&&sp.uid||null,reg:sp?(sp.region||"")+(sp.file?" · "+sp.file:""):""}); MSGS=MSGS.slice(0,12); drawMsg(); return; }
   if(typeof toast==="function") toast(m,k); else console.log(m); }catch(e){} };
 function drawMsg(){ const el=ROOT&&$q(ROOT,"#xpsMsg"); if(!el) return; if(!MSGS.length){ el.innerHTML=""; el.hidden=true; return; } el.hidden=false;
-  const m=MSGS[0], old=MSGS.slice(1);
-  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span><span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="xpsMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="xpsMsgX" title="Close">×</button></div>
-    ${old.length?`<details class="old"><summary>Earlier messages (${old.length})</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
-  $q(el,"#xpsMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); };
+  const sel=typeof S!=="undefined"&&S?S.sel:null; const m=MSGS.find(x=>!x.uid||x.uid===sel)||MSGS[0], old=MSGS.filter(x=>x!==m).slice(0,6);
+  const rl=x=>x.uid?`<span class="rg${x.uid!==sel?" other":""}" title="${esc("Message of "+x.reg+(x.uid!==sel?" — not the spectrum shown":""))}">${esc((x.reg||"").split(" · ")[0])}</span>`:"";
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span>${rl(m)}<span class="tx">${esc(m.m)}</span>${m.act?`<button class="btn xs" id="xpsMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="xpsMsgX" title="Close">×</button></div>
+    ${old.length?`<details class="old"><summary>Earlier messages (${old.length})</summary>${old.map(o=>`<div class="${esc(o.k)}">${rl(o)}${esc(o.m)}</div>`).join("")}</details>`:""}`;
+  $q(el,"#xpsMsgX").onclick=()=>{ MSGS=MSGS.filter(x=>x!==m); drawMsg(); };
   const b=$q(el,"#xpsMsgA"); if(b) b.onclick=()=>{ const f=m.act&&m.act.fn; m.act=null; drawMsg(); if(f) f(); };
 }
 const f=(v,d)=>v==null||!isFinite(v)?"—":(+v).toFixed(d==null?2:d);
@@ -48809,6 +49104,8 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   else if(d.cmd==="sens") out=C.sensJob(d.spec,d.model,d.variants);
   else if(d.cmd==="batch") out=C.batchJob(d.spec,d.model,d.opt);
   else if(d.cmd==="staged") out=self.XPS_GUIDE.stagedJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="c1s") out=self.XPS_GUIDE.c1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="o1s") out=self.XPS_GUIDE.o1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="xj") out=XJ[d.job](d.args,(fr,t)=>self.postMessage({id:d.id,prog:fr,txt:t||""}));
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
@@ -48819,7 +49116,7 @@ function pool(jobs,onDone,onProg){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):j.cmd==="c1s"?GD().c1sJob(j.prob,j.opt):j.cmd==="o1s"?GD().o1sJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -48849,16 +49146,22 @@ async function runFit(kind,spArg){
     prob.comps=best.comps; prob.bg=best.bg;
     setProg("불확도 계산…",K/(K+1));
     const [fin]=await pool([{cmd:"final",prob,opt:{}}],null,d=>setProg(`다듬기·불확도 — 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
-    const near=chis.filter(x=>x-best.chi2<1).length;
-    fin.multi=N>1?{N,chis,near,frac:near/N}:null;
-    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn"); return; }
+    // v1.9.13 (SPEC §17.12 R13): 'same minimum' = Δχ² < max(1, χ²ν_best) — the covariance is scaled by χ²ν, so Δχ²/χ²ν < 1 is the same 1σ criterion when
+    // σ is underestimated; 'same parameters' = every nonlinear free parameter (not areas, not background) within its 1σ (final covariance) of the best start
+    const dofB=Math.max(1,(best.N||prob.E.length)-(best.nfree||0)), nuB=best.chi2/dofB, thr=Math.max(1,nuB);
+    const near=chis.filter(x=>x-best.chi2<thr).length;
+    let sameP=null; { const pars=[].concat(...ok.map(o=>o.pars||[])), mpB=C.buildMap(prob); const nl=mpB.free.map((q,j)=>q.k!=="area"&&q.ci>=0?j:-1).filter(j=>j>=0);
+      const bi=chis.indexOf(best.chi2); const pb=bi>=0?pars[bi]:null; const sg=fin.cov&&fin.cov.sig;
+      if(pb&&sg&&pars.length===chis.length&&nl.length){ sameP=0; pars.forEach((v,i)=>{ if(!v||!(chis[i]-best.chi2<thr)) return; if(nl.every(j=>{ const s_=sg[j]; return s_>0&&isFinite(s_)?Math.abs(v[j]-pb[j])<=s_:Math.abs(v[j]-pb[j])<=1e-6*(Math.abs(pb[j])+1); })) sameP++; }); } }
+    fin.multi=N>1?{N,chis,near,frac:near/N,thr,chi2nu:nuB,sameP,fracP:sameP!=null?sameP/N:null}:null;
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`피팅 중에 ${sp.region} 의 모형이 바뀌어 결과를 버렸습니다 — 다시 Fit 하세요`,"warn",null,sp); return; }
     fin.iter0=best.iter||0;   // 시작점 묶음 피팅의 반복 수(최종 다듬기 fin.iter 와 따로)
     if(best.stop==="stalled"&&fin.stop!=="stalled"){ fin.stop="stalled"; fin.stall=best.stall||fin.stall||null; }   // 시작점 피팅에서 멈췄으면 그것을 알림 (SPEC §3.3b)
     if(best.branch&&!fin.branch) fin.branch=best.branch;   // 시작점 피팅에서 갇힌 매개변수를 되돌려 풀었으면 그것도 (SPEC §3.3b)
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null});
     p.ver++; save(); hideProg(); rerender();
-    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn");
+    const st=fin.stats; const stl=fin.stop==="stalled"; note(`피팅 완료 — χ²ν ${f(st.chi2nu,3)}, ${stl?"진전 멈춤(일찍 끝냄)":fin.conv?"수렴":"최대 반복 도달"}${fin.multi?`, ${N}개 시작 중 ${near}개가 같은 최솟값`:""}`,fin.conv&&!stl?"ok":"warn",null,sp);
   }catch(e){ hideProg(); RUN=null; note("피팅 중단: "+(e.message||e),"warn"); }
 }
 async function runMC(){
@@ -48873,7 +49176,7 @@ async function runMC(){
     const samples=[].concat(...outs.filter(Boolean).map(o=>o.samples)); const fails=outs.reduce((s,o)=>s+(o?o.fails:0),0);
     p.result.mc={summ:C.mcSummarize(samples),n:samples.length,fails,rho:outs[0]?outs[0].rho:null,phi:outs[0]?outs[0].phi:null,when:new Date().toISOString(),
       areaSum:samples.length?areaSumStats(samples):null};
-    save(); hideProg(); S.ui.tab="result"; rerender(); note(`Monte Carlo ${samples.length}회 완료${fails?` (실패 ${fails})`:""}`,"ok");
+    save(); hideProg(); S.ui.tab="result"; rerender(); note(`Monte Carlo ${samples.length}회 완료${fails?` (실패 ${fails})`:""}`,"ok",null,sp);
   }catch(e){ hideProg(); RUN=null; note("Monte Carlo 중단: "+(e.message||e),"warn"); }
 }
 function areaSumStats(samples){ const a=samples.map(s=>s.reduce((t,q)=>t+q.area,0)); const m=a.reduce((x,y)=>x+y,0)/a.length; return {mean:m,sd:Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/Math.max(1,a.length-1))}; }
@@ -49398,7 +49701,7 @@ function fitStrip(r,sp){
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
     r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
-  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="Fraction of starts reaching the minimum (Δχ²<1)">Same minimum<b>${r.multi.near}/${r.multi.N}</b></div>`);
+  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum: Δχ² < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
   if(r.optimizer==="simplex") parts.push(`<div title="Nelder–Mead simplex; count = χ² evaluations">Simplex<b>${r.iter} eval.</b></div>`);
   let w="";
@@ -49415,10 +49718,12 @@ function fitStrip(r,sp){
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=3;   // v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
+const CHECK_V=4;   // v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
 const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
+  if(R.kind==="c1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("One action: build the adventitious-carbon model, fit it, test the weak lines and set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
+  if(R.kind==="o1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Build and fit the O 1s model (lattice + surface O) on the charge-corrected scale; with a C 1s recipe fit of this sample the organic / carbonate O areas are bounded by the C 1s areas and the high-BE C 1s line is tested as O–C=O and as CO₃²⁻. "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
   if(R.kind==="par"||R.kind==="emp") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe. "+R.how+" Window "+R.window[0]+"–"+R.window[1]+" eV, in-fit Shirley + slope. Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
   if(R.kind==="env") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" envelopes of the species ticked below: each species = its published peaks at fixed spacing, area % and FWHM; free per species: one position (± "+R.beTol+" eV around the charge-corrected literature BE) and one area. Window "+R.window[0]+"–"+R.window[1]+" eV (2p3/2), Shirley fitted with the envelopes. Species fractions appear in Fit check after the fit. Pitfalls: "+R.pitfalls+" "+TM_PIT+" Source: "+R.cite)}">Recipe</button>`;
   return `<select class="xps-sel" id="xpsRcpO" title="${esc(R.name+" — literature starting model with doublet links (ΔE shared, u/v area 2/3, equal widths), window and background. "+R.cite)}">${R.options.map(o=>`<option value="${o.id}" ${o.id===cur_?"selected":""}>${esc(o.label)}</option>`).join("")}</select><button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("Replace the components by the "+R.name+" recipe (anchored to the charge correction; lines aligned to the data within ±3 eV). Pitfalls: "+R.pitfalls)}">Recipe</button>`; }
@@ -49429,13 +49734,29 @@ function envOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD(
 /* v1.9.7 parametric / empirical recipes (SPEC §17.8): species tick boxes · flags (Fix ratio, Plasmon, MNN Auger, FWHM×) */
 function parOpts(sp,R){ const ui=S.ui; const sel=(ui.rcpSp&&ui.rcpSp[R.id])||GD().parDefaults(R); const fl={}; (R.flags||[]).forEach(q=>{ const v=ui.rcpFl&&ui.rcpFl[R.id]&&ui.rcpFl[R.id][q.id]; fl[q.id]=v!=null?!!v:!!q.def; });
   return {species:sel.slice(),flags:fl,hv:sp&&sp.hv}; }
-function rcpOpts(sp,R,fallback){ return R.kind==="env"?envOpts(sp,R):(R.kind==="par"||R.kind==="emp")?parOpts(sp,R):(fallback||S.ui.rcpOpt||"mix"); }
+function rcpOpts(sp,R,fallback){ return R.kind==="c1s"?c1sOpts(sp,R):R.kind==="o1s"?o1sOpts(sp,R):R.kind==="env"?envOpts(sp,R):(R.kind==="par"||R.kind==="emp")?parOpts(sp,R):(fallback||S.ui.rcpOpt||"mix"); }
 function recipeParRow(sp,R){ const o=parOpts(sp,R); const multi=R.species.length>1;
   const box=s=>{ const l0=s.lines[0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+s.lines.length+" "+(R.dE?"spin–orbit pair":"line")+(s.lines.length>1?"s":"")+", main line "+l0.be+" eV ("+(R.c1s!=null?"C 1s "+R.c1s+" eV":R.off?"Fermi-edge scale":"source scale")+")"+(s.ratio?", c4f⁰ : c4f¹L = "+s.ratio.join(":")+" (Sunding Table 5)":"")+". Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
   const fls=(R.flags||[]).filter(q=>!q.al||!sp||Math.abs((sp.hv||1486.6)-1486.6)<2);
   if(!multi&&!fls.length) return "";
   return `<div class="xps-row xps-rcp-env" id="xpsRcpPar">${multi?R.species.map(box).join(""):`<span class="muted xs" title="${esc(R.how)}">${esc(R.kind==="emp"?"Empirical envelope (single crystal, areas free)":R.species[0].label)} ⓘ</span>`}${fls.map(q=>`<label class="xps-rcp-sp" title="${esc(q.tip)}"><input type="checkbox" data-rfl="${q.id}" ${o.flags[q.id]?"checked":""}>${esc(q.label)}</label>`).join("")}</div>`; }
-function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(R&&(R.kind==="par"||R.kind==="emp")) return recipeParRow(sp,R); if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
+/* v1.9.13 C 1s / O 1s recipes (SPEC §17.10–17.11): flag rows (ids as the parametric row, so bindGuide stores them the same way) */
+function c1sOpts(sp,R){ const st=(S.ui.rcpFl&&S.ui.rcpFl[R.id])||{}; const pres=[...presentEls(sp)]; return {flags:GD().c1sFlags(R,{flags:st,present:pres}),present:pres}; }
+/* the C 1s spectrum of the sample to link to: a fresh C 1s recipe fit first, then any fitted C 1s, then any C 1s */
+function c1sOf(sp){ const L=chgCands(SK(sp)); const rc=s=>{ const r=fitted(s); return r&&r.comps.some(c=>c.recipe==="c1s")?2:r?1:0; }; return L.slice().sort((a,b)=>rc(b)-rc(a))[0]||null; }
+/* O expected from C 1s (SPEC §17.11): C 1s recipe areas (+ covariance σ) and R = (S·T·λ)O / (S·T·λ)C from the Quantification tab's settings */
+function c1sLink(sp,cs,sfRel){ const r=cs&&fitted(cs); if(!r||!r.comps.some(c=>c.recipe==="c1s")) return null; const comps={};
+  r.comps.forEach((c,i)=>{ if(["co","cdo","oco","co3"].includes(c.rk)) comps[c.rk]={a:Math.max(0,r.summ[i].area),s:(r.summ[i].sig&&r.summ[i].sig.area)||0}; });
+  const row=(s_,el,orb,BE)=>{ const ov=S.quant.rows[s_.uid+"|"+el]||{}; const lk=rsfLookup(el,orb,S.quant.lib,s_.hv); const Sv=ov.rsf!=null?+ov.rsf:(lk?lk.v:null); return {el,area:1,S:Sv,BE,hv:s_.hv||1486.6,PE:s_.meta&&s_.meta.passEnergy,tf:tfFor(s_)}; };
+  const rC=row(cs,"C","1s",285), rO=row(sp,"O","1s",531); if(!(rC.S>0)||!(rO.S>0)) return null;
+  const q=C.quantify([rC,rO],{imfp:S.quant.imfp}); const R=q[1].den/q[0].den; if(!(R>0)) return null;
+  return {R,sfRel,comps,from:cs.uid,src:`${S.quant.lib} S, ${S.quant.imfp.model} λ`,SC:rC.S,SO:rO.S}; }
+function o1sOpts(sp,R){ const st=(S.ui.rcpFl&&S.ui.rcpFl[R.id])||{}; const pres=[...presentEls(sp)]; const sf=S.ui.rcpSF!=null?+S.ui.rcpSF:10; const cs=c1sOf(sp); const link=c1sLink(sp,cs,sf/100);
+  return {flags:GD().o1sFlags(R,{flags:st,present:pres,link}),present:pres,link,cs}; }
+function recipeCORow(sp,R){ const o=R.kind==="c1s"?c1sOpts(sp,R):o1sOpts(sp,R);
+  const fls=R.flags.filter(q=>R.kind!=="o1s"||q.id!=="link"||o.link);
+  return `<div class="xps-row xps-rcp-env" id="xpsRcpPar">${fls.map(q=>`<label class="xps-rcp-sp" title="${esc(q.tip)}"><input type="checkbox" data-rfl="${q.id}" ${o.flags[q.id]?"checked":""}>${esc(q.label)}</label>`).join("")}${R.kind==="o1s"&&o.link?`<span class="xps-f" title="${esc("Uncertainty of the O/C sensitivity-factor ratio (S·T·λ) used for the C 1s ↔ O 1s link, in %. Default 10 % is an assumption, not a literature value — set it for your instrument and RSF library. It widens the area bands together with the C 1s area σ.")}">SF ± <input type="number" class="w56" id="xpsRcpSF" min="0" max="100" step="1" value="${S.ui.rcpSF!=null?S.ui.rcpSF:10}"> %</span>`:""}</div>`; }
+function recipeEnvRow(sp,p){ const L=recipeList(sp); const R=L[0]; if(R&&(R.kind==="c1s"||R.kind==="o1s")) return recipeCORow(sp,R); if(R&&(R.kind==="par"||R.kind==="emp")) return recipeParRow(sp,R); if(!R||R.kind!=="env") return ""; const o=envOpts(sp,R);
   const has10=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[2]!=null))), has20=R.species.some(s=>(s.sets||[s]).some(t=>t.peaks.some(r=>r[3]!=null)));
   const box=s=>{ const t=(s.sets||[s]).map(x=>x.peaks.length).reduce((a,b)=>a+b,0); const be=(s.sets?s.sets[0]:s).peaks[0][0]; return `<label class="xps-rcp-sp" title="${esc(s.label+": "+t+" peaks"+(s.sets?" in "+s.sets.length+" sets ("+s.sets.map(x=>x.label).join(", ")+")":"")+", main line "+be+" eV (charge-corrected). Tick to include it in the recipe.")}"><input type="checkbox" data-rsp="${s.key}" ${o.species.includes(s.key)?"checked":""}>${esc(s.short||s.label)}</label>`; };
   return `<div class="xps-row xps-rcp-env" id="xpsRcpEnv">${R.species.map(box).join("")}<select class="xps-sel" id="xpsRcpPE" title="${esc("Pass energy column of the published FWHMs (Biesinger: PE 10 and/or PE 20 eV). "+(has10&&has20?"Where only one column exists for a peak, that one is used.":"This table has PE "+(has10?"10":"20")+" widths only.")+" Default from the spectrum's pass energy (≤ 15 eV → 10).")}"><option value="10" ${o.pe===10?"selected":""}>PE 10</option><option value="20" ${o.pe===20?"selected":""}>PE 20</option></select><label class="xps-rcp-sp" title="One common FWHM scale (0.6–1.6×) for all envelope peaks — Biesinger notes the widths can be adjusted for other instruments or pass energies. Off: widths fixed at the table values."><input type="checkbox" id="xpsRcpW" ${o.wscale?"checked":""}>FWHM×</label>${R.stoich?`<label class="xps-rcp-sp" title="Fe₃O₄: tie the Fe³⁺ set to the Fe²⁺ set — area 2 : 1 (stoichiometric) and fixed separation (literature 1.8 eV). Off: the two sets are free (the table itself has 68.5 : 31.4)."><input type="checkbox" id="xpsRcpS" ${o.stoich?"checked":""}>Fe₃O₄ 1:2</label>`:""}</div>`; }
@@ -49444,6 +49765,8 @@ function recipeBanner(sp,p){ const r=sp.reg||{}; const G_=GD(); if(!G_||!r.el) r
   if(inUse){ const m=p.recipe||{}; return `<div class="muted xs" style="margin:2px 0 4px" title="${esc(rc.pitfalls+"\n"+rc.cite)}">Recipe model: ${esc(rc.name)}${m.label?" · "+esc(m.label):""}${m.align!=null&&Math.abs(m.align)>0.05?` · aligned ${m.align>0?"+":""}${f(m.align,2)} eV`:""} ⓘ</div>`; }
   return `<div class="note xps-rcp-b" style="margin:4px 0 6px" title="${esc(ci.why+"."+(rc?" "+rc.pitfalls:" No recipe is built in: fit the envelope and use the summed area, or use measured reference spectra (Store as reference → LCF).")+(ci.closed?" Closed-shell exception: "+ci.closed+".":"")+(ci.note?" "+ci.note:""))}">${esc(r.el+" "+r.orb)}: ${ci.kind==="satellite"?"satellite-rich region":"complex region"}${rc?(rc.kind==="emp"?" — empirical envelope available (Recipe)":" — literature recipe available (Recipe)"):""} ⓘ</div>`; }
 function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&GD().recipeById(id); if(!R) return; let M;
+  if(R.kind==="c1s") return applyC1s(sp,opt&&typeof opt==="object"?opt:c1sOpts(sp,R));
+  if(R.kind==="o1s") return applyO1s(sp,opt&&typeof opt==="object"?opt:o1sOpts(sp,R));
   const env=R.kind==="env", par=R.kind==="par"||R.kind==="emp"; const eo=env||par?(opt&&typeof opt==="object"?opt:rcpOpts(sp,R)):null;
   try{ M=GD().recipeModel(id,env||par?Object.assign({shift:shOf(sp),be:sp.be,y:sp.y},eo):{shift:shOf(sp),be:sp.be,y:sp.y,opt:opt||"mix"}); }catch(e){ note(e.message,"warn"); return; }
   pushHist(p,"Recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
@@ -49453,6 +49776,64 @@ function applyRecipe(sp,id,opt){ if(!sp) return; const p=pr(sp); const R=GD()&&G
   if(env){ note(`${R.name}: ${M.recipe.species.length} species, ${M.comps.length} peaks, window ${f(M.lo+shOf(sp),1)}–${f(M.hi+shOf(sp),1)} eV, Shirley in fit, FWHM PE ${M.recipe.pe}${M.recipe.wscale?" ×scale":""}.`+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.","ok",{label:"Staged fit",fn:()=>runStaged(sp)}); return; }
   const a=M.recipe.align, far=Math.abs(a)>0.5;
   note(`${R.name} · ${M.recipe.label}: ${M.comps.length} pairs, window ${f(M.lo+shOf(sp),0)}–${f(M.hi+shOf(sp),0)} eV, in-fit Shirley.`+(far?` The lines match the data ${a>0?"+":""}${f(a,2)} eV away from the charge-corrected literature positions — check the charge correction (differential charging?).`:"")+(M.recipe.clipped.length?" Window clipped to the spectrum.":"")+" Next: Staged fit.",far?"warn":"ok",{label:"Staged fit",fn:()=>runStaged(sp)}); }
+/* v1.9.13 C 1s recipe (SPEC §17.10): one action = model → fit (Worker 'c1s': staged fit, relative windows, weak-line F-test) → whole-sample charge
+   correction with the fitted reference line. The fit is on measured BE, so Δ replaces any earlier correction (no double shift). */
+async function applyC1s(sp,o){
+  if(RUN){ note("Already computing","warn"); return; }
+  const p=pr(sp), R=GD().recipeById("c1s"), sm=smpOf(sp), k=SK(sp); o=o||c1sOpts(sp,R);
+  const tg=o.flags.sp2?R.sp2ref:(sm.c1sSp2?R.ref:(sm.target!=null?sm.target:R.ref));
+  let M; try{ M=GD().recipeModel("c1s",{shift:shOf(sp),be:sp.be,y:sp.y,flags:o.flags,present:o.present,target:tg}); }catch(e){ note(e.message,"warn",null,sp); return; }
+  if(!M.recipe.found){ note("C 1s recipe: no C 1s peak found near "+f(tg-shOf(sp),1)+" eV (measured) — check the spectrum","warn",null,sp); return; }
+  pushHist(p,"C 1s recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; touch(p); rerender();
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; }
+  const t0=performance.now(), ver=p.ver;
+  try{ setProg("C 1s recipe: staged fit, weak-line test…",null);
+    const [fin]=await pool([{cmd:"c1s",prob,opt:{drop:o.flags.weak!==false,target:tg}}],null,d=>setProg(`C 1s recipe… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
+    if(!fin) throw new Error("no result");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
+    const slot={}; p.comps.forEach(c=>slot[c.id]=c.slot); p.comps=fin.comps; p.comps.forEach(c=>{ if(c.slot==null) c.slot=slot[c.id]!=null?slot[c.id]:slotFor(p); }); p.cons=fin.cons;
+    p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; hideProg();
+    const info=fin.c1s, ref=p.comps.find(c=>c.id===info.refId)||p.comps.find(c=>c.rrole==="ref"); const old=sm.shift||0;
+    if(o.flags.sp2){ sm.target=R.sp2ref; sm.c1sSp2=true; } else if(sm.c1sSp2){ sm.target=R.ref; delete sm.c1sSp2; }
+    sm.refUid=sp.uid; sm.refComp=ref.id;
+    setShift(sp,tg-ref.be,{uid:sp.uid,compId:ref.id,be:ref.be,name:ref.name||"",file:sp.file||"",target:tg},`C 1s recipe ‘${ref.name}’ ${f(ref.be,2)} → ${f(tg,2)} eV · ${sp.file||sp.name}`);
+    const sg=v=>(v>0?"+":"")+f(v,2); const dr=info.dropped||[];
+    const msg=`C 1s recipe: ${ref.name} ${f(ref.be,2)} eV (measured) → ${f(tg,2)} eV · Δ ${sg(sm.shift)} eV, whole sample ${smpDisp(k).name}${Math.abs(old-sm.shift)>0.0005?` (was ${sg(old)})`:""} · ${p.comps.length} lines, χ²ν ${f(fin.stats.chi2nu,2)}`
+      +(dr.length?` · dropped ${dr.map(d=>`${d.name} (F-test p ${f(d.p,2)})`).join(", ")}`:"")+(o.flags.co3?" · CO₃²⁻ overlaps O–C=O: check O 1s":"")+(o.flags.sp2?" · sp² reference 284.4 eV":"");
+    note(msg,fin.conv&&fin.stop!=="stalled"?"ok":"warn",dr.length?{label:"Keep all",fn:()=>applyC1s(sp,Object.assign({},o,{flags:Object.assign({},o.flags,{weak:false})}))}:null,sp);
+  }catch(e){ hideProg(); RUN=null; note("C 1s recipe stopped: "+(e.message||e),"warn",null,sp); }
+}
+/* v1.9.13 O 1s recipe (SPEC §17.11): positions on the corrected scale; the C 1s ↔ O 1s link needs a C 1s recipe fit of the sample */
+async function applyO1s(sp,o){
+  if(RUN){ note("Already computing","warn"); return; }
+  const p=pr(sp), R=GD().recipeById("o1s"); o=o||o1sOpts(sp,R); const cs=o.cs!==undefined?o.cs:c1sOf(sp); const cst=chgState(sp);
+  const cFit=cs&&fitted(cs), cRec=cFit&&cFit.comps.some(c=>c.recipe==="c1s");
+  if(cs&&(!cRec||cst.st==="none"||cst.st==="stale")&&!o.force){
+    note(`O 1s recipe: ${!cFit?"the C 1s of this sample is not fitted":!cRec?"the C 1s of this sample was not fitted with the C 1s recipe":"the charge correction is "+(cst.st==="none"?"missing":"stale")} — O 1s positions are on the corrected scale and the C 1s ↔ O 1s link uses the C 1s recipe areas. Run the C 1s recipe first.`,"warn",
+      {label:"Run C 1s recipe",fn:async()=>{ await applyC1s(cs); if(fitted(cs)) applyO1s(sp); }},sp); return; }
+  const sh=shOf(sp), build={shift:sh,flags:o.flags,present:o.present,link:o.flags.link?o.link:null};
+  let M; try{ M=GD().recipeModel("o1s",Object.assign({be:sp.be,y:sp.y},build)); }catch(e){ note(e.message,"warn",null,sp); return; }
+  pushHist(p,"O 1s recipe"); p.lo=M.lo; p.hi=M.hi; p.bg=Object.assign({n:5,C:1643,D:0,u3:false},C.clone(M.bg)); p.comps=[]; p.cons=M.cons;
+  M.comps.forEach(c=>{ c.slot=slotFor(p); p.comps.push(c); }); p.recipe=M.recipe; touch(p); rerender();
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; }
+  const t0=performance.now(), ver=p.ver;
+  try{ setProg("O 1s recipe: staged fit"+(build.link?", O–C=O vs CO₃²⁻ test":"")+"…",null);
+    const [fin]=await pool([{cmd:"o1s",prob,opt:{build}}],null,d=>setProg(`O 1s recipe… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
+    if(!fin) throw new Error("no result");
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
+    const slot={}; p.comps.forEach(c=>slot[c.id]=c.slot); p.comps=fin.comps; p.comps.forEach(c=>{ if(c.slot==null) c.slot=slot[c.id]!=null?slot[c.id]:slotFor(p); }); p.cons=fin.cons;
+    p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; save(); hideProg(); rerender();
+    const I=fin.o1s, h=I.hyp; const rs=I.residual;
+    const msg=`O 1s recipe: ${p.comps.length} lines, χ²ν ${f(fin.stats.chi2nu,2)} · lattice O ${f(rs.latPct,1)} % of O`+(rs.ohExcess!=null?` · OH⁻ beyond CO₃²⁻ ${f(100*rs.ohExcess/rs.total,1)} %`:"")
+      +(I.latlo&&I.latlo.with?` · low lattice line: ${I.latlo.verdict} (ΔAICc ${f(I.latlo.dAICc,1)})`:"")+(h?` · high-BE C 1s line: ${h.verdict} (AICc O–C=O ${f(h.oco.AICc,1)} vs CO₃²⁻ ${f(h.co3.AICc,1)})`:"")+(!cs?" · no C 1s in this sample (no link)":"")+(!sh&&cst.st==="none"?" · not charge-corrected: positions are measured BE":"");
+    note(msg,fin.conv&&fin.stop!=="stalled"?"ok":"warn",null,sp);
+  }catch(e){ hideProg(); RUN=null; note("O 1s recipe stopped: "+(e.message||e),"warn",null,sp); }
+}
 async function runStaged(spArg){
   const sp=spArg&&spArg.uid?spArg:cur(); if(!sp) return; const p=pr(sp);
   if(!p.comps.length){ note("No components — use Auto suggest or Recipe first","warn"); return; }
@@ -49462,11 +49843,11 @@ async function runStaged(spArg){
   try{ setProg("Staged fit: heights → positions → all, plus the normal fit…",null);
     const [fin]=await pool([{cmd:"staged",prob,opt:{}}],null,d=>setProg(`Staged fit… iteration ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     if(!fin) throw new Error("no result");
-    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn"); return; }
+    if(p.ver!==ver||S.proc[sp.uid]!==p){ hideProg(); const hi=(p.hist||[]).indexOf(hEnt); if(hi>=0) p.hist.splice(hi,1); note(`The model of ${sp.region} changed during the fit — result discarded`,"warn",null,sp); return; }
     p.comps=fin.comps; p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
     p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
     p.ver++; save(); hideProg(); rerender();
-    const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn");
+    const s=fin.staged; note(`Staged fit done — kept the ${s.used} result (χ²_d ${g(Math.min(s.chi2dStaged,s.chi2dNormal),6)}; ${s.used==="staged"?"normal fit "+g(s.chi2dNormal,6):"staged "+g(s.chi2dStaged,6)}) · χ²ν ${f(fin.stats.chi2nu,3)}`,fin.conv&&fin.stop!=="stalled"?"ok":"warn",null,sp);
   }catch(e){ hideProg(); RUN=null; note("Staged fit stopped: "+(e.message||e),"warn"); }
 }
 /* elements present for the overlap rules (SPEC §17.8): regions of the same sample + elements accepted in its survey */
@@ -49481,27 +49862,37 @@ function checkOf(sp,p){ const r=p.result; if(!r||r.stale||!GD()||!r.mu||!r.free)
   try{ items=GD().diagnose({E:Float64Array.from(R.E),y:Float64Array.from(R.y),fin:r,el:rg.el,orb:rg.orb,shift:sh,bgType:r.bgType||p.bg.type,spec:{be0:sp.be[0],be1:sp.be[sp.n-1]},recipe:rc?GD().recipeById(rc.recipe):null,recipeMeta:rc&&p.recipe&&p.recipe.id===rc.recipe?p.recipe:null,dEref:so&&so.dE,present:pres,hv:sp.hv}); }catch(e){ console.error(e); return null; }
   r.check={sh,v:CHECK_V,items,pk}; return items; }
 function derivedHTML(p){ const r=p.result; const rc=(r.comps||[]).find(c=>c.recipe); if(!rc||!GD()) return ""; const R=GD().recipeById(rc.recipe); if(!R) return "";
+  if(R.kind==="c1s"&&r.c1s){ const I=r.c1s, ref=r.comps.find(c=>c.id===I.refId); const sg=v=>(v>0?"+":"")+f(v,2);
+    const tt=(I.tests||[]).map(t=>`${t.name}: F ${f(t.F,1)} (${t.dp} par.), p ${t.p<1e-4?t.p.toExponential(1):f(t.p,3)}, area/σ ${t.z!=null?f(t.z,1):"—"}`).concat((I.dropped||[]).map(d=>`${d.name}: dropped (F ${f(d.F,2)}, p ${f(d.p,3)})`)).join("\n");
+    return `<div class="xps-chk-d"><span data-der="c1sref" title="${esc(`Charge reference: ${ref?ref.name:"C–C/C–H"} fitted at ${f(I.refBE,3)} eV (measured) → ${f(I.target,2)} eV, Δ = ${sg(I.delta)} eV for the whole sample. Report the reference used: 284.8 eV is a convention (±0.2–0.3 eV or more; Biesinger 2022, Greczynski & Hultman 2017).`)}">Ref → ${f(I.target,2)} <b>Δ ${sg(I.delta)}</b> eV</span><span data-der="c1sweak" title="${esc("Weak-line test (F-test on the data-variance χ², α = "+I.alpha+"; area/σ from the covariance):\n"+tt)}">F-test: ${(I.tests||[]).length} kept${(I.dropped||[]).length?` · ${I.dropped.length} dropped`:""}</span><span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
+  if(R.kind==="o1s"&&r.o1s){ const I=r.o1s, rs=I.residual, h=I.hyp, ex=I.expect;
+    const et=ex?Object.entries(ex).map(([k,e])=>`${k}: expected ${g(e.E,4)} ± ${g(e.s,3)}${e.lower?" (lower bound only)":""}`).join("\n"):"no C 1s link";
+    return `<div class="xps-chk-d"><span data-der="o1slat" title="${esc("Lattice O = sum of the lattice lines / all O 1s lines. "+et)}">Lattice O <b>${f(rs.latPct,1)}</b> %</span>${rs.ohExcess!=null?`<span data-der="o1soh" title="${esc("OH⁻/CO₃²⁻ line area minus the carbonate O expected from C 1s (3 O per CO₃²⁻), as % of all O — the hydroxide (and other ≈ 531.5 eV O) not explained by carbonate.")}">OH⁻ excess <b>${f(100*rs.ohExcess/rs.total,1)}</b> %</span>`:""}${h?`<span data-der="o1shyp" title="${esc(`High-BE C 1s line (O–C=O + CO₃²⁻ area) assigned two ways, same O 1s line set: as O–C=O (2 O: ≈532 + ≈533.5 eV) χ²_d ${f(h.oco.chi2d,1)}, AICc ${f(h.oco.AICc,1)}, χ²ν ${f(h.oco.chi2nu,3)}; as CO₃²⁻ (3 O at ≈531.5 eV) χ²_d ${f(h.co3.chi2d,1)}, AICc ${f(h.co3.AICc,1)}, χ²ν ${f(h.co3.chi2nu,3)}${h.fitted?`; split as fitted in C 1s (O–C=O and CO₃²⁻ lines separately): AICc ${f(h.fitted.AICc,1)}`:""}. ΔAICc (CO₃²⁻ − O–C=O) = ${f(h.dAICc,1)}; |ΔAICc| < 2: not distinguishable.`)}">C 1s high-BE: <b>${esc(h.verdict)}</b></span>`:""}${I.latlo&&I.latlo.with?`<span data-der="o1slow" title="${esc(`Low lattice line (528.0–529.2 eV) compared with the same model without it: AICc ${f(I.latlo.with.AICc,1)} (with, ${I.latlo.with.p} par.) vs ${f(I.latlo.without.AICc,1)} (without, ${I.latlo.without.p} par.); ΔAICc = ${f(I.latlo.dAICc,1)} — > 2 supports the line.`)}">Low lattice: <b>${esc(I.latlo.verdict.split(" (")[0])}</b></span>`:""}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
   const dv=GD().recipeDerived(r,{id:R.id,cons:p.cons}).filter(d=>d.v!=null||d.flag); if(!dv.length) return "";
   return `<div class="xps-chk-d">${dv.map(d=>`<span data-der="${d.id}" class="${d.fixed?"fx":d.flag?"fl":""}" title="${esc(d.tip)}">${esc(d.label)} <b>${d.flag&&d.v>=100?"≥ ":""}${f(d.v,1)}</b>${d.sig!=null?` <span class="muted xs">± ${f(d.sig,1)}</span>`:""} %${d.fixed?` <span class="muted xs">fixed</span>`:""}${d.flag?` <span class="badge wr" title="${esc(d.flag)}">!</span>`:""}</span>`).join("")}<span class="muted xs" title="${esc(R.pitfalls+"\n"+R.cite)}">${esc(R.name)} ⓘ</span></div>`; }
 function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const items=checkOf(sp,p); if(!items) return "";
   const nW=items.filter(x=>x.sev!=="info").length; const s=r.staged;
   const st=s?`<span class="muted xs" title="${esc(`Staged fit (SPEC §17.4): stage χ² ${s.stages.map(q=>g(q.chi2,5)).join(" → ")}; data-variance χ²_d staged ${g(s.chi2dStaged,6)} vs normal fit ${g(s.chi2dNormal,6)} — the lower one is kept`)}">staged: kept ${esc(s.used)} ⓘ</span>`:"";
-  const rows=items.map((x,i)=>`<li class="${x.sev}"><span class="ic">${x.sev==="info"?"i":"!"}</span><span class="tx" title="${esc(x.tip)}">${esc(x.label)} ⓘ</span>${x.act?`<button class="btn xs" data-chk="${i}">${esc(x.act.label)}</button>`:""}</li>`).join("");
+  const rows=items.map((x,i)=>`<li class="${x.sev}"><span class="ic">${x.sev==="info"?"i":"!"}</span><span class="tx" title="${esc(x.tip)}">${esc(x.label)} ⓘ</span>${(x.acts||(x.act?[x.act]:[])).length?`<span class="acts">${(x.acts||[x.act]).map((a,j)=>`<button class="btn xs" data-chk="${i}" data-ai="${j}">${esc(a.label)}</button>`).join("")}</span>`:""}</li>`).join("");
   return `<div class="xps-chk" id="xpsChk"><div class="xps-chk-h"><span title="${esc(CHECK_HELP)}">Fit check ⓘ</span>${nW?`<span class="badge wr">${nW}</span>`:`<span class="badge ok">OK</span>`}${st}</div>${derivedHTML(p)}${rows?`<ul>${rows}</ul>`:`<div class="muted xs">No issues found.</div>`}</div>`; }
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
+  if(act.type==="mc"){ runMC(); return; }
   if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_?rcpOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
+  if(act.type==="bound"&&!act.start){ const h=(p.hist||[]).slice().reverse().find(x=>x.comps&&act.ids.every(id=>x.comps.some(c=>c.id===id))); if(h){ act=Object.assign({},act,{start:{}}); act.ids.forEach(id=>{ act.start[id]=h.comps.find(c=>c.id===id).be; }); } }   // start values = positions before the last fit
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
   try{ msg=GD().applyAction(m,act,{be0:sp.be[0],be1:sp.be[sp.n-1]}); }catch(e){ note(e.message,"warn"); return; }
   if(msg==null){ p.hist.pop(); note("Could not apply: "+act.label,"warn"); return; }
   p.lo=m.lo; p.hi=m.hi; p.bg=m.bg; p.comps=m.comps; p.cons=m.cons;
   p.comps.forEach(c=>{ if(c.slot==null){ if(!c.name) c.name=defName(sp,p,!!c.doublet); c.slot=slotFor(p); } });
   if(act.type==="bg") S.ui.knotMode=false;
-  touch(p); rerender(); note(`${act.label}: done — press Fit to refit`,"ok",{label:"Fit",fn:()=>runFit("one",sp)}); }
+  if(act.refit){ touch(p); rerender(); note(`${act.label}: done — refitting`,"ok",null,sp); runFit("one",sp); return; }
+  touch(p); rerender(); note(`${act.label}: done — press Fit to refit`,"ok",{label:"Fit",fn:()=>runFit("one",sp)},sp); }
 function bindGuide(el,sp,p){
   const st=$q(el,"#xpsStaged"); if(st) st.onclick=()=>runStaged(sp);
   const ro=$q(el,"#xpsRcpO"); if(ro) ro.onchange=()=>{ S.ui.rcpOpt=ro.value; save(); };
   const ra=$q(el,"#xpsRcpA"); if(ra) ra.onclick=()=>{ const R_=GD().recipeById(ra.dataset.rcp); applyRecipe(sp,ra.dataset.rcp,R_?rcpOpts(sp,R_,ro&&ro.value):(ro&&ro.value)||S.ui.rcpOpt||"mix"); };
+  const sfi=$q(el,"#xpsRcpSF"); if(sfi) sfi.onchange=()=>{ const v=+sfi.value; if(isFinite(v)&&v>=0){ S.ui.rcpSF=v; save(); } };
   const pv=$q(el,"#xpsRcpPar"); if(pv&&ra){ const id=ra.dataset.rcp; const put=(k,v)=>{ S.ui[k]=Object.assign({},S.ui[k]); S.ui[k][id]=v; save(); };
     $a(pv,"[data-rsp]").forEach(b=>b.onchange=()=>{ put("rcpSp",$a(pv,"[data-rsp]").filter(x=>x.checked).map(x=>x.dataset.rsp)); });
     $a(pv,"[data-rfl]").forEach(b=>b.onchange=()=>{ const cur=Object.assign({},(S.ui.rcpFl||{})[id]); cur[b.dataset.rfl]=b.checked; put("rcpFl",cur); }); }
@@ -49510,7 +49901,7 @@ function bindGuide(el,sp,p){
     const pe=$q(ev,"#xpsRcpPE"); if(pe) pe.onchange=()=>put("rcpPE",+pe.value);
     const w=$q(ev,"#xpsRcpW"); if(w) w.onchange=()=>put("rcpW",w.checked);
     const s_=$q(ev,"#xpsRcpS"); if(s_) s_.onchange=()=>put("rcpSt",s_.checked); }
-  const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.act); });
+  const items=p.result&&p.result.check&&p.result.check.items; $a(el,"[data-chk]").forEach(b=>b.onclick=()=>{ const x=items&&items[+b.dataset.chk]; if(x) applyCheck(sp,p,x.acts?x.acts[+b.dataset.ai||0]:x.act); });
 }
 function compCard(sp,p,c,ci){
   const sel=S.ui.selComp===c.id, sh=shOf(sp); const r=p.result&&!p.result.stale?p.result:null;
@@ -49521,7 +49912,7 @@ function compCard(sp,p,c,ci){
     const sig=sm&&sm.sig?(k==="be"?sm.sig.be:k==="area"?sm.sig.area:null):null;
     const lab=c.shape==="MEAS"&&k==="wG"?"Broadening":c.shape==="MEAS"&&k==="be"?"BE (max)":c.shape==="LA"&&k==="alpha"?"α (hi BE)":c.shape==="LA"&&k==="beta"?"β (lo BE)":c.shape==="DS"&&k==="alpha"?"α (asym.)":c.shape==="TLA"&&k==="alpha"?"α (power)":k==="tk"&&c.tail==="PHI"?"Tail k (len.)":(C.PDEF[k]||{lab:k}).lab;
     const tip=c.shape==="MEAS"&&k==="wG"?"Extra Gaussian broadening (FWHM, eV) applied to the reference shape. Fixed = off":c.shape==="MEAS"&&k==="be"?"Position of the reference maximum. Fixed = LCF (no shift); Free = shift δ fitted":c.shape==="LA"&&(k==="alpha"||k==="beta")?"Lorentzian power-law exponent — smaller = longer tail on that side (α: high-BE side, β: low-BE side; metals: α < β)":(S2TIP(c,k)||((C.PDEF[k]||{}).lab||k)+" "+((C.PDEF[k]||{}).u||""))+(der?` — set by CasaXPS ${k==="stG"?"γ = "+c.stN:"n = "+c.casaN} (width = n·F/144.87)`:"");
-    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+(v==null?C.shapeParams(c,1)[k]||0:v)).toFixed(d)}" ${cs.mode==="link"||der?"disabled":""}>${der?`<button class="cm fixed" disabled title="Width from CasaXPS n — clear n to fit it">n</button>`:`<button class="cm ${cs.mode}" data-cm="${k}" title="Free → Fixed → Linked">${CMLAB[cs.mode]}</button>`}</div>`; };
+    return `<div class="pf ${atb.has(k)?"atb":""}"><span class="pl" title="${esc(tip)}">${esc(lab)}</span><input type="number" step="${k==="area"?"any":k==="be"?"0.01":"0.01"}" data-p="${k}" value="${k==="area"?Math.round(v):(+(v==null?C.shapeParams(c,1)[k]||0:v)).toFixed(d)}" ${cs.mode==="link"||der?"disabled":""}>${der?`<button class="cm fixed" disabled title="Width from CasaXPS n — clear n to fit it">n</button>`:`${k==="be"&&cs.mode==="free"&&cs.lo!=null&&cs.hi!=null&&isFinite(cs.lo)&&isFinite(cs.hi)?`<button class="cm bnd" data-cm="${k}" title="${esc(`Bounded: ${f(cs.lo+sh,2)} – ${f(cs.hi+sh,2)} eV (charge-corrected). Click: Bounded → Fixed → Linked → Free. Edit the range in the row below.`)}">±</button><span class="bnds muted xs" data-bndr="${c.id}">${f(cs.lo+sh,2)}–${f(cs.hi+sh,2)}</span>`:`<button class="cm ${cs.mode}" data-cm="${k}" title="${k==="be"?`Free → Bounded (± ${S.ui.bndW||0.5} eV around the current value, range editable) → Fixed → Linked`:"Free → Fixed → Linked"}">${CMLAB[cs.mode]}</button>`}`}</div>`; };
   const open=sel||S.ui.openAll;
   const head=`<div class="ch" data-sel="${c.id}"><span class="sw" style="background:${colorOf(c)}"></span><input class="nmi" data-nm="${c.id}" value="${esc(c.name||"")}" placeholder="Name"><span class="sum">${c.shape==="MEAS"?"Ref":esc(c.shape)}${c.doublet?" ·D":""} · ${f(c.be+sh,2)} eV${sm&&sm.fwhm?` · ${f(sm.fwhm,2)} eV`:""}</span><button class="btn xs" data-dl="${c.id}" title="Delete">×</button></div>`;
   if(!open) return `<div class="comp" data-c="${c.id}">${head}</div>`;
@@ -49588,9 +49979,12 @@ function bindComps(el,sp,p){
     const c=p.comps.find(x=>x.id===card.dataset.c); if(!c) return;
     $a(card,"input[data-p]").forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.p; let v=+inp.value; if(!isFinite(v)) return; if(k==="be") v-=sh; pushHist(p,"값 수정"); C.setP(c,k,v); propagate(p); touch(p); drawPlot(); });
     $a(card,"[data-cm]").forEach(b=>b.onclick=()=>{ const k=b.dataset.cm; const cs=(p.cons[c.id]=p.cons[c.id]||{}); const curm=(cs[k]||C.defaultCons(c,k)||{mode:"free"}).mode;
+      // v1.9.13: BE has a 'Bounded' step (free with lo/hi = current ± S.ui.bndW, default 0.5 eV) between Free and Fixed (SPEC §17.12)
+      const q0=cs[k]||{}; const bounded=k==="be"&&curm==="free"&&q0.lo!=null&&q0.hi!=null&&isFinite(q0.lo)&&isFinite(q0.hi);
+      if(k==="be"&&curm==="free"&&!bounded){ const w=+S.ui.bndW>0?+S.ui.bndW:0.5; cs[k]={mode:"free",lo:+(c.be-w).toFixed(4),hi:+(c.be+w).toFixed(4)}; S.ui.ced={id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); return; }
       const order=["free","fixed","link"]; let nx=order[(order.indexOf(curm)+1)%3];
       if(nx==="link"&&!p.comps.some(o=>o.id!==c.id&&C.paramNames(o).includes(k))) nx="free";
-      const prev=cs[k]||{}; cs[k]=Object.assign({},prev,{mode:nx});
+      const prev=cs[k]||{}; cs[k]=Object.assign({},prev,{mode:nx}); if(k==="be"&&nx==="free"){ delete cs[k].lo; delete cs[k].hi; }
       if(nx==="link"){ const ref=p.comps.find(o=>o.id!==c.id&&C.paramNames(o).includes(k)); cs[k].ref=prev.ref||ref.id; if(k==="be"){ cs[k].k=1; cs[k].b=+(c.be-(p.comps.find(o=>o.id===cs[k].ref)||ref).be).toFixed(3); } else { const rv=C.getP(p.comps.find(o=>o.id===cs[k].ref)||ref,k); cs[k].k=rv?+(C.getP(c,k)/rv).toPrecision(4):1; cs[k].b=0; } }
       S.ui.ced=nx==="fixed"?null:{id:c.id,k}; propagate(p); touch(p); renderPanel(); drawPlot(); });
     const shp=$q(card,"[data-shape]"); if(shp) shp.onchange=()=>{ pushHist(p,"모양"); const i=p.comps.indexOf(c); const n=C.convertShape(c,shp.value); if(n.shape==="AGT") n.ch=chOf(sp); n.slot=c.slot; n.noQuant=c.noQuant; p.comps[i]=n; const cs=p.cons[c.id]||{}; Object.keys(cs).forEach(k=>{ if(!C.paramNames(n).includes(k)) delete cs[k]; }); touch(p); renderPanel(); drawPlot(); };
@@ -49605,7 +49999,13 @@ function bindComps(el,sp,p){
   });
 }
 function propagate(p){ try{ const prob={comps:p.comps,cons:p.cons,bg:p.bg}; const map=C.buildMap(prob); C.applyLinks(prob,map); }catch(e){ note(e.message,"warn"); } }
-function snapshotModel(sp,p){ const r=p.result; if(!r||r.stale) return; p.models=p.models||[]; const nm=`Model ${p.models.length+1} (${p.comps.length} comp., ${C.BG_TYPES[p.bg.type]})`;
+/* v1.9.13: auto-name = what distinguishes the model — components, background (+slope for the in-fit Shirley with a free slope), fixed / linked
+   parameter counts, recipe (SPEC §17.12); renamed inline in the comparison table */
+function modelName(p,i){ const fx=[],lk=[]; Object.values(p.cons||{}).forEach(q=>Object.values(q||{}).forEach(c=>{ if(c&&c.mode==="fixed") fx.push(1); else if(c&&c.mode==="link") lk.push(1); }));
+  const bg=C.BG_TYPES[p.bg.type]+(p.bg.type==="active"&&p.bg.cons&&p.bg.cons.s&&p.bg.cons.s.mode!=="fixed"?" +slope":"");
+  const rc=p.comps.find(c=>c.recipe), R=rc&&GD()?GD().recipeById(rc.recipe):null;
+  return `Model ${i} (${R?R.name.replace(/ \(.*$/,"")+" recipe, ":""}${p.comps.length} comp., ${bg}, ${fx.length} fixed, ${lk.length} linked)`; }
+function snapshotModel(sp,p){ const r=p.result; if(!r||r.stale) return; p.models=p.models||[]; const nm=modelName(p,p.models.length+1);
   p.models.push({name:nm,when:new Date().toISOString(),lo:p.lo,hi:p.hi,bg:C.clone(p.bg),comps:C.clone(p.comps),cons:C.clone(p.cons),stats:{N:r.stats.N,p:r.stats.p,chi2:r.stats.chi2,chi2nu:r.stats.chi2nu,AICc:r.stats.AICc,BIC:r.stats.BIC,rho1:r.stats.rho1},c:sp.c||null});
   save(); note("모형 비교 목록에 저장: "+nm,"ok"); }
 /* 템플릿 (브라우저에 저장) */
@@ -49764,9 +50164,11 @@ function exportSens(sp,p){ const S_=p.sens; if(!S_) return; const sh=shOf(sp); c
     lines.push([i,v.f.bg+(v.f.kn?" knot"+v.f.kn:""),v.f.n==null?"":v.f.n,(v.lo+sh).toFixed(3),(v.hi+sh).toFixed(3),x&&x.ok?1:0,x&&x.ok?x.chi2nu.toFixed(4):"",...rc.map(c=>get(c,"areaPct")),...rc.map(c=>get(c,"be")),...rc.map(c=>get(c,"fwhm"))].map(csvE).join(",")); });
   download(safe(SK(sp)+"_"+sp.region)+"_sensitivity.csv",new Blob(["﻿"+lines.join("\n")],{type:"text/csv"})); }
 
+const MCMP_TIP="Differences to the best model in this table (same region and data only). ΔAICc < 2: indistinguishable — prefer the model with fewer parameters; 4–7: considerably less support; > 10: essentially none (Burnham & Anderson 2002). ΔBIC 0–2: not worth more than a bare mention, 2–6: positive, 6–10: strong, > 10: very strong evidence against the higher-BIC model (Kass & Raftery, J. Am. Stat. Assoc. 90, 773 (1995)). Correlated noise (lag-1 residual correlation ρ₁ high, χ²ν < 1 — smoothed or oversampled data) inflates these differences: the N points carry less information than N independent points, so read them with the Fit check note on correlated residuals.";
 function modelsHTML(p){ const L=p.models||[]; if(!L.length) return ""; const same=L.filter(m=>Math.abs(m.lo-p.lo)<1e-6&&Math.abs(m.hi-p.hi)<1e-6); const amin=Math.min(...L.map(m=>m.stats.AICc)), bmin=Math.min(...L.map(m=>m.stats.BIC));
-  return `<details class="xps-d" open><summary>Model Comparison (${L.length})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>Model</th><th class="num">p</th><th class="num">χ²ν</th><th class="num">ΔAICc</th><th class="num">ΔBIC</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr><td>${esc(m.name)}${Math.abs(m.lo-p.lo)>1e-6||Math.abs(m.hi-p.hi)>1e-6?` <span class="badge wr">Different range</span>`:""}</td><td class="num">${m.stats.p}</td><td class="num">${f(m.stats.chi2nu,3)}</td><td class="num">${f(m.stats.AICc-amin,1)}</td><td class="num">${f(m.stats.BIC-bmin,1)}</td><td><button class="btn xs" data-mload="${i}">Load</button> <button class="btn xs" data-mdel="${i}">×</button></td></tr>`).join("")}</tbody></table><div class="muted xs" style="margin-top:4px">같은 영역·같은 데이터에서만 비교 의미가 있습니다. ΔAICc &lt; 2 는 사실상 구별 불가, &gt; 10 은 강한 근거. 성분을 늘려 χ² 가 조금 줄어도 AICc 가 커지면 과적합입니다.${same.length<L.length?" (영역이 다른 모형 포함)":""}</div></div></details>`; }
-function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ const m=p.models[+b.dataset.mload]; pushHist(p,"모형 불러오기"); p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=C.clone(m.bg); p.lo=m.lo; p.hi=m.hi; touch(p); S.ui.tab="fit"; rerender(); note("불러왔습니다 — 다시 피팅하면 결과가 갱신됩니다"); }); $a(el,"[data-mdel]").forEach(b=>b.onclick=()=>{ p.models.splice(+b.dataset.mdel,1); save(); renderPanel(); }); }
+  return `<details class="xps-d" open><summary>Model Comparison (${L.length})</summary><div class="b tw"><table class="xps-tbl"><thead><tr><th>Model</th><th class="num">p</th><th class="num">χ²ν</th><th class="num" title="${esc(MCMP_TIP)}">ΔAICc ⓘ</th><th class="num" title="${esc(MCMP_TIP)}">ΔBIC ⓘ</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr><td><input class="mnm" data-mnm="${i}" value="${esc(m.name)}" title="Rename this model (Enter or leave the field to keep it)">${Math.abs(m.lo-p.lo)>1e-6||Math.abs(m.hi-p.hi)>1e-6?` <span class="badge wr">Different range</span>`:""}</td><td class="num">${m.stats.p}</td><td class="num">${f(m.stats.chi2nu,3)}</td><td class="num">${f(m.stats.AICc-amin,1)}</td><td class="num">${f(m.stats.BIC-bmin,1)}</td><td><button class="btn xs" data-mload="${i}">Load</button> <button class="btn xs" data-mdel="${i}">×</button></td></tr>`).join("")}</tbody></table><div class="muted xs" style="margin-top:4px">같은 영역·같은 데이터에서만 비교 의미가 있습니다. ΔAICc &lt; 2 는 사실상 구별 불가, &gt; 10 은 강한 근거. 성분을 늘려 χ² 가 조금 줄어도 AICc 가 커지면 과적합입니다.${same.length<L.length?" (영역이 다른 모형 포함)":""}</div></div></details>`; }
+function bindModels(el,sp,p){ $a(el,"[data-mload]").forEach(b=>b.onclick=()=>{ const m=p.models[+b.dataset.mload]; pushHist(p,"모형 불러오기"); p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=C.clone(m.bg); p.lo=m.lo; p.hi=m.hi; touch(p); S.ui.tab="fit"; rerender(); note("불러왔습니다 — 다시 피팅하면 결과가 갱신됩니다"); }); $a(el,"[data-mdel]").forEach(b=>b.onclick=()=>{ p.models.splice(+b.dataset.mdel,1); save(); renderPanel(); });
+  $a(el,"[data-mnm]").forEach(i=>{ i.onchange=()=>{ const m=p.models[+i.dataset.mnm]; const v=i.value.trim(); if(m&&v){ m.name=v; save(); } }; i.onkeydown=e=>{ if(e.key==="Enter") i.blur(); }; }); }
 
 /* ============================================================
    정량 패널
