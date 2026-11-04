@@ -7,7 +7,8 @@
    4 final analysis: |r| > 0.9 group → sum with σ, members 'not separately determined'; χ²ν > 2 → not established; static background → not established;
      local multi-start uses χ²_d; hidden-neighbour bound covers a missed neighbour; candidates only from cited tables (no naming); input never mutated; log
    5 user-session-like O 1s (lattice + missed low-BE lattice line + surface O, VGD-like smoothing): recipe start → Auto build adds the ≈ 528.6 eV line
-   6 benchmark (SPEC §18.4 acceptance criteria A–C on confirmation set 4, seeds 700001… / 800001…; QUICK: first 24 + 4, no false line in-family, runs complete) */
+   6 benchmark (SPEC §18.4 acceptance criteria A–C on confirmation set 4, seeds 700001… / 800001…; QUICK: first 24 + 4, no false line in-family, runs complete);
+     v1.11.1: Fit check R16 (structured residual, SPEC §17.12) on the finals — ≤ 2 % on finals with every true line and no false one */
 "use strict";
 const C=require("../src/xps_core.js"), G=require("../src/xps_guide.js"), A=require("../src/xps_autobuild.js"), U=require("./synth_util.js"), B=require("./autobuild_bench.js"), REP=require("./autobuild_report.js");
 const QUICK=!!process.env.QUICK;
@@ -140,6 +141,12 @@ console.log("== 6 benchmark (SPEC §18.4)");
     ok(S.fa/S.n<=0.02&&worst.v<=0.05&&SR.fa/SR.n<=0.02,"(A) false-add ≤ 2 % in-family, ≤ 5 % in every bin, ≤ 2 % on recipe starts",`${S.fa}/${S.n}; worst bin ${worst.b||"none"}; recipe ${SR.fa}/${SR.n}`);
     const all=REP.summarize(R.filter(r=>!r.meta.asym)); ok(all.posOK/all.estPos>=0.95,"(B) established cases: all positions within 3u in ≥ 95 %",`${all.posOK}/${all.estPos} (strict 3σ ${all.posStrict}/${all.estPos})`);
     ok(all.unresOK/Math.max(1,all.unres)>=0.95,"(C) unresolvable truth pairs handled honestly in ≥ 95 %",`${all.unresOK}/${all.unres}`); }
+  // v1.11.1 Fit check R16 (구조가 있는 잔차, SPEC §17.12) 를 Auto build 끝 해에: 참 선을 모두 찾고 가짜 선이 없는 끝 해에서의 경고율 ≤ 2 % ·
+  // '확립됨'인데 R16 이 걸린 것은 무엇을 놓쳤나 (실측 사각지대 — 끝 판정은 χ²ν > 2 또는 ρ₁ > 0.5)
+  { const sy=R.filter(r=>r.fc&&!r.meta.asym), comp=sy.filter(r=>r.ev.missed===0&&r.ev.falseAdd===0), fA=comp.filter(r=>r.fc.struct);
+    const est=sy.filter(r=>r.ev.established&&r.fc.struct), mis=sy.filter(r=>r.ev.missed>0), asy=R.filter(r=>r.fc&&r.meta.asym);
+    console.log(`     R16 on Auto build finals: complete ${fA.length}/${comp.length}`+(fA.length?` (${fA.map(r=>`${r.seed} χ²ν ${r.fc.chi2nu.toFixed(2)} ρ₁ ${r.fc.rho1.toFixed(2)}${r.ev.established?"":" not established"}`).join(", ")})`:"")+` · established with R16 ${est.length} (missed lines ${est.map(r=>r.ev.missed).join(",")||"—"}) · finals that missed a line ${mis.filter(r=>r.fc.struct).length}/${mis.length} · asymmetric (LA, outside the model set) ${asy.filter(r=>r.fc.struct).length}/${asy.length}`);
+    ok(fA.length<=0.02*comp.length,"Fit check R16 (structured residual) on Auto build finals that found every true line and no false one: ≤ 2 %",`${fA.length}/${comp.length}`); }
   console.log(`  benchmark time ${((Date.now()-tb)/1000).toFixed(0)} s`); }
 
 console.log(`\ntest_autobuild: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);

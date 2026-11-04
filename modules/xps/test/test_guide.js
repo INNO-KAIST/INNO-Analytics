@@ -13,7 +13,9 @@
      PE columns, constraint structure, Fe₃O₄ 1:2, synthetic 2–3-species mixtures (Ni Co Fe Mn Cr Cu) recovered, σ, Cu shake-up, fit check
    9 v1.9.7 Ba · Y · lanthanide recipes (SPEC §17.8): numbers = journal transcripts (test/ref/lit2), constraint structure (Sunding's six
      constraints, Cole ratio, Karslıoğlu relative shifts, Haasch envelopes), synthetic recovery (La 3d/4d, Y 3d, Ba 4d), empirical-envelope
-     smoke test (converges, no bound hits), complexInfo for Sm–Lu, overlap rules (library energies, presence, window, Al Kα only) */
+     smoke test (converges, no bound hits), complexInfo for Sm–Lu, overlap rules (library energies, presence, window, Al Kα only)
+  14 v1.11.1 R16 structured residual whatever χ²ν: field signature (2 of 5 O 1s lines, smoothed noise, χ²ν ≈ 1), R12/R13 interplay,
+     false-alarm and hit-rate benchmark on the Auto build generator (QUICK: 24 seeds per noise type, rates reported) */
 "use strict";
 const C=require("../src/xps_core.js"), G=require("../src/xps_guide.js"), L=require("../src/xps_lib.js"), U=require("./synth_util.js"), AE=require("./all_elements.js");
 const QUICK=!!process.env.QUICK;
@@ -771,6 +773,66 @@ console.log("== 13 v1.9.13 Fit check: shared L fraction, merge first + 'Bound po
     "O 1s overlap rules: Sb 3d5/2 528.2 · Pd 3p3/2 532.3 (Booklet) · V⁵⁺ 2p1/2 524.7 (NIST SRD 20) · Na KLL KE 951 → 535.6 eV (Al Kα only; library KE); partner absent / outside the window → none; Sb 3d and V 2p regions with O present → the same rules",V13.ovlO1s.join(" | "));
 }
 
+/* ---------- 14 v1.11.1 R16: structured residual whatever χ²ν (SPEC §17.12) ---------- */
+console.log("== 14 v1.11.1 Fit check R16: structured residual whatever χ²ν (smoothed / oversampled data)");
+const V14={};
+{ // (a) 실측 증상 재현: 참 선 5개(O 1s 형) · 2개로 피팅 · 과표본/평활 잡음(σ 0.74·√μ, MA θ 0.15 → 맞는 모형 χ²ν ≈ 0.55, ρ₁ ≈ 0.15) → χ²ν ≈ 1
+  const field=(seed,H)=>{ const rg=U.rng(seed); const step=0.05,lo=524.5,hi=537.5,n=Math.round((hi-lo)/step)+1,E=Float64Array.from({length:n},(_,i)=>lo+i*step),ctx={emin:E[0],emax:E[n-1]};
+    const L=[[528.7,0.35,1.15],[529.5,1,1.15],[531.3,0.6,1.7],[532.2,0.3,1.7],[533.3,0.12,1.7]]; const P=new Float64Array(n);
+    L.forEach(([be,a,F])=>{ const v=C.compEval(C.casaToComp("GL(30)",{be,fwhm:F,area:a*H}).comp,E,ctx); for(let i=0;i<n;i++) P[i]+=v[i]; });
+    const Q=C.cumtrapz(E,P), Qn=Q[n-1], Pm=Math.max(...P); const mu=Float64Array.from(P,(p,i)=>0.5*Pm+0.15*Pm*Q[i]/Qn+p);
+    const th=0.15; let zp=rg.g(); const y=Float64Array.from(mu,v=>{ const z=rg.g(); const e=(z+th*zp)/Math.sqrt(1+th*th); zp=z; return v+0.74*Math.sqrt(v)*e; });
+    return {E,y,L:L.map(([b,a,F])=>[b,a*H,F])}; };
+  const fitN=(S,lines,th)=>{ const comps=lines.map(([be,a,F],i)=>{ const c=C.casaToComp("GL(30)",{be,fwhm:F,area:a}).comp; c.id="L"+i; return c; }); const cons={}; comps.forEach(c=>cons[c.id]={F:{mode:"free",lo:0.5,hi:3},m:{mode:"fixed"}});
+    const P=C.makeProblem({be:S.E,y:S.y,c:1},{lo:S.E[0],hi:S.E[S.E.length-1],bg:{type:"active",n:5,cons:{s:{mode:"free"}}},comps,cons}); const fin=C.finalize(P,C.fitOnce(P,{}));
+    const dg=th=>G.diagnose({E:P.E,y:P.y,fin,el:"O",orb:"1s",bgType:"active",spec:{be0:S.E[0],be1:S.E[S.E.length-1]}},th); return {P,fin,d:dg(th),off:dg({structS:Infinity})}; };
+  const S=field(3,2000); const good=fitN(S,S.L), two=fitN(S,[[529.4,2600,1.3],[531.6,2000,2.0]]); const st=two.fin.stats, it=two.d.find(x=>x.id==="struct");
+  V14.field={chi2nu:st.chi2nu,rho1:st.rho1,runsZ:st.runsZ,AICc2:st.AICc,AICc5:good.fin.stats.AICc,goodChi:good.fin.stats.chi2nu,goodRho:good.fin.stats.rho1,label:it&&it.label,before:two.off.filter(x=>x.sev!=="info").map(x=>x.id)};
+  ok(st.chi2nu>0.95&&st.chi2nu<1.2&&st.rho1>0.5&&st.runsZ<-4&&good.fin.stats.chi2nu<0.65&&good.fin.stats.rho1<0.25&&good.fin.stats.AICc<st.AICc-100&&!two.off.some(x=>x.sev!=="info"),
+    "field signature reproduced: 2 of 5 lines fitted → χ²ν ≈ 1, ρ₁ > 0.5, runs z < −4 (5-line model χ²ν ≈ 0.5, AICc far lower); without R16 Fit check has no warning ('OK')",JSON.stringify(V14.field,(k,v)=>typeof v==="number"?+v.toFixed(3):v));
+  const acts=(it&&it.acts||[]).map(a=>a.type);
+  ok(it&&it.sev==="warn"&&/systematic structure/.test(it.label)&&/ρ₁ 0\.\d\d/.test(it.label)&&/runs z −?-?\d/.test(it.label)&&/line may be missing/.test(it.tip)&&/shape or the background/.test(it.tip)&&/not evidence of a good fit/.test(it.tip)&&/smoothed or oversampled/.test(it.tip)
+     &&/Largest positive residual runs/.test(it.tip)&&/5(2[89]|3[0-4])\.\d\d eV \(z/.test(it.tip)&&acts.includes("autobuild")&&acts.includes("recipe")&&acts.includes("add")&&two.d.filter(x=>x.sev!=="info").length>=1,
+    "R16 fires (warn): systematic structure, 'a line may be missing, or the shape or background', positive residual runs with BE, χ²ν ≈ 1 is not evidence on smoothed data; actions Add a line · Apply recipe · Auto build",it&&it.label);
+  ok(!good.d.some(x=>x.id==="struct"),"the correct 5-line model on the same data: no R16",good.d.map(x=>x.id).join(","));
+  // (b) χ²ν < 1 with ρ₁ > 0.3 and structure: R12 ('not a misfit') is replaced by R16; R13 'misfit' branch also when χ²ν ≤ 2 but R16 fires
+  const S2=field(4,1400); const t2=fitN(S2,[[529.4,1800,1.3],[531.6,1400,2.0]]); const st2=t2.fin.stats;
+  const i12off=t2.off.find(x=>x.id==="corrnoise"), i12on=t2.d.find(x=>x.id==="corrnoise"), r16=t2.d.some(x=>x.id==="struct");
+  const r12off=!!i12off&&/not of a misfit/.test(i12off.tip), r12on=!!i12on&&!/not of a misfit/.test(i12on.tip)&&/also structured/.test(i12on.tip)&&/Zięba/.test(i12on.tip);
+  const fm=Object.assign({},two.fin,{multi:{N:8,near:1,frac:1/8,chi2nu:st.chi2nu,thr:Math.max(1,st.chi2nu),sameP:1}});
+  const m13=G.diagnose({E:two.P.E,y:two.P.y,fin:fm,el:"O",orb:"1s",bgType:"active"}).find(x=>x.id==="multi"), m13off=G.diagnose({E:two.P.E,y:two.P.y,fin:fm,el:"O",orb:"1s",bgType:"active"},{structS:Infinity}).find(x=>x.id==="multi");
+  V14.r12={chi2nu:st2.chi2nu,rho1:st2.rho1,r12off,r12on,r16,m13:m13&&m13.label,m13off:m13off&&m13off.label};
+  ok(st2.chi2nu<1&&st2.rho1>0.3&&r12off&&r12on&&r16&&m13&&/misfit/.test(m13.label)&&/structured/.test(m13.tip)&&m13off&&!/misfit/.test(m13off.label),
+    "χ²ν < 1, ρ₁ > 0.3 with structure: R16 fires and R12 no longer says 'not a misfit' (keeps the σ factor and Monte Carlo); R13 with few same-minimum starts says 'model misfit' (was 'not unique' because χ²ν ≤ 2)",JSON.stringify(V14.r12,(k,v)=>typeof v==="number"?+v.toFixed(3):v));
+}
+{ // (c) 보정 벤치마크 (SPEC §17.12): Auto build 벤치 생성기(autobuild_bench.gen, LA 비대칭 없음) — 참 모형 피팅의 오경보 · 선 하나 뺀 모형의 적중
+  const B=require("./autobuild_bench.js"); const nS=QUICK?24:120, R=C.rng(1411); const s0=900001;
+  const CFG=[["white Poisson",()=>({noise:"poisson"})],["AR(1) ρ 0–0.5",()=>({noise:"ar1",rho:0.5*R.u()})],["AR(1) ρ 0–0.5, σ×0.6–0.9 (χ²ν < 1)",()=>({noise:"ar1",rho:0.5*R.u(),sigScale:0.6+0.3*R.u()})],
+    ["white, σ×0.6–0.9 (χ²ν < 1)",()=>({noise:"ar1",rho:0,sigScale:0.6+0.3*R.u()})],["3-point smoothed Poisson (χ²ν ≈ 0.5)",()=>({noise:"smooth"})]];
+  const fitT=(g,drop)=>{ const comps=g.truth.filter((t,i)=>i!==drop).map((t,i)=>{ const c=C.newComp("GLS",t.be,{F:t.F,m:g.meta.m}); c.area=t.area; c.id="c"+i; return c; });
+    const cons={}; comps.forEach((c,i)=>{ cons[c.id]={F:{mode:"free",lo:0.3,hi:4}}; if(i) cons[c.id].m={mode:"link",ref:"c0",k:1,b:0}; });
+    const E=g.spec.be, P=C.makeProblem(g.spec,{lo:E[0],hi:E[E.length-1],bg:{type:"active",n:5,cons:{s:{mode:"free"}}},comps,cons}); const fin=C.finalize(P,C.fitOnce(P,{}));
+    let cT=0; for(let i=0;i<P.y.length;i++){ const d=P.y[i]-g.mu[i]; cT+=d*d/fin.v[i]; }
+    const d=G.diagnose({E:P.E,y:P.y,fin,bgType:"active"}); return {struct:d.some(x=>x.id==="struct"),chi2:fin.stats.chi2,cT,n:P.y.length,chi2nu:fin.stats.chi2nu}; };
+  const okR=[], miss=[];
+  CFG.forEach(([name,mk],ci)=>{ for(let k=0;k<nS;k++){ const seed=s0+ci*1000+k; const g=B.gen(seed,Object.assign({asym:false},mk()));
+    const a=fitT(g,-1); a.cfg=name; a.conv=a.chi2<=a.cT+10; okR.push(a);   // conv: 참값 둘레의 최소 (χ² ≤ 참값 χ² + 10); 아니면 LM 이 다른 해로 감 — 실제 misfit
+    if(g.meta.K>=2){ const j=seed%g.meta.K, T=g.truth, F0=g.meta.F0; const sep=Math.min(...T.map((t,i)=>i===j?Infinity:Math.abs(t.be-T[j].be)))/F0, ratio=T[j].area/Math.max(...T.map(t=>t.area));
+      const b=fitT(g,j); b.cfg=name; b.sep=sep; b.ratio=ratio; b.det=(b.chi2-a.cT)/(a.cT/a.n); miss.push(b); } } });
+  const conv=okR.filter(r=>r.conv), fa=conv.filter(r=>r.struct).length; const per=CFG.map(([nm])=>{ const a=conv.filter(r=>r.cfg===nm); return {nm,n:a.length,f:a.filter(r=>r.struct).length}; });
+  const nonconv=okR.filter(r=>!r.conv);
+  V14.fa={n:conv.length,fa,per:per.map(q=>`${q.nm}: ${q.f}/${q.n}`),nonconv:nonconv.length,nonconvFired:nonconv.filter(r=>r.struct).length};
+  console.log("     correct models: "+V14.fa.per.join(" · ")+` · fits that left the true minimum (χ² > truth + 10, real misfits): ${V14.fa.nonconv}, R16 on ${V14.fa.nonconvFired}`);
+  ok(fa/conv.length<=0.02&&per.every(q=>q.f/q.n<=0.05),`false alarms on correct models (white · AR(1) ρ ≤ 0.5 · χ²ν < 1 scaled · smoothed): ${fa}/${conv.length} ≤ 2 %, every noise type ≤ 5 %`,`${(100*fa/conv.length).toFixed(2)} %`);
+  const SB=[[0.3,0.5],[0.5,1],[1,1.5],[1.5,3]], RB=[[0,0.1],[0.1,0.3],[0.3,1.01]], hr=a=>a.length?`${a.filter(r=>r.struct).length}/${a.length}`:"—";
+  V14.hit={bySep:SB.map(b=>`sep ${b[0]}–${b[1]} FWHM: `+RB.map(r=>`area ${r[0]}–${Math.min(1,r[1])} ${hr(miss.filter(m=>m.sep>=b[0]&&m.sep<b[1]&&m.ratio>=r[0]&&m.ratio<r[1]))}`).join(", ")),
+    byDet:[[-1e9,30],[30,100],[100,300],[300,1e12]].map(([lo,hi])=>`Δχ²/s² ${lo<-1e8?"< 30":hi>1e11?"≥ 300":lo+"–"+hi}: ${hr(miss.filter(m=>m.det>=lo&&m.det<hi))}`)};
+  console.log("     missing one line, hits by separation × area: \n       "+V14.hit.bySep.join("\n       ")+"\n     by detectability (χ² increase over the truth in noise units): "+V14.hit.byDet.join(" · "));
+  const big=miss.filter(m=>m.sep>=1.5&&m.ratio>=0.3), det=miss.filter(m=>m.det>=300);
+  if(QUICK) ok(miss.length>0,"missing-line set ran (QUICK: rates reported only)",`${miss.length} fits`);
+  else ok(big.filter(m=>m.struct).length>=0.8*big.length&&det.filter(m=>m.struct).length>=0.9*det.length,"missing one line: caught in ≥ 80 % when separated ≥ 1.5 FWHM with ≥ 30 % of the main area, and in ≥ 90 % when its absence raises χ² by ≥ 300 noise units",`${hr(big)} · ${hr(det)}`);
+}
+
 console.log(`\ntest_guide: ${pass} passed, ${fail} failed (${((Date.now()-t0)/1000).toFixed(0)} s)`);
 if(fail){ console.log(fails.map(f=>"  - "+f).join("\n")); process.exitCode=1; }
-module.exports={FP,SYN,POS,TM,LT,V8,V13};
+module.exports={FP,SYN,POS,TM,LT,V8,V13,V14};

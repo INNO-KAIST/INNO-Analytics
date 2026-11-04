@@ -11,7 +11,9 @@ function gen(seed,o){ o=o||{}; const R=U.rng(seed*7919+13); const u=(a,b)=>a+(b-
   const K=o.K||pick([1,2,2,3,3,3,4,4,5,6]); const F0=u(0.9,1.6), m=u(0,0.6), step=pick([0.05,0.05,0.1]);
   const seps=[]; for(let i=1;i<K;i++){ const b=pick(SEPBIN); seps.push(u(b[0],b[1])); }
   const asym=o.asym!=null?o.asym:R.u()<0.1;
-  const H=pick([300,3000,30000]); const nk=R.u(); const noise=o.noise||(nk<0.6?"poisson":nk<0.8?"ar1":"smooth"); const rho=noise==="ar1"?u(0.3,0.5):0;
+  const H=pick([300,3000,30000]); const nk=R.u(); const noise=o.noise||(nk<0.6?"poisson":nk<0.8?"ar1":"smooth"); const rho0=noise==="ar1"?u(0.3,0.5):0;
+  // v1.11.1 (Fit check R16 calibration, SPEC §17.12): o.rho 가 AR(1) ρ 를, o.sigScale 이 잡음 σ 배율(< 1 → χ²ν < 1)을 정함 — 기본값이면 난수 순서·결과 그대로
+  const rho=noise==="ar1"&&o.rho!=null?o.rho:rho0, sgs=o.sigScale!=null?o.sigScale:1;
   const lines=[]; let be=0; const main=Math.floor(R.u()*K);
   for(let i=0;i<K;i++){ if(i) be+=seps[i-1]*F0; lines.push({be,F:F0*u(0.9,1.1),ratio:i===main?1:Math.exp(u(Math.log(0.03),0))}); }
   const span=be, lo0=-2.5*F0-u(0.5,1.5), hi0=span+2.5*F0+u(0.5,1.5); const off=500+Math.round(u(0,100)); const lo=off+lo0, hi=off+hi0;
@@ -26,11 +28,11 @@ function gen(seed,o){ o=o||{}; const R=U.rng(seed*7919+13); const u=(a,b)=>a+(b-
   const mu=Float64Array.from(P,(p,i)=>base+step_*Q[i]/Qn+slope*(E[i]-lo)+p);
   let y;
   if(noise==="poisson") y=Float64Array.from(mu,v=>R.pois(v));
-  else if(noise==="ar1"){ let e=0; y=Float64Array.from(mu,(v,i)=>{ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; return v+Math.sqrt(v)*e; }); }
+  else if(noise==="ar1"){ let e=0; y=Float64Array.from(mu,(v,i)=>{ const z=R.g(); e=i?rho*e+Math.sqrt(1-rho*rho)*z:z; return v+sgs*Math.sqrt(v)*e; }); }
   else { const x=Float64Array.from(mu,v=>R.pois(v)); y=Float64Array.from(x,(v,i)=>i===0||i===n-1?v:x[i-1]/6+2*v/3+x[i+1]/6); }
   const truth=comps.map(c=>({be:c.be,area:c.area,F:C.trueFWHM(c.shape,C.shapeParams(c,1)).fwhm,shape:c.shape}));
   const minSep=K>1?Math.min(...seps):null;
-  return {seed,spec:{be:E,y,c:1},truth,meta:{K,F0,m,step,H,noise,rho,asym,slope:slope!==0,minSep,sepBin:minSep==null?"single":minSep<0.5?"0.3-0.5":minSep<1?"0.5-1":minSep<1.5?"1-1.5":"1.5-3",minRatio:Math.min(...lines.map(l=>l.ratio))}};
+  return {seed,spec:{be:E,y,c:1},truth,mu,meta:{K,F0,m,step,H,noise,rho,sigScale:sgs,asym,slope:slope!==0,minSep,sepBin:minSep==null?"single":minSep<0.5?"0.3-0.5":minSep<1?"0.5-1":minSep<1.5?"1-1.5":"1.5-3",minRatio:Math.min(...lines.map(l=>l.ratio))}};
 }
 /* 시작 모형 = 화면 Auto suggest (suggestModel + refineByResidual, 사용자 배경 = Smart — 새 스펙트럼의 기본) */
 function autoSuggest(spec){ const E=spec.be, y=spec.y; const bg={type:"smart",n:5};
@@ -61,8 +63,12 @@ function evaluate(g,res,o){ o=o||{}; const T=g.truth, F0=g.meta.F0, gate=0.5*F0;
 function runCase(g,o){ o=o||{}; const t0=Date.now(); const P0=autoSuggest(g.spec); const tS=Date.now()-t0; if(!P0) return {seed:g.seed,meta:g.meta,err:"no start model"};
   const nStart=P0.comps.length; let R; try{ R=A.autoBuild(P0,{},{starts:o.starts}); }catch(e){ return {seed:g.seed,meta:g.meta,err:String(e.message||e)}; }
   const ev=evaluate(g,R); const evS=evaluate(g,{final:{lines:P0.comps.map(c=>({be:c.be,id:c.id,separate:false})),groups:[],established:false}});
-  return {seed:g.seed,meta:g.meta,nStart,startFalseAdd:evS.falseAdd,startMissed:evS.missed,steps:R.steps.map(s=>s.kind+":"+s.label.slice(0,50)),stop:R.stop,ev,ms:Date.now()-t0,msSuggest:tS}; }
-module.exports={gen,autoSuggest,evaluate,runCase,SEPBIN};
+  return {seed:g.seed,meta:g.meta,nStart,startFalseAdd:evS.falseAdd,startMissed:evS.missed,steps:R.steps.map(s=>s.kind+":"+s.label.slice(0,50)),stop:R.stop,ev,fc:fitCheck(P0,R),ms:Date.now()-t0,msSuggest:tS}; }
+/* v1.11.1: Fit check R16 (구조가 있는 잔차, SPEC §17.12) 를 Auto build 최종 해에 — test_autobuild 가 오경보·적중을 셈 */
+function fitCheck(P0,R){ const fin=R.final&&R.final.fin; if(!fin||!fin.mu) return null; const Gd_=require("../src/xps_guide.js"); const dbg={};
+  const d=Gd_.diagnose({E:P0.E,y:P0.y,fin,bgType:fin.bgType||(R.S&&R.S.P.bg.type),debug:dbg}); const S=dbg.struct||{};
+  return {struct:d.some(x=>x.id==="struct"),s:S.s,z:S.z,rho1:fin.stats&&fin.stats.rho1,chi2nu:fin.stats&&fin.stats.chi2nu}; }
+module.exports={gen,autoSuggest,evaluate,runCase,fitCheck,SEPBIN};
 
 /* 레시피 시작 경우 (SPEC §18.4): C 1s (C–C/C–H + C–O ± C=O ± O–C=O, GL(30), 같은 폭) · O 1s (격자 ± 낮은 격자 528.6 + 표면 O) — 참 위치는 레시피 창 안.
    시작 = 레시피 모형 + 레시피 피팅(c1sFit: 단계 피팅 · 약한 선 F 검정 / o1sFit), 그다음 Auto build. 가짜 선 = Auto build 가 더한 선 중 참에 없는 것 */
@@ -90,7 +96,7 @@ function runRecipeCase(g,o){ const t0=Date.now(); let P0; try{ P0=recipeStart(g)
   ev.addedLines=added.length; ev.falseAdd=added.filter(l=>!T.some(t=>Math.abs(t.be-l.be)<=gate)).length;   // 레시피 경우: Auto build 가 더한 선만 셈
   ev.recipeExtra=R.final.lines.filter(l=>l.recipe&&!T.some(t=>Math.abs(t.be-l.be)<=gate)).length;
   ev.latloFound=g.meta.latlo?R.final.lines.some(l=>Math.abs(l.be-T[0].be)<=gate):null;
-  return {seed:g.seed,meta:g.meta,nStart:P0.comps.length,startFalseAdd:0,steps:R.steps.map(s=>s.kind+":"+s.label.slice(0,50)),stop:R.stop,ev,ms:Date.now()-t0}; }
+  return {seed:g.seed,meta:g.meta,nStart:P0.comps.length,startFalseAdd:0,steps:R.steps.map(s=>s.kind+":"+s.label.slice(0,50)),stop:R.stop,ev,fc:fitCheck(P0,R),ms:Date.now()-t0}; }
 module.exports.genRecipe=genRecipe; module.exports.runRecipeCase=runRecipeCase;
 if(require.main===module){ const s0=+process.argv[2]||1, cnt=+process.argv[3]||10, out=process.argv[4]; const fs=require("fs"); if(out) fs.writeFileSync(out,"");
   const rec=process.argv[5]==="recipe";

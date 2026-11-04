@@ -1188,8 +1188,8 @@ function bindAB(el,sp,p){ const b=$q(el,"#xpsAB"); if(b) b.onclick=()=>abStart(s
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=4;   // v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
-const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
+const CHECK_V=5;   // v1.11.1: R16 structured residual (any χ²ν), R12 not with R16, R13 misfit with R16; v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
+const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · residual with systematic structure whatever χ²ν is (autocorrelation over lags 3–5 points; χ²ν ≈ 1 is no proof of a good fit on smoothed data) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
   if(R.kind==="c1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("One action: build the adventitious-carbon model, fit it, test the weak lines and set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
@@ -1348,6 +1348,7 @@ function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const ite
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
   if(act.type==="mc"){ runMC(); return; }
+  if(act.type==="autobuild"){ abStart(sp); return; }   // v1.11.1 R16
   if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_?rcpOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
   if(act.type==="bound"&&!act.start){ const h=(p.hist||[]).slice().reverse().find(x=>x.comps&&act.ids.every(id=>x.comps.some(c=>c.id===id))); if(h){ act=Object.assign({},act,{start:{}}); act.ids.forEach(id=>{ act.start[id]=h.comps.find(c=>c.id===id).be; }); } }   // start values = positions before the last fit
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;

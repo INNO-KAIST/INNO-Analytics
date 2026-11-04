@@ -10,7 +10,9 @@ usage: python3 test/ui_xps_guide.py <injected html> <figure folder>
 7 v1.9.7 La 3d (Sunding, synthetic La(OH)₃ c4f¹L 57 % + MNN Auger): species / flag row, Recipe → 3 pairs + Auger line → Staged fit →
   c4f¹L ±2 %; Ba 3d + Co 2p in one sample: one-line overlap banner (details in title) and a Fit check overlap warning after a fit
 8 v1.9.13 C 1s recipe (sample with Ba: carbonate box on) → one click: fit + whole-sample Δ (truth +0.44); clicking again keeps Δ (no double shift);
-  O 1s recipe with the C 1s link → O–C=O vs CO₃²⁻ verdict; per-region message bar; 'Bounded' BE mode; merge → 'Bound positions' → refit"""
+  O 1s recipe with the C 1s link → O–C=O vs CO₃²⁻ verdict; per-region message bar; 'Bounded' BE mode; merge → 'Bound positions' → refit
+9 v1.11.1 R16: O 1s-like spectrum with 5 lines and smoothed/oversampled noise fitted with 2 lines (χ²ν ≈ 1) → Fit check is not 'OK':
+  'Residual has systematic structure' (warn badge, tooltip: χ²ν ≈ 1 is not evidence on smoothed data) with Add a line · Apply recipe · Auto build"""
 import sys, os, json, tempfile, math, random, re
 from playwright.sync_api import sync_playwright
 
@@ -128,6 +130,25 @@ bo = [524 + 0.05 * i for i in range(281)]
 OK_ = [(529.06, 30000, G12), (530.96, 8000 + 3 * 2.93 * 4000, G18), (531.66, 2.93 * 1600, G18), (532.16, 2.93 * 7000, G18)]
 f_ko = write('[GuideK] O1s.txt', bo, [pois(1500 + sum(A * g(e - b0) for b0, A, g in OK_)) for e in bo])
 bb4 = [84 + 0.05 * i for i in range(251)]
+# v1.11.1 R16 field signature: 5 O 1s-like lines, noise σ = 0.74·√μ with MA(1) θ 0.15 (smoothed / oversampled: a correct model gives χ²ν ≈ 0.55)
+rf = random.Random(11)
+bf = [524.5 + 0.05 * i for i in range(261)]
+LF = [(528.7, 0.35, G12), (529.5, 1.0, G12), (531.3, 0.6, glp30(1.7)), (532.2, 0.3, glp30(1.7)), (533.3, 0.12, glp30(1.7))]
+PF = [sum(2000 * a * g(e - b0) for b0, a, g in LF) for e in bf]
+QF, acc = [], 0.0
+for i, p_ in enumerate(PF):
+    if i:
+        acc += 0.5 * (p_ + PF[i - 1]) * 0.05
+    QF.append(acc)
+pmF = max(PF)
+zp = rf.gauss(0, 1)
+yF = []
+for i, p_ in enumerate(PF):
+    m_ = 0.5 * pmF + 0.15 * pmF * QF[i] / QF[-1] + p_
+    z = rf.gauss(0, 1)
+    yF.append(m_ + 0.74 * math.sqrt(m_) * (z + 0.15 * zp) / math.sqrt(1 + 0.15 ** 2))
+    zp = z
+f_kf = write('[GuideR16] O1s.txt', bf, yF)
 f_kb = write('[GuideK] Ba4d.txt', bb4, [pois(1500 + 20000 * (0.6 * gls(e - 89.6, 1.6) + 0.4 * gls(e - 92.2, 1.6))) for e in bb4])
 
 with sync_playwright() as p:
@@ -149,8 +170,8 @@ with sync_playwright() as p:
         J("(r)=>{ const st=XPS_UI._state(); const x=st.specs.find(q=>q.region===r); st.sel=x.uid; st.ui.tab='fit'; st.ui.selComp=null; XPS_UI.rerender(); }", region)
         pg.wait_for_timeout(200)
 
-    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe, f_la, f_co, f_ba, f_kc, f_ko, f_kb])
-    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=11', timeout=20000)
+    pg.set_input_files('#xpsFin', [f_ce, f_c, f_ni, f_cu, f_fe, f_la, f_co, f_ba, f_kc, f_ko, f_kb, f_kf])
+    pg.wait_for_function('window.XPS_UI && XPS_UI._state().specs.length>=12', timeout=20000)
     regs = J("XPS_UI._state().specs.map(s=>s.region)")
     ce = [r for r in regs if 'Ce' in r][0]
     c1 = [r for r in regs if ('C 1s' in r or 'C1s' in r) and 'GuideK' not in r][0]
@@ -323,6 +344,16 @@ with sync_playwright() as p:
           and nm2[1] == 'no slope' and s29['tip'] and 'Kass' in s29['tip'] and '< 2' in s29['tip'] and 'orrelated noise' in s29['tip'], [s29['names'], nm2])
     J("(()=>{ const st=XPS_UI._state(); st.ui.tab='fit'; XPS_UI.rerender(); })()"); pg.wait_for_timeout(200)
     pg.screenshot(path=os.path.join(out, 'guide_07_c1s_o1s.png'), full_page=False)
+    # 9 v1.11.1 R16: 2 of 5 lines on smoothed / oversampled data → χ²ν ≈ 1, but Fit check must not say OK
+    uf = J("XPS_UI._state().specs.filter(s=>/GuideR16/.test(s.region+' '+(s.file||'')+' '+(s.name||''))).map(s=>s.uid)")
+    selu(uf[0])
+    J("(()=>{ const p=XPS_UI._pr(); const C=window.XPS_CORE; const mk=(be,F,A,nm)=>{ const c=C.casaToComp('GL(30)',{be,fwhm:F,area:A}).comp; c.name=nm; return c; }; p.comps=[mk(529.4,1.3,2600,'Lattice'),mk(531.6,2.0,2000,'Surface')]; p.comps.forEach((c,i)=>c.slot=i); p.cons={}; p.comps.forEach(c=>{ p.cons[c.id]={F:{mode:'free',lo:0.5,hi:3},m:{mode:'fixed'}}; }); p.bg={type:'active',n:5,c0:null,k:null,s:0,cons:{s:{mode:'free'}}}; p.recipe=null; p.ver++; XPS_UI.rerender(); })()")
+    J("XPS_UI._fit('one')"); idle()
+    s30 = J("(()=>{ const c=document.querySelector('#xpsChk'); if(!c) return null; const st=XPS_UI._pr().result.stats; const it=Array.from(c.querySelectorAll('li')); const m=it.find(l=>/systematic structure/.test(l.textContent)); return {badge:c.querySelector('.badge').textContent, wr:c.querySelector('.badge').classList.contains('wr'), none:/No issues found/.test(c.textContent), chi:st.chi2nu, rho:st.rho1, rz:st.runsZ, labels:it.map(l=>l.querySelector('.tx').textContent), sev:m&&m.className, tip:m&&m.querySelector('.tx').title, btns:m?Array.from(m.querySelectorAll('button')).map(b=>b.textContent):[]}; })()")
+    check("9 v1.11.1 2 of 5 O 1s lines on smoothed/oversampled data (χ²ν ≈ 1, ρ₁ > 0.4): Fit check not 'OK' — warn badge, 'Residual has systematic structure' with tooltip (χ²ν ≈ 1 not evidence) and Add a line · Apply recipe · Auto build",
+          s30 and s30['wr'] and s30['badge'] != 'OK' and not s30['none'] and 0.85 < s30['chi'] < 1.4 and s30['rho'] > 0.4 and s30['sev'] == 'warn' and 'not evidence of a good fit' in (s30['tip'] or '') and 'Auto build' in s30['btns'] and 'Apply recipe' in s30['btns'] and any(b.startswith('Add a line') for b in s30['btns']),
+          s30 and {k: s30[k] for k in ('badge', 'chi', 'rho', 'rz', 'labels', 'btns')})
+    pg.screenshot(path=os.path.join(out, 'guide_08_struct.png'), full_page=False)
     # 5 terse labels · 390 px · console
     labs = J("Array.from(document.querySelectorAll('#xpsChk li .tx')).map(x=>x.textContent)")
     select(ce)
