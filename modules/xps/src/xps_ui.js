@@ -6,7 +6,8 @@
 (function(){
 "use strict";
 const C=window.XPS_CORE, IO=window.XPS_IO;
-const GD=()=>window.XPS_GUIDE||null;   // v1.9.3 fit guidance (SPEC §17): fit check · region recipes · staged fit
+const GD=()=>window.XPS_GUIDE||null;
+const AB=()=>window.XPS_AUTO||null;   // v1.10 Auto build (SPEC §18)   // v1.9.3 fit guidance (SPEC §17): fit check · region recipes · staged fit
 const LIB=()=>window.XPS_LIB||{core:{},scofield:{al:{},mg:{}},althermo1:{},auger:[],meta:{sources:{}}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $q=(r,s)=>r.querySelector(s), $a=(r,s)=>[...r.querySelectorAll(s)];
@@ -474,7 +475,7 @@ function workerURL(){
   const el=document.getElementById("xps-core-src"); const src=el?el.textContent:null;
   if(!src) return null;
   /* 엔진 순서: core → multi → arxps → image → proc (각 파일이 self 에 전역을 단다). xj = Series·ARXPS·Imaging·Processing 작업 */
-  const more=["xps-guide-src","xps-multi-src","xps-arxps-src","xps-image-src","xps-proc-src"].map(id=>{ const q=document.getElementById(id); return q?q.textContent:""; }).join("\n;\n");
+  const more=["xps-guide-src","xps-auto-src","xps-multi-src","xps-arxps-src","xps-image-src","xps-proc-src"].map(id=>{ const q=document.getElementById(id); return q?q.textContent:""; }).join("\n;\n");
   const body=src+"\n;\n"+more+"\nconst XJ=("+xjobs.toString()+")(self);\n"+`
 self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   let out;
@@ -488,6 +489,7 @@ self.onmessage=function(e){ const d=e.data; const C=self.XPS_CORE; try{
   else if(d.cmd==="staged") out=self.XPS_GUIDE.stagedJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="c1s") out=self.XPS_GUIDE.c1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
   else if(d.cmd==="o1s") out=self.XPS_GUIDE.o1sJob(d.prob,Object.assign({},d.opt,{onIter:tick()}));
+  else if(d.cmd==="ab") out=self.XPS_AUTO.abJob(d.args);
   else if(d.cmd==="xj") out=XJ[d.job](d.args,(fr,t)=>self.postMessage({id:d.id,prog:fr,txt:t||""}));
   self.postMessage({id:d.id,ok:true,out});
 }catch(err){ self.postMessage({id:d.id,ok:false,err:String(err&&err.message||err)}); } };`;
@@ -498,7 +500,7 @@ function pool(jobs,onDone,onProg){
   const url=workerURL(); const K=Math.min(nWorkers(),jobs.length);
   return new Promise((resolve,reject)=>{
     if(!url){ // 주 스레드 (예외: 주입 안 된 시험 환경)
-      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):j.cmd==="c1s"?GD().c1sJob(j.prob,j.opt):j.cmd==="o1s"?GD().o1sJob(j.prob,j.opt):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
+      try{ const outs=jobs.map(j=>{ const o=j.cmd==="fit"?C.fitJob(j.prob,j.starts,j.opt):j.cmd==="final"?C.finalJob(j.prob,j.opt):j.cmd==="auto"?C.autoJob(j.prob,j.opt):j.cmd==="sens"?C.sensJob(j.spec,j.model,j.variants):j.cmd==="batch"?C.batchJob(j.spec,j.model,j.opt):j.cmd==="staged"?GD().stagedJob(j.prob,j.opt):j.cmd==="c1s"?GD().c1sJob(j.prob,j.opt):j.cmd==="o1s"?GD().o1sJob(j.prob,j.opt):j.cmd==="ab"?AB().abJob(j.args):C.mcJob(j.prob,j.res,j.M,j.seed,j.opt); onDone&&onDone(); return o; }); resolve(outs); }catch(e){ reject(e); } return; }
     const ws=[...Array(K)].map(()=>new Worker(url)); RUN={ws,cancel:()=>{ ws.forEach(w=>w.terminate()); reject(new Error("취소")); }};
     const outs=new Array(jobs.length); let next=0, done=0, failed=null;
     const feed=w=>{ if(next>=jobs.length) return; const id=next++; w.postMessage(Object.assign({id},jobs[id])); };
@@ -959,7 +961,7 @@ function panelFit(el,sp){
    <div class="muted xs">${bgHelp(bg.type)}</div>${casaRegionTxt(sp,p)}${bgWarn(sp,p)}
    <hr class="xps-hr">
    <div class="xps-h">Components <span class="muted sm">(${p.comps.length})</span></div>${multBanner(sp)}${recipeBanner(sp,p)}${ovlBanner(sp,p)}
-   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>${recipeEnvRow(sp,p)}
+   <div class="xps-row"><button class="btn sm primary" id="xpsAuto" title="Find peaks to build a starting model, then refine from the residual (add components, tune the doublet area ratio; judged by BIC). The result is only a starting point — check it, then press Fit">Auto suggest</button><button class="btn sm" id="xpsAB" title="${esc(AB_HELP)}">Auto build</button>${recipeSel(sp,p)}${sp.reg.el==="C"&&sp.reg.orb==="1s"?`<button class="btn sm" id="xpsTplC">C 1s template</button>`:""}<button class="btn sm" id="xpsTplS" title="Save the current component set as a template">Save template</button><select class="xps-sel" id="xpsTplL"><option value="">Load template…</option>${tplList().map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="btn sm" id="xpsUndo" title="Undo the last change">Undo</button></div>${recipeEnvRow(sp,p)}${abHTML(sp,p)}
    <div id="xpsComps">${p.comps.map((c,ci)=>compCard(sp,p,c,ci)).join("")||`<div class="muted sm" style="padding:6px 2px">성분이 없습니다. <b>Auto suggest</b> 또는 그래프 위 <b>+ Add component</b> 로 직접 놓으세요.</div>`}</div>
    ${refHTML(sp,p)}
    <hr class="xps-hr">
@@ -994,6 +996,7 @@ function panelFit(el,sp){
   const tc=$q(el,"#xpsTgC"), td=$q(el,"#xpsTgD"); if(tc) tc.onchange=()=>{ bg.C=+tc.value; touch(p); drawPlot(); }; if(td) td.onchange=()=>{ bg.D=+td.value; touch(p); drawPlot(); };
   const bs=$q(el,"#xpsBgS"); if(bs) bs.onchange=()=>{ bg.cons=bg.cons||{}; bg.cons.s={mode:bs.checked?"free":"fixed"}; if(!bs.checked) bg.s=0; touch(p); };
   $q(el,"#xpsAuto").onclick=()=>autoSuggest(sp);
+  bindAB(el,sp,p);
   $q(el,"#xpsW").onchange=e=>{ pushHist(p,"가중"); p.weight=e.target.value; touch(p); renderPanel(); drawPlot(); };
   const tpc=$q(el,"#xpsTplC"); if(tpc) tpc.onclick=templateC1s;
   $q(el,"#xpsTplS").onclick=saveTpl; $q(el,"#xpsTplL").onchange=e=>{ if(e.target.value!=="") loadTpl(+e.target.value); };
@@ -1097,6 +1100,91 @@ function fitStrip(r,sp){
   if(r.cov&&r.cov.singular) w+=`<div class="note warn" style="margin-top:4px">공분산 행렬이 특이에 가깝습니다 — 서로 구별되지 않는 매개변수가 있습니다(Results 탭의 Parameter Correlation Matrix).</div>`;
   return `<div class="strip">${parts.join("")}</div>${w}`;
 }
+/* ============================================================
+   v1.10 Auto build (SPEC §18): 모형 만들기 고리를 걸음마다 *제안* — 근거(Δχ²ν · ΔAICc_eff · ΔBIC_eff · 잔차 구간 · 한계)를 보이고
+   사용자가 받아들이거나(한 걸음 = 되돌리기 하나) 버린다. 받아들이기 전에는 모형을 바꾸지 않는다. 끝에 정직한 불확도 요약.
+   ============================================================ */
+const AB_HELP="Auto build (SPEC §18): proposes the model-building steps an expert takes, one at a time — start model (Auto suggest, or the region recipe), then fix merging lines, simplify (shared L fraction, tied widths, drop unsupported lines) and add freedom only when ΔAICc and ΔBIC (with N_eff = N(1 − ρ₁)/(1 + ρ₁) for correlated residuals) both improve by ≥ 10 (add a line at the largest residual run, release a non-literature bound, background). Each step shows its evidence; Accept / Reject it, or Accept remaining. Nothing changes until you accept; every accepted step is one Undo. At the end: multi-start uniqueness and covariance (σ × √((1 + ρ₁)/(1 − ρ₁))); lines whose parameters correlate |r| > 0.9 are reported only as their sum. 'Model not established' when χ²ν > 2, same minimum < 1/3 of the starts, residual ρ₁ > 0.5, a position or width sits at its bound, two lines are closer than ½ FWHM, or the background is static. Uncertainties: σ (covariance × the ρ₁ factor) plus a bound for one undetected neighbouring line (u = σ + bound/3). New lines are named by BE — candidates are listed only from the app's cited tables; you name them. Not validated for asymmetric (metallic) lines (SPEC §18.5).";
+function abCtx(sp){ const r=sp.reg||{}; return {shift:shOf(sp),el:r.el||null,orb:r.orb||null,present:[...presentEls(sp)],hv:sp.hv}; }
+function abLogPush(p,st,dec){ p.ab.steps.push(Object.assign({},st,{model:undefined,decision:dec,at:new Date().toISOString()})); }
+async function abStart(sp){ if(!AB()){ note("Auto build engine missing","warn"); return; } if(RUN){ note("Already computing","warn"); return; }
+  const p=pr(sp); if(p.ab&&p.ab.steps&&p.ab.steps.length){ p.abPrev=(p.abPrev||[]).concat([{when:p.ab.when,steps:p.ab.steps,stop:p.ab.stop,final:p.ab.final}]).slice(-10); }   // 앞 세션의 기록은 지우지 않음 (Log 에 함께)
+  p.ab={when:new Date().toISOString(),region:sp.region,sample:SK(sp),steps:[],excluded:[],prop:null,stop:null,final:null,first:true,open:true};
+  const R=recipeList(sp)[0]; const inRec=R&&p.comps.some(c=>c.recipe===R.id);
+  if(R&&!inRec){ p.ab.prop={kind:"recipe",key:"recipe|"+R.id,label:`Start from the ${R.name} recipe`,why:`A literature recipe applies to this region (${R.cite.split(";")[0]}). Auto build starts from it and keeps its literature ranges and ties; it only proposes changes within the rules.`+(R.kind==="c1s"?" The C 1s recipe also sets the charge correction of the whole sample (C 1s → charge correction → O 1s).":R.kind==="o1s"?" The O 1s recipe needs the C 1s recipe and its charge correction first.":"")+" Reject to build from the current model instead.",ev:null,recipe:R.id}; rerender(); return; }
+  if(!p.comps.length){ p.ab.prop={kind:"suggest",key:"suggest",label:"Start model: Auto suggest",why:"No components yet: peak finding plus residual refinement (SPEC §9) gives the start model.",ev:null}; rerender(); return; }
+  abNext(sp); }
+async function abNext(sp){ const p=pr(sp); if(!p.ab) return; if(!p.comps.length){ p.ab.stop="no components"; rerender(); return; }
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; } const ver=p.ver;
+  setProg("Auto build: evaluating candidate steps…",null);
+  try{ const [o]=await pool([{cmd:"ab",args:{mode:"step",prob,ctx:abCtx(sp),excluded:p.ab.excluded,first:p.ab.first}}]); hideProg();
+    if(!o) throw new Error("no result"); if(p.ver!==ver||S.proc[sp.uid]!==p){ note(`Auto build: the model of ${sp.region} changed — stopped`,"warn",null,sp); p.ab.stop="model changed by the user"; rerender(); return; }
+    p.ab.cur=o.cur; if(o.step){ p.ab.prop=o.step; rerender(); return; }
+    p.ab.stop=o.stop; p.ab.prop=null; rerender(); abFinal(sp); }
+  catch(e){ hideProg(); RUN=null; note("Auto build stopped: "+(e.message||e),"warn",null,sp); } }
+function abApply(sp,p,st){ const m=st.model; pushHist(p,"Auto build: "+st.label); const slot={}; p.comps.forEach(c=>slot[c.id]=c.slot);
+  p.comps=C.clone(m.comps); p.cons=C.clone(m.cons); p.bg=Object.assign({},p.bg,C.clone(m.bg));
+  p.comps.forEach(c=>{ c.slot=slot[c.id]!=null?slot[c.id]:slotFor(p); if(!c.name) c.name=defName(sp,p,!!c.doublet); }); touch(p); }
+async function abAccept(sp){ const p=pr(sp), st=p.ab&&p.ab.prop; if(!st) return;
+  if(st.kind==="suggest"){ abLogPush(p,st,"accepted"); p.ab.prop=null; await autoSuggest(sp); if(!p.comps.length){ p.ab.stop="Auto suggest found no peak"; rerender(); return; } p.ab.first=true; return abNext(sp); }
+  if(st.kind==="recipe"){ abLogPush(p,st,"accepted"); p.ab.prop=null; const R=GD().recipeById(st.recipe);
+    if(R.kind==="c1s"||R.kind==="o1s") await applyRecipe(sp,R.id,rcpOpts(sp,R)); else { applyRecipe(sp,R.id,rcpOpts(sp,R)); await runStaged(sp); }
+    if(!p.comps.some(c=>c.recipe===R.id)||!p.result||p.result.stale){ p.ab.stop=R.kind==="o1s"?"the O 1s recipe needs the C 1s recipe and charge correction first (C 1s → charge correction → O 1s) — run it, then Auto build again":"the recipe could not be applied"; rerender(); return; }
+    p.ab.first=false; return abNext(sp); }
+  if(st.kind==="adopt"||st.kind==="multi"){ abLogPush(p,st,"accepted"); abApply(sp,p,st); p.ab.prop=null; rerender(); return abFinal(sp,true); }
+  abLogPush(p,st,"accepted"); abApply(sp,p,st); if(st.kind==="bound") p.ab.excluded.push(st.key); p.ab.prop=null; p.ab.first=false; rerender(); return abNext(sp); }
+function abReject(sp){ const p=pr(sp), st=p.ab&&p.ab.prop; if(!st) return; abLogPush(p,st,"rejected"); p.ab.prop=null;
+  if(st.kind==="suggest"){ p.ab.stop="start model rejected"; rerender(); return; }
+  if(st.kind==="recipe"){ if(!p.comps.length){ p.ab.prop={kind:"suggest",key:"suggest",label:"Start model: Auto suggest",why:"Recipe rejected and no components: peak finding plus residual refinement (SPEC §9).",ev:null}; rerender(); return; } return abNext(sp); }
+  if(st.kind==="multi"){ return abFinal(sp,true); }
+  p.ab.excluded.push(st.key); rerender(); return abNext(sp); }
+async function abRest(sp){ const p=pr(sp); if(!p.ab) return; const st0=p.ab.prop; if(st0&&(st0.kind==="suggest"||st0.kind==="recipe"||st0.kind==="multi")) return abAccept(sp);
+  let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; } const ver=p.ver; setProg("Auto build: running the remaining steps…",null);
+  try{ const [o]=await pool([{cmd:"ab",args:{mode:"run",prob,ctx:abCtx(sp),excluded:p.ab.excluded,first:p.ab.first}}]); hideProg();
+    if(!o) throw new Error("no result"); if(p.ver!==ver||S.proc[sp.uid]!==p){ note(`Auto build: the model of ${sp.region} changed — stopped`,"warn",null,sp); return; }
+    o.steps.forEach(st=>{ abLogPush(p,st,"accepted (remaining)"); abApply(sp,p,st); }); p.ab.prop=null; p.ab.stop=o.stop; p.ab.first=false; rerender(); abFinal(sp); }
+  catch(e){ hideProg(); RUN=null; note("Auto build stopped: "+(e.message||e),"warn",null,sp); } }
+async function abFinal(sp,noAdopt){ const p=pr(sp); if(!p.ab) return; let prob; try{ prob=probOf(sp,p); }catch(e){ note(e.message,"warn",null,sp); return; } const ver=p.ver, t0=performance.now();
+  setProg("Auto build: multi-start uniqueness, covariance…",null);
+  try{ const [o]=await pool([{cmd:"ab",args:{mode:"final",prob,ctx:abCtx(sp),noAdopt:!!noAdopt}}]); hideProg();
+    if(!o) throw new Error("no result"); if(p.ver!==ver||S.proc[sp.uid]!==p){ note(`Auto build: the model of ${sp.region} changed — stopped`,"warn",null,sp); return; }
+    if(o.step&&!noAdopt){ p.ab.prop=Object.assign(o.step,{kind:"multi"}); rerender(); return; }
+    const fin=o.fin; pushHist(p,"Auto build: final fit"); p.comps=fin.comps.map(c=>{ const q=p.comps.find(x=>x.id===c.id); if(q){ c.slot=q.slot; c.name=q.name; } return c; }); p.cons=fin.cons;
+    p.bg=Object.assign(p.bg,{c0:fin.bg.c0,k:fin.bg.k,s:fin.bg.s});
+    p.result=Object.assign(fin,{when:new Date().toISOString(),ms:Math.round(performance.now()-t0),stale:false,lo:p.lo,hi:p.hi,bgType:p.bg.type,mc:null,iter0:0});
+    p.ver++; p.ab.final=o.final; p.ab.steps.push({kind:"final",label:"Final fit, multi-start and covariance",decision:"done",ev:{chi2nuTo:o.final.chi2nu,rho:o.final.rho1,sameMin:o.final.multi}});
+    save(); rerender(); note(`Auto build: ${o.final.established?"model established":"MODEL NOT ESTABLISHED — "+o.final.reasons.join("; ")} · ${p.comps.length} lines, χ²ν ${f(o.final.chi2nu,2)}`,o.final.established?"ok":"warn",null,sp); }
+  catch(e){ hideProg(); RUN=null; note("Auto build stopped: "+(e.message||e),"warn",null,sp); } }
+function abEvHTML(e){ if(!e) return ""; const sg_=(v,d)=>v==null||!isFinite(v)?"—":(v>0?"+":"")+f(v,d);
+  const it=[];
+  if(e.chi2nuTo!=null&&e.chi2nuFrom!=null) it.push(`<span title="Reduced χ² before → after this step">χ²ν ${f(e.chi2nuFrom,3)} → ${f(e.chi2nuTo,3)}</span>`);
+  if(e.dAICc!=null) it.push(`<span title="AICc(current) − AICc(proposed) with N_eff = N(1 − ρ₁)/(1 + ρ₁) (Zięba 2010, Eq. 15): positive = the proposal is better. Adding freedom needs ≥ 10 in both AICc and BIC; a simplification is kept when it is not worse by 2 or more (Burnham & Anderson 2002)">ΔAICc ${sg_(e.dAICc,1)}</span>`);
+  if(e.dBIC!=null) it.push(`<span title="BIC(current) − BIC(proposed), same N_eff (Kass & Raftery 1995: > 10 very strong)">ΔBIC ${sg_(e.dBIC,1)}</span>`);
+  if(e.dp!=null) it.push(`<span title="Change in the number of free parameters (a static background counts its two end levels)">Δp ${e.dp>0?"+":""}${e.dp}</span>`);
+  if(e.rho!=null) it.push(`<span title="ρ₁ used for N_eff: lag-1 residual correlation of the better-fitting model, capped at 0.5 (SPEC §18.2); N_eff ${f(e.Neff,0)} of N ${e.N||"—"}">ρ₁ ${f(e.rho,2)}</span>`);
+  if(e.run) it.push(`<span title="Largest positive residual run (sum of normalised residuals over ±½ median FWHM; noise level and correlation from the data's second differences, SPEC §17.6)">run ${f(e.run.be,2)} eV · z ${f(e.run.z,1)}</span>`);
+  if(e.bounds&&e.bounds.length) it.push(`<span title="${esc(e.bounds.join("; "))}">at bound: ${e.bounds.length}</span>`);
+  if(e.sameMin) it.push(`<span title="Multi-start: starts that reached the same minimum (Δχ²_d < max(1, χ²ν))">same min. ${e.sameMin.near}/${e.sameMin.N}</span>`);
+  return `<div class="xps-ab-ev">${it.join("")}</div>`; }
+function abSumHTML(sp,p){ const F=p.ab.final; if(!F) return ""; const tip=F.established?"χ²ν ≤ 2, the same minimum from ≥ 1/3 of the multi-starts and residual ρ₁ ≤ 0.5 (SPEC §18.3). Established means the model is a statistically adequate, locally unique description of these data — not that each line is a chemical state.":"The result is not final: "+F.reasons.join("; ");
+  const rows=F.lines.map(l=>`<tr><td title="${esc((l.added?"Added by Auto build — named by BE. ":"")+(l.weak?`Weak support: removing it changes AICc_eff by ${f(l.support&&l.support.dAICc,1)}, BIC_eff by ${f(l.support&&l.support.dBIC,1)} (< 10). `:"")+(l.bounds.length?"At bound: "+l.bounds.join(", "):""))}">${esc(l.name)}${l.weak?" (weak)":""}${l.bounds.length?" !":""}</td><td>${f(l.be,2)}</td><td>${l.separate?"± "+f(l.beSig,3):"—"}</td><td>${l.separate?f(l.areaPct,1):`<span title="This line's parameters correlate |r| > 0.9 with another line: only the sum below is determined">not sep. det.</span>`}</td><td>${f(l.fwhm,2)}</td></tr>`).join("");
+  const grp=F.groups.map(g=>`<div title="${esc(g.pairs.map(q=>`${q.a} ${q.ka} ↔ ${q.b} ${q.kb}: r ${f(q.r,3)}`).join("; "))}">Sum ${esc(g.names.join(" + "))}: area ${g_(g.area)} ± ${g_(g.sig)} (${f(100*g.sig/g.area,1)} %) · centroid ${f(g.be,2)} eV</div>`).join("");
+  const spc=(F.species||[]).filter(s=>s.cands.length).map(s=>`<div title="${esc("Candidates only (not an assignment): entries of the app's cited tables whose range contains this BE, filtered by the elements loaded in this sample. "+s.cands.map(c=>`${c.name}${c.lo!=null?` [${c.lo}–${c.hi} eV]`:""} — ${c.src}`).join("\n"))}">${f(s.be,1)} eV: candidates ${esc(s.cands.map(c=>c.name).join(", ").slice(0,70))} ⓘ</div>`).join("");
+  return `<div class="xps-ab-sum"><div class="xps-ab-h"><span class="badge ${F.established?"ok":"wr"}" title="${esc(tip)}">${F.established?"Established":"Model not established"}</span><span class="muted xs" title="Residual lag-1 correlation and the σ inflation √((1 + ρ₁)/(1 − ρ₁)) applied to every σ here">χ²ν ${f(F.chi2nu,2)} · ρ₁ ${f(F.rho1,2)} (σ × ${f(F.infl,2)}) · same min. ${F.multi?F.multi.near+"/"+F.multi.N:"—"}</span></div>${F.established?"":`<div class="note warn xs">${esc(F.reasons.join(" · "))}</div>`}
+    <div class="xps-ab-wrap"><table class="xps-ab-tb"><tr><th>line</th><th>BE eV</th><th>σ</th><th>area %</th><th>FWHM</th></tr>${rows}</table></div>${grp?`<div class="xs" style="margin:2px 0">${grp}</div>`:""}${spc?`<div class="xs muted">${spc}</div>`:""}</div>`; }
+const g_=v=>g(v,4);
+function abHTML(sp,p){ const A_=p.ab; if(!A_||!A_.open) return ""; const st=A_.prop;
+  const log=A_.steps.map(s=>`<li class="${/^accepted/.test(s.decision)?"acc":s.decision==="rejected"?"rej":""}"><span class="d">${/^accepted|done/.test(s.decision)?"✓":s.decision==="rejected"?"×":"·"}</span><span class="tx" title="${esc((s.why||"")+(s.ev&&s.ev.dAICc!=null?` ΔAICc ${f(s.ev.dAICc,1)}, ΔBIC ${f(s.ev.dBIC,1)}, χ²ν → ${f(s.ev.chi2nuTo,3)}.`:""))}">${esc(s.label)}</span></li>`).join("");
+  return `<div class="xps-ab" id="xpsABp"><div class="xps-ab-h"><span title="${esc(AB_HELP)}">Auto build ⓘ</span>${A_.stop?`<span class="muted xs" title="${esc("Stopped: "+A_.stop)}">stopped: ${esc(String(A_.stop).slice(0,60))}</span>`:""}<span style="margin-left:auto"></span>${A_.steps.length?`<button class="btn xs" id="xpsABlog" title="Download the full step log (Markdown: every proposal, its evidence and your decision, the stop reason and the final summary)">Log</button>`:""}<button class="btn xs" id="xpsABx" title="Close the Auto build panel (the model stays as it is)">×</button></div>
+   ${st?`<div class="xps-ab-p" title="${esc(st.why||"")}">${esc(st.label)} ⓘ</div>${abEvHTML(st.ev)}<div class="xps-row"><button class="btn xs primary" id="xpsABa">Accept</button><button class="btn xs" id="xpsABr">Reject</button>${st.kind!=="multi"?`<button class="btn xs" id="xpsABall" title="Accept this and every following step that passes the rules (each still becomes one Undo entry and is logged)">Accept remaining</button>`:""}<button class="btn xs" id="xpsABs" title="Stop proposing and run the final uniqueness / uncertainty analysis on the current model">Stop</button></div>`:""}
+   ${log?`<details ${A_.final?"":"open"}><summary class="xs">Steps (${A_.steps.length})</summary><ul class="xps-ab-log">${log}</ul></details>`:""}${abSumHTML(sp,p)}</div>`; }
+function abLogMD(sp,p){ const A_=p.ab; const rg=`${sp.sample||""} ${sp.region}`; const cur_=AB().logText({region:rg,when:A_.when,steps:A_.steps,stop:A_.stop,final:A_.final});
+  const prev=(p.abPrev||[]).map((x,i)=>AB().logText({region:`${rg} — earlier session ${i+1}`,when:x.when,steps:x.steps,stop:x.stop,final:x.final}).replace(/^# /,"## ")); return prev.length?cur_+"\n\n---\n\n"+prev.join("\n\n---\n\n"):cur_; }
+function bindAB(el,sp,p){ const b=$q(el,"#xpsAB"); if(b) b.onclick=()=>abStart(sp);
+  const q=id=>$q(el,id); const a=q("#xpsABa"); if(a) a.onclick=()=>abAccept(sp); const r=q("#xpsABr"); if(r) r.onclick=()=>abReject(sp); const all=q("#xpsABall"); if(all) all.onclick=()=>abRest(sp);
+  const s=q("#xpsABs"); if(s) s.onclick=()=>{ const st=p.ab.prop; if(st) abLogPush(p,st,"stopped"); p.ab.prop=null; p.ab.stop="stopped by the user"; rerender(); if(p.comps.length) abFinal(sp,true); };
+  const x=q("#xpsABx"); if(x) x.onclick=()=>{ p.ab.open=false; rerender(); };
+  const lg=q("#xpsABlog"); if(lg) lg.onclick=()=>download(safe(SK(sp)+"_"+sp.region)+"_autobuild.md",new Blob([abLogMD(sp,p)],{type:"text/markdown"})); }
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
@@ -2731,4 +2819,5 @@ window.XPS_UI={_lines:{mainLine,strongLines,practicalLines,lineChoices,lineStren
   _img:{run:()=>imgRun(),recon:()=>imgRecon(),bin:()=>imgBin(),roi:r=>{ IMU().roi=r; roiCompute(); drawWS(); return RES.roi; },roiRef:()=>roiAsRef(),roiSpec:()=>roiToSpectrum(),cands:()=>{ const st=curStack(); return st?imgRefCands(st).map(c=>({id:c.id,name:c.name,kind:c.kind})):[]; }},
   _proc:{dec:sp=>procDeconv(sp||cur()),fermi:sp=>procFermi(sp||cur()),peak:sp=>procPeak(sp||cur()),resample:(sp,add)=>procResample(sp||cur(),add),smooth:sp=>procSmooth(sp||cur())},
   _refCands:(el,orb)=>refCands(el,orb).map(c=>({id:c.id,name:c.name,kind:c.kind}))};
+window.XPS_UI._ab={start:sp=>abStart(sp||cur()),accept:sp=>abAccept(sp||cur()),reject:sp=>abReject(sp||cur()),rest:sp=>abRest(sp||cur()),log:sp=>{ const x=sp||cur(); return abLogMD(x,pr(x)); }};   // v1.10 Auto build (화면 시험)
 })();

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run every XPS test suite one after another and print one summary table (name · pass · fail · skip · time).
 #   test/run_all.sh [--quick] [--seeds A-B] [--html "INNO Analytics.html" [--fig DIR]] [--only REGEX] [--logs DIR]
-#   --quick        QUICK=1 for the suites that support it (test_xps_casa, test_guide, test_multi, test_arxps, test_proc)
+#   --quick        QUICK=1 for the suites that support it (test_xps_casa, test_guide, test_autobuild, test_multi, test_arxps, test_proc)
 #   --seeds A-B    run the seed-dependent Monte-Carlo suites (test_multi, test_arxps) once per SEED_OFFSET A..B (rows name@sN)
 #   --html FILE    also run the browser scripts test/ui_xps*.py against FILE (figures to --fig DIR, default <logs>/fig)
 #   --only REGEX   run only the suites whose name matches REGEX (bash =~)
@@ -63,6 +63,7 @@ run_suite test_casa_v3    node test/test_casa_v3.js
 run_suite test_shapes2    node test/test_shapes2.js
 for f in test/test_real_*.js; do [ -e "$f" ] || continue; n="$(basename "$f" .js)"; run_suite "$n" node "$f"; done
 run_suite test_guide      Q node test/test_guide.js
+run_suite test_autobuild  Q node test/test_autobuild.js
 if [ -n "$SEEDS" ]; then
   a="${SEEDS%-*}"; b="${SEEDS#*-}"
   for ((o=a; o<=b; o++)); do

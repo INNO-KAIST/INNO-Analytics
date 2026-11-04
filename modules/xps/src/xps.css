@@ -253,3 +253,19 @@ html[data-theme="dark"] .xps{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500
 .xps .xps-mig .warn{color:var(--warn)}
 .xps .xps-chk-d .fx{font-style:italic}
 .xps .xps-chk-d .fl{color:var(--warn)}
+/* v1.10 Auto build (SPEC §18) — 제안 하나씩, 근거는 칩 + title */
+.xps .xps-ab{border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;font-size:11.5px}
+.xps .xps-ab-h{display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;flex-wrap:wrap}
+.xps .xps-ab-p{margin:5px 0 3px;font-weight:600;overflow-wrap:anywhere}
+.xps .xps-ab-ev{display:flex;flex-wrap:wrap;gap:3px 6px;margin:2px 0 4px}
+.xps .xps-ab-ev span{background:var(--chip);border-radius:4px;padding:1px 5px;font-variant-numeric:tabular-nums;cursor:help;white-space:nowrap}
+.xps .xps-ab-log{list-style:none;margin:2px 0 0;padding:0;max-height:180px;overflow:auto}
+.xps .xps-ab-log li{display:flex;gap:5px;padding:1px 0;min-width:0}
+.xps .xps-ab-log li .tx{flex:1;min-width:0;overflow-wrap:anywhere;cursor:help}
+.xps .xps-ab-log li .d{flex:none;width:14px;text-align:center;font-weight:700}
+.xps .xps-ab-log li.acc .d{color:var(--ok,#2a7)} .xps .xps-ab-log li.rej .d{color:var(--warn)}
+.xps .xps-ab-sum{border-top:1px solid var(--line);margin-top:5px;padding-top:4px}
+.xps .xps-ab-tb{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin:3px 0}
+.xps .xps-ab-tb td,.xps .xps-ab-tb th{padding:1px 4px;text-align:right;border-bottom:1px solid var(--line);font-weight:400}
+.xps .xps-ab-tb td:first-child,.xps .xps-ab-tb th:first-child{text-align:left;overflow-wrap:anywhere}
+.xps .xps-ab-wrap{overflow-x:auto}
