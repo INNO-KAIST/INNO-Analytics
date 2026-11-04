@@ -1649,7 +1649,7 @@ window.INNO_TIPS={convert,addTip,hide,DELAY:TIP_DELAY};
 <body>
 <div id="app">
   <div class="topbar">
-    <div class="brand" style="align-items:center"><svg class="brand-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26"><defs><linearGradient id="anmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f3048"/><stop offset=".62" stop-color="#33202f"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#anmk)"/><rect x=".75" y=".75" width="62.5" height="62.5" rx="14.3" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="1.5"/><circle cx="32" cy="32" r="19" stroke="#e1b7d5" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45" stroke="#F4F6F1" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span class="logo"><em>INNO</em> Analytics</span><span class="ver" title="INNO Analytics v1.16 — XPS module v1.11 (2026-11-04). Version history: docs/HISTORY.md">v1.16 · XPS 1.11</span></div>
+    <div class="brand" style="align-items:center"><svg class="brand-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26"><defs><linearGradient id="anmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f3048"/><stop offset=".62" stop-color="#33202f"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#anmk)"/><rect x=".75" y=".75" width="62.5" height="62.5" rx="14.3" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="1.5"/><circle cx="32" cy="32" r="19" stroke="#e1b7d5" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45" stroke="#F4F6F1" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span class="logo"><em>INNO</em> Analytics</span><span class="ver" title="INNO Analytics v1.16 — XPS module v1.11.1 (2026-11-04). Version history: docs/HISTORY.md">v1.16 · XPS 1.11.1</span></div>
     <div class="spacer"></div>
     <span class="chipbtn" id="h5stat"><span class="dot"></span>HDF5 loading…</span>
     <button class="chipbtn" id="chipTheme" title="Toggle light / dark theme" aria-label="Toggle theme"></button>
@@ -45930,6 +45930,11 @@ const GUIDE_TH={
   blobZ:5,           // residual blob |z| ≥ 5 (noise σ and AR(1) ρ estimated from the data's second differences, independent of the model)
   blobHalf:0.6,      // eV, half width of the residual blob window
   blobAmp:0.03,      // and the blob's mean residual ≥ 3 % of the net peak height (a static-background endpoint error of ~1 % is not a missing line)
+  structLag:[3,5],   // v1.11.1 R16: residual autocorrelation averaged over lags 3–5 points (beyond the noise correlation length; SPEC §17.12)
+  structRho:0.35,    // residual ρ₁ ≥ 0.35 (practical size: a weak broad misfit of a static background, ρ₁ ≤ 0.30 at χ²ν ≤ 1.5, stays quiet) …
+  structS:0.15,      // … structured share s ≥ 0.15 …
+  structZ:2.0,       // … and s·√N ≥ 2 (significance; 99.5 % quantile of s·√N on correct models ≈ 1.1)
+  structMinN:30,     // at least 30 points in the window
 };
 const SEV_ORDER={bad:0,warn:1,info:2};
 
@@ -46623,6 +46628,21 @@ function noiseMA1(y,v){
   const s2=med/(1.5-2*rho); return {rho,s2,lrv:s2*(1+2*rho),c};
 }
 /* ------------------------------------------------------------
+   3b) 잔차 구조 (v1.11.1, SPEC §17.12 R16). 정규화 잔차 r = (y − μ)/√v 의 자기상관 ρ_k = Σ r_i r_{i−k} / Σ r_i² (stats.rho1 과 같은 정의).
+       잡음 상관(평활 3점: ρ_k = 0 for k ≥ 3; AR(1) ρ ≤ 0.5: ρ_k ≤ 0.125)은 2점 안에서 사라지고, 빠진 선·안 맞는 모양/배경의 잔차는 선 폭(수십 점)에
+       걸쳐 상관이 남음 → s = 지연 3–5 점 평균 ρ_k ≈ 잔차 분산 중 '구조' 몫. 잡음 몫의 지연-1 상관 ρ_n = (ρ₁ − s)/(1 − s) (ρ₁ = ρ_n(1 − s) + s).
+       차분(2차 차분) 으로 잡음 ρ 를 재면 AR(1) 은 구별되지 않고(Δ² 의 지연-1 상관 −0.667 → −0.550, ρ 0 → 0.5) 높은 계수에선 곡률이 섞임 → 잔차의 지연 구조를 씀
+   ------------------------------------------------------------ */
+function residStruct(y,mu,v,lag){ const n=y.length; lag=lag||GUIDE_TH.structLag; const k1=lag[1];
+  if(!mu||!v||n<2*k1+2) return null; const r=new Float64Array(n); let a0=0; for(let i=0;i<n;i++){ r[i]=(y[i]-mu[i])/Math.sqrt(v[i]); a0+=r[i]*r[i]; } if(!(a0>0)) return null;
+  const ac=[1]; for(let k=1;k<=k1;k++){ let a=0; for(let i=k;i<n;i++) a+=r[i]*r[i-k]; ac.push(a/a0); }
+  let s=0; for(let k=lag[0];k<=k1;k++) s+=ac[k]; s/=k1-lag[0]+1; const rhoN=s<1?(ac[1]-s)/(1-s):null;
+  return {n,rho1:ac[1],ac,s,z:s*Math.sqrt(n),rhoN}; }
+/* 양(+) 잔차 구간 (데이터 > 모형): 구간 합 z = Σr/√길이, 가운데 BE · 폭 — R13 · R16 공용 */
+function posRuns(E,y,mu,v,sh,step){ const n=y.length, runs=[]; if(!mu||!v) return runs; let k0=-1, zs=0;
+  for(let i=0;i<=n;i++){ const z=i<n?(y[i]-mu[i])/Math.sqrt(v[i]):-1; if(z>0){ if(k0<0){ k0=i; zs=0; } zs+=z; } else if(k0>=0){ const m=Math.floor((k0+i-1)/2); runs.push({be:E[m]+sh,i:m,z:zs/Math.sqrt(i-k0),w:(i-k0)*step}); k0=-1; } }
+  return runs.sort((a,b)=>b.z-a.z); }
+/* ------------------------------------------------------------
    4) Fit check (SPEC §17.1). ctx = {E, y, fin, el, orb, spec:{be0, be1} (raw spectrum extent), shift, recipe, dEref (literature Δ), anyRecipe}
       → [{id, sev:"bad"|"warn"|"info", label, tip, act|null, ids:[comp ids]}] sorted by severity
    ------------------------------------------------------------ */
@@ -46802,20 +46822,36 @@ function diagnose(ctx,th){
   const rm=ctx.recipeMeta; if(rm&&rm.alignLim>0&&rm.align!=null&&Math.abs(rm.align)>=rm.alignLim-0.026){ const lim=rm.alignLim;
     push({key:"alignlim",id:"alignlim",sev:"warn",ids:[],label:`Recipe alignment at its ±${fmt(lim,1)} eV search limit (${rm.align>0?"+":""}${fmt(rm.align,2)} eV)`,
       tip:`The recipe lines were shifted by ${rm.align>0?"+":""}${fmt(rm.align,2)} eV to match the data — the end of the ±${fmt(lim,1)} eV search range, so the best match may lie further out. Usual causes: a wrong or missing charge correction (check C 1s / the reference line), differential charging, or a different compound (for Ba 4d, ±1 eV cannot tell a global offset from BaO → Ba(OH)₂, +1.2 eV — confirm with O 1s / C 1s). Correct the charge reference and apply the recipe again; the fitted positions are otherwise held near the wrong start.`,act:null}); }
+  // R16 (v1.11.1) structured residual whatever χ²ν is (SPEC §17.12): smoothed / oversampled data overestimate σ, so a missing line can leave χ²ν ≈ 1
+  // (실측: 선 2개로 맞춘 O 1s — χ²ν 1.06, ρ₁ 0.54, runs z −6.1 인데 R12 (χ²ν < 1) · R13 (χ²ν > 2) 어느 것도 안 걸려 'OK' 였음)
+  const rS=fin.mu&&fin.v?residStruct(y,fin.mu,fin.v,th.structLag):null; if(ctx.debug) ctx.debug.struct=rS;
+  const structured=!!rS&&n>=th.structMinN&&rS.rho1>=th.structRho&&rS.s>=th.structS&&rS.z>=th.structZ;
+  const runsAll=fin.mu&&fin.v?posRuns(E,y,fin.mu,fin.v,sh,step):[];
+  if(structured){ const st=fin.stats||{}, cn=st.chi2nu, rz=st.runsZ; const top=runsAll.slice(0,3).filter(q=>q.z>2);
+    const rid=(recipesFor(ctx.el,ctx.orb)[0]||{}).id, recOn=!!(rid&&ctx.recipe&&ctx.recipe.id===rid);
+    const acts=[]; const blobAdd=out.some(x=>x.key==="resid"&&x.act&&x.act.type==="add");
+    if(top.length&&!blobAdd){ const q=top[0], anc=comps.reduce((a,c)=>!a||c.area>a.area?c:a,null); acts.push({type:"add",be:q.be-sh,F:Math.min(3,Math.max(0.8,anc?fw(byId[anc.id]):1.2)),h:Math.max(0,y[q.i]-fin.mu[q.i]),label:`Add a line at ${fmt(q.be,1)} eV`}); }
+    if(rid&&!recOn) acts.push({type:"recipe",recipe:rid,label:"Apply recipe"});
+    acts.push({type:"autobuild",label:"Auto build"});
+    push({key:"struct",id:"struct",sev:"warn",ids:[],acts,act:acts[0],label:`Residual has systematic structure (ρ₁ ${fmt(rS.rho1,2)}${rz!=null?`, runs z ${fmt(rz,1)}`:""})`,
+      tip:`The residual is not noise: its autocorrelation averaged over lags ${th.structLag[0]}–${th.structLag[1]} points is s = ${fmt(rS.s,2)} (thresholds: ρ₁ ≥ ${th.structRho}, s ≥ ${th.structS} and s·√N = ${fmt(rS.z,1)} ≥ ${th.structZ}), so about ${fmt(100*rS.s,0)} % of the residual variance is smooth structure spanning many points. Noise correlation from smoothing or oversampling dies out within one or two points (3-point smoothing: zero at lag ≥ 3; AR(1) with ρ ≤ 0.5: ≤ 0.125), so it is not the cause: the noise part of the lag-1 correlation is ≈ ${fmt(rS.rhoN,2)}, the residual's ρ₁ is ${fmt(rS.rho1,2)}${rz!=null?` (runs z ${fmt(rz,1)})`:""}. A line may be missing, or the line shape or the background does not fit. `
+        +(top.length?`Largest positive residual runs (data above the model): ${top.map(q=>`${fmt(q.be,2)} eV (z ${fmt(q.z,1)}, ${fmt(q.w,2)} eV wide)`).join(", ")} — add a line there, `:"No single positive run stands out (the residual alternates in sign over wide ranges) — check the line shape (asymmetry, L fraction) and the background first, then ")+(rid&&!recOn?`apply the region recipe, `:"")+`or run Auto build, and compare the models by AICc/BIC. `
+        +`χ²ν = ${fmt(cn,3)} is not evidence of a good fit here: when the data are smoothed or oversampled (step finer than the resolution, or interpolated by the acquisition software), σ from counting statistics is overestimated and a correct model gives χ²ν well below 1 (≈ 0.5), so a missing line can leave χ²ν ≈ 1.`}); }
   // R12 (v1.9.13) χ²ν < 1 with neighbour-correlated residuals → smoothed / oversampled data (SPEC §17.12)
+  // v1.11.1: R16 이 함께 걸리면 R12 는 'misfit 아님'이라 하지 않음 — ρ₁ 의 일부는 평활이 아니라 구조(σ 배율·MC 조언은 그대로)
   { const st=fin.stats||{}; const rho=st.rho1, cn=st.chi2nu; if(cn!=null&&rho!=null&&cn<1&&rho>0.3){ const fac=Math.sqrt((1+rho)/(1-Math.min(rho,0.95)));
     push({key:"corrnoise",id:"corrnoise",sev:"info",ids:[],label:`χ²ν ${fmt(cn,2)} < 1 with correlated residuals (ρ₁ ${fmt(rho,2)})`,
-      tip:`χ²ν = ${fmt(cn,3)} below 1 together with a lag-1 residual autocorrelation ρ₁ = ${fmt(rho,2)}${st.runsZ!=null?` and runs z = ${fmt(st.runsZ,1)}`:""} is the signature of smoothed or oversampled data (step smaller than the resolution, or data smoothed/interpolated by the acquisition software), not of a misfit: neighbouring points are not independent, so the per-point variance looks small while the information is less than N points carry. Uncertainties from the covariance are then too small: for AR(1)-correlated residuals the variance of a mean grows by (1 + ρ₁)/(1 − ρ₁) (effective number of points n(1 − ρ₁)/(1 + ρ₁) — A. Zięba, Metrol. Meas. Syst. 17, 3 (2010), Eq. 15), so scale σ by √((1 + ρ₁)/(1 − ρ₁)) = ${fmt(fac,2)}. The results table already shows that factor and the Monte Carlo uncertainty adds AR(1) noise with this ρ₁ (SPEC §3.4) — use Monte Carlo for reporting. Compare models by relative χ²/AICc, not by χ²ν ≈ 1.`,act:{type:"mc",label:"Monte Carlo"}}); } }
+      tip:`χ²ν = ${fmt(cn,3)} below 1 together with a lag-1 residual autocorrelation ρ₁ = ${fmt(rho,2)}${st.runsZ!=null?` and runs z = ${fmt(st.runsZ,1)}`:""} is the signature of smoothed or oversampled data (step smaller than the resolution, or data smoothed/interpolated by the acquisition software)${structured?` — but here the residual is also structured (see 'Residual has systematic structure'): part of ρ₁ is a misfit, not smoothing, so χ²ν < 1 does not mean the model is complete. For the smoothing part`:", not of a misfit"}: neighbouring points are not independent, so the per-point variance looks small while the information is less than N points carry. Uncertainties from the covariance are then too small: for AR(1)-correlated residuals the variance of a mean grows by (1 + ρ₁)/(1 − ρ₁) (effective number of points n(1 − ρ₁)/(1 + ρ₁) — A. Zięba, Metrol. Meas. Syst. 17, 3 (2010), Eq. 15), so scale σ by √((1 + ρ₁)/(1 − ρ₁)) = ${fmt(fac,2)}. The results table already shows that factor and the Monte Carlo uncertainty adds AR(1) noise with this ρ₁ (SPEC §3.4) — use Monte Carlo for reporting. Compare models by relative χ²/AICc, not by χ²ν ≈ 1.`,act:{type:"mc",label:"Monte Carlo"}}); } }
   // R13 (v1.9.13) multi-start (SPEC §17.12): same minimum = Δχ² < max(1, χ²ν) (UI); χ²ν > 2 with few starts → the model is wrong (misfit), not a search
   // (v1.11) Δχ² = 각 시작점의 최종 해의 χ²_d 차 (core.startChi2 · sameMinimum); v1.10 까지 1차 끝점의 chi2p1 이라 같은 해를 '다르다'고 셈
   // problem; few starts → rugged surface; equal χ² but different parameters (same-parameter count) → not unique
   const mu_=fin.multi; if(mu_&&mu_.N>=6&&mu_.frac!=null){ const rid=(recipesFor(ctx.el,ctx.orb)[0]||{}).id, ract=rid&&!(ctx.recipe&&ctx.recipe.id===rid)?{type:"recipe",recipe:rid,label:"Apply recipe"}:null;
     const nu=mu_.chi2nu!=null?mu_.chi2nu:(fin.stats&&fin.stats.chi2nu), thrT=mu_.thr!=null?` (each start compared at its final solution: Δχ²_d < max(1, χ²ν) = ${fmt(mu_.thr,2)})`:"";
-    if(mu_.frac<1/3&&nu!=null&&nu>2){ const bb=[]; free.forEach((f,j)=>{ if(f.k==="area") return; const p=val(f.id,f.k); if(p==null||!isFinite(f.lo)||!isFinite(f.hi)) return; if(atB[j]||Math.min(p-f.lo,f.hi-p)<=th.boundRel*(f.hi-f.lo)) bb.push(`${nm(f.id)} ${lab(f.k)} ${fmt(p+(f.k==="be"?sh:0),f.k==="be"?2:3)}`); });
-      const runs=[]; if(fin.mu&&fin.v){ let k0=-1, zs=0; for(let i=0;i<=n;i++){ const z=i<n?(y[i]-fin.mu[i])/Math.sqrt(fin.v[i]):-1; if(z>0){ if(k0<0){ k0=i; zs=0; } zs+=z; } else if(k0>=0){ const m=Math.floor((k0+i-1)/2); runs.push({be:E[m]+sh,z:zs/Math.sqrt(i-k0),w:(i-k0)*step}); k0=-1; } } runs.sort((a,b)=>b.z-a.z); }
-      const top=runs.slice(0,3).filter(q=>q.z>2);
+    // v1.11.1: 구조가 있는 잔차(R16)도 misfit — 평활 데이터에선 χ²ν ≈ 1 로도 모형이 틀림
+    if(mu_.frac<1/3&&nu!=null&&(nu>2||structured)){ const bb=[]; free.forEach((f,j)=>{ if(f.k==="area") return; const p=val(f.id,f.k); if(p==null||!isFinite(f.lo)||!isFinite(f.hi)) return; if(atB[j]||Math.min(p-f.lo,f.hi-p)<=th.boundRel*(f.hi-f.lo)) bb.push(`${nm(f.id)} ${lab(f.k)} ${fmt(p+(f.k==="be"?sh:0),f.k==="be"?2:3)}`); });
+      const top=runsAll.slice(0,3).filter(q=>q.z>2);
       push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Model misfit: χ²ν ${fmt(nu,2)}, same minimum ${mu_.near}/${mu_.N}`,
-        tip:`χ²ν = ${fmt(nu,2)} (> 2) and only ${mu_.near} of ${mu_.N} starts reached the best minimum${thrT}: the model is wrong — a component is missing, or a bound or width limit is binding — so the starts end in different poor compromises. More starts will not help. `+(bb.length?`Parameters at a bound: ${bb.slice(0,6).join("; ")}. `:"No nonlinear parameter is at a bound. ")+(top.length?`Largest positive residual runs (data above the model): ${top.map(q=>`${fmt(q.be,2)} eV (z ${fmt(q.z,1)}, ${fmt(q.w,2)} eV wide)`).join(", ")} — add a line there or widen the binding range.`:"")+(rid?` The region recipe sets literature lines and ranges.`:""),act:ract}); }
+        tip:(nu>2?`χ²ν = ${fmt(nu,2)} (> 2)`:`The residual is structured (see 'Residual has systematic structure'; χ²ν = ${fmt(nu,2)} is not a guide for smoothed data)`)+` and only ${mu_.near} of ${mu_.N} starts reached the best minimum${thrT}: the model is wrong — a component is missing, or a bound or width limit is binding — so the starts end in different poor compromises. More starts will not help. `+(bb.length?`Parameters at a bound: ${bb.slice(0,6).join("; ")}. `:"No nonlinear parameter is at a bound. ")+(top.length?`Largest positive residual runs (data above the model): ${top.map(q=>`${fmt(q.be,2)} eV (z ${fmt(q.z,1)}, ${fmt(q.w,2)} eV wide)`).join(", ")} — add a line there or widen the binding range.`:"")+(rid?` The region recipe sets literature lines and ranges.`:""),act:ract}); }
     else if(mu_.frac<1/3) push({key:"multi",id:"multi",sev:"warn",ids:[],label:`Multi-start: same minimum in ${mu_.near}/${mu_.N} starts`,
       tip:`Only ${mu_.near} of ${mu_.N} starting points ended at the best minimum${thrT}: the χ² surface has several minima of similar depth, so the model is not unique — components can trade places (a wide line taking a lattice-like maximum, a Lorentzian tail standing in for a missing line). Constrain it: BE ranges ('Bounded' in a component's BE field, or 'Bound positions'), tied widths and one shared L fraction`+(rid?`, or the region recipe (${(recipeById(rid)||{}).name}), which sets literature ranges and ties`:"")+`. Then run Multi-start again — a well-posed model reaches the same minimum from most starts.`,act:ract});
     else if(mu_.sameP!=null&&mu_.near>=2&&mu_.sameP<0.5*mu_.near) push({key:"multiP",id:"multi",sev:"warn",ids:[],label:`Multi-start: equal χ², different parameters (${mu_.sameP}/${mu_.near})`,
@@ -47008,7 +47044,7 @@ function stagedFit(prob,opt){
 /* Worker job: staged fit → finalize (same summary as finalJob) + staged report */
 function stagedJob(prob,opt){ const C=CORE(); const s=stagedFit(prob,opt); const out=C.finalize(s.P,s.r); out.staged=s.staged; return out; }
 
-const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPE_C1S,RECIPE_O1S,c1sModel,c1sFit,c1sJob,c1sFlags,c1sLines,c1sCo3Default,fTestP,betaI,o1sModel,o1sFit,o1sJob,o1sFlags,o1sLatStarts,o1sExpect,O1S_LAT,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
+const XPS_GUIDE={GUIDE_TH,RECIPES,RECIPE_C1S,RECIPE_O1S,c1sModel,c1sFit,c1sJob,c1sFlags,c1sLines,c1sCo3Default,fTestP,betaI,o1sModel,o1sFit,o1sJob,o1sFlags,o1sLatStarts,o1sExpect,O1S_LAT,RECIPES_ENV,RECIPES_PAR,HAASCH,OVERLAPS,overlapFindings,parModel,parLines,parDefaults,parFlags,envSets,envDefaults,envModel,relinkWithout,complexInfo,recipesFor,recipeById,recipeModel,recipeDerived,noiseMA1,residStruct,posRuns,d2Corr,diagnose,diagnoseFit,applyAction,stageCons,stagedFit,stagedJob};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_GUIDE; else root.XPS_GUIDE=XPS_GUIDE;
 })(typeof self!=="undefined"?self:this);
 </script>
@@ -50194,8 +50230,8 @@ function bindAB(el,sp,p){ const b=$q(el,"#xpsAB"); if(b) b.onclick=()=>abStart(s
 /* ============================================================
    v1.9.3 피팅 안내 (SPEC §17): Fit check · 영역 레시피 · 단계 피팅. 화면 글은 짧게, 설명은 title(ⓘ)에
    ============================================================ */
-const CHECK_V=4;   // v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
-const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
+const CHECK_V=5;   // v1.11.1: R16 structured residual (any χ²ν), R12 not with R16, R13 misfit with R16; v1.9.13: merge first + 'Bound positions', shared L fraction, R12 correlated residuals; v1.9.7: overlap rules (R10); v1.9.8: R11 alignment limit, recipe drops, Auger rules
+const CHECK_HELP="Fit check (SPEC §17.1), after every fit: parameters at a bound · correlated pairs (|r| > 0.95) · negligible (< 1 % of area) or ill-determined (σ > 100 %) lines · merging lines (ΔBE < ½ FWHM) · stalled / not converged · peak cut at a window end · background above the data · structured residual (≥ 5 σ and ≥ 3 % of the peak; noise from the data's second differences) · residual with systematic structure whatever χ²ν is (autocorrelation over lags 3–5 points; χ²ν ≈ 1 is no proof of a good fit on smoothed data) · multiplet / satellite regions · peak overlaps with other elements of the sample (survey or regions; Ba 3d / Co 2p, La 3d / Ni 2p, La MNN, Nd 3d / O KLL …). Thresholds are conservative: on 270 well-posed synthetic fits there were no warnings. ‘Apply’ buttons edit the model; press Fit again afterwards.";
 function recipeList(sp){ const r=sp.reg||{}; return GD()&&r.el?GD().recipesFor(r.el,r.orb):[]; }
 function recipeSel(sp,p){ const L=recipeList(sp); if(!L.length) return ""; const R=L[0]; const cur_=S.ui.rcpOpt||"mix";
   if(R.kind==="c1s") return `<button class="btn sm" id="xpsRcpA" data-rcp="${R.id}" title="${esc("One action: build the adventitious-carbon model, fit it, test the weak lines and set the fitted C–C/C–H to the reference BE for the whole sample (charge correction). "+R.how+" Pitfalls: "+R.pitfalls+" Source: "+R.cite)}">Recipe</button>`;
@@ -50354,6 +50390,7 @@ function checkHTML(sp,p){ const r=p.result; if(!r||r.stale) return ""; const ite
 function applyCheck(sp,p,act){ if(!act) return;
   if(act.type==="staged"){ runStaged(sp); return; }
   if(act.type==="mc"){ runMC(); return; }
+  if(act.type==="autobuild"){ abStart(sp); return; }   // v1.11.1 R16
   if(act.type==="recipe"){ const R_=GD().recipeById(act.recipe); applyRecipe(sp,act.recipe,R_?rcpOpts(sp,R_):S.ui.rcpOpt||"mix"); return; }
   if(act.type==="bound"&&!act.start){ const h=(p.hist||[]).slice().reverse().find(x=>x.comps&&act.ids.every(id=>x.comps.some(c=>c.id===id))); if(h){ act=Object.assign({},act,{start:{}}); act.ids.forEach(id=>{ act.start[id]=h.comps.find(c=>c.id===id).be; }); } }   // start values = positions before the last fit
   pushHist(p,"Fit check: "+act.label); const m={lo:p.lo,hi:p.hi,bg:p.bg,comps:p.comps,cons:p.cons}; let msg=null;
