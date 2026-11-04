@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#33202f">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
-<title>INNO Analytics — STEM / EDS</title>
+<title>INNO Analytics</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22iana%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234f3048%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%2333202f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url%28%23iana%29%22/%3E%3Crect x=%22.75%22 y=%22.75%22 width=%2262.5%22 height=%2262.5%22 rx=%2214.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.10%22 stroke-width=%221.5%22/%3E%3Ccircle cx=%2232%22 cy=%2232%22 r=%2219%22 stroke=%22%23e1b7d5%22 stroke-width=%224.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3Cpath d=%22M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45%22 stroke=%22%23F4F6F1%22 stroke-width=%223.4%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22 fill=%22none%22/%3E%3C/svg%3E">
 <script>/* theme boot (FOUC 방지) */
 (function(){try{var t=localStorage.getItem("innoanalytics_theme");
@@ -1649,9 +1649,9 @@ window.INNO_TIPS={convert,addTip,hide,DELAY:TIP_DELAY};
 <body>
 <div id="app">
   <div class="topbar">
-    <div class="brand" style="align-items:center"><svg class="brand-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26"><defs><linearGradient id="anmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f3048"/><stop offset=".62" stop-color="#33202f"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#anmk)"/><rect x=".75" y=".75" width="62.5" height="62.5" rx="14.3" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="1.5"/><circle cx="32" cy="32" r="19" stroke="#e1b7d5" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45" stroke="#F4F6F1" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span class="logo"><em>INNO</em> Analytics</span><span class="ver">STEM / EDS v0.1</span></div>
+    <div class="brand" style="align-items:center"><svg class="brand-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26"><defs><linearGradient id="anmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f3048"/><stop offset=".62" stop-color="#33202f"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#anmk)"/><rect x=".75" y=".75" width="62.5" height="62.5" rx="14.3" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="1.5"/><circle cx="32" cy="32" r="19" stroke="#e1b7d5" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 40h5l3.5-15 3.5 15h3l2.5-7 2.5 7H45" stroke="#F4F6F1" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span class="logo"><em>INNO</em> Analytics</span><span class="ver" title="INNO Analytics v1.16 — XPS module v1.11 (2026-11-04). Version history: docs/HISTORY.md">v1.16 · XPS 1.11</span></div>
     <div class="spacer"></div>
-    <span class="chipbtn" id="h5stat"><span class="dot"></span>HDF5 준비 중…</span>
+    <span class="chipbtn" id="h5stat"><span class="dot"></span>HDF5 loading…</span>
     <button class="chipbtn" id="chipTheme" title="Toggle light / dark theme" aria-label="Toggle theme"></button>
     <span class="copyright">© 2026 WonJeong Yu</span>
   </div>
@@ -38320,7 +38320,7 @@ function initTheme(){
   { const rv=()=>{ try{ if(state.curFile==null){ restoreView(); renderView(); } }catch(e){} };
     if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",rv,{once:true}); else setTimeout(rv,0); }
   ensureH5().then(()=>{
-    const el=$("#h5stat"); if(el){ el.innerHTML='<span class="dot"></span>HDF5 준비됨'; el.classList.add("on"); }
+    const el=$("#h5stat"); if(el){ el.innerHTML='<span class="dot"></span>HDF5 ready'; el.classList.add("on"); }
   }).catch(e=>{ toast("HDF5 엔진 로드 실패: "+(e.message||e),"err"); });
   // global drop
   ["dragover","drop"].forEach(ev=>document.addEventListener(ev,e=>{
@@ -44730,7 +44730,8 @@ function fitOnce(prob,opt){
     if(!viaInc&&r1.stop==="stalled"&&r.stop!=="stalled"){ r.stop="stalled"; if(!r.stall) r.stall=r1.stall; }
     if(!viaInc&&r1.branch&&!r.branch) r.branch=r1.branch; }
   r.trig=(r1.tries||0)+(r!==r1?(r.tries||0):0); if(pick) r.pick=pick;   // trig: 갈래를 푼 횟수(0 이면 옛 LM 과 같은 경로)
-  r.v=v; r.map=map; r.chi2p1=chi2p1; r.iter1=it1;   // 1차 χ²(데이터로 정한 분산) — 시작점끼리 비교하는 공통 목적함수
+  r.v=v; r.map=map; r.chi2p1=chi2p1; r.iter1=it1;   // 1차 χ²(데이터로 정한 분산 χ²_d) — 1차 끝점의 값(최종 해의 값이 아님: 시작점 비교는 startChi2)
+  r.onePass=r===r1;   // 2차 없음(가중 const·casa, irls 끔) → 1차 끝점 = 최종 해, chi2p1 = 최종 해의 χ²_d
   if(FIT_HOOK.fit) FIT_HOOK.fit(prob,r,opt);   // 시험용 기록 고리 (test/fitlog_hook.js; 화면에서는 비어 있음)
   return r;
 }
@@ -44751,14 +44752,25 @@ function startPoints(prob,N,seed){
 }
 function applyStart(prob,o){ if(!o) return; Object.entries(o).forEach(([key,v])=>{ const [ci,k]=key.split("|"); setP(prob.comps[+ci],k,v); }); }
 function stripProb(prob){ const o=Object.assign({},prob); delete o._Bst; return o; }
+/* 시작점 비교값 (v1.11, SPEC §3.3): 끝난(최종) 해의 χ²_d — 데이터만으로 정한 분산(평활 데이터, §3.5)이라 모든 시작점에 같은 가중이고,
+   1차 χ²(chi2p1)와 같은 정의이되 1차 끝점이 아니라 최종 해에서 잰다. 1차는 일찍 끝날 수 있어(먼 시작) 같은 최종 해(χ²_d 188.4)가
+   chi2p1 188 · 1310 · 13 594 로 갈렸다(v1.10 Auto build 개발, test_xps §2c). 2차 χ²(분산 v = μ₁)는 시작점마다 가중이 달라 비교 못 함.
+   2차가 없는 피팅(onePass)은 chi2p1 이 곧 최종 해의 χ²_d (다시 계산하지 않음 — 옛 결과와 비트 동일) */
+function chi2dOf(prob,mu){ const y=prob.y, n=y.length; const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let s=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; s+=d*d/vd[i]; } return s; }
+function startChi2(prob,r){ const x=r.onePass?r.chi2p1:chi2dOf(prob,r.mu); return isFinite(x)?x:Infinity; }
+/* 같은 최솟값 (SPEC §17.12 R13 · §18.3): 가장 낮은 값(처음 나온 것) 과의 차 < max(1, χ²_d/ν) 인 시작점 수. Fit 의 Multi-start · fitMulti · Auto build 가 같이 씀 */
+function sameMinimum(xs,N,nfree){ let bi=-1; for(let i=0;i<xs.length;i++) if(isFinite(xs[i])&&(bi<0||xs[i]<xs[bi])) bi=i;
+  if(bi<0) return {bi:-1,best:Infinity,nu:Infinity,thr:Infinity,near:0};
+  const best=xs[bi], nu=best/Math.max(1,N-nfree), thr=Math.max(1,nu); let near=0; for(const x of xs) if(x-best<thr) near++;
+  return {bi,best,nu,thr,near}; }
 function fitMulti(prob,opt){
   opt=opt||{}; const N=Math.max(1,opt.starts||1); const pts=startPoints(prob,N,opt.seed||1);
-  let best=null; const all=[];
-  // 시작점 비교는 1차 χ²(모든 시작점에 같은 가중)로 — 2차 분산 v=μ₁ 은 시작점마다 달라 2차 χ² 는 서로 비교할 수 없다 (SPEC 3.3)
-  pts.forEach((pt,s)=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); all.push(r.chi2p1); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ all.push(Infinity); } if(opt.progress) opt.progress(s+1,N,best&&best.r.chi2p1); });
+  let best=null; const all=[], all1=[];
+  // 시작점 비교는 최종 해의 χ²_d 로 (startChi2; v1.10 까지는 1차 끝점의 chi2p1)
+  pts.forEach((pt,s)=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); const x=startChi2(P,r); r.chi2s=x; all.push(x); all1.push(r.chi2p1); if(!best||x<best.r.chi2s) best={P,r}; }catch(e){ all.push(Infinity); all1.push(Infinity); } if(opt.progress) opt.progress(s+1,N,best&&best.r.chi2s); });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  const near=all.filter(x=>x-best.r.chi2p1<1).length;
-  best.r.multi={N,chi2:all,near,frac:near/N};
+  const sm=sameMinimum(all,prob.E.length,buildMap(best.P).free.length);   // v1.11: 문턱 max(1, χ²_d/ν) — 화면 R13 과 같음 (v1.10 까지 1)
+  best.r.multi={N,chi2:all,chi2p1:all1,near:sm.near,frac:sm.near/N,thr:sm.thr,chi2nu:sm.nu};
   return best;
 }
 
@@ -44815,8 +44827,7 @@ function fitStats(prob,res){
     for(let i=1;i<n-1;i++){ const d=y[i]-mu[i]; s2+=d*d; if(!Bc||Math.abs(y[i]-Bc[i])>1e-12*Math.max(1,Math.abs(y[i]))) ne++; }
     casa={rms:Math.sqrt(s2),dof:Math.max(1,ne-p),n:ne}; }
   // 모형 비교용 χ²_d: 데이터만으로 정한 분산(평활 데이터) — 모형마다 같은 가중 (SPEC 3.5 v1.1)
-  let ymax=0; for(const t of y) ymax=Math.max(ymax,Math.abs(t));
-  const vd=dataVar(prob,smoothQ(prob.E,y,smoothHW(prob.E))); let chi2d=0; for(let i=0;i<n;i++){ const d=y[i]-mu[i]; chi2d+=d*d/vd[i]; }
+  const chi2d=chi2dOf(prob,mu);
   const AICc=n*Math.log(chi2d/n)+2*p+(n-p-1>0?2*p*(p+1)/(n-p-1):Infinity), BIC=n*Math.log(chi2d/n)+p*Math.log(n);
   return {N:n,p,dof,chi2,chi2d,chi2nu:chi2/dof,R2:ss>0?1-sr/ss:null,rmsNorm:Math.sqrt(chi2/n),DW:a0>0?dw/a0:null,rho1,ar1Inflate:rho1>0?Math.sqrt((1+rho1)/(1-Math.min(rho1,0.95))):1,runs,runsZ:zR,AICc,BIC,resid:r,casa};
 }
@@ -45661,12 +45672,13 @@ function finalize(P,r){
 }
 /* 한 묶음의 시작점에서 피팅 → 최선 해 (Worker 작업 단위) */
 function fitJob(prob,starts,opt){
-  let best=null; const chis=[];
-  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13). 피팅 결과는 그대로(비트 동일)
+  let best=null; const chis=[], chis1=[];
+  // v1.9.13: pars = 시작점마다 끝난 자유 매개변수 벡터(buildMap 순서) — 같은 χ² 의 다른 해를 세려고(SPEC §17.12 R13)
+  // v1.11: chis = 시작점마다 최종 해의 χ²_d (startChi2) — 최선 고르기와 '같은 최솟값' 모두 이것으로; chis1 = 1차 끝점의 chi2p1 (진단용, 고르기에 안 씀)
   const pars=[]; let nfree=0;
-  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); chis.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||r.chi2p1<best.r.chi2p1) best={P,r}; }catch(e){ chis.push(Infinity); pars.push(null); } });
+  (starts&&starts.length?starts:[null]).forEach(pt=>{ const P=clone(stripProb(prob)); P.E=prob.E; P.y=prob.y; applyStart(P,pt); try{ const r=fitOnce(P,opt); const x=startChi2(P,r); r.chi2s=x; chis.push(x); chis1.push(r.chi2p1); const mp=buildMap(P); nfree=mp.free.length; pars.push(getVec(P,mp)); if(!best||x<best.r.chi2s) best={P,r}; }catch(e){ chis.push(Infinity); chis1.push(Infinity); pars.push(null); } });
   if(!best) throw new Error("모든 시작점에서 피팅 실패");
-  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2p1,chis,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 1차 χ² (시작점 비교용)
+  return {comps:best.P.comps,bg:best.P.bg,chi2:best.r.chi2s,chis,chis1,pars,nfree,N:prob.E.length,iter:best.r.iter,stop:best.r.stop||null,stall:best.r.stall||null,branch:best.r.branch||null};   // chi2 = 최종 해의 χ²_d (시작점 비교용)
 }
 /* 최종: 주어진 매개변수에서 (넓이 재초기화 없이) 다시 다듬고 요약 */
 function finalJob(prob,opt){
@@ -45881,7 +45893,7 @@ function casaModelToINNO(cm,hv,o){
 const XPS_CORE={_hook:FIT_HOOK,_work:WORK,LM_STALL,areaSumSigma,finalize,fitJob,finalJob,mcJob,SHAPES,PDEF,BG_TYPES,faddeeva,erfcx,lgamma,gauss,lorentz,voigt,glpNorm,laNorm,shapeUnit,trueFWHM,compEval,shapeParams,
   cumtrapz,endpoints,shirleyFallback,checkData,smoothQ,smoothHW,bgLinear,bgShirley,bgTougaard,bgStatic,
   paramNames,getP,setP,defBounds,buildMap,applyLinks,getVec,setVec,toU,fromU,dPdU,makeEvaluator,
-  nnls,rng,fitOnce,fitMulti,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
+  nnls,rng,fitOnce,fitMulti,chi2dOf,startChi2,sameMinimum,startPoints,applyStart,lmFit,covariance,fitStats,compSummary,monteCarlo,mcSummarize,noiseEstimate,
   tfValue,tpp2m,imfpValue,quantify,quantMC,endpointsCasa,bgShirleyCasa,casaEnds,bgShirleyAvantage,bgSmartAvantage,avantagePad,bgShirleyAvantageV18,bgSmartAvantageV18,avantageV19,avantageHalf,avantagePQ,avantageSmooth,aglRaw,aglShape,avantageVoigt,voigtFromAvantage,casaRegionStats,pchipSlopes,interpAt,interpIntegral,makeTemplate,perturbTpl,tplShape,tplCache,lcfDiag,symEig,splineKnots,naturalSplineM,splineAt,bgSpline,nmFit,propagateModel,batchJob,shiftModelBE,constVar,parseFormula,stoichCompare,augerParam,peakMaxPos,findPeaks,identify,acceptDefault,elementLines,EXCLUDE_DEFAULT,doubletInfo,multipletInfo,dEConstraint,suggestModel,refineByResidual,autoJob,sensVariants,sensJob,sensSummary,sensBg,SENS_BG_LABEL,removeComp,anchorOf,DOUBLET_RESOLVE,sliceRegion,makeProblem,newComp,convertShape,clone,stripProb,CASA_LA_RHO,casaVar,sglToGLS,glsToSGL,casaWidthFactor,casaWidthAsym,refineHalfMax,CASA_GRID,CASA_DS_T,dsCasaAreaFactor,casaStK,compToCasa,casaToComp,casaBg,casaModelToINNO,
   _s2g:S2GN,_s2lv:S2LV,s2Base,s2Eval,s2FWHM,tlaI1,tlaJ,tpEval,quadA,quadInf,lag6,gridInt6,compMod,compTail,shapePList,casaNKey,derivedParam,defaultCons,casaTokens,unitFWHM,compToCasa0,casaToComp0,CASA_SHAPES_HELP,S2_MODBASE};
 if(typeof module!=="undefined"&&module.exports) module.exports=XPS_CORE; else root.XPS_CORE=XPS_CORE;
@@ -46280,7 +46292,7 @@ const RECIPE_O1S={kind:"o1s", id:"o1s", el:"O", orb:"1s", name:"O 1s (oxide + su
    {id:"link",label:"Link C 1s",def:true,tip:"Constrain the organic / carbonate O 1s areas to the O expected from the C 1s fit of this sample: C–O ×1, C=O ×1, O–C=O ×2 (one at ≈532, one at ≈533.5 eV), CO₃²⁻ ×3 (≈531.5 eV), each × the C 1s area × (S·T·λ)O / (S·T·λ)C (Quantification tab factors). Band = expected ± 2σ, σ from the C 1s area σ (covariance) and the sensitivity-factor ratio uncertainty (default 10 % — an assumption, not a literature value; set it for your instrument). OH⁻/CO₃²⁻ and the 533.5 eV line are bounded from below only (hydroxide and water add to them)."}],
   how:"Lattice O (1–2 lines, FWHM tied, 0.8–2.0 eV: Graf et al. 2025 §2.3 give ≈ 1.2–1.6 eV for oxides and 1.6–2.0 eV for hydroxides; the upper end allows mixed / disordered oxides — a lattice line wider than that is better described by a second environment ('2 lattice', 'Low lattice')) + surface O (OH⁻/CO₃²⁻ 531.0–532.0, C=O / O=C–O 531.8–532.3, C–O 532.35–533.1, H₂O / C–O of O–C=O 533.1–533.9 eV; wider, FWHM tied among them; hydroxides 1.6–2.0 eV, Graf 2025 §2.3). Every line CasaXPS GL(30) (one fixed Lorentzian share). Window 525.5–536.5 eV with an in-fit Shirley + slope. Positions are on the charge-corrected scale of the sample (C 1s recipe first) — no second correction here. With a C 1s fit of the same sample the organic and carbonate O areas are bounded by the O expected from the C 1s areas, and the high-BE C 1s line (O–C=O or CO₃²⁻) is tested both ways (χ²_d and AICc).",
   cite:"A. Graf, M.A. Isaacs, D.J. Morgan, Surf. Interface Anal. (2025), doi:10.1002/sia.70036 (Table 1, §2.3–2.7); S.L. Cole et al., Surf. Sci. Spectra 27, 024010 (2020); O. Karslıoğlu et al., J. Electron Spectrosc. Relat. Phenom. 225 (2018) Table 1; G. Beamson, D. Briggs, High Resolution XPS of Organic Polymers (1992) via NIST SRD 20; H. Idriss, Surf. Sci. 712, 121894 (2021)",
-  pitfalls:"A line near 531 eV is not 'oxygen vacancies': a vacancy has no electron to eject — the 531–532 eV intensity is hydroxide, carbonate, organic O or a screened-state shoulder (H. Idriss, Surf. Sci. 712, 121894 (2021), doi:10.1016/j.susc.2021.121894; Graf et al. 2025 §2.6). Background: a kink or rise near 534 eV makes a static Smart/Shirley background swallow surface O — use the in-fit Shirley and a window up to ≈ 536 eV. Overlaps: Sb 3d5/2 (≈ 528 eV), V 2p1/2 (≈ 520–525 eV tail), Pd 3p3/2 (≈ 532 eV) and the Na KLL Auger (Al Kα) lie in or near this window (Fit check overlap warning). Lattice O positions depend on the cation and the structure (perovskite lattice ≈ 528.5 eV, Graf 2025 Table 1); a lattice line at its range end usually means a missing environment or a charge-correction error. Positions assume the C 1s charge correction is right (±0.2–0.3 eV, see C 1s recipe)."};
+  pitfalls:"A line near 531 eV is not 'oxygen vacancies': a vacancy has no electron to eject — the 531–532 eV intensity is hydroxide, carbonate, organic O or a screened-state shoulder (H. Idriss, Surf. Sci. 712, 121894 (2021), doi:10.1016/j.susc.2021.121894; Graf et al. 2025 §2.6). Background: a kink or rise near 534 eV makes a static Smart/Shirley background swallow surface O — use the in-fit Shirley and a window up to ≈ 536 eV. Overlaps: Sb 3d5/2 (≈ 528 eV), V 2p1/2 (≈ 520–525 eV tail), Pd 3p3/2 (≈ 532 eV) and the Na KLL Auger (≈ 535.6 eV under Al Kα) lie in or near this window (Fit check overlap rules when the element is present). Lattice O positions depend on the cation and the structure (perovskite lattice ≈ 528.5 eV, Graf 2025 Table 1); a lattice line at its range end usually means a missing environment or a charge-correction error. Positions assume the C 1s charge correction is right (±0.2–0.3 eV, see C 1s recipe)."};
 RECIPE_O1S.options=[]; RECIPE_O1S.derived=[]; RECIPES.push(RECIPE_O1S);
 const O1S_NONMETAL=new Set(["C","O","N","F","S","Cl","P","Si","B","H","Br","I","Se"]);
 function o1sMetals(present){ const P=present instanceof Set?[...present]:(present||[]); return P.filter(e=>e&&!O1S_NONMETAL.has(e)); }
@@ -46795,9 +46807,10 @@ function diagnose(ctx,th){
     push({key:"corrnoise",id:"corrnoise",sev:"info",ids:[],label:`χ²ν ${fmt(cn,2)} < 1 with correlated residuals (ρ₁ ${fmt(rho,2)})`,
       tip:`χ²ν = ${fmt(cn,3)} below 1 together with a lag-1 residual autocorrelation ρ₁ = ${fmt(rho,2)}${st.runsZ!=null?` and runs z = ${fmt(st.runsZ,1)}`:""} is the signature of smoothed or oversampled data (step smaller than the resolution, or data smoothed/interpolated by the acquisition software), not of a misfit: neighbouring points are not independent, so the per-point variance looks small while the information is less than N points carry. Uncertainties from the covariance are then too small: for AR(1)-correlated residuals the variance of a mean grows by (1 + ρ₁)/(1 − ρ₁) (effective number of points n(1 − ρ₁)/(1 + ρ₁) — A. Zięba, Metrol. Meas. Syst. 17, 3 (2010), Eq. 15), so scale σ by √((1 + ρ₁)/(1 − ρ₁)) = ${fmt(fac,2)}. The results table already shows that factor and the Monte Carlo uncertainty adds AR(1) noise with this ρ₁ (SPEC §3.4) — use Monte Carlo for reporting. Compare models by relative χ²/AICc, not by χ²ν ≈ 1.`,act:{type:"mc",label:"Monte Carlo"}}); } }
   // R13 (v1.9.13) multi-start (SPEC §17.12): same minimum = Δχ² < max(1, χ²ν) (UI); χ²ν > 2 with few starts → the model is wrong (misfit), not a search
+  // (v1.11) Δχ² = 각 시작점의 최종 해의 χ²_d 차 (core.startChi2 · sameMinimum); v1.10 까지 1차 끝점의 chi2p1 이라 같은 해를 '다르다'고 셈
   // problem; few starts → rugged surface; equal χ² but different parameters (same-parameter count) → not unique
   const mu_=fin.multi; if(mu_&&mu_.N>=6&&mu_.frac!=null){ const rid=(recipesFor(ctx.el,ctx.orb)[0]||{}).id, ract=rid&&!(ctx.recipe&&ctx.recipe.id===rid)?{type:"recipe",recipe:rid,label:"Apply recipe"}:null;
-    const nu=mu_.chi2nu!=null?mu_.chi2nu:(fin.stats&&fin.stats.chi2nu), thrT=mu_.thr!=null?` (Δχ² < max(1, χ²ν) = ${fmt(mu_.thr,2)})`:"";
+    const nu=mu_.chi2nu!=null?mu_.chi2nu:(fin.stats&&fin.stats.chi2nu), thrT=mu_.thr!=null?` (each start compared at its final solution: Δχ²_d < max(1, χ²ν) = ${fmt(mu_.thr,2)})`:"";
     if(mu_.frac<1/3&&nu!=null&&nu>2){ const bb=[]; free.forEach((f,j)=>{ if(f.k==="area") return; const p=val(f.id,f.k); if(p==null||!isFinite(f.lo)||!isFinite(f.hi)) return; if(atB[j]||Math.min(p-f.lo,f.hi-p)<=th.boundRel*(f.hi-f.lo)) bb.push(`${nm(f.id)} ${lab(f.k)} ${fmt(p+(f.k==="be"?sh:0),f.k==="be"?2:3)}`); });
       const runs=[]; if(fin.mu&&fin.v){ let k0=-1, zs=0; for(let i=0;i<=n;i++){ const z=i<n?(y[i]-fin.mu[i])/Math.sqrt(fin.v[i]):-1; if(z>0){ if(k0<0){ k0=i; zs=0; } zs+=z; } else if(k0>=0){ const m=Math.floor((k0+i-1)/2); runs.push({be:E[m]+sh,z:zs/Math.sqrt(i-k0),w:(i-k0)*step}); k0=-1; } } runs.sort((a,b)=>b.z-a.z); }
       const top=runs.slice(0,3).filter(q=>q.z>2);
@@ -46862,7 +46875,18 @@ const OVERLAPS=[
  {id:"BiS", sev:"warn", a:{el:"Bi",orb:"4f",sub:"4f5/2",be:162.3}, b:{el:"S",orb:"2p",sub:"2p3/2",be:162.5}, src:BKL,
   tip:"Bi 4f5/2 (162.3 eV) lies on S 2p (2p3/2 162.5 eV, Booklet) — in Bi sulfides fit Bi 4f and S 2p together, or use S 2s for S."},
  {id:"SrP", sev:"info", a:{el:"Sr",orb:"3d",sub:"3d5/2",be:134.2}, b:{el:"P",orb:"2p",sub:"2p",be:135.0}, src:BKL,
-  tip:"Sr 3d5/2 (134.2 eV) and P 2p (135 eV, Booklet) overlap — in Sr phosphates fit them together or use P 2s."}];
+  tip:"Sr 3d5/2 (134.2 eV) and P 2p (135 eV, Booklet) overlap — in Sr phosphates fit them together or use P 2s."},
+ /* v1.11: the four overlaps named in the O 1s recipe pitfalls. O side = 530.0 eV (oxide O 1s; the O 1s recipe lattice range 528–531 eV, Graf 2025 —
+    the Booklet O 1s 543.1 eV is the O₂ gas value, vacuum-referenced). Partner energies: Booklet (Sb, Pd: elements in natural form) or NIST SRD 20 (V⁵⁺,
+    because the metal V 2p1/2 519.8 eV lies outside an O 1s window), Na KLL from the library Avantage KE table, position confirmed by Thermo Fisher */
+ {id:"SbO", sev:"warn", a:{el:"O",orb:"1s",sub:"1s",be:530.0}, b:{el:"Sb",orb:"3d",sub:"3d5/2",be:528.2}, src:BKL+" (Sb 3d5/2 528.2, 3d3/2 537.5 eV); NIST SRD 20 (Sb 3d5/2 530.4 eV and 3d splitting 9.5 eV in BiSbO₄, Schuhl et al., J. Chem. Soc. Faraday Trans. I 79, 2055 (1983))",
+  tip:"Sb 3d5/2 (528.2 eV metal, Booklet; ≈ 530.4 eV in Sb oxides, NIST SRD 20) lies on O 1s — an Sb-containing sample cannot be fitted with O lines alone. Fit Sb 3d and O 1s in one model over the full Sb 3d / O 1s range (≈ 525–545 eV): Sb 3d3/2 (537.5 eV metal, 9.3–9.5 eV above 3d5/2) is free of O, so link Sb 3d5/2 to it (area ratio 3:2, fixed ΔE) and give the rest of the intensity to O."},
+ {id:"PdO", sev:"warn", a:{el:"O",orb:"1s",sub:"1s",be:530.0}, b:{el:"Pd",orb:"3p",sub:"3p3/2",be:532.3}, src:BKL+" (Pd 3p3/2 532.3, 3p1/2 559.9 eV)",
+  tip:"Pd 3p3/2 (532.3 eV, Booklet) lies inside the O 1s envelope (hydroxide / carbonate / adsorbed O at 531–533 eV) — with Pd present part of that intensity is Pd. Measure the full Pd 3p / O 1s range (≈ 525–580 eV) so that Pd 3p1/2 (559.9 eV, free of O) is included, and fit Pd 3p (doublet, area ratio 2:1) together with O 1s; use Pd 3d for the Pd chemical state."},
+ {id:"VO", sev:"warn", a:{el:"O",orb:"1s",sub:"1s",be:530.0}, b:{el:"V",orb:"2p",sub:"2p1/2",be:524.7}, src:"NIST SRD 20 (V 2p1/2 524.7 eV, V⁵⁺ in (V₂O₅)₅₀(GeO)₅₀, Khawaja et al., J. Non-Cryst. Solids 93, 45 (1987); V₂O₅ V 2p3/2 516.9–517.7 eV, Sawatzky & Post, Phys. Rev. B 20, 1546 (1979), Schuhl et al. 1983); "+BKL+" (V metal 2p1/2 519.8 eV)",
+  tip:"The V 2p1/2 of vanadium oxides (524.7 eV for V⁵⁺, NIST SRD 20; metal 519.8 eV, Booklet) sits on the low-BE side of an O 1s window, and its Coster–Kronig-broadened tail runs under the lattice O line — a background or an O line fitted alone takes it up. Fit V 2p (both halves) and O 1s in one model over ≈ 510–536 eV, or start the O 1s window above the V 2p1/2 tail and say so."},
+ {id:"NaKLLO", sev:"info", al:true, a:{el:"O",orb:"1s",sub:"1s",be:530.0}, b:{el:"Na",auger:"KLL",ke:[989,951]}, src:AVK+" (Na KL1 989, KL2 951 eV); Thermo Fisher XPS reference table, Oxygen: 'Sodium Auger peak (Na KLL) sometimes observed ~535 eV'",
+  tip:"Na KLL Auger (library KE 951 eV → BE ≈ 535.6 eV under Al Kα; the main line, KE 989 eV, is at ≈ 497.6 eV) appears on the high-BE side of O 1s, where adsorbed water and organic O are fitted — it is much broader than an O 1s line. With Na present do not assign that intensity to H₂O / C–O. Under Mg Kα the Auger moves to BE ≈ 302.6 eV (KE does not depend on hν), clear of O 1s."}];
 function overlapFindings(el,orb,present,o){
   o=o||{}; const out=[]; if(!el||!orb) return out; const P=present instanceof Set?present:new Set(present||[]); const hv=o.hv, al=isAl(hv), h=hv||1486.6;
   const inWin=be=>o.lo==null||o.hi==null||(be>=o.lo-1&&be<=o.hi+1);
@@ -47223,8 +47247,9 @@ function multiStart(S,o){ const C=CORE(); const N=(o&&o.starts)||AB_TH.starts; c
   // 시작점끼리는 끝난 해의 χ²_d(데이터 분산, §3.5 — 모든 해에 같은 가중)로 비교. 1차 χ²(chi2p1)는 쓰지 않음: 먼 시작에서 1차가 일찍 끝나
   // 같은 최종 해(χ² 188)인데 chi2p1 이 188 · 1310 · 13 594 로 갈렸다(개발 중 seed 1021) — 같은 최솟값을 '다르다'고 셈
   pts.forEach(pt=>{ const Q=clonePs(S.P); C.applyStart(Q,pt); try{ const r=C.fitOnce(Q,{}); const st=C.fitStats(Q,r); res.push({x:isFinite(st.chi2d)?st.chi2d:Infinity,Q,r,st}); }catch(e){ res.push({x:Infinity}); } });
-  const best=res.reduce((a,b)=>b.x<a.x?b:a,res[0]); const nfree=(S.r.map||C.buildMap(S.P)).free.length; const nu=best.x/Math.max(1,S.st.N-nfree); const thr=Math.max(1,nu);
-  const near=res.filter(q=>q.x-best.x<thr).length; return {N,near,frac:near/N,thr,chi2nu:nu,best,cur:S.st.chi2d}; }
+  // v1.11: 같은 최솟값 계산은 core.sameMinimum (Fit 의 Multi-start 와 같은 함수); st.chi2d = core.chi2dOf = startChi2 와 같은 값
+  const sm=C.sameMinimum(res.map(q=>q.x),S.st.N,(S.r.map||C.buildMap(S.P)).free.length); const best=res[sm.bi<0?0:sm.bi];
+  return {N,near:sm.near,frac:sm.near/N,thr:sm.thr,chi2nu:sm.nu,best,cur:S.st.chi2d}; }
 function multiAdopt(S,o){ const ms=multiStart(S,o); S.ms=ms; if(!(ms.best&&ms.best.Q&&ms.best.x<ms.cur-ms.thr)) return null; const C=CORE();
   const T={P:ms.best.Q,r:ms.best.r,st:ms.best.st}; T.ms=null; const d=cmpIC(S,T);
   return {kind:"multi",key:"multi",cls:"cap",label:`Adopt the lower minimum found by multi-start (χ²_d ${fx(ms.cur,1)} → ${fx(ms.best.x,1)})`,S2:T,d,info:{},sameMin:{near:ms.near,N:ms.N}}; }
@@ -49513,8 +49538,8 @@ async function runFit(kind,spArg){
     const [fin]=await pool([{cmd:"final",prob,opt:{}}],null,d=>setProg(`다듬기·불확도 — 반복 ${d.it+1} · χ² ${g(d.chi2,6)}`,null));
     // v1.9.13 (SPEC §17.12 R13): 'same minimum' = Δχ² < max(1, χ²ν_best) — the covariance is scaled by χ²ν, so Δχ²/χ²ν < 1 is the same 1σ criterion when
     // σ is underestimated; 'same parameters' = every nonlinear free parameter (not areas, not background) within its 1σ (final covariance) of the best start
-    const dofB=Math.max(1,(best.N||prob.E.length)-(best.nfree||0)), nuB=best.chi2/dofB, thr=Math.max(1,nuB);
-    const near=chis.filter(x=>x-best.chi2<thr).length;
+    // v1.11: chis = 시작점마다 최종 해의 χ²_d (fitJob · startChi2; v1.10 까지 1차 끝점의 chi2p1) — 계산은 core.sameMinimum (Auto build 와 같음)
+    const sm=C.sameMinimum(chis,best.N||prob.E.length,best.nfree||0), nuB=sm.nu, thr=sm.thr, near=sm.near;
     let sameP=null; { const pars=[].concat(...ok.map(o=>o.pars||[])), mpB=C.buildMap(prob); const nl=mpB.free.map((q,j)=>q.k!=="area"&&q.ci>=0?j:-1).filter(j=>j>=0);
       const bi=chis.indexOf(best.chi2); const pb=bi>=0?pars[bi]:null; const sg=fin.cov&&fin.cov.sig;
       if(pb&&sg&&pars.length===chis.length&&nl.length){ sameP=0; pars.forEach((v,i)=>{ if(!v||!(chis[i]-best.chi2<thr)) return; if(nl.every(j=>{ const s_=sg[j]; return s_>0&&isFinite(s_)?Math.abs(v[j]-pb[j])<=s_:Math.abs(v[j]-pb[j])<=1e-6*(Math.abs(pb[j])+1); })) sameP++; }); } }
@@ -49710,7 +49735,7 @@ function build(root){
   ROOT=root;
   root.innerHTML=`<div class="xps">
     <div class="card xps-top">
-      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="VGD · VAMAS (.vms) · Avantage xls/xlsx/avg · Text. Multiple files or folders can also be dropped onto the page">Open files<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+      <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="VGD · VAMAS (.vms) · Avantage xls/xlsx/avg · Text. Multiple files or folders can also be dropped onto the page">Open files<input type="file" id="xpsFin" multiple accept="${ACCEPT}" style="display:none"></label><span class="muted sm">or drop files here</span></div>
       <div class="seg xps-ws-sw" id="xpsWs" role="tablist" aria-label="XPS workspace"></div>
       <div class="grp" style="margin-left:auto"><button class="btn sm" id="xpsSaveP" title="Save spectra, fits and charge correction as one JSON file">Save work</button><label class="btn sm" style="cursor:pointer" title="Open a saved JSON work file">Open work<input type="file" id="xpsLoadP" accept=".json" style="display:none"></label><button class="btn sm" id="xpsClear" title="Remove the list and all work (press twice to confirm)">Clear all</button></div>
       <div class="xps-chg" id="xpsChg"></div>
@@ -50067,7 +50092,7 @@ function fitStrip(r,sp){
     `<div>AICc<b>${f(st.AICc,1)}</b></div>`,
     r.stop==="stalled"?`<div class="warn" title="LM stopped early: χ² was still falling, but by less than χ²ν over 8 heavily damped steps even after a fresh Gauss–Newton try (SPEC §3.3b) — the model has a direction the data do not fix">Stalled<b>${(r.iter0||0)+r.iter} iter</b></div>`:
     `<div class="${r.conv?"ok":"warn"}" title="${(r.iter0||0)+r.iter?"LM iterations (start-point fit + final refinement)":"The starting values were already at the minimum (e.g. after Auto suggest) — nothing to change"}">${r.conv?"Converged":"Not converged"}<b>${(r.iter0||0)+r.iter?((r.iter0||0)+r.iter)+" iter":"at start"}</b></div>`];
-  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum: Δχ² < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
+  if(r.multi) parts.push(`<div class="${r.multi.frac<0.2?"warn":""}" title="${esc(`Starts reaching the best minimum, each start compared at its final solution by χ²_d (data-based variance, the same weights for every start): Δχ²_d < max(1, χ²ν) = ${f(r.multi.thr!=null?r.multi.thr:1,2)} (equivalent to Δχ²/χ²ν < 1 — the covariance is scaled by χ²ν). Same parameters: of those, the starts whose nonlinear parameters (positions, widths, shapes) all lie within 1σ of the best — equal χ² with different parameters means the model is not unique.`)}">Same minimum<b>${r.multi.near}/${r.multi.N}${r.multi.sameP!=null?` · same param. ${r.multi.sameP}`:""}</b></div>`);
   if(r.lcf) parts.push(`<div class="${r.lcf.warn?"warn":""}" title="Collinearity of the reference shapes on this data: scaled condition number κ (Belsley) and VIF per reference (${r.lcf.vif.map(v=>f(v,1)).join(", ")}). κ > 30 or VIF > 10 = references too alike — fractions poorly determined">Collinearity κ<b>${f(r.lcf.cond,1)}</b></div>`);
   if(r.optimizer==="simplex") parts.push(`<div title="Nelder–Mead simplex; count = χ² evaluations">Simplex<b>${r.iter} eval.</b></div>`);
   let w="";
@@ -59533,7 +59558,7 @@ function build(root){
   root.innerHTML=`<div class="imx">
     <div class="card im-top">
       <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF, ND2, CZI, PNG, JPEG, DM3/DM4, MRC, EMD, GWY, Nanoscope, ARDF, IBW, SXM, NPY, text … — you can also drop several files or whole folders here">Open files<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
-        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">또는 화면에 끌어다 놓기</span></div>
+        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">or drop files here</span></div>
       <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF (calibration and stacks included)">Save TIFF</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
     </div>
     <div class="im-main">
