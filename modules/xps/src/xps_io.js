@@ -43,7 +43,7 @@ function parseRegionName(s){
   if(a&&SYMSET.has(a[1])) return {kind:"auger",el:a[1],label:a[1]+" "+a[2]};
   return {kind:"region",label:t||"?",unknown:true};
 }
-/* 파일 이름에서 시료 이름: "[D.I. on BCT (600'C 5h)] Ta4f.txt" → "D.I. on BCT (600'C 5h)" */
+/* 파일 이름에서 시료 이름: "[Sample A (500'C 2h)] Ta4f.txt" → "Sample A (500'C 2h)" */
 function sampleFromName(fn){
   const b=String(fn||"").replace(/^.*[\\/]/,"");
   const lb=leadBracket(b); if(lb&&lb.inner.trim()) return lb.inner.trim();
@@ -55,7 +55,7 @@ function sampleFromName(fn){
   return s||"";
 }
 
-/* Avantage 경로 "…\\Experiment2\\X-Ray018 400um - FG  ON\\W1\\Group\\C1s Scan.VGD" → "W1" (Group 위 폴더 = 측정 지점/시료) */
+/* Avantage 경로 "…\\Experiment1\\X-Ray001 400um - FG  ON\\P1\\Group\\C1s Scan.VGD" → "P1" (Group 위 폴더 = 측정 지점/시료) */
 /* Avantage 원래 경로 → 측정 지점(점) 폴더 이름. 예: …\\W1\\Group\\C1s Scan.VGD → "W1" */
 function pathPoint(p){
   const a=String(p||"").split(/[\\/]/).filter(Boolean); if(a.length<2) return "";
@@ -63,7 +63,7 @@ function pathPoint(p){
   return a.length?a[a.length-1].replace(/\s+/g," "):"";
 }
 /* VGD 의 시료 키: 측정 지점 폴더 + 위로 세 단계(자료·실험·측정 조건) — 다른 실험의 같은 지점 이름(W1 등)이 한 시료로 합쳐지지 않게.
-   예: C:\\DATA\\K231213C\\Experiment2\\X-Ray018 400um - FG  ON\\W1\\Group\\C1s Scan.VGD → "K231213C / Experiment2 / X-Ray018 400um - FG ON / W1"
+   예: C:\\DATA\\S000000A\\Experiment1\\X-Ray001 400um - FG  ON\\P1\\Group\\C1s Scan.VGD → "S000000A / Experiment1 / X-Ray001 400um - FG ON / P1"
    (표시: 이름 = 마지막 부분, 맥락 = 앞부분) */
 function pathSample(p){
   const a=String(p||"").split(/[\\/]/).filter(Boolean); if(a.length<2) return "";
