@@ -1117,6 +1117,11 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 .imx .pa-k.pick{border-color:#e6bf00;background:rgba(255,220,0,.5)}
 .imx .more{opacity:.55}
 
+/* Non-destructive AFM before/after comparison */
+.im-lf-modal{position:fixed;inset:0;z-index:99999;background:#000b;display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
+.im-lf-card{background:#202c2a;color:#eef7f3;border:1px solid #567167;border-radius:8px;padding:12px;width:min(1400px,100%);max-height:calc(100vh - 24px);overflow:auto;box-sizing:border-box}
+.im-lf-head,.im-lf-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.im-lf-head span{margin-left:auto;font-size:12px}.im-lf-views{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.im-lf-views>div{min-width:0}.im-lf-views b{display:block;font-size:12px}.im-lf-views canvas{display:block;width:100%;background:#090d0c;touch-action:none;cursor:grab}.im-lf-actions{margin-top:8px}.im-lf-actions .sp{flex:1}
+
 /* Diffraction 탭 */
 .df-head{padding-bottom:12px}
 .df-head .seg{margin-top:2px}
@@ -53248,8 +53253,61 @@ const G=typeof self!=="undefined"?self:globalThis, IC=G.IMG_CORE||(G.IMG_CORE={}
 IC.afmLevel=function(p,o){
   o=o||{};const w=p.w,h=p.h,N=w*h,method=o.method;
   if(!Number.isSafeInteger(w)||!Number.isSafeInteger(h)||w<1||h<1||!Number.isSafeInteger(N)||!p.data||p.data.length!==N)throw new Error("AFM correction: invalid image dimensions");
-  if(!["plane","rows","poly2"].includes(method))throw new Error("AFM correction: invalid method");
+  if(!["plane","rows","poly2","lineFlatten"].includes(method))throw new Error("AFM correction: invalid method");
   for(const m of [o.fitMask,o.applyMask])if(m&&m.length!==N)throw new Error("AFM correction: invalid mask dimensions");
+  if(method==="lineFlatten"){
+    if(![0,1,2].includes(o.degree))throw new Error("AFM correction: invalid degree");
+    if(!["x","y"].includes(o.axis))throw new Error("AFM correction: invalid axis");
+    for(const mask of [o.fitMask,o.applyMask])if(mask!=null){
+      if(mask.length!==N)throw new Error("AFM correction: invalid mask dimensions");
+      for(let i=0;i<N;i++)if(mask[i]!==0&&mask[i]!==1)throw new Error("AFM correction: invalid mask value (expected 0 or 1)");
+    }
+    const degree=o.degree,axis=o.axis,fit=o.fitMask,apply=o.applyMask,src=p.data;
+    const length=axis==="x"?w:h,lines=axis==="x"?h:w,k=degree+1;
+    if(N*8+length*(k*8+16)>1.2e9)throw new Error("AFM correction: image exceeds memory limit");
+    const idx=(line,t)=>axis==="x"?line*w+t:t*w+line;
+    let applicable=0;for(let i=0;i<N;i++)if((!apply||apply[i]===1)&&Number.isFinite(src[i]))applicable++;
+    if(!applicable)throw new Error("AFM correction: apply region has no finite pixels");
+    const out=Float64Array.from(src);
+    for(let line=0;line<lines;line++){
+      let hasApply=false,n=0,base=0;
+      for(let t=0;t<length;t++){const i=idx(line,t);if((!apply||apply[i]===1)&&Number.isFinite(src[i]))hasApply=true;}
+      if(!hasApply)continue;
+      for(let t=0;t<length;t++){const i=idx(line,t);if((!fit||fit[i]===1)&&Number.isFinite(src[i])){if(!n)base=src[i];n++;}}
+      const label=(axis==="x"?"row ":"column ")+(line+1);
+      if(n<k)throw new Error(`AFM correction: ${label} has insufficient fit samples`);
+      // Match rows' summation order when possible; scale only on overflow.
+      if(degree===0){
+        let sum=0,overflow=false;for(let t=0;t<length;t++){const i=idx(line,t);if((!fit||fit[i]===1)&&Number.isFinite(src[i])){const delta=src[i]-base;if(!Number.isFinite(delta))throw new Error(`AFM correction: ${label} numeric range overflow`);sum+=delta;if(!Number.isFinite(sum)){overflow=true;break;}}}
+        let mean=sum/n;if(overflow){mean=0;for(let t=0;t<length;t++){const i=idx(line,t);if((!fit||fit[i]===1)&&Number.isFinite(src[i])){const delta=src[i]-base;if(!Number.isFinite(delta))throw new Error(`AFM correction: ${label} numeric range overflow`);mean+=delta/n;if(!Number.isFinite(mean))throw new Error(`AFM correction: ${label} numeric range overflow`);}}}
+        for(let t=0;t<length;t++){const i=idx(line,t);if((!apply||apply[i]===1)&&Number.isFinite(src[i])){const result=(src[i]-base)-mean;if(!Number.isFinite(result))throw new Error(`AFM correction: ${label} numeric range overflow`);out[i]=result;}}
+        continue;
+      }
+      const cols=Array.from({length:k},()=>new Float64Array(n)),target=new Float64Array(n);
+      let z=0;for(let t=0;t<length;t++){const i=idx(line,t);if((!fit||fit[i]===1)&&Number.isFinite(src[i])){
+        const x=length>1?2*t/(length-1)-1:0;cols[0][z]=1;if(k>1)cols[1][z]=x;if(k>2)cols[2][z]=x*x;
+        target[z]=src[i]-base;if(!Number.isFinite(target[z]))throw new Error(`AFM correction: ${label} numeric range overflow`);z++;
+      }}
+      const R=Array.from({length:k},()=>new Float64Array(k)),qTy=new Float64Array(k);
+      for(let j=0;j<k;j++){const v=cols[j];for(let pass=0;pass<2;pass++)for(let i=0;i<j;i++){const q=cols[i];let dot=0;for(let a=0;a<n;a++)dot+=q[a]*v[a];R[i][j]+=dot;for(let a=0;a<n;a++)v[a]-=dot*q[a];}
+        let norm=0;for(let a=0;a<n;a++)norm+=v[a]*v[a];norm=Math.sqrt(norm);
+        if(!(norm>1e-12*Math.sqrt(n)))throw new Error(`AFM correction: ${label} singular fit`);
+        R[j][j]=norm;let dot=0;for(let a=0;a<n;a++){v[a]/=norm;dot+=v[a]*target[a];}if(!Number.isFinite(dot))throw new Error(`AFM correction: ${label} numeric range overflow`);qTy[j]=dot;
+      }
+      // The 1-norm condition number of R equals that of the fitted QR
+      // system up to norm choice; reject fits that amplify roundoff excessively.
+      let rNorm=0,invNorm=0;
+      for(let j=0;j<k;j++){
+        let colSum=0;for(let i=0;i<=j;i++)colSum+=Math.abs(R[i][j]);rNorm=Math.max(rNorm,colSum);
+        const v=new Float64Array(k);for(let i=k-1;i>=0;i--){let x=i===j?1:0;for(let m=i+1;m<k;m++)x-=R[i][m]*v[m];v[i]=x/R[i][i];}
+        let sum=0;for(let i=0;i<k;i++)sum+=Math.abs(v[i]);invNorm=Math.max(invNorm,sum);
+      }
+      if(!Number.isFinite(rNorm*invNorm)||rNorm*invNorm>1e8)throw new Error(`AFM correction: ${label} ill-conditioned fit`);
+      const coef=new Float64Array(k);for(let j=k-1;j>=0;j--){let v=qTy[j];for(let i=j+1;i<k;i++)v-=R[j][i]*coef[i];coef[j]=v/R[j][j];if(!Number.isFinite(coef[j]))throw new Error(`AFM correction: ${label} numeric range overflow`);}
+      for(let t=0;t<length;t++){const i=idx(line,t);if((!apply||apply[i]===1)&&Number.isFinite(src[i])){const x=length>1?2*t/(length-1)-1:0;let v=coef[0];if(k>1)v+=coef[1]*x;if(k>2)v+=coef[2]*x*x;const result=(src[i]-base)-v;if(!Number.isFinite(result))throw new Error(`AFM correction: ${label} numeric range overflow`);out[i]=result;}}
+    }
+    return {w,h,bit:32,data:out};
+  }
   const fit=o.fitMask,apply=o.applyMask,src=p.data,include=i=>(!fit||fit[i])&&Number.isFinite(src[i]),use=i=>(!apply||apply[i])&&Number.isFinite(src[i]);
   let applicable=0;for(let i=0;i<N;i++)if(use(i))applicable++;if(!applicable)throw new Error("AFM correction: apply region has no finite pixels");
   const k=method==="poly2"?6:method==="plane"?3:1;if(N*(8*(k+3)+16)>1.2e9)throw new Error("AFM correction: image exceeds memory limit");
@@ -58152,7 +58210,9 @@ let CANCEL_GEN=0; // 중단할 때마다 늘림: 기다리던 일·batch 고리�
 function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.clear(); hideProg(); } // BUSY 는 그 작업이 끝나며 직접 풂
 
 /* ---------------- 이미지 추가·삭제·되돌리기 ---------------- */
+function invalidateLineCompare(){ const e=document.getElementById("imLfDialog"); if(e) e.dispatchEvent(new Event("lf-invalidate")); }
 function addImage(d,o){
+  invalidateLineCompare();
   if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1;
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
     desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||d.ops||[],historyIncomplete:!!d.historyIncomplete,snapshotPrecision:d.snapshotPrecision||null,created:new Date().toISOString(),
@@ -58165,7 +58225,7 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ if(!WRITE_OWNER) return; const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const originalId=S.images[i].originalId; S.images.splice(i,1); if(originalId&&!S.images.some(x=>x.originalId===originalId)){ ORIGINALS.delete(originalId); ORIGINAL_DIRTY.delete(originalId); } PX.delete(id); SOURCE.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
+function closeImage(id,force){ invalidateLineCompare(); if(!WRITE_OWNER) return; const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const originalId=S.images[i].originalId; S.images.splice(i,1); if(originalId&&!S.images.some(x=>x.originalId===originalId)){ ORIGINALS.delete(originalId); ORIGINAL_DIRTY.delete(originalId); } PX.delete(id); SOURCE.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB
@@ -58250,33 +58310,87 @@ const clean=P=>{ const o={}; for(const k in P) if(k!=="__op"&&k!=="__pv") o[k]=P
 const stackParam={k:"stack",label:"Process all slices",type:"bool",def:false,stackOnly:true};
 const ijStack=P=>P.stack?" stack":"";
 
-/* AFM: fit and apply areas are independent; current plane only. */
+/* AFM correction: prepare is non-destructive and shared by Apply and comparison preview. */
+// SHA-256 over exact typed mask bytes: fixed-size provenance, including offline file:// use.
+function afmMaskSnapshot(data){
+  if(!ArrayBuffer.isView(data)||data instanceof DataView)throw new Error("Invalid particle mask storage");
+  for(let i=0;i<data.length;i++)if(!Number.isFinite(data[i]))throw new Error("Particle mask contains a non-finite pixel");
+  const b=new Uint8Array(data.buffer,data.byteOffset,data.byteLength), n=b.length;
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const h=new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]),w=new Uint32Array(64),total=Math.ceil((n+9)/64)*64,hi=Math.floor(n/0x20000000),lo=(n*8)>>>0;
+  const byteAt=i=>i<n?b[i]:i===n?128:i>=total-8?(i<total-4?(hi>>>((total-5-i)*8))&255:(lo>>>((total-1-i)*8))&255):0;
+  const rr=(x,k)=>(x>>>k)|(x<<(32-k));
+  for(let o=0;o<total;o+=64){for(let i=0;i<16;i++){const j=o+i*4;w[i]=(byteAt(j)<<24)|(byteAt(j+1)<<16)|(byteAt(j+2)<<8)|byteAt(j+3);}for(let i=16;i<64;i++){const a=w[i-15],z=w[i-2];w[i]=(w[i-16]+(rr(a,7)^rr(a,18)^(a>>>3))+w[i-7]+(rr(z,17)^rr(z,19)^(z>>>10)))>>>0;}
+    let [a,c,d,e,f,g,j,k]=h;for(let i=0;i<64;i++){const t1=(k+(rr(f,6)^rr(f,11)^rr(f,25))+((f&g)^(~f&j))+K[i]+w[i])>>>0,t2=((rr(a,2)^rr(a,13)^rr(a,22))+((a&c)^(a&d)^(c&d)))>>>0;k=j;j=g;g=f;f=(e+t1)>>>0;e=d;d=c;c=a;a=(t1+t2)>>>0;}h[0]=(h[0]+a)>>>0;h[1]=(h[1]+c)>>>0;h[2]=(h[2]+d)>>>0;h[3]=(h[3]+e)>>>0;h[4]=(h[4]+f)>>>0;h[5]=(h[5]+g)>>>0;h[6]=(h[6]+j)>>>0;h[7]=(h[7]+k)>>>0;
+  }
+  return "sha256:"+data.constructor.name+":"+n+":"+Array.from(h,v=>v.toString(16).padStart(8,"0")).join("");
+}
+const AFM_GEOMETRY_OPS=new Set(["crop","cropbar","flip","rotate","rot90","resize","register"]);
+function afmGeometrySignature(im){return JSON.stringify((im.ops||[]).filter(s=>AFM_GEOMETRY_OPS.has(s.op)).map(s=>({op:s.op,params:s.params})));}
+function afmValidateMaskAlignment(im,mi,c,maskC,maskZ,maskT){
+  if(!mi||byId(mi.id)!==mi||mi===im||mi.rgb||mi.kind!=="mask"||mi.parent!==im.id||mi.w!==im.w||mi.h!==im.h)throw new Error("Particle mask must be an aligned mask created directly from this image");
+  const origin=mi.afmMaskSource;
+  if(!origin||origin.sourceId!==im.id||origin.c!==c||origin.planeMap!=="same-zt"||!Number.isInteger(origin.z)||!Number.isInteger(origin.t)||origin.z<0||origin.z>=im.nz||origin.t<0||origin.t>=im.nt||origin.geometry!==afmGeometrySignature(im))throw new Error("Particle mask source channel or geometry no longer matches; create a new mask from this plane");
+  if((mi.ops||[]).some(s=>AFM_GEOMETRY_OPS.has(s.op)))throw new Error("Particle mask geometry was changed; recreate an aligned mask");
+  const a=calOf(im),b=calOf(mi);if(a.pw!==b.pw||a.ph!==b.ph||a.unit!==b.unit)throw new Error("Particle mask calibration does not match the image");
+  if(mi.nc!==1||mi.nz!==im.nz||mi.nt!==im.nt||maskC!==0||maskZ<0||maskZ>=mi.nz||maskT<0||maskT>=mi.nt)throw new Error("Particle mask stack planes do not match the image");
+  const md=planeAt(mi,maskC,maskZ,maskT).data;if(!md||md.length!==im.w*im.h)throw new Error("Invalid particle mask plane");return md;
+}
+function afmPrepare(im,P){
+  if(im.rgb)throw new Error("AFM correction requires a single-channel grayscale image; RGB is not supported");
+  const method=P.method||"plane",fit=P.fit||"all",apply=P.apply||"all";
+  if(!["plane","rows","poly2","lineFlatten"].includes(method)||!["all","inside","outside"].includes(fit)||!["all","inside","outside"].includes(apply))throw new Error("Invalid AFM correction settings");
+  const degree=P.degree===undefined?0:Number(P.degree),axis=P.axis||"x";
+  if(method==="lineFlatten"&&(![0,1,2].includes(degree)||!["x","y"].includes(axis)))throw new Error("Invalid Line Flatten order or axis");
+  const need=fit!=="all"||apply!=="all",roi=need?(REPLAY?P.roi:activeRoi(im)):null;
+  const valid=roi&&AREA_T.has(roi.type)&&Array.isArray(roi.pts)&&((roi.type==="rect"||roi.type==="oval")?roi.pts.length===2:roi.pts.length>=3)&&roi.pts.every(pt=>Array.isArray(pt)&&pt.length===2&&Number.isFinite(pt[0])&&Number.isFinite(pt[1]));
+  if(need&&!valid)throw new Error(REPLAY?"AFM replay requires a valid recorded area ROI":"Select a valid area ROI for the selected fit or apply region");
+  let inside=null;if(need){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");inside=new Uint8Array(im.w*im.h);let count=0;const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x])){inside[Y*im.w+X]=1;count++;}}if(!count)throw new Error("AFM correction: ROI region contains no image pixels");}
+  const region=scope=>scope==="all"?null:scope==="inside"?inside:Uint8Array.from(inside,v=>v?0:1);
+  const present=["c","z","t"].map(k=>Object.prototype.hasOwnProperty.call(P,k));if(REPLAY&&present.some(Boolean)&&!present.every(Boolean))throw new Error("AFM replay requires all recorded plane coordinates");
+  const [c,z,t]=REPLAY&&present.every(Boolean)?[P.c,P.z,P.t]:[im.c,im.z,im.t];if(!Number.isInteger(c)||!Number.isInteger(z)||!Number.isInteger(t)||c<0||c>=im.nc||z<0||z>=im.nz||t<0||t>=im.nt)throw new Error("Recorded AFM plane is not available in this image");
+  const resultMode=(im.bit===8||im.bit===16)&&planesOf(im).length>1?"new-image":"in-place";
+  if(REPLAY){const recorded=P.resultMode||"in-place";if(!["in-place","new-image"].includes(recorded)||recorded!==resultMode||(P.sourceBit!=null&&P.sourceBit!==im.bit))throw new Error("AFM replay result mode or bit depth does not match the recorded operation");}
+  if(REPLAY&&method!=="lineFlatten"&&(P.maskId||P.maskSnapshot!=null||P.maskC!=null||P.maskZ!=null||P.maskT!=null))throw new Error("Recorded particle mask is invalid for this AFM method");
+  const maskId=method==="lineFlatten"?P.maskId:"";
+  if(REPLAY&&method==="lineFlatten"&&(typeof P.maskRequired!=="boolean"||P.maskRequired!==!!maskId))throw new Error("Recorded particle mask requirement is missing or invalid");
+  let fitMask=region(fit),mi=null,maskSnapshot=null,maskC=0,maskZ=0,maskT=0;
+  if(maskId){
+    mi=byId(maskId);maskZ=z;maskT=t;const md=afmValidateMaskAlignment(im,mi,c,maskC,maskZ,maskT);maskSnapshot=afmMaskSnapshot(md);
+    if(REPLAY&&(typeof P.maskSnapshot!=="string"||P.maskSnapshot!==maskSnapshot||P.maskC!==maskC||P.maskZ!==maskZ||P.maskT!==maskT))throw new Error("Recorded particle mask or its plane has changed");
+    if(!fitMask)fitMask=new Uint8Array(im.w*im.h).fill(1);else fitMask=Uint8Array.from(fitMask);
+    for(let i=0;i<fitMask.length;i++)if(md[i]!==0)fitMask[i]=0;
+  }else if(REPLAY&&(P.maskSnapshot!=null||P.maskC!=null||P.maskZ!=null||P.maskT!=null))throw new Error("Recorded particle mask is missing");
+  const params={method,fit,apply,c,z,t,resultMode,sourceBit:im.bit};if(method==="lineFlatten")Object.assign(params,{degree,axis,maskRequired:!!maskId});if(roi)params.roi={type:roi.type,pts:roi.pts.map(v=>v.slice())};
+  if(mi)Object.assign(params,{maskId:mi.id,maskSnapshot,maskC,maskZ,maskT});
+  return {im,ver:im.ver,sourceCal:JSON.stringify(im.cal),sourceShape:JSON.stringify([im.w,im.h,im.bit,im.nc,im.nz,im.nt]),maskCal:mi?JSON.stringify(mi.cal):null,maskOrigin:mi?JSON.stringify(mi.afmMaskSource):null,roi:roi?JSON.stringify({type:roi.type,pts:roi.pts}):null,mi,maskVer:mi&&mi.ver,maskSnapshot,maskC,maskZ,maskT,sourcePlane:planeAt(im,c,z,t),params,options:{method,degree,axis,fitMask,applyMask:region(apply)}};
+}
+function afmValidatePrepared(q){
+  const {im,params,mi}=q;if(!WRITE_OWNER||byId(im.id)!==im||im.ver!==q.ver)throw new Error("AFM source changed during calculation");
+  if(!REPLAY&&(im.c!==params.c||im.z!==params.z||im.t!==params.t))throw new Error("AFM plane changed during calculation");
+  if(!REPLAY&&q.roi!==null){const r=activeRoi(im);if(!r||JSON.stringify({type:r.type,pts:r.pts})!==q.roi)throw new Error("AFM ROI changed during calculation");}
+  if(JSON.stringify(im.cal)!==q.sourceCal||JSON.stringify([im.w,im.h,im.bit,im.nc,im.nz,im.nt])!==q.sourceShape)throw new Error("AFM source calibration or shape changed during calculation");
+  if(mi){const md=afmValidateMaskAlignment(im,mi,params.c,q.maskC,q.maskZ,q.maskT);if(mi.ver!==q.maskVer||JSON.stringify(mi.cal)!==q.maskCal||JSON.stringify(mi.afmMaskSource)!==q.maskOrigin||afmMaskSnapshot(md)!==q.maskSnapshot)throw new Error("Particle mask changed during calculation");}
+}
+async function afmCompute(q){return await call("afmLevel",[q.sourcePlane,q.options]);}
+function afmCommit(q,result){
+  afmValidatePrepared(q);const {im,params,sourcePlane}=q,{c,z,t,resultMode,method}=params;
+  const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
+  if(resultMode==="new-image"){
+    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
+    setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
+  }
+  const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
+}
 op("afmLevel",{label:"AFM background correction",group:"bg",kind:"image",params:[
-  R("method","Method","plane",{type:"sel",opts:[["plane","Plane (degree 1)"],["rows","Row mean"],["poly2","Polynomial (degree 2)"]]}),
+  R("method","Method","plane",{type:"sel",opts:[["plane","Plane (degree 1)"],["rows","Row mean"],["poly2","Polynomial (degree 2)"],["lineFlatten","Line Flatten"]]}),
+  R("degree","Line order",0,{type:"sel",opts:[["0","0"],["1","1"],["2","2"]],showIf:v=>v.method==="lineFlatten"}),
+  R("axis","Line direction","x",{type:"sel",opts:[["x","X (rows)"],["y","Y (columns)"]],showIf:v=>v.method==="lineFlatten"}),
+  R("maskId","Exclude particle mask","",{type:"imgOptional",showIf:v=>v.method==="lineFlatten"}),
   R("fit","Fit region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]}),
   R("apply","Apply region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]})],
-  run:async(im,P)=>{
-    if(im.rgb)throw new Error("AFM correction requires a single-channel grayscale image; RGB is not supported");
-    const method=P.method||"plane",fit=P.fit||"all",apply=P.apply||"all"; if(!["all","inside","outside"].includes(fit)||!["all","inside","outside"].includes(apply))throw new Error("Invalid AFM correction region");
-    const need=fit!=="all"||apply!=="all";const roi=need?(REPLAY?P.roi:activeRoi(im)):null;
-    const validRoi=roi&&AREA_T.has(roi.type)&&Array.isArray(roi.pts)&&((roi.type==="rect"||roi.type==="oval")?roi.pts.length===2:roi.pts.length>=3)&&roi.pts.every(pt=>Array.isArray(pt)&&pt.length===2&&Number.isFinite(pt[0])&&Number.isFinite(pt[1]));
-    if(need&&!validRoi)throw new Error(REPLAY?"AFM replay requires a valid recorded area ROI":"Select a valid area ROI for the selected fit or apply region");
-    let inside=null;if(need){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");inside=new Uint8Array(im.w*im.h);let insideCount=0;const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x])){inside[Y*im.w+X]=1;insideCount++;}}if(!insideCount)throw new Error("AFM correction: ROI region contains no image pixels");}
-    const mask=scope=>scope==="all"?null:scope==="inside"?inside:Uint8Array.from(inside,v=>v?0:1);
-    const present=["c","z","t"].map(k=>Object.prototype.hasOwnProperty.call(P,k));if(REPLAY&&present.some(Boolean)&&!present.every(Boolean))throw new Error("AFM replay requires all recorded plane coordinates");
-    const [c,z,t]=REPLAY&&present.every(Boolean)?[P.c,P.z,P.t]:[im.c,im.z,im.t];if(!Number.isInteger(c)||!Number.isInteger(z)||!Number.isInteger(t)||c<0||c>=im.nc||z<0||z>=im.nz||t<0||t>=im.nt)throw new Error("Recorded AFM plane is not available in this image");
-    const resultMode=(im.bit===8||im.bit===16)&&planesOf(im).length>1?"new-image":"in-place";
-    if(REPLAY){const recorded=P.resultMode||"in-place";if(!["in-place","new-image"].includes(recorded)||recorded!==resultMode||(P.sourceBit!=null&&P.sourceBit!==im.bit))throw new Error("AFM replay result mode or bit depth does not match the recorded operation");}
-    const sourcePlane=planeAt(im,c,z,t), result=await call("afmLevel",[sourcePlane,{method,fitMask:mask(fit),applyMask:mask(apply)}]);
-    const params={method,fit,apply,c,z,t,resultMode,sourceBit:im.bit};if(roi)params.roi={type:roi.type,pts:roi.pts.map(v=>v.slice())};
-    const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
-    if(resultMode==="new-image"){
-      const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
-      setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
-    }
-    const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
-  },
-  help:"Fits the selected region and subtracts from the chosen apply region in the current plane. Non-finite values are retained. ROI masks include pixels inside the area. For 8/16-bit stacks, the corrected plane opens as a separate 32-bit image."});
+  run:async(im,P)=>{const q=afmPrepare(im,P),r=await afmCompute(q);return afmCommit(q,r);},
+  help:"Fit and apply regions are independent. For particle exclusion, create a new mask from this image using Threshold, then select it here. Nonzero mask pixels are excluded from fitting only. 8/16-bit stacks open a separate corrected plane."});
 
 /* ---------- Smooth & denoise ---------- */
 op("gaussian",{label:"Gaussian Blur",group:"smooth",params:[R("sigma","Sigma (radius)",2,{min:0.1,step:0.1,unit:"px"}),R("scaled","Scaled units",false,{type:"bool"}),stackParam],
@@ -58449,6 +58563,7 @@ op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image
 /* ---------- Threshold · Binary (패널이 따로 있음) ---------- */
 op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,params:[],
   run:async(im,P)=>{ // P: {method, dark, manual, lower, upper, stack, newImage, local:{method,radius,p1,p2}}
+    const source={id:im.id,ver:im.ver,c:im.c,z:im.z,t:im.t,geometry:afmGeometrySignature(im)};
     const planes=planesOf(im); const idx=[]; for(let k=0;k<planes.length;k++) if(k%im.nc===(im.rgb?0:im.c)||im.nc===1) idx.push(k); // 스택은 언제나 모든 장 (ImageJ 처럼 스택 유지)
     let fixed=null; if(isStack(im)&&!P.stack&&!P.manual&&!P.local){ const t=await call("autoThreshold",[{w:im.w,h:im.h,bit:im.bit,data:planes[pIndex(im,im.rgb?0:im.c,im.z,im.t)]},P.method,!!P.dark]); fixed=[t.lower,t.upper]; } // '모든 장' 끔 = 지금 장에서 구한 문턱을 모든 장에
     if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ RGB → 8-bit gray");
@@ -58458,7 +58573,7 @@ op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,par
       else { let lo=+P.lower, hi=+P.upper; if(fixed){ [lo,hi]=fixed; } else if(!P.manual){ const t=await call("autoThreshold",[p,P.method,!!P.dark]); lo=t.lower; hi=t.upper; } m=IC.applyThreshold(p,lo,hi); msg=P.manual?`Threshold ${g4(lo)}–${g4(hi)}`:`${P.method}${P.dark?" dark":""} → [${g4(lo)}, ${g4(hi)}]`; }
       out.push(m.data); }
     const step={op:"threshold",params:clean(P),label:"Convert to Mask ("+msg+")"};
-    if(P.newImage){ const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record(step,im); note(msg,"ok"); return n; }
+    if(P.newImage){ if(byId(source.id)!==im||im.ver!==source.ver||im.c!==source.c||im.z!==source.z||im.t!==source.t||afmGeometrySignature(im)!==source.geometry)throw new Error("Mask source changed during threshold calculation"); const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); n.afmMaskSource={sourceId:source.id,c:source.c,z:source.z,t:source.t,planeMap:"same-zt",geometry:source.geometry}; record(step,im); note(msg,"ok"); return n; }
     setPlanes(im,out,{bit:8,nc:1,c:0,composite:false,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1},"Convert to Mask",step); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; note(msg,"ok"); },
   ij:P=>P.local?`run("Auto Local Threshold", "method=${P.local.method} radius=${P.local.radius} parameter_1=${P.local.p1||0} parameter_2=${P.local.p2||0}${P.dark?" white":""}");`:(P.manual?`setThreshold(${P.lower}, ${P.upper}); setOption("BlackBackground", true); run("Convert to Mask", "method=Default background=${P.dark?"Dark":"Light"} black");`:`setAutoThreshold("${P.method}${P.dark?" dark":""}"); setOption("BlackBackground", true); run("Convert to Mask", "method=${P.method} background=${P.dark?"Dark":"Light"}${P.stack?" calculate":""} black");`)}); // 스택: calculate = 장마다 문턱, 아니면 지금 장의 문턱을 모든 장에
 /* Color Threshold (ImageJ ColorThresholder): RGB 이미지 → 8-bit mask. P: {space, min[3], max[3], pass[3], stack, newImage} */
@@ -58542,7 +58657,7 @@ function lutCss(name){ const t=lutTable(name); const st=[]; for(let i=0;i<=8;i++
 /* ---------- 표시 버퍼 ---------- */
 const DISP={key:null,cv:null,scale:1};
 const MAXDISP=24e6;
-function invalidate(im){ if(im) im.ver=(im.ver||0)+1; DISP.key=null; DISPZ.key=null; OVL.key=null; }
+function invalidate(im){ invalidateLineCompare(); if(im) im.ver=(im.ver||0)+1; DISP.key=null; DISPZ.key=null; OVL.key=null; }
 function dispKey(im){ return [im.id,im.ver,im.c,im.z,im.t,im.composite,JSON.stringify(im.disp),PREVIEW.key||""].join("|"); }
 /* 값 → 0..255 (ImageJ create8BitImage 와 같은 규칙)
    8-bit : LUT[i] = i<min ? 0 : i>max ? 255 : (int)(256·(i−min)/(max−min))   (ByteProcessor.setMinAndMax, min·max 반올림)
@@ -58674,7 +58789,7 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(!WRITE_OWNER) return; if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
+function setActive(im,r){ if(!WRITE_OWNER) return; invalidateLineCompare(); if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
 function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
@@ -58861,13 +58976,14 @@ function formHTML(o,im){ const v=formVals(o);
   return o.params.filter(p=>!(p.stackOnly&&!isStack(im))&&(!p.showIf||p.showIf(v))).map(p=>{ const id=`imf_${o.id}_${p.k}`; const u=p.unit?`<span class="u">${esc(p.unit)}</span>`:"";
     if(p.type==="bool") return `<label class="im-chk"><input type="checkbox" id="${id}" data-k="${p.k}" ${v[p.k]?"checked":""}> ${esc(p.label)}</label>`;
     if(p.type==="sel") return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${p.opts.map(([a,b])=>`<option value="${esc(a)}" ${String(v[p.k])===String(a)?"selected":""}>${esc(b)}</option>`).join("")}</select></label>`;
+    if(p.type==="imgOptional"){ const L=S.images.filter(x=>x.id!==im.id&&x.kind==="mask"&&x.parent===im.id); return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel"><option value="" ${!v[p.k]?"selected":""}>None</option>${v[p.k]&&!L.some(x=>x.id===v[p.k])?`<option value="${esc(v[p.k])}" selected>Unavailable mask — choose another or None</option>`:""}${L.map(x=>`<option value="${esc(x.id)}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`; }
     if(p.type==="img"){ const L=S.images.filter(x=>x.id!==im.id); if(L.length&&!L.some(x=>x.id===v[p.k])) v[p.k]=L[0].id; /* 보이는 첫 항목 = 값 (고르지 않고 실행해도 화면과 같게) */
       return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${L.map(x=>`<option value="${x.id}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`; }
     if(p.type==="text") return `<label class="im-f col"><span>${esc(p.label)}</span><textarea id="${id}" data-k="${p.k}" rows="3" class="mono">${esc(v[p.k])}</textarea></label>`;
     return `<label class="im-f"><span>${esc(p.label)}</span><input type="number" id="${id}" data-k="${p.k}" value="${esc(v[p.k])}" ${p.min!=null?`min="${p.min}"`:""} ${p.max!=null?`max="${p.max}"`:""} step="${p.step||(p.type==="int"?1:"any")}">${u}</label>`; }).join("");
 }
 function bindForm(el,o,onChange){ $a(el,"[data-k]").forEach(inp=>{ const p=o.params.find(q=>q.k===inp.dataset.k); const ev=inp.tagName==="SELECT"||inp.type==="checkbox"?"change":"input";
-  inp.addEventListener(ev,()=>{ const v=formVals(o); v[p.k]=p.type==="bool"?inp.checked:(p.type==="num"||p.type==="int")?(inp.value===""?"":+inp.value):inp.value; if(p.type==="sel"||p.type==="bool") onChange(true); else onChange(false); }); }); }
+  inp.addEventListener(ev,()=>{ invalidateLineCompare(); const v=formVals(o); v[p.k]=p.type==="bool"?inp.checked:(p.type==="num"||p.type==="int")?(inp.value===""?"":+inp.value):inp.value; if(p.type==="sel"||p.type==="bool"||p.type==="imgOptional") onChange(true); else onChange(false); }); }); }
 async function runOp(id,params,im){
   if(!WRITE_OWNER) return;
   const o=OPS[id]; im=im||cur(); if(!im){ note("이미지를 먼저 여세요","warn"); return; } if(BUSY){ note("계산 중입니다 — 끝나면 다시 누르세요","warn"); return; }
@@ -58943,8 +59059,8 @@ function panelAdjust(el,im){
 }
 const SCALE={};
 function openSetScale(im,L){ SCALE.px=+L.toFixed(3); S.ui.panel="adjust"; drawTabs(); renderPanel(); const e=$q(ROOT,"#imScD"); if(e){ e.focus(); } note(`선 길이 ${L.toFixed(2)} px — Known distance 와 단위를 넣고 Set`); }
-function setCal(im,cal,quiet){ im.cal=cal; save(); if(!quiet){ note(`보정: ${g4(cal.pw)} ${cal.unit}/px`,"ok"); rerender(); } }
-function removeCal(im){ im.cal=null; save(); rerender(); note("보정을 지웠습니다 (px)"); }
+function setCal(im,cal,quiet){ invalidateLineCompare(); im.cal=cal; save(); if(!quiet){ note(`보정: ${g4(cal.pw)} ${cal.unit}/px`,"ok"); rerender(); } }
+function removeCal(im){ invalidateLineCompare(); im.cal=null; save(); rerender(); note("보정을 지웠습니다 (px)"); }
 OPS.setScale={id:"setScale",label:"Set Scale",hidden:true,params:[],run:(im,P)=>{ setCal(im,{pw:P.d/P.px,ph:P.d/P.px,unit:P.u,src:`Set Scale (macro): ${P.px} px = ${P.d} ${P.u}`},true); },ij:P=>`run("Set Scale...", "distance=${P.px} known=${P.d} unit=${P.u==="µm"?"micron":P.u}");`};
 
 /* ===== Process ===== */
@@ -58954,13 +59070,43 @@ function panelProcess(el,im){
   const prevAble=o.kind==="plane";
   el.innerHTML=`<div class="im-proc"><div class="im-oplist">${GROUPS.map(([g,gl])=>{ const L=list.filter(x=>x.group===g); if(!L.length) return ""; return `<div class="g">${gl}</div>${L.map(x=>`<button class="op ${x.id===o.id?"on":""}" data-op="${x.id}">${esc(x.label)}</button>`).join("")}`; }).join("")}</div>
     <div class="im-opform"><div class="im-h">${esc(o.label)}</div>${o.help?`<div class="xs muted im-help">${esc(o.help)}</div>`:""}<div id="imForm">${formHTML(o,im)}</div>
-    <div class="im-row">${prevAble?`<label class="im-chk"><input type="checkbox" id="imPrev" ${S.ui.preview?"checked":""}> Preview</label>`:""}<span class="sp"></span><button class="btn primary sm" id="imApply">${o.kind==="new"?"Create":"Apply"}</button></div>
+    <div class="im-row">${prevAble?`<label class="im-chk"><input type="checkbox" id="imPrev" ${S.ui.preview?"checked":""}> Preview</label>`:""}${o.id==="afmLevel"&&formVals(o).method==="lineFlatten"?`<button class="btn sm" id="imLineCompare">Compare before / after</button>`:""}<span class="sp"></span><button class="btn primary sm" id="imApply">${o.kind==="new"?"Create":"Apply"}</button></div>
     <div class="xs muted">ImageJ: <code>${esc(o.ij?o.ij(Object.assign({},formVals(o))):"")}</code></div></div></div>`;
   $a(el,"[data-op]").forEach(b=>b.onclick=()=>{ S.ui.proc=b.dataset.op; clearPreview(); save(); renderPanel(); });
   bindForm(el,o,(re)=>{ if(re) renderPanel(); else { const c=$q(el,"code"); if(c&&o.ij) c.textContent=o.ij(formVals(o)); } schedulePreview(); });
   const pv=$q(el,"#imPrev"); if(pv) pv.onchange=e=>{ S.ui.preview=e.target.checked; save(); if(S.ui.preview) schedulePreview(); else clearPreview(); };
+  const lc=$q(el,"#imLineCompare"); if(lc) lc.onclick=()=>openLineCompare(im,Object.assign({},formVals(o)));
   $q(el,"#imApply").onclick=()=>runOp(o.id);
   if(S.ui.preview&&prevAble) schedulePreview();
+}
+/* Line Flatten comparison owns only transient numerical results; original pixels and history are untouched until Apply. */
+let LF_CLOSE=null;
+function openLineCompare(im,P){
+  if(!WRITE_OWNER||BUSY) return;
+  let q; try { if(im.w*im.h>8e6) throw new Error("Comparison exceeds the preview memory limit (8 million pixels)"); q=afmPrepare(im,P); } catch(e){ note("Comparison: "+e.message,"warn"); return; }
+  if(LF_CLOSE) LF_CLOSE();
+  const shell=document.createElement("div"); shell.id="imLfDialog"; shell.className="im-lf-modal";
+  shell.innerHTML=`<div class="im-lf-card" role="dialog" aria-modal="true" aria-label="Line Flatten comparison"><div class="im-lf-head"><strong>Line Flatten — before / after</strong><span id="imLfStatus">Calculating…</span></div><div class="im-lf-views"><div><b>Before</b><canvas id="imLfBefore"></canvas></div><div><b>After</b><canvas id="imLfAfter"></canvas></div></div><div class="im-lf-actions"><button class="btn sm" id="imLfZoomOut">−</button><button class="btn sm" id="imLfFit">Fit</button><button class="btn sm" id="imLfZoomIn">+</button><label><input type="checkbox" id="imLfMask" ${q.mi?"checked":"disabled"}> Show excluded mask</label><span class="sp"></span><button class="btn sm" id="imLfCancel">Cancel</button><button class="btn primary sm" id="imLfApply" disabled>Apply</button></div><div class="xs muted">Drag either image to pan both. Both views use the same value range and LUT. Preview does not change measurements.</div></div>`;
+  document.body.appendChild(shell); const $=s=>shell.querySelector(s), before=$("#imLfBefore"), after=$("#imLfAfter"), apply=$("#imLfApply"), status=$("#imLfStatus");
+  const roiKey=()=>{const r=activeRoi(im);return r?JSON.stringify({type:r.type,pts:r.pts}):null;}, initialRoi=roiKey();
+  const paramKey=JSON.stringify(P), lut=(im.disp[q.params.c]||{}).lut||"Grays", md=q.mi?planeAt(q.mi,q.maskC,q.maskZ,q.maskT).data:null;
+  let result=null,closed=false,expired=false,zoom=1,panX=0,panY=0,drag=null;
+  function close(){closed=true;document.removeEventListener("keydown",keyGuard,true);shell.remove();if(LF_CLOSE===close) LF_CLOSE=null;}
+  LF_CLOSE=close;
+  function keyGuard(e){if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();close();return;} if(e.ctrlKey||e.metaKey||e.altKey||!shell.contains(e.target))e.preventDefault();e.stopImmediatePropagation();}
+  document.addEventListener("keydown",keyGuard,true);
+  function validate(strong=true){ if(closed||expired||cur()!==im||S.ui.panel!=="process"||S.ui.proc!=="afmLevel"||JSON.stringify(formVals(OPS.afmLevel))!==paramKey||roiKey()!==initialRoi) throw new Error("Image or settings changed; reopen comparison"); if(strong)afmValidatePrepared(q);else if(!WRITE_OWNER||byId(im.id)!==im||im.ver!==q.ver||im.c!==q.params.c||im.z!==q.params.z||im.t!==q.params.t||(q.mi&&(byId(q.mi.id)!==q.mi||q.mi.ver!==q.maskVer)))throw new Error("Image or mask changed; reopen comparison"); }
+  function stale(e){ if(closed)return;expired=true;result=null;apply.disabled=true;status.textContent="Preview expired: "+e.message;before.getContext("2d").clearRect(0,0,before.width,before.height);after.getContext("2d").clearRect(0,0,after.width,after.height); }
+  shell.addEventListener("lf-invalidate",()=>stale(new Error("Image, ROI, mask or settings changed; reopen comparison")));
+  function paint(){ if(!result||closed)return; try{validate(false);}catch(e){stale(e);return;}
+    const w=Math.max(1,Math.min(900,Math.floor(before.parentElement.clientWidth))),h=Math.max(140,Math.min(520,Math.floor(window.innerHeight*0.52))); const tab=lutTable(lut); const scale=Math.min(w/im.w,h/im.h)*zoom;
+    for(const [cv,data] of [[before,q.sourcePlane.data],[after,result.data]]){ cv.width=w;cv.height=h;const cx=cv.getContext("2d"), image=cx.createImageData(w,h), out=image.data, map=qMap(32,rangeMin,rangeMax); for(let y=0;y<h;y++)for(let x=0;x<w;x++){const sx=Math.floor((x-w/2-panX)/scale+im.w/2),sy=Math.floor((y-h/2-panY)/scale+im.h/2),j=(y*w+x)*4;if(sx<0||sy<0||sx>=im.w||sy>=im.h){out[j+3]=255;continue;} const i=sy*im.w+sx,k=map(data[i]);out[j]=tab[k];out[j+1]=tab[256+k];out[j+2]=tab[512+k];out[j+3]=255;if(md&&$("#imLfMask").checked&&md[i]!==0){out[j]=Math.round(out[j]*0.45+140);out[j+1]=Math.round(out[j+1]*0.45);out[j+2]=Math.round(out[j+2]*0.45);} }cx.putImageData(image,0,0); }
+  }
+  let rangeMin=Infinity,rangeMax=-Infinity;
+  $("#imLfCancel").onclick=close; $("#imLfMask").onchange=paint; $("#imLfFit").onclick=()=>{zoom=1;panX=panY=0;paint();}; $("#imLfZoomIn").onclick=()=>{zoom=Math.min(64,zoom*1.5);paint();}; $("#imLfZoomOut").onclick=()=>{zoom=Math.max(.25,zoom/1.5);paint();};
+  [before,after].forEach(cv=>{cv.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,px:panX,py:panY};cv.setPointerCapture(e.pointerId);};cv.onpointermove=e=>{if(drag){panX=drag.px+e.clientX-drag.x;panY=drag.py+e.clientY-drag.y;paint();}};cv.onpointerup=cv.onpointercancel=()=>{drag=null;};});
+  apply.onclick=()=>{try{validate(); if(!result)throw new Error("Preview is not ready"); BUSY="afmLevel";const r=afmCommit(q,result);BUSY=null;close();if(r&&r.id)S.sel=r.id;save();rerender();}catch(e){BUSY=null;stale(e);}};
+  afmCompute(q).then(r=>{if(closed)return;try{validate();for(const data of [q.sourcePlane.data,r.data])for(let i=0;i<data.length;i++){const v=data[i];if(Number.isFinite(v)){if(v<rangeMin)rangeMin=v;if(v>rangeMax)rangeMax=v;}} if(!Number.isFinite(rangeMin))throw new Error("No finite preview values");result=r;status.textContent=`Range ${g4(rangeMin)} – ${g4(rangeMax)} · ${lut}`;apply.disabled=false;paint();}catch(e){stale(e);}}).catch(e=>stale(e));
 }
 let _pvT=null, _pvSeq=0;
 function schedulePreview(){ clearTimeout(_pvT); const o=OPS[S.ui.proc]; if(!S.ui.preview||!o||o.kind!=="plane"||S.ui.panel!=="process") return; _pvT=setTimeout(runPreview,220); }
