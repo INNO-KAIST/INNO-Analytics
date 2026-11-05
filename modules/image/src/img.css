@@ -185,3 +185,8 @@ html[data-theme="dark"] .imx{--imbg:#0d1112}
 .imx .pa-k.out{border-color:#ff4fd8;border-style:dashed}
 .imx .pa-k.pick{border-color:#e6bf00;background:rgba(255,220,0,.5)}
 .imx .more{opacity:.55}
+
+/* Non-destructive AFM before/after comparison */
+.im-lf-modal{position:fixed;inset:0;z-index:99999;background:#000b;display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
+.im-lf-card{background:#202c2a;color:#eef7f3;border:1px solid #567167;border-radius:8px;padding:12px;width:min(1400px,100%);max-height:calc(100vh - 24px);overflow:auto;box-sizing:border-box}
+.im-lf-head,.im-lf-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.im-lf-head span{margin-left:auto;font-size:12px}.im-lf-views{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.im-lf-views>div{min-width:0}.im-lf-views b{display:block;font-size:12px}.im-lf-views canvas{display:block;width:100%;background:#090d0c;touch-action:none;cursor:grab}.im-lf-actions{margin-top:8px}.im-lf-actions .sp{flex:1}

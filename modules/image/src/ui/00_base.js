@@ -162,7 +162,9 @@ let CANCEL_GEN=0; // 중단할 때마다 늘림: 기다리던 일·batch 고리�
 function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.clear(); hideProg(); } // BUSY 는 그 작업이 끝나며 직접 풂
 
 /* ---------------- 이미지 추가·삭제·되돌리기 ---------------- */
+function invalidateLineCompare(){ const e=document.getElementById("imLfDialog"); if(e) e.dispatchEvent(new Event("lf-invalidate")); }
 function addImage(d,o){
+  invalidateLineCompare();
   if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1;
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
     desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||d.ops||[],historyIncomplete:!!d.historyIncomplete,snapshotPrecision:d.snapshotPrecision||null,created:new Date().toISOString(),
@@ -175,7 +177,7 @@ function addImage(d,o){
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ if(!WRITE_OWNER) return; const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const originalId=S.images[i].originalId; S.images.splice(i,1); if(originalId&&!S.images.some(x=>x.originalId===originalId)){ ORIGINALS.delete(originalId); ORIGINAL_DIRTY.delete(originalId); } PX.delete(id); SOURCE.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
+function closeImage(id,force){ invalidateLineCompare(); if(!WRITE_OWNER) return; const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const originalId=S.images[i].originalId; S.images.splice(i,1); if(originalId&&!S.images.some(x=>x.originalId===originalId)){ ORIGINALS.delete(originalId); ORIGINAL_DIRTY.delete(originalId); } PX.delete(id); SOURCE.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB

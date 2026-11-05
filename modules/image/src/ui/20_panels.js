@@ -10,13 +10,14 @@ function formHTML(o,im){ const v=formVals(o);
   return o.params.filter(p=>!(p.stackOnly&&!isStack(im))&&(!p.showIf||p.showIf(v))).map(p=>{ const id=`imf_${o.id}_${p.k}`; const u=p.unit?`<span class="u">${esc(p.unit)}</span>`:"";
     if(p.type==="bool") return `<label class="im-chk"><input type="checkbox" id="${id}" data-k="${p.k}" ${v[p.k]?"checked":""}> ${esc(p.label)}</label>`;
     if(p.type==="sel") return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${p.opts.map(([a,b])=>`<option value="${esc(a)}" ${String(v[p.k])===String(a)?"selected":""}>${esc(b)}</option>`).join("")}</select></label>`;
+    if(p.type==="imgOptional"){ const L=S.images.filter(x=>x.id!==im.id&&x.kind==="mask"&&x.parent===im.id); return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel"><option value="" ${!v[p.k]?"selected":""}>None</option>${v[p.k]&&!L.some(x=>x.id===v[p.k])?`<option value="${esc(v[p.k])}" selected>Unavailable mask — choose another or None</option>`:""}${L.map(x=>`<option value="${esc(x.id)}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`; }
     if(p.type==="img"){ const L=S.images.filter(x=>x.id!==im.id); if(L.length&&!L.some(x=>x.id===v[p.k])) v[p.k]=L[0].id; /* 보이는 첫 항목 = 값 (고르지 않고 실행해도 화면과 같게) */
       return `<label class="im-f"><span>${esc(p.label)}</span><select id="${id}" data-k="${p.k}" class="im-sel">${L.map(x=>`<option value="${x.id}" ${v[p.k]===x.id?"selected":""}>${esc(x.name)} (${x.w}×${x.h})</option>`).join("")}</select></label>`; }
     if(p.type==="text") return `<label class="im-f col"><span>${esc(p.label)}</span><textarea id="${id}" data-k="${p.k}" rows="3" class="mono">${esc(v[p.k])}</textarea></label>`;
     return `<label class="im-f"><span>${esc(p.label)}</span><input type="number" id="${id}" data-k="${p.k}" value="${esc(v[p.k])}" ${p.min!=null?`min="${p.min}"`:""} ${p.max!=null?`max="${p.max}"`:""} step="${p.step||(p.type==="int"?1:"any")}">${u}</label>`; }).join("");
 }
 function bindForm(el,o,onChange){ $a(el,"[data-k]").forEach(inp=>{ const p=o.params.find(q=>q.k===inp.dataset.k); const ev=inp.tagName==="SELECT"||inp.type==="checkbox"?"change":"input";
-  inp.addEventListener(ev,()=>{ const v=formVals(o); v[p.k]=p.type==="bool"?inp.checked:(p.type==="num"||p.type==="int")?(inp.value===""?"":+inp.value):inp.value; if(p.type==="sel"||p.type==="bool") onChange(true); else onChange(false); }); }); }
+  inp.addEventListener(ev,()=>{ invalidateLineCompare(); const v=formVals(o); v[p.k]=p.type==="bool"?inp.checked:(p.type==="num"||p.type==="int")?(inp.value===""?"":+inp.value):inp.value; if(p.type==="sel"||p.type==="bool"||p.type==="imgOptional") onChange(true); else onChange(false); }); }); }
 async function runOp(id,params,im){
   if(!WRITE_OWNER) return;
   const o=OPS[id]; im=im||cur(); if(!im){ note("이미지를 먼저 여세요","warn"); return; } if(BUSY){ note("계산 중입니다 — 끝나면 다시 누르세요","warn"); return; }
@@ -92,8 +93,8 @@ function panelAdjust(el,im){
 }
 const SCALE={};
 function openSetScale(im,L){ SCALE.px=+L.toFixed(3); S.ui.panel="adjust"; drawTabs(); renderPanel(); const e=$q(ROOT,"#imScD"); if(e){ e.focus(); } note(`선 길이 ${L.toFixed(2)} px — Known distance 와 단위를 넣고 Set`); }
-function setCal(im,cal,quiet){ im.cal=cal; save(); if(!quiet){ note(`보정: ${g4(cal.pw)} ${cal.unit}/px`,"ok"); rerender(); } }
-function removeCal(im){ im.cal=null; save(); rerender(); note("보정을 지웠습니다 (px)"); }
+function setCal(im,cal,quiet){ invalidateLineCompare(); im.cal=cal; save(); if(!quiet){ note(`보정: ${g4(cal.pw)} ${cal.unit}/px`,"ok"); rerender(); } }
+function removeCal(im){ invalidateLineCompare(); im.cal=null; save(); rerender(); note("보정을 지웠습니다 (px)"); }
 OPS.setScale={id:"setScale",label:"Set Scale",hidden:true,params:[],run:(im,P)=>{ setCal(im,{pw:P.d/P.px,ph:P.d/P.px,unit:P.u,src:`Set Scale (macro): ${P.px} px = ${P.d} ${P.u}`},true); },ij:P=>`run("Set Scale...", "distance=${P.px} known=${P.d} unit=${P.u==="µm"?"micron":P.u}");`};
 
 /* ===== Process ===== */
@@ -103,13 +104,43 @@ function panelProcess(el,im){
   const prevAble=o.kind==="plane";
   el.innerHTML=`<div class="im-proc"><div class="im-oplist">${GROUPS.map(([g,gl])=>{ const L=list.filter(x=>x.group===g); if(!L.length) return ""; return `<div class="g">${gl}</div>${L.map(x=>`<button class="op ${x.id===o.id?"on":""}" data-op="${x.id}">${esc(x.label)}</button>`).join("")}`; }).join("")}</div>
     <div class="im-opform"><div class="im-h">${esc(o.label)}</div>${o.help?`<div class="xs muted im-help">${esc(o.help)}</div>`:""}<div id="imForm">${formHTML(o,im)}</div>
-    <div class="im-row">${prevAble?`<label class="im-chk"><input type="checkbox" id="imPrev" ${S.ui.preview?"checked":""}> Preview</label>`:""}<span class="sp"></span><button class="btn primary sm" id="imApply">${o.kind==="new"?"Create":"Apply"}</button></div>
+    <div class="im-row">${prevAble?`<label class="im-chk"><input type="checkbox" id="imPrev" ${S.ui.preview?"checked":""}> Preview</label>`:""}${o.id==="afmLevel"&&formVals(o).method==="lineFlatten"?`<button class="btn sm" id="imLineCompare">Compare before / after</button>`:""}<span class="sp"></span><button class="btn primary sm" id="imApply">${o.kind==="new"?"Create":"Apply"}</button></div>
     <div class="xs muted">ImageJ: <code>${esc(o.ij?o.ij(Object.assign({},formVals(o))):"")}</code></div></div></div>`;
   $a(el,"[data-op]").forEach(b=>b.onclick=()=>{ S.ui.proc=b.dataset.op; clearPreview(); save(); renderPanel(); });
   bindForm(el,o,(re)=>{ if(re) renderPanel(); else { const c=$q(el,"code"); if(c&&o.ij) c.textContent=o.ij(formVals(o)); } schedulePreview(); });
   const pv=$q(el,"#imPrev"); if(pv) pv.onchange=e=>{ S.ui.preview=e.target.checked; save(); if(S.ui.preview) schedulePreview(); else clearPreview(); };
+  const lc=$q(el,"#imLineCompare"); if(lc) lc.onclick=()=>openLineCompare(im,Object.assign({},formVals(o)));
   $q(el,"#imApply").onclick=()=>runOp(o.id);
   if(S.ui.preview&&prevAble) schedulePreview();
+}
+/* Line Flatten comparison owns only transient numerical results; original pixels and history are untouched until Apply. */
+let LF_CLOSE=null;
+function openLineCompare(im,P){
+  if(!WRITE_OWNER||BUSY) return;
+  let q; try { if(im.w*im.h>8e6) throw new Error("Comparison exceeds the preview memory limit (8 million pixels)"); q=afmPrepare(im,P); } catch(e){ note("Comparison: "+e.message,"warn"); return; }
+  if(LF_CLOSE) LF_CLOSE();
+  const shell=document.createElement("div"); shell.id="imLfDialog"; shell.className="im-lf-modal";
+  shell.innerHTML=`<div class="im-lf-card" role="dialog" aria-modal="true" aria-label="Line Flatten comparison"><div class="im-lf-head"><strong>Line Flatten — before / after</strong><span id="imLfStatus">Calculating…</span></div><div class="im-lf-views"><div><b>Before</b><canvas id="imLfBefore"></canvas></div><div><b>After</b><canvas id="imLfAfter"></canvas></div></div><div class="im-lf-actions"><button class="btn sm" id="imLfZoomOut">−</button><button class="btn sm" id="imLfFit">Fit</button><button class="btn sm" id="imLfZoomIn">+</button><label><input type="checkbox" id="imLfMask" ${q.mi?"checked":"disabled"}> Show excluded mask</label><span class="sp"></span><button class="btn sm" id="imLfCancel">Cancel</button><button class="btn primary sm" id="imLfApply" disabled>Apply</button></div><div class="xs muted">Drag either image to pan both. Both views use the same value range and LUT. Preview does not change measurements.</div></div>`;
+  document.body.appendChild(shell); const $=s=>shell.querySelector(s), before=$("#imLfBefore"), after=$("#imLfAfter"), apply=$("#imLfApply"), status=$("#imLfStatus");
+  const roiKey=()=>{const r=activeRoi(im);return r?JSON.stringify({type:r.type,pts:r.pts}):null;}, initialRoi=roiKey();
+  const paramKey=JSON.stringify(P), lut=(im.disp[q.params.c]||{}).lut||"Grays", md=q.mi?planeAt(q.mi,q.maskC,q.maskZ,q.maskT).data:null;
+  let result=null,closed=false,expired=false,zoom=1,panX=0,panY=0,drag=null;
+  function close(){closed=true;document.removeEventListener("keydown",keyGuard,true);shell.remove();if(LF_CLOSE===close) LF_CLOSE=null;}
+  LF_CLOSE=close;
+  function keyGuard(e){if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();close();return;} if(e.ctrlKey||e.metaKey||e.altKey||!shell.contains(e.target))e.preventDefault();e.stopImmediatePropagation();}
+  document.addEventListener("keydown",keyGuard,true);
+  function validate(strong=true){ if(closed||expired||cur()!==im||S.ui.panel!=="process"||S.ui.proc!=="afmLevel"||JSON.stringify(formVals(OPS.afmLevel))!==paramKey||roiKey()!==initialRoi) throw new Error("Image or settings changed; reopen comparison"); if(strong)afmValidatePrepared(q);else if(!WRITE_OWNER||byId(im.id)!==im||im.ver!==q.ver||im.c!==q.params.c||im.z!==q.params.z||im.t!==q.params.t||(q.mi&&(byId(q.mi.id)!==q.mi||q.mi.ver!==q.maskVer)))throw new Error("Image or mask changed; reopen comparison"); }
+  function stale(e){ if(closed)return;expired=true;result=null;apply.disabled=true;status.textContent="Preview expired: "+e.message;before.getContext("2d").clearRect(0,0,before.width,before.height);after.getContext("2d").clearRect(0,0,after.width,after.height); }
+  shell.addEventListener("lf-invalidate",()=>stale(new Error("Image, ROI, mask or settings changed; reopen comparison")));
+  function paint(){ if(!result||closed)return; try{validate(false);}catch(e){stale(e);return;}
+    const w=Math.max(1,Math.min(900,Math.floor(before.parentElement.clientWidth))),h=Math.max(140,Math.min(520,Math.floor(window.innerHeight*0.52))); const tab=lutTable(lut); const scale=Math.min(w/im.w,h/im.h)*zoom;
+    for(const [cv,data] of [[before,q.sourcePlane.data],[after,result.data]]){ cv.width=w;cv.height=h;const cx=cv.getContext("2d"), image=cx.createImageData(w,h), out=image.data, map=qMap(32,rangeMin,rangeMax); for(let y=0;y<h;y++)for(let x=0;x<w;x++){const sx=Math.floor((x-w/2-panX)/scale+im.w/2),sy=Math.floor((y-h/2-panY)/scale+im.h/2),j=(y*w+x)*4;if(sx<0||sy<0||sx>=im.w||sy>=im.h){out[j+3]=255;continue;} const i=sy*im.w+sx,k=map(data[i]);out[j]=tab[k];out[j+1]=tab[256+k];out[j+2]=tab[512+k];out[j+3]=255;if(md&&$("#imLfMask").checked&&md[i]!==0){out[j]=Math.round(out[j]*0.45+140);out[j+1]=Math.round(out[j+1]*0.45);out[j+2]=Math.round(out[j+2]*0.45);} }cx.putImageData(image,0,0); }
+  }
+  let rangeMin=Infinity,rangeMax=-Infinity;
+  $("#imLfCancel").onclick=close; $("#imLfMask").onchange=paint; $("#imLfFit").onclick=()=>{zoom=1;panX=panY=0;paint();}; $("#imLfZoomIn").onclick=()=>{zoom=Math.min(64,zoom*1.5);paint();}; $("#imLfZoomOut").onclick=()=>{zoom=Math.max(.25,zoom/1.5);paint();};
+  [before,after].forEach(cv=>{cv.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,px:panX,py:panY};cv.setPointerCapture(e.pointerId);};cv.onpointermove=e=>{if(drag){panX=drag.px+e.clientX-drag.x;panY=drag.py+e.clientY-drag.y;paint();}};cv.onpointerup=cv.onpointercancel=()=>{drag=null;};});
+  apply.onclick=()=>{try{validate(); if(!result)throw new Error("Preview is not ready"); BUSY="afmLevel";const r=afmCommit(q,result);BUSY=null;close();if(r&&r.id)S.sel=r.id;save();rerender();}catch(e){BUSY=null;stale(e);}};
+  afmCompute(q).then(r=>{if(closed)return;try{validate();for(const data of [q.sourcePlane.data,r.data])for(let i=0;i<data.length;i++){const v=data[i];if(Number.isFinite(v)){if(v<rangeMin)rangeMin=v;if(v>rangeMax)rangeMax=v;}} if(!Number.isFinite(rangeMin))throw new Error("No finite preview values");result=r;status.textContent=`Range ${g4(rangeMin)} – ${g4(rangeMax)} · ${lut}`;apply.disabled=false;paint();}catch(e){stale(e);}}).catch(e=>stale(e));
 }
 let _pvT=null, _pvSeq=0;
 function schedulePreview(){ clearTimeout(_pvT); const o=OPS[S.ui.proc]; if(!S.ui.preview||!o||o.kind!=="plane"||S.ui.panel!=="process") return; _pvT=setTimeout(runPreview,220); }

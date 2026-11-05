@@ -43,33 +43,87 @@ const clean=P=>{ const o={}; for(const k in P) if(k!=="__op"&&k!=="__pv") o[k]=P
 const stackParam={k:"stack",label:"Process all slices",type:"bool",def:false,stackOnly:true};
 const ijStack=P=>P.stack?" stack":"";
 
-/* AFM: fit and apply areas are independent; current plane only. */
+/* AFM correction: prepare is non-destructive and shared by Apply and comparison preview. */
+// SHA-256 over exact typed mask bytes: fixed-size provenance, including offline file:// use.
+function afmMaskSnapshot(data){
+  if(!ArrayBuffer.isView(data)||data instanceof DataView)throw new Error("Invalid particle mask storage");
+  for(let i=0;i<data.length;i++)if(!Number.isFinite(data[i]))throw new Error("Particle mask contains a non-finite pixel");
+  const b=new Uint8Array(data.buffer,data.byteOffset,data.byteLength), n=b.length;
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const h=new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]),w=new Uint32Array(64),total=Math.ceil((n+9)/64)*64,hi=Math.floor(n/0x20000000),lo=(n*8)>>>0;
+  const byteAt=i=>i<n?b[i]:i===n?128:i>=total-8?(i<total-4?(hi>>>((total-5-i)*8))&255:(lo>>>((total-1-i)*8))&255):0;
+  const rr=(x,k)=>(x>>>k)|(x<<(32-k));
+  for(let o=0;o<total;o+=64){for(let i=0;i<16;i++){const j=o+i*4;w[i]=(byteAt(j)<<24)|(byteAt(j+1)<<16)|(byteAt(j+2)<<8)|byteAt(j+3);}for(let i=16;i<64;i++){const a=w[i-15],z=w[i-2];w[i]=(w[i-16]+(rr(a,7)^rr(a,18)^(a>>>3))+w[i-7]+(rr(z,17)^rr(z,19)^(z>>>10)))>>>0;}
+    let [a,c,d,e,f,g,j,k]=h;for(let i=0;i<64;i++){const t1=(k+(rr(f,6)^rr(f,11)^rr(f,25))+((f&g)^(~f&j))+K[i]+w[i])>>>0,t2=((rr(a,2)^rr(a,13)^rr(a,22))+((a&c)^(a&d)^(c&d)))>>>0;k=j;j=g;g=f;f=(e+t1)>>>0;e=d;d=c;c=a;a=(t1+t2)>>>0;}h[0]=(h[0]+a)>>>0;h[1]=(h[1]+c)>>>0;h[2]=(h[2]+d)>>>0;h[3]=(h[3]+e)>>>0;h[4]=(h[4]+f)>>>0;h[5]=(h[5]+g)>>>0;h[6]=(h[6]+j)>>>0;h[7]=(h[7]+k)>>>0;
+  }
+  return "sha256:"+data.constructor.name+":"+n+":"+Array.from(h,v=>v.toString(16).padStart(8,"0")).join("");
+}
+const AFM_GEOMETRY_OPS=new Set(["crop","cropbar","flip","rotate","rot90","resize","register"]);
+function afmGeometrySignature(im){return JSON.stringify((im.ops||[]).filter(s=>AFM_GEOMETRY_OPS.has(s.op)).map(s=>({op:s.op,params:s.params})));}
+function afmValidateMaskAlignment(im,mi,c,maskC,maskZ,maskT){
+  if(!mi||byId(mi.id)!==mi||mi===im||mi.rgb||mi.kind!=="mask"||mi.parent!==im.id||mi.w!==im.w||mi.h!==im.h)throw new Error("Particle mask must be an aligned mask created directly from this image");
+  const origin=mi.afmMaskSource;
+  if(!origin||origin.sourceId!==im.id||origin.c!==c||origin.planeMap!=="same-zt"||!Number.isInteger(origin.z)||!Number.isInteger(origin.t)||origin.z<0||origin.z>=im.nz||origin.t<0||origin.t>=im.nt||origin.geometry!==afmGeometrySignature(im))throw new Error("Particle mask source channel or geometry no longer matches; create a new mask from this plane");
+  if((mi.ops||[]).some(s=>AFM_GEOMETRY_OPS.has(s.op)))throw new Error("Particle mask geometry was changed; recreate an aligned mask");
+  const a=calOf(im),b=calOf(mi);if(a.pw!==b.pw||a.ph!==b.ph||a.unit!==b.unit)throw new Error("Particle mask calibration does not match the image");
+  if(mi.nc!==1||mi.nz!==im.nz||mi.nt!==im.nt||maskC!==0||maskZ<0||maskZ>=mi.nz||maskT<0||maskT>=mi.nt)throw new Error("Particle mask stack planes do not match the image");
+  const md=planeAt(mi,maskC,maskZ,maskT).data;if(!md||md.length!==im.w*im.h)throw new Error("Invalid particle mask plane");return md;
+}
+function afmPrepare(im,P){
+  if(im.rgb)throw new Error("AFM correction requires a single-channel grayscale image; RGB is not supported");
+  const method=P.method||"plane",fit=P.fit||"all",apply=P.apply||"all";
+  if(!["plane","rows","poly2","lineFlatten"].includes(method)||!["all","inside","outside"].includes(fit)||!["all","inside","outside"].includes(apply))throw new Error("Invalid AFM correction settings");
+  const degree=P.degree===undefined?0:Number(P.degree),axis=P.axis||"x";
+  if(method==="lineFlatten"&&(![0,1,2].includes(degree)||!["x","y"].includes(axis)))throw new Error("Invalid Line Flatten order or axis");
+  const need=fit!=="all"||apply!=="all",roi=need?(REPLAY?P.roi:activeRoi(im)):null;
+  const valid=roi&&AREA_T.has(roi.type)&&Array.isArray(roi.pts)&&((roi.type==="rect"||roi.type==="oval")?roi.pts.length===2:roi.pts.length>=3)&&roi.pts.every(pt=>Array.isArray(pt)&&pt.length===2&&Number.isFinite(pt[0])&&Number.isFinite(pt[1]));
+  if(need&&!valid)throw new Error(REPLAY?"AFM replay requires a valid recorded area ROI":"Select a valid area ROI for the selected fit or apply region");
+  let inside=null;if(need){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");inside=new Uint8Array(im.w*im.h);let count=0;const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x])){inside[Y*im.w+X]=1;count++;}}if(!count)throw new Error("AFM correction: ROI region contains no image pixels");}
+  const region=scope=>scope==="all"?null:scope==="inside"?inside:Uint8Array.from(inside,v=>v?0:1);
+  const present=["c","z","t"].map(k=>Object.prototype.hasOwnProperty.call(P,k));if(REPLAY&&present.some(Boolean)&&!present.every(Boolean))throw new Error("AFM replay requires all recorded plane coordinates");
+  const [c,z,t]=REPLAY&&present.every(Boolean)?[P.c,P.z,P.t]:[im.c,im.z,im.t];if(!Number.isInteger(c)||!Number.isInteger(z)||!Number.isInteger(t)||c<0||c>=im.nc||z<0||z>=im.nz||t<0||t>=im.nt)throw new Error("Recorded AFM plane is not available in this image");
+  const resultMode=(im.bit===8||im.bit===16)&&planesOf(im).length>1?"new-image":"in-place";
+  if(REPLAY){const recorded=P.resultMode||"in-place";if(!["in-place","new-image"].includes(recorded)||recorded!==resultMode||(P.sourceBit!=null&&P.sourceBit!==im.bit))throw new Error("AFM replay result mode or bit depth does not match the recorded operation");}
+  if(REPLAY&&method!=="lineFlatten"&&(P.maskId||P.maskSnapshot!=null||P.maskC!=null||P.maskZ!=null||P.maskT!=null))throw new Error("Recorded particle mask is invalid for this AFM method");
+  const maskId=method==="lineFlatten"?P.maskId:"";
+  if(REPLAY&&method==="lineFlatten"&&(typeof P.maskRequired!=="boolean"||P.maskRequired!==!!maskId))throw new Error("Recorded particle mask requirement is missing or invalid");
+  let fitMask=region(fit),mi=null,maskSnapshot=null,maskC=0,maskZ=0,maskT=0;
+  if(maskId){
+    mi=byId(maskId);maskZ=z;maskT=t;const md=afmValidateMaskAlignment(im,mi,c,maskC,maskZ,maskT);maskSnapshot=afmMaskSnapshot(md);
+    if(REPLAY&&(typeof P.maskSnapshot!=="string"||P.maskSnapshot!==maskSnapshot||P.maskC!==maskC||P.maskZ!==maskZ||P.maskT!==maskT))throw new Error("Recorded particle mask or its plane has changed");
+    if(!fitMask)fitMask=new Uint8Array(im.w*im.h).fill(1);else fitMask=Uint8Array.from(fitMask);
+    for(let i=0;i<fitMask.length;i++)if(md[i]!==0)fitMask[i]=0;
+  }else if(REPLAY&&(P.maskSnapshot!=null||P.maskC!=null||P.maskZ!=null||P.maskT!=null))throw new Error("Recorded particle mask is missing");
+  const params={method,fit,apply,c,z,t,resultMode,sourceBit:im.bit};if(method==="lineFlatten")Object.assign(params,{degree,axis,maskRequired:!!maskId});if(roi)params.roi={type:roi.type,pts:roi.pts.map(v=>v.slice())};
+  if(mi)Object.assign(params,{maskId:mi.id,maskSnapshot,maskC,maskZ,maskT});
+  return {im,ver:im.ver,sourceCal:JSON.stringify(im.cal),sourceShape:JSON.stringify([im.w,im.h,im.bit,im.nc,im.nz,im.nt]),maskCal:mi?JSON.stringify(mi.cal):null,maskOrigin:mi?JSON.stringify(mi.afmMaskSource):null,roi:roi?JSON.stringify({type:roi.type,pts:roi.pts}):null,mi,maskVer:mi&&mi.ver,maskSnapshot,maskC,maskZ,maskT,sourcePlane:planeAt(im,c,z,t),params,options:{method,degree,axis,fitMask,applyMask:region(apply)}};
+}
+function afmValidatePrepared(q){
+  const {im,params,mi}=q;if(!WRITE_OWNER||byId(im.id)!==im||im.ver!==q.ver)throw new Error("AFM source changed during calculation");
+  if(!REPLAY&&(im.c!==params.c||im.z!==params.z||im.t!==params.t))throw new Error("AFM plane changed during calculation");
+  if(!REPLAY&&q.roi!==null){const r=activeRoi(im);if(!r||JSON.stringify({type:r.type,pts:r.pts})!==q.roi)throw new Error("AFM ROI changed during calculation");}
+  if(JSON.stringify(im.cal)!==q.sourceCal||JSON.stringify([im.w,im.h,im.bit,im.nc,im.nz,im.nt])!==q.sourceShape)throw new Error("AFM source calibration or shape changed during calculation");
+  if(mi){const md=afmValidateMaskAlignment(im,mi,params.c,q.maskC,q.maskZ,q.maskT);if(mi.ver!==q.maskVer||JSON.stringify(mi.cal)!==q.maskCal||JSON.stringify(mi.afmMaskSource)!==q.maskOrigin||afmMaskSnapshot(md)!==q.maskSnapshot)throw new Error("Particle mask changed during calculation");}
+}
+async function afmCompute(q){return await call("afmLevel",[q.sourcePlane,q.options]);}
+function afmCommit(q,result){
+  afmValidatePrepared(q);const {im,params,sourcePlane}=q,{c,z,t,resultMode,method}=params;
+  const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
+  if(resultMode==="new-image"){
+    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
+    setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
+  }
+  const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
+}
 op("afmLevel",{label:"AFM background correction",group:"bg",kind:"image",params:[
-  R("method","Method","plane",{type:"sel",opts:[["plane","Plane (degree 1)"],["rows","Row mean"],["poly2","Polynomial (degree 2)"]]}),
+  R("method","Method","plane",{type:"sel",opts:[["plane","Plane (degree 1)"],["rows","Row mean"],["poly2","Polynomial (degree 2)"],["lineFlatten","Line Flatten"]]}),
+  R("degree","Line order",0,{type:"sel",opts:[["0","0"],["1","1"],["2","2"]],showIf:v=>v.method==="lineFlatten"}),
+  R("axis","Line direction","x",{type:"sel",opts:[["x","X (rows)"],["y","Y (columns)"]],showIf:v=>v.method==="lineFlatten"}),
+  R("maskId","Exclude particle mask","",{type:"imgOptional",showIf:v=>v.method==="lineFlatten"}),
   R("fit","Fit region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]}),
   R("apply","Apply region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]})],
-  run:async(im,P)=>{
-    if(im.rgb)throw new Error("AFM correction requires a single-channel grayscale image; RGB is not supported");
-    const method=P.method||"plane",fit=P.fit||"all",apply=P.apply||"all"; if(!["all","inside","outside"].includes(fit)||!["all","inside","outside"].includes(apply))throw new Error("Invalid AFM correction region");
-    const need=fit!=="all"||apply!=="all";const roi=need?(REPLAY?P.roi:activeRoi(im)):null;
-    const validRoi=roi&&AREA_T.has(roi.type)&&Array.isArray(roi.pts)&&((roi.type==="rect"||roi.type==="oval")?roi.pts.length===2:roi.pts.length>=3)&&roi.pts.every(pt=>Array.isArray(pt)&&pt.length===2&&Number.isFinite(pt[0])&&Number.isFinite(pt[1]));
-    if(need&&!validRoi)throw new Error(REPLAY?"AFM replay requires a valid recorded area ROI":"Select a valid area ROI for the selected fit or apply region");
-    let inside=null;if(need){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");inside=new Uint8Array(im.w*im.h);let insideCount=0;const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x])){inside[Y*im.w+X]=1;insideCount++;}}if(!insideCount)throw new Error("AFM correction: ROI region contains no image pixels");}
-    const mask=scope=>scope==="all"?null:scope==="inside"?inside:Uint8Array.from(inside,v=>v?0:1);
-    const present=["c","z","t"].map(k=>Object.prototype.hasOwnProperty.call(P,k));if(REPLAY&&present.some(Boolean)&&!present.every(Boolean))throw new Error("AFM replay requires all recorded plane coordinates");
-    const [c,z,t]=REPLAY&&present.every(Boolean)?[P.c,P.z,P.t]:[im.c,im.z,im.t];if(!Number.isInteger(c)||!Number.isInteger(z)||!Number.isInteger(t)||c<0||c>=im.nc||z<0||z>=im.nz||t<0||t>=im.nt)throw new Error("Recorded AFM plane is not available in this image");
-    const resultMode=(im.bit===8||im.bit===16)&&planesOf(im).length>1?"new-image":"in-place";
-    if(REPLAY){const recorded=P.resultMode||"in-place";if(!["in-place","new-image"].includes(recorded)||recorded!==resultMode||(P.sourceBit!=null&&P.sourceBit!==im.bit))throw new Error("AFM replay result mode or bit depth does not match the recorded operation");}
-    const sourcePlane=planeAt(im,c,z,t), result=await call("afmLevel",[sourcePlane,{method,fitMask:mask(fit),applyMask:mask(apply)}]);
-    const params={method,fit,apply,c,z,t,resultMode,sourceBit:im.bit};if(roi)params.roi={type:roi.type,pts:roi.pts.map(v=>v.slice())};
-    const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
-    if(resultMode==="new-image"){
-      const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
-      setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
-    }
-    const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
-  },
-  help:"Fits the selected region and subtracts from the chosen apply region in the current plane. Non-finite values are retained. ROI masks include pixels inside the area. For 8/16-bit stacks, the corrected plane opens as a separate 32-bit image."});
+  run:async(im,P)=>{const q=afmPrepare(im,P),r=await afmCompute(q);return afmCommit(q,r);},
+  help:"Fit and apply regions are independent. For particle exclusion, create a new mask from this image using Threshold, then select it here. Nonzero mask pixels are excluded from fitting only. 8/16-bit stacks open a separate corrected plane."});
 
 /* ---------- Smooth & denoise ---------- */
 op("gaussian",{label:"Gaussian Blur",group:"smooth",params:[R("sigma","Sigma (radius)",2,{min:0.1,step:0.1,unit:"px"}),R("scaled","Scaled units",false,{type:"bool"}),stackParam],
@@ -242,6 +296,7 @@ op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image
 /* ---------- Threshold · Binary (패널이 따로 있음) ---------- */
 op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,params:[],
   run:async(im,P)=>{ // P: {method, dark, manual, lower, upper, stack, newImage, local:{method,radius,p1,p2}}
+    const source={id:im.id,ver:im.ver,c:im.c,z:im.z,t:im.t,geometry:afmGeometrySignature(im)};
     const planes=planesOf(im); const idx=[]; for(let k=0;k<planes.length;k++) if(k%im.nc===(im.rgb?0:im.c)||im.nc===1) idx.push(k); // 스택은 언제나 모든 장 (ImageJ 처럼 스택 유지)
     let fixed=null; if(isStack(im)&&!P.stack&&!P.manual&&!P.local){ const t=await call("autoThreshold",[{w:im.w,h:im.h,bit:im.bit,data:planes[pIndex(im,im.rgb?0:im.c,im.z,im.t)]},P.method,!!P.dark]); fixed=[t.lower,t.upper]; } // '모든 장' 끔 = 지금 장에서 구한 문턱을 모든 장에
     if(im.rgb) throw new Error("RGB 는 먼저 Type ▸ RGB → 8-bit gray");
@@ -251,7 +306,7 @@ op("threshold",{label:"Convert to Mask",group:"thr",kind:"plane",hidden:true,par
       else { let lo=+P.lower, hi=+P.upper; if(fixed){ [lo,hi]=fixed; } else if(!P.manual){ const t=await call("autoThreshold",[p,P.method,!!P.dark]); lo=t.lower; hi=t.upper; } m=IC.applyThreshold(p,lo,hi); msg=P.manual?`Threshold ${g4(lo)}–${g4(hi)}`:`${P.method}${P.dark?" dark":""} → [${g4(lo)}, ${g4(hi)}]`; }
       out.push(m.data); }
     const step={op:"threshold",params:clean(P),label:"Convert to Mask ("+msg+")"};
-    if(P.newImage){ const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); record(step,im); note(msg,"ok"); return n; }
+    if(P.newImage){ if(byId(source.id)!==im||im.ver!==source.ver||im.c!==source.c||im.z!==source.z||im.t!==source.t||afmGeometrySignature(im)!==source.geometry)throw new Error("Mask source changed during threshold calculation"); const n=addImage({name:"Mask of "+im.name,w:im.w,h:im.h,bit:8,nc:1,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1,planes:out,cal:im.cal},{parent:im.id,src:"derived",kind:"mask"}); n.afmMaskSource={sourceId:source.id,c:source.c,z:source.z,t:source.t,planeMap:"same-zt",geometry:source.geometry}; record(step,im); note(msg,"ok"); return n; }
     setPlanes(im,out,{bit:8,nc:1,c:0,composite:false,nz:idx.length>1?im.nz:1,nt:idx.length>1?im.nt:1},"Convert to Mask",step); im.disp=[{min:0,max:255,lut:"Grays"}]; im.kind="mask"; note(msg,"ok"); },
   ij:P=>P.local?`run("Auto Local Threshold", "method=${P.local.method} radius=${P.local.radius} parameter_1=${P.local.p1||0} parameter_2=${P.local.p2||0}${P.dark?" white":""}");`:(P.manual?`setThreshold(${P.lower}, ${P.upper}); setOption("BlackBackground", true); run("Convert to Mask", "method=Default background=${P.dark?"Dark":"Light"} black");`:`setAutoThreshold("${P.method}${P.dark?" dark":""}"); setOption("BlackBackground", true); run("Convert to Mask", "method=${P.method} background=${P.dark?"Dark":"Light"}${P.stack?" calculate":""} black");`)}); // 스택: calculate = 장마다 문턱, 아니면 지금 장의 문턱을 모든 장에
 /* Color Threshold (ImageJ ColorThresholder): RGB 이미지 → 8-bit mask. P: {space, min[3], max[3], pass[3], stack, newImage} */

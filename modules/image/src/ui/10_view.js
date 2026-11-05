@@ -26,7 +26,7 @@ function lutCss(name){ const t=lutTable(name); const st=[]; for(let i=0;i<=8;i++
 /* ---------- 표시 버퍼 ---------- */
 const DISP={key:null,cv:null,scale:1};
 const MAXDISP=24e6;
-function invalidate(im){ if(im) im.ver=(im.ver||0)+1; DISP.key=null; DISPZ.key=null; OVL.key=null; }
+function invalidate(im){ invalidateLineCompare(); if(im) im.ver=(im.ver||0)+1; DISP.key=null; DISPZ.key=null; OVL.key=null; }
 function dispKey(im){ return [im.id,im.ver,im.c,im.z,im.t,im.composite,JSON.stringify(im.disp),PREVIEW.key||""].join("|"); }
 /* 값 → 0..255 (ImageJ create8BitImage 와 같은 규칙)
    8-bit : LUT[i] = i<min ? 0 : i>max ? 255 : (int)(256·(i−min)/(max−min))   (ByteProcessor.setMinAndMax, min·max 반올림)
@@ -158,7 +158,7 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(!WRITE_OWNER) return; if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
+function setActive(im,r){ if(!WRITE_OWNER) return; invalidateLineCompare(); if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
 function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
