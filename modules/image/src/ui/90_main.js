@@ -2,18 +2,39 @@
    화면 뼈대 · 파일 열기 · 이미지 목록 · 도구 막대 · 스택 막대 · 단축키 · 외부 API
    ============================================================ */
 const svgI=d=>`<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+let OWNERSHIP_STARTED=false, READ_ONLY_REASON="", FILE_MESSAGE_BATCHES=[];
+async function reloadImageSnapshot(){
+  RECOVERY_REQUIRED=false; RECOVERY_ITEMS.length=0; S=defState(); PX.clear(); SOURCE.clear(); ORIGINALS.clear(); UNDO.clear(); DIRTY.clear(); ORIGINAL_DIRTY.clear();
+  if(WRITE_OWNER) await loadSaved();
+  else{ let db=await openExisting(DBN); if(db){const snap=await readSnapshot(db),keys=snap.get(SNAP_KEYS)||[]; const empty=!snap.has("migration:v2")&&!snap.has("state")&&!keys.some(k=>typeof k==="string"&&(k.startsWith("px:")||k.startsWith("original:")));if(empty){db.close();db=null;}} if(!db) db=await openExisting(LEGACY_DBN); if(db) try{await loadSaved(db);}finally{db.close();} }
+  LOADED=true; if(ROOT) build(ROOT);
+}
+async function takeOwnership(){
+  WRITE_OWNER=true;
+  try{ await migrateLegacy(); await reloadImageSnapshot(); if(WRITE_OWNER) await cleanupSavedOriginals(); note("The new storage contains one snapshot of the old storage. Later changes in older tabs are not merged.","warn"); }
+  catch(e){ WRITE_OWNER=false; READ_ONLY_REASON="Storage could not be opened safely. Read-only: "+e.message; try{await reloadImageSnapshot();}catch(_){if(ROOT) ROOT.innerHTML=`<div class="card">${esc(READ_ONLY_REASON)}</div>`;} throw e; }
+  await new Promise(()=>{});
+}
+async function startOwnership(){
+  if(!navigator.locks||typeof indexedDB.databases!=="function"){ await reloadImageSnapshot(); return; }
+  let acquired=false;
+  await navigator.locks.request("innoanalytics_image_v2_writer",{ifAvailable:true},async lock=>{ if(!lock) return; acquired=true; await takeOwnership(); });
+  if(acquired) return;
+  await reloadImageSnapshot();
+  navigator.locks.request("innoanalytics_image_v2_writer",async()=>{ await takeOwnership(); }).catch(()=>{});
+}
 function render(root){
   ROOT=root;
-  if(!LOADED){ LOADED=true; root.innerHTML=`<div class="card"><div class="im-empty">Image 작업을 불러오는 중…</div></div>`; loadSaved().then(()=>{ if(ROOT===root) build(root); }); return; }
-  build(root);
+  if(!OWNERSHIP_STARTED){ OWNERSHIP_STARTED=true; root.innerHTML=`<div class="card"><div class="im-empty">Image 작업을 불러오는 중…</div></div>`; startOwnership().catch(async()=>{WRITE_OWNER=false; if(!LOADED){READ_ONLY_REASON="Lock or storage error — read-only";try{await reloadImageSnapshot();}catch(_){if(ROOT) ROOT.innerHTML=`<div class="card">${esc(READ_ONLY_REASON)}</div>`;}}}); return; }
+  if(LOADED) build(root);
 }
 function build(root){
   ROOT=root;
   root.innerHTML=`<div class="imx">
     <div class="card im-top">
       <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF, ND2, CZI, PNG, JPEG, DM3/DM4, MRC, EMD, GWY, Nanoscope, ARDF, IBW, SXM, NPY, text … — you can also drop several files or whole folders here">Open files<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
-        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><span class="muted sm">or drop files here</span></div>
-      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF (calibration and stacks included)">Save TIFF</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
+        <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><button class="btn sm" id="imFileMessages" ${FILE_MESSAGE_BATCHES.length?"":"disabled"}>File messages</button><span class="muted sm">or drop files here</span></div>
+      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF: 32-bit data are float32; value units and processing history are not preserved">Save TIFF</button><button class="btn sm" id="imSaveNumeric" title="Export current numeric values as Float64; earlier precision loss remains and processing history may be incomplete">Export numeric snapshot</button><button class="btn sm" id="imSaveOriginal" title="Export the entire original IBW file, including all channels and dimensions; edits are not included">Export original IBW (entire file)</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
     </div>
     <div class="im-main">
       <div class="card im-list" id="imList"></div>
@@ -33,10 +54,10 @@ function build(root){
   </div>`;
   const x=$q(root,".imx"), q=s=>$q(root,s);
   q("#imFin").onchange=e=>{ loadFiles(e.target.files); e.target.value=""; };
-  q("#imFmts").onclick=showFormats;
-  q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveP").onclick=exportPNG;
+  q("#imFmts").onclick=showFormats; q("#imFileMessages").onclick=()=>showFileMessages();
+  q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveOriginal").onclick=saveOriginalIBW; q("#imSaveNumeric").onclick=saveNumericSnapshot; q("#imSaveP").onclick=exportPNG;
   q("#imClose").onclick=()=>{ const im=cur(); if(im){ closeImage(im.id); rerender(); } };
-  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 이미지·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); DIRTY.add(id); }); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
+  q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 이미지·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); SOURCE.delete(id); UNDO.delete(id); DIRTY.add(id); }); for(const id of ORIGINALS.keys()) ORIGINAL_DIRTY.delete(id); ORIGINALS.clear(); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
   q("#imStop").onclick=()=>{ cancelAll(); note("계산을 중단했습니다"); };
   ["dragenter","dragover"].forEach(ev=>x.addEventListener(ev,e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes("Files")){ e.preventDefault(); e.stopPropagation(); x.classList.add("over"); } }));
   x.addEventListener("dragleave",e=>{ if(e.target===x) x.classList.remove("over"); });
@@ -46,6 +67,10 @@ function build(root){
   ov.addEventListener("pointercancel",e=>{ if(e.pointerType==="touch"&&TSNAP) touchRestore(); }); ov.addEventListener("pointerup",()=>{ TSNAP=null; }); bindTouch(ov); // 손가락 제스처 (INNO_TOUCH)
   try{ new ResizeObserver(()=>draw()).observe(q("#imCanvasWrap")); }catch(e){}
   rerender();
+  if(!WRITE_OWNER){ x.inert=true; const banner=document.createElement("div"); banner.textContent=RECOVERY_REQUIRED?"Some saved images are missing or damaged. Saving is disabled; recover available original IBW files.":(READ_ONLY_REASON||"Read-only: another tab is editing, or locking is unavailable. Later changes in older tabs are not merged."); banner.className="card"; if(S.images.length){ const select=document.createElement("select"); select.id="imReadSelect"; for(const im of S.images){const option=document.createElement("option");option.value=im.id;option.textContent=im.name;option.selected=im.id===S.sel;select.appendChild(option);} select.onchange=()=>{S.sel=select.value;build(root);};banner.appendChild(select);
+    const active=cur(); if(active){const tiff=document.createElement("button");tiff.id="imReadTIFF";tiff.textContent="Export selected TIFF (32-bit is float32; no value unit or history)";tiff.onclick=saveTIFF;banner.appendChild(tiff);} const original=active&&active.originalId&&ORIGINALS.get(active.originalId); if(original){const exportButton=document.createElement("button");exportButton.id="imReadOriginal";exportButton.textContent="Export selected original IBW";exportButton.title="Export the entire original file; edits are not included";exportButton.onclick=()=>downloadBlob(original.name,original.blob);banner.appendChild(exportButton);} if(active&&active.nc>1&&!active.rgb){const channel=document.createElement("select");channel.id="imReadChannel";for(let c=0;c<active.nc;c++){const option=document.createElement("option");option.value=String(c);option.textContent=(active.chNames&&active.chNames[c])||"Channel "+(c+1);option.selected=c===active.c;channel.appendChild(option);}channel.onchange=()=>{active.c=+channel.value;invalidate();draw();};banner.appendChild(channel);}
+    const zoom=document.createElement("button");zoom.id="imReadZoomIn";zoom.textContent="Zoom +";zoom.onclick=()=>{const im=cur();if(im)zoomStep(im,1);};banner.appendChild(zoom); const out=document.createElement("button");out.textContent="Zoom −";out.onclick=()=>{const im=cur();if(im)zoomStep(im,-1);};banner.appendChild(out); }
+  for(const [i,o] of RECOVERY_ITEMS.entries()){const button=document.createElement("button");button.id=i===0?"imRecoverOriginal":"imRecoverOriginal"+i;button.textContent="Recover original: "+o.name;button.onclick=()=>downloadBlob(o.name,o.blob);banner.appendChild(button);} root.prepend(banner); }
 }
 function rerender(){ if(!ROOT||!$q(ROOT,".imx")) return; drawSide(); drawTools(); drawStack(); drawTabs(); renderPanel(); draw(); drawBottom(); drawMsg(); }
 
@@ -86,6 +111,7 @@ function drawStack(){ const el=ROOT&&$q(ROOT,"#imStack"); if(!el) return; const 
 
 /* ---------- 파일 열기 ---------- */
 async function loadFiles(list){
+  if(!WRITE_OWNER) return;
   const arr=[...list]; if(!arr.length) return;
   const base=n=>n.replace(/\.[^.]+$/,"").toLowerCase();
   const imgNames=new Set(arr.filter(f=>!/\.txt$/i.test(f.name)).map(f=>base(f.name)));
@@ -94,17 +120,21 @@ async function loadFiles(list){
   const files=arr.filter(f=>!side.includes(f));
   let n=0; const errs=[];
   for(let k=0;k<files.length;k++){ const f=files[k]; setProg(`읽는 중 ${k+1}/${files.length}: ${f.name}`,k/files.length);
-    try{ const u8=new Uint8Array(await f.arrayBuffer()); let r;
+    try{ if(/\.ibw$/i.test(f.name)&&f.size>IO.MAXBYTES) throw new Error("The original IBW file exceeds the browser memory limit"); const u8=new Uint8Array(await f.arrayBuffer()); let r;
       try{ r=await IO.readFile(f.name,u8,{sidecars,choose:askImport,onProgress:p=>setProg(`읽는 중: ${f.name}`,(k+p)/files.length)}); if(r.cancel){ note(`${f.name}: 열기 취소`); continue; } }
       catch(e){ if(e.needRaw){ hideProg(); const o=await askRaw(f.name,u8.length); if(!o) continue; r=IO.readRaw(f.name,u8,o); } else throw e; }
-      for(const d of r.images){ const im=addImage(d,{file:f.name}); n++; if(im.cal) im.info.unshift(["Scale",`${g4(im.cal.pw)} ${im.cal.unit}/px`]); (d.warn||[]).forEach(w=>errs.push(`${d.name}: ${w}`)); }
+      const originalId=/\.ibw$/i.test(f.name)&&r.images.length?uid():null; if(originalId){ ORIGINALS.set(originalId,{name:f.name,blob:new Blob([u8],{type:"application/octet-stream"})}); ORIGINAL_DIRTY.add(originalId); }
+      for(const d of r.images){ const im=addImage(d,{file:f.name,originalId}); n++; if(im.cal) im.info.unshift(["Scale",`${g4(im.cal.pw)} ${im.cal.unit}/px`]); (d.warn||[]).forEach(w=>errs.push(`${d.name}: ${w}`)); }
       (r.warn||[]).forEach(w=>errs.push(`${f.name}: ${w}`));
     }catch(e){ errs.push(`${f.name}: ${e.message||e}`); }
     await sleep(0); }
+  const messages=Object.freeze(errs.slice()); if(messages.length)FILE_MESSAGE_BATCHES.push(messages); const messageButton=ROOT&&$q(ROOT,"#imFileMessages"); if(messageButton)messageButton.disabled=!FILE_MESSAGE_BATCHES.length;
   hideProg(); save(); rerender();
   if(n){ const im=cur(); note(`이미지 ${n}개를 열었습니다${side.length?` (옆 파일 ${side.length}개 메타데이터 사용)`:""}${im&&!im.cal?" — 화소 크기가 없습니다: Adjust ▸ Set Scale":""}`,im&&!im.cal?"warn":"ok"); }
   errs.slice(0,6).forEach(e=>note(e,"warn"));
+  if(errs.length>6) note(`${errs.length} messages — ${errs.length-6} more than the first six.`,"warn",{label:"View details",persistent:true,fn:()=>showFileMessages(messages)});
 }
+function showFileMessages(batch){const batches=batch?[batch]:FILE_MESSAGE_BATCHES.slice().reverse();modal(`<div class="im-h">File messages</div>${batches.map((msgs,i)=>`<section><p>${batch?"This request":"Request "+(FILE_MESSAGE_BATCHES.length-i)}: ${msgs.length} messages (${Math.max(0,msgs.length-6)} additional)</p><ol>${msgs.map(e=>`<li>${esc(e)}</li>`).join("")}</ol></section>`).join("")}<button class="btn sm" data-close>Close</button>`);}
 function showFormats(){ modal(`<div class="im-h">Supported Formats</div><table class="im-kv sm">${IO.FORMATS.map(([a,b,c])=>`<tr><td><b>${esc(a)}</b><div class="xs muted">.${esc(b.split(",").join(" ."))}</div></td><td>${esc(c)}</td></tr>`).join("")}</table>
   <div class="xs muted">화소 크기 출처: ImageJ·OME 메타데이터, SEM 장비 태그(Zeiss 34118, FEI/Thermo 34680·34682, TESCAN 50431), Hitachi·JEOL 옆 .txt(같은 이름으로 함께 열기), DM·MRC·EMD 보정, Nikon ND2 dCalibration, Zeiss CZI Scaling, Igor wave scaling, Nanonis SCAN_RANGE. TIFF·PNG 해상도 태그는 기본값인 경우가 많아 '후보'로만 보입니다.</div>
   <div class="im-row"><span class="sp"></span><button class="btn sm" data-close>Close</button></div>`); }
@@ -144,7 +174,9 @@ function askRaw(name,size){ return new Promise(res=>{ const m=modal(`<div class=
   m.addEventListener("click",e=>{ if(e.target===m||e.target.dataset.close!=null) res(null); }); }); }
 
 /* ---------- 저장·내보내기 ---------- */
-function saveTIFF(){ const im=cur(); if(!im) return; const t=tiffOf(im); downloadBlob(t.name,new Blob([t.data],{type:"image/tiff"})); note(`${t.name} — ImageJ/Fiji 에서 보정·스택 정보와 함께 열립니다`,"ok"); }
+function saveNumericSnapshot(){const im=cur();if(!im)return;try{const data=IO.writeNumericSnapshot({name:im.name,w:im.w,h:im.h,nc:im.nc,nz:im.nz,nt:im.nt,bit:im.bit,rgb:im.rgb,planes:planesOf(im),cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,zStep:im.zStep,chNames:im.chNames,ops:im.ops,snapshotPrecision:im.snapshotPrecision});downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_numeric.innoimg",new Blob([data],{type:"application/octet-stream"}));note("Current values were saved as Float64. Earlier precision loss remains, and the recorded history may be incomplete.","warn");}catch(e){note("Numeric snapshot could not be saved: "+e.message,"warn");}}
+function saveOriginalIBW(){ const im=cur(), o=im&&im.originalId&&ORIGINALS.get(im.originalId); if(!o){ note("No original IBW file is available for this image. Reopen the original file.","warn"); return; } downloadBlob(o.name,o.blob); note("The entire original IBW file was saved, including all channels and dimensions; edits are not included.","ok"); }
+function saveTIFF(){ const im=cur(); if(!im) return; const t=tiffOf(im); downloadBlob(t.name,new Blob([t.data],{type:"image/tiff"})); note(`${t.name} — 32-bit TIFF uses float32; value units and processing history are not preserved.`,"warn"); }
 function exportPNG(){ const im=cur(); if(!im) return; const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
   if(fullScale(im)===1){ const D=buildDisplay(im); g.drawImage(D.cv,0,0); } else { const hs=Math.max(1,Math.floor(8e6/im.w)); for(let y=0;y<im.h;y+=hs){ const st=renderRegion(im,{x:0,y,w:im.w,h:Math.min(hs,im.h-y),sc:1}); g.drawImage(st,0,y); } } // 큰 이미지도 원래 해상도 (띠로 나눠)
   const v={zoom:1,x:0,y:0}; drawThreshold(im,g,v); drawParticles(im,g,v); if(S.ui.showAll!==false) roiList(im).forEach(r=>drawRoi(g,v,r,false,im)); const a=activeRoi(im); if(a) drawRoi(g,v,a,false,im); drawScaleBar(im,g,v,im.w,im.h);
@@ -152,6 +184,7 @@ function exportPNG(){ const im=cur(); if(!im) return; const c=document.createEle
 
 /* ---------- 단축키 ---------- */
 function onKey(e){
+  if(!WRITE_OWNER) return;
   if(!ROOT||!document.body.contains(ROOT)||!$q(ROOT,".imx")) return;
   { const m=$q(ROOT,"#imModal"); if(e.key==="Escape"&&m&&!m.hidden){ e.preventDefault(); const b=$q(m,"[data-close]"); if(b) b.click(); else { m.hidden=true; m.innerHTML=""; } return; } } // Esc = 창 닫기(취소)
   const t=e.target; if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)) return;
@@ -169,4 +202,5 @@ function onKey(e){
 }
 try{ document.addEventListener("keydown",onKey); document.addEventListener("keyup",e=>{ if(e.key===" ") SPACE=false; }); window.addEventListener("blur",()=>{ SPACE=false; }); }catch(e){}
 
-window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll,_msgs:()=>MSGS,_wand:wandAt,_toScr:(x,y)=>{ const im=cur(); return toScr(viewOf(im),x,y); }};
+window.IMG_UI={render,rerender,_load:loadFiles,_state:()=>S,_px:PX,_source:SOURCE,_cur:cur,_run:runOp,_ops:OPS,_steps:()=>S.macro.steps,_runSteps:runSteps,_addImage:addImage,_setActive:(r)=>setActive(cur(),r),_flush:flushSave,_toIJM:()=>toIJM(S.macro.steps),_busy:()=>BUSY,_undo:undo,_close:closeImage,_cancel:cancelAll,_msgs:()=>MSGS,_wand:wandAt,_toScr:(x,y)=>{ const im=cur(); return toScr(viewOf(im),x,y); }};
+

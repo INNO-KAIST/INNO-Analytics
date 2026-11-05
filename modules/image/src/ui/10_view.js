@@ -158,7 +158,7 @@ function drawScaleBar(im,ox,v,W,H){
 const AREA_T=new Set(["rect","oval","poly","free","traced"]);
 const roiList=im=>S.rois[im.id]||(S.rois[im.id]=[]);
 const activeRoi=im=>S.roiSel[im.id]||null;
-function setActive(im,r){ if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
+function setActive(im,r){ if(!WRITE_OWNER) return; if(r) S.roiSel[im.id]=r; else delete S.roiSel[im.id]; save(); draw(); drawSide(); if(S.ui.panel==="analyze"&&typeof dropRefresh==="function") dropRefresh(); } // Analyze 안 Drop Shape 칸은 영역·기준선 ROI 를 보여 줌
 function clearRois(im){ delete S.roiSel[im.id]; S.rois[im.id]=[]; delete S.particles[im.id]; if(S.dropFit) delete S.dropFit[im.id]; if(S.dropBase) delete S.dropBase[im.id]; } // 좌표가 바뀌는 연산 → 방울 덧그림·기준선도
 function roiBounds(r){ const xs=r.pts.map(p=>p[0]), ys=r.pts.map(p=>p[1]); const x=Math.min(...xs), y=Math.min(...ys); return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}; }
 function roiRect(im){ const r=activeRoi(im); if(!r||r.type!=="rect") return null; return roiBounds(r); }
@@ -322,11 +322,13 @@ function drawStatus(){
   el.innerHTML=s;
 }
 /* 선 ROI 의 프로파일 (캔버스 아래 작은 그래프) */
-function profileOf(im,r){ const p=curPlaneOf(im); const [a,b]=r.pts; const pr=IC.lineProfile(p,a[0],a[1],b[0],b[1],S.ui.lw||1); const c=calOf(im); return {x:[...pr.values].map((_,i)=>i*pr.step*c.pw),y:[...pr.values],unit:c.unit}; }
+function afmXYCal(im){const c=im&&im.cal;return c&&Number.isFinite(c.pw)&&c.pw>0&&Number.isFinite(c.ph)&&c.ph>0&&typeof c.unit==="string"&&c.unit?c:{pw:1,ph:1,unit:"px"};}
+function profileOf(im,r){ const p=curPlaneOf(im); const [a,b]=r.pts; const pr=IC.lineProfile(p,a[0],a[1],b[0],b[1],S.ui.lw||1); const c=afmXYCal(im); return {x:Array.from(IC.afmProfileDistances(a[0],a[1],b[0],b[1],pr.values.length,c)),y:[...pr.values],unit:c.unit,valueUnit:im.valueUnit||"unknown"}; }
 function drawProfileMini(){
   const el=ROOT&&$q(ROOT,"#imProfile"); if(!el) return; const im=cur(); const a=im&&activeRoi(im);
   if(!a||a.type!=="line"){ el.hidden=true; return; } el.hidden=false; const pr=profileOf(im,a);
-  el.innerHTML=`<div class="ph"><b>Line profile</b><span class="muted xs">width ${S.ui.lw||1} px · ${pr.y.length} points</span><span class="sp"></span><button class="btn xs" id="imProfAdd">Add to Plots</button><button class="btn xs" id="imProfCsv">CSV</button></div>${svgXY([{name:"profile",x:pr.x,y:pr.y}],{w:640,h:150,xl:`distance (${pr.unit})`,yl:"gray value"})}`;
-  $q(el,"#imProfAdd").onclick=()=>{ S.plots.push({id:uid(),kind:"xy",title:"Profile — "+im.name,xl:`distance (${pr.unit})`,yl:"gray value",series:[{name:"profile",x:pr.x,y:pr.y}]}); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); drawBottom(); };
-  $q(el,"#imProfCsv").onclick=()=>downloadText(`profile_${im.name}.csv`,"distance_"+pr.unit+",value\n"+pr.x.map((x,i)=>x+","+pr.y[i]).join("\n"));
+  el.innerHTML=`<div class="ph"><b>Line profile</b><span class="muted xs">width ${S.ui.lw||1} px · ${pr.y.length} points</span><span class="sp"></span><button class="btn xs" id="imProfStep" title="End height minus start height; bilinear interpolation at line endpoints">Measure end-to-end</button><button class="btn xs" id="imProfAdd">Add to Plots</button><button class="btn xs" id="imProfCsv">CSV</button></div><div class="afm-boundary">Profile samples outside the image clamp to its edge; endpoint height requires endpoints inside.</div>${svgXY([{name:"profile",x:pr.x,y:pr.y}],{w:640,h:150,xl:`distance (${pr.unit})`,yl:`value (${pr.valueUnit})`})}`;
+  $q(el,"#imProfStep").onclick=()=>measureAFMStep(im,a);
+  $q(el,"#imProfAdd").onclick=()=>{ S.plots.push({id:uid(),kind:"xy",title:"Profile — "+im.name,xl:`distance (${pr.unit})`,yl:`value (${pr.valueUnit})`,series:[{name:`value (${pr.valueUnit})`,x:pr.x,y:pr.y}]}); S.ui.bottom="plots"; S.ui.bottomOpen=true; save(); drawBottom(); };
+  $q(el,"#imProfCsv").onclick=()=>downloadText(`profile_${im.name}.csv`,"distance_"+pr.unit+",value_"+pr.valueUnit+"\n"+pr.x.map((x,i)=>x+","+pr.y[i]).join("\n"));
 }

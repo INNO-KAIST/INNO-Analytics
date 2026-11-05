@@ -358,14 +358,24 @@ function readIBW(name,u8){
   const bs=tsz[base]; if(!bs) throw new Error("wave 자료형 "+type+" 은 읽지 않습니다");
   if(!(npnts>0)||dataOff+npnts*bs>u8.length) throw new Error(`IBW: 자료가 짧습니다 (${npnts} 점 × ${bs} 바이트) — 파일이 잘렸거나 손상됨`);
   const rd=i=>{ const o=dataOff+i*bs; switch(base){ case 2: return dv.getFloat32(o,le); case 4: return dv.getFloat64(o,le); case 8: return uns?dv.getUint8(o):dv.getInt8(o); case 16: return uns?dv.getUint16(o,le):dv.getInt16(o,le); case 32: return uns?dv.getUint32(o,le):dv.getInt32(o,le); } };
+  const metadataSizes=[formulaSize,noteSize,dataEUnitsSize,...dimEU,...dimLab]; if(dimLab.some(n=>n%32!==0)||metadataSizes.some(n=>n<0)||!Number.isSafeInteger(metadataSizes.reduce((a,b)=>a+b,0))||dataOff+npnts*bs+metadataSizes.reduce((a,b)=>a+b,0)>u8.length) throw new Error("IBW: metadata is truncated or invalid");
   let o=dataOff+npnts*bs+formulaSize; const note=tdu.decode(u8.subarray(o,o+noteSize)).replace(/\r/g,"\n"); o+=noteSize+dataEUnitsSize;
   const dimEUstr=[]; for(let k=0;k<4;k++){ dimEUstr.push(td.decode(u8.subarray(o,o+dimEU[k]))); o+=dimEU[k]; }
   const labels=[]; for(let k=0;k<4;k++){ const L=[]; for(let j=0;j*32<dimLab[k];j++) L.push(td.decode(u8.subarray(o+32*j,o+32*j+32)).replace(/\0.*$/,"")); labels.push(L); o+=dimLab[k]; }
   const nx=nDim[0]||npnts, ny=nDim[1]||1, nl=nDim[2]||1; if(ny<2) throw new Error("1D wave 는 이미지가 아닙니다");
+  if(nDim.some(n=>n<0)||!Number.isSafeInteger(nx*ny*nl*(nDim[3]||1))||nx*ny*nl*(nDim[3]||1)!==npnts) throw new Error("IBW: 차원과 자료 점 수가 일치하지 않습니다");
+  if(16*nx*ny*nl+2*u8.byteLength>IO.MAXBYTES) throw new Error("IBW: 원본과 작업 배열을 보관하기에 파일이 너무 큽니다");
+  const noteKeys=new Set(note.split(/\n/).map(line=>{const i=line.indexOf(":");return i<0?"":line.slice(0,i).trim().toLowerCase();}));
+  const curveLabels=labels[1]||[]; const labelledCurve=nDim[2]===0&&nDim[3]===0&&dimLab[1]===(ny+1)*32&&curveLabels.length===ny+1&&curveLabels.slice(1).every(v=>v.trim().length>0);
+  const xyKnown=!!IO.unitToM(dimUnits[0]||dimEUstr[0])&&!!IO.unitToM(dimUnits[1]||dimEUstr[1])&&Number.isFinite(sfA[0])&&sfA[0]!==0&&Number.isFinite(sfA[1])&&sfA[1]!==0;
+  const curveKeys=["forcedist","forcescanrate","numptsperwave"], strongCurve=labelledCurve&&curveKeys.every(k=>noteKeys.has(k));
+  const conflict2D=nDim[2]===0&&nDim[3]===0&&xyKnown&&(labelledCurve||curveKeys.some(k=>noteKeys.has(k)));
+  if(strongCurve&&!xyKnown) throw new Error("IBW contains curve or non-image wave data and cannot be opened as a 2D image");
   const iwarn=[]; if(nDim[3]>1) iwarn.push(`4D wave (${nDim.join("×")}) — 넷째 차원의 첫 묶음만 읽었습니다`);
   // Igor: 첫 차원(행)이 가로(x), 둘째 차원이 세로(y, 위로 증가) → 화면은 위가 큰 y
-  const planes=[]; for(let l=0;l<nl;l++){ const p=new Float32Array(nx*ny); for(let y=0;y<ny;y++) for(let x=0;x<nx;x++) p[(ny-1-y)*nx+x]=rd(x+nx*y+nx*ny*l); planes.push(p); }
+  const sources=[]; const planes=[]; for(let l=0;l<nl;l++){ const source=new Float64Array(nx*ny); for(let y=0;y<ny;y++) for(let x=0;x<nx;x++) source[(ny-1-y)*nx+x]=rd(x+nx*y+nx*ny*l); sources.push(source); planes.push(source.slice()); }
   const u0=dimUnits[0]||dimEUstr[0]; const k=IO.unitToM(u0); let cal=null; if(k&&sfA[0]!==0&&isFinite(sfA[0])) cal=IO.calFromMeters(Math.abs(sfA[0])*k,Math.abs(sfA[1]||sfA[0])*(IO.unitToM(dimUnits[1]||dimEUstr[1])||k),"Igor wave scaling (sfA, "+u0+")",u0); // 음의 간격 = 축 방향만 반대
+  const uncertain2D=nDim[2]===0&&nDim[3]===0&&!xyKnown;
   const info=[["Wave",bname]]; const nv={}; note.split(/\n/).forEach(l=>{ const i=l.indexOf(":"); if(i>0) nv[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
   ["ImagingMode","ScanSize","ScanRate","SetPoint","DriveAmplitude","DriveFrequency","SpringConstant","InvOLS","Date","Time"].forEach(kk=>{ if(nv[kk]!=null) info.push([kk,nv[kk]]); });
   const chLab=labels[2]&&labels[2].length>1?labels[2].slice(1):null;
@@ -379,8 +389,8 @@ function readIBW(name,u8){
     if(u&&IO._unitParse&&IO._dispUnit){ const uo=IO._unitParse(u); const du=IO._dispUnit({p10:0,u:uo.u},p); const f=du.f*Math.pow(10,uo.p10);
       if(f!==1) for(let i=0;i<p.length;i++) p[i]*=f; valueUnit=du.unit; siScale=f; siUnit=du.base;
       iinfo=info.concat([["Value unit",f!==1?`${du.unit} (파일 ${u} × ${+f.toPrecision(6)})`:du.unit]]); }
-    return {name:nl>1?`${name} · ${lab||"layer "+(l+1)}`:name,w:nx,h:ny,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info:iinfo,warn:uwarn?[uwarn]:[],metaText:note,
-      channelLabel:lab,valueUnit,siScale,siUnit}; });
+    return {name:nl>1?`${name} · ${lab||"layer "+(l+1)}`:name,w:nx,h:ny,bit:32,rgb:false,nc:1,nz:1,nt:1,order:"czt",planes:[p],cal,calCandidates:[],info:iinfo,warn:[...(uwarn?[uwarn]:[]),...(uncertain2D?["2D wave type and XY calibration are uncertain; verify before treating this as an image."]:[]),...(conflict2D?["Conflicting curve indicators and XY calibration: image or curve classification is uncertain."]:[])],metaText:note,
+      channelLabel:lab,valueUnit,siScale,siUnit,sourceSamples:sources[l],sourceType:type,sourceLittleEndian:le,sourceMeta:{dimensions:nDim.slice(),scale:sfA.slice(),offset:sfB.slice(),dimensionUnits:dimUnits.slice(),extendedDimensionUnits:dimEUstr.slice(),dataUnit:dataUnits,channelLabel:lab,channelIndex:l,orientation:"y-reversed"}}; });
   void sfB;
   return {images:imgs,warn:iwarn};
 }
@@ -453,6 +463,38 @@ IO.readRaw=function(name,u8,o){
   return {images:[{name,w,h,bit,rgb:false,nc:1,nz:planes.length,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["Raw",`${type} ${le?"little":"big"}-endian, offset ${offset}`]],warn:[]}],warn:[]};
 };
 
+/* Numeric snapshot: UTF-8 metadata plus little-endian IEEE-754 float64 planes. */
+const SNAP_META_MAX=1024*1024, SNAP_PLANES_MAX=4096, SNAP_PLANE_OVERHEAD=256;
+function snapshotBudget(size,samples,count,meta){return size+8*samples+SNAP_PLANE_OVERHEAD*count+2*meta;}
+function validateSnapshotMeta(h){
+  if(!h||typeof h!=="object"||Array.isArray(h)||h.version!==1||h.storedAs!=="float64-le"||h.historyIncomplete!==true)throw new Error("Numeric snapshot: invalid metadata");
+  const dims=[h.w,h.h,h.nc,h.nz,h.nt];if(dims.some(n=>!Number.isSafeInteger(n)||n<1))throw new Error("Numeric snapshot: invalid dimensions");
+  const count=h.nc*h.nz*h.nt,samples=h.w*h.h*count;if(!Number.isSafeInteger(count)||count>SNAP_PLANES_MAX||!Number.isSafeInteger(samples))throw new Error("Numeric snapshot: plane limit exceeded");
+  if(typeof h.rgb!=="boolean"||![8,16,32].includes(h.bit)||(h.rgb&&(h.nc!==3||h.bit!==8)))throw new Error("Numeric snapshot: inconsistent image type");
+  if(h.cal!==null&&(!h.cal||typeof h.cal!=="object"||Array.isArray(h.cal)||typeof h.cal.unit!=="string"||!Number.isFinite(h.cal.pw)||h.cal.pw<=0||!Number.isFinite(h.cal.ph)||h.cal.ph<=0))throw new Error("Numeric snapshot: invalid calibration");
+  if(typeof h.name!=="string"||typeof h.valueUnit!=="string"||typeof h.siUnit!=="string"||(h.siScale!==null&&(!Number.isFinite(h.siScale)||h.siScale<=0)))throw new Error("Numeric snapshot: invalid value metadata");
+  if(h.zStep!==undefined&&h.zStep!==null&&(!Number.isFinite(h.zStep)||h.zStep<0))throw new Error("Numeric snapshot: invalid Z spacing");
+  if(h.chNames!==undefined&&h.chNames!==null&&(!Array.isArray(h.chNames)||h.rgb||h.chNames.length!==h.nc||h.chNames.some(n=>typeof n!=="string")))throw new Error("Numeric snapshot: invalid channel names");
+  if(!Array.isArray(h.ops)||h.ops.some(o=>!o||typeof o!=="object"||Array.isArray(o)||typeof o.op!=="string"))throw new Error("Numeric snapshot: invalid history");
+  if(!Array.isArray(h.snapshotPrecision)||h.snapshotPrecision.length!==count||h.snapshotPrecision.some(x=>typeof x!=="string"))throw new Error("Numeric snapshot: invalid precision metadata");
+  return {count,samples};
+}
+IO.writeNumericSnapshot=function(im){
+  const dims=[im.w,im.h,im.nc||1,im.nz||1,im.nt||1]; if(dims.some(n=>!Number.isSafeInteger(n)||n<1)) throw new Error("Numeric snapshot: invalid dimensions");
+  const [w,h,nc,nz,nt]=dims, per=w*h, count=nc*nz*nt; if(!Number.isSafeInteger(per*count)||!Array.isArray(im.planes)||im.planes.length!==count||im.planes.some(p=>!ArrayBuffer.isView(p)||p.length!==per)) throw new Error("Numeric snapshot: invalid planes");
+  const precision=im.planes.map(p=>p instanceof Float64Array?"float64":p instanceof Float32Array?"float32":p.constructor.name);
+  const header={version:1,name:String(im.name||"image"),w,h,nc,nz,nt,bit:im.bit,rgb:!!im.rgb,cal:im.cal||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",zStep:im.zStep==null?0:im.zStep,chNames:im.chNames==null?null:im.chNames,ops:im.ops||[],historyIncomplete:true,storedAs:"float64-le",snapshotPrecision:precision,priorSnapshotPrecision:im.snapshotPrecision||null,precisionNotice:"Stored values reflect current arrays; prior processing may have reduced precision."};
+  validateSnapshotMeta(header); const meta=new TextEncoder().encode(JSON.stringify(header)), size=12+meta.length+8*per*count; if(meta.length>SNAP_META_MAX||!Number.isSafeInteger(size)||snapshotBudget(size,per*count,count,meta.length)>IO.MAXBYTES) throw new Error("Numeric snapshot: file too large");
+  const out=new Uint8Array(size),d=new DataView(out.buffer);out.set([73,78,78,79,70,54,52,1]);d.setUint32(8,meta.length,true);out.set(meta,12);let offset=12+meta.length;for(const p of im.planes)for(const v of p){d.setFloat64(offset,v,true);offset+=8;}return out;
+};
+function readNumericSnapshot(name,u8){
+  if(u8.length<12||![73,78,78,79,70,54,52,1].every((b,i)=>u8[i]===b)) throw new Error("Numeric snapshot: invalid header");
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength), m=dv.getUint32(8,true), start=12+m; if(m>SNAP_META_MAX||start>u8.length) throw new Error("Numeric snapshot: invalid or oversized metadata");
+  let h;try{h=JSON.parse(tdf.decode(u8.subarray(12,start)));}catch(e){throw new Error("Numeric snapshot: invalid metadata");}
+  const {count,samples}=validateSnapshotMeta(h), per=h.w*h.h; if(start+samples*8!==u8.length||snapshotBudget(u8.length,samples,count,m)>IO.MAXBYTES) throw new Error("Numeric snapshot: invalid or oversized data");
+  const planes=[];let off=start;for(let k=0;k<count;k++){const p=new Float64Array(per);for(let i=0;i<per;i++,off+=8)p[i]=dv.getFloat64(off,true);planes.push(p);}
+  const im={name,w:h.w,h:h.h,nc:h.nc,nz:h.nz,nt:h.nt,bit:h.bit||32,rgb:!!h.rgb,planes,cal:h.cal||null,valueUnit:h.valueUnit||"",siScale:h.siScale||null,siUnit:h.siUnit||"",zStep:h.zStep==null?0:h.zStep,chNames:h.chNames==null?null:h.chNames,ops:Array.isArray(h.ops)?h.ops:[],historyIncomplete:true,snapshotPrecision:Array.isArray(h.snapshotPrecision)?h.snapshotPrecision:[],warn:["Snapshot stores current values; earlier precision loss and incomplete history cannot be recovered."]};return {images:[im],warn:[]};
+}
 /* ============================================================ 판별·읽기 ============================================================ */
 IO.FORMATS=[
   ["TIFF / BigTIFF","tif,tiff,ome.tif,btf,tf8,gel","8·16·32-bit, float, RGB, 스택, ImageJ·OME 메타데이터, Zeiss·FEI·TESCAN SEM 태그"],
@@ -461,8 +503,8 @@ IO.FORMATS=[
   ["Nikon ND2","nd2","NIS-Elements v2·v3: 채널·Z·T·XY 위치, lossless, 채널 이름·색, µm/px·z step (v1 JPEG 2000 제외)"],["Leica LIF","lif","LAS X·LAS AF: series·tile, 채널·Z·T(λ 포함), XZ 주사, LUT 색, µm/px·z step"],["Olympus/Evident OIR · POIR","oir,poir","FluoView FV3000·FV4000: 채널·Z·T·λ(T 에 이음), 8/12/16-bit·float, RGB, 선 주사, 참조 이미지, 채널 이름·파장, µm/px·z step (보조 파일 _00001… 은 함께 읽지 않음)"],["Zeiss CZI","czi","ZEN: 채널·Z·T·scene·mosaic tile 합성, 비압축·zstd·JPG, Scaling·채널 이름·색 (JPEG XR 제외)"],
   ["Gwyddion GWY · GSF","gwy,gsf","채널(DataField)·mask·volume(Brick), 제목·SI 단위·meta"],["Bruker Nanoscope","spm,000–999,pfc","채널·Trace/Retrace, Z scale × soft scale(nm/V 등) → 물리값, 16/32-bit (힘 곡선 파일 제외)"],
   ["Asylum ARDF","ardf","force map 이미지 채널(Height·Adhesion·Modulus 등), IDEF 간격·단위 (힘 곡선은 알리기만)"],
-  ["Igor IBW (Asylum AFM)","ibw","채널별 이미지, wave scaling"],["Nanonis SXM","sxm","채널·방향별"],["NumPy","npy","2D·3D"],["텍스트 행렬","txt,csv,tsv,dat,asc","숫자 표"],["Raw","raw,bin","크기·형식 직접 지정"]];
-IO.ACCEPT=".nd2,.czi,.lif,.oir,.poir,.gwy,.gsf,.spm,.ardf,.pfc,"+Array.from({length:1000},(_,i)=>"."+String(i).padStart(3,"0")).join(",")+",.tif,.tiff,.btf,.png,.jpg,.jpeg,.bmp,.gif,.webp,.avif,.dm3,.dm4,.mrc,.mrcs,.st,.rec,.ali,.map,.emd,.h5,.hdf5,.bcf,.ibw,.sxm,.npy,.txt,.csv,.tsv,.dat,.asc,.raw,.bin";
+  ["Igor IBW (Asylum AFM)","ibw","채널별 이미지, wave scaling"],["Nanonis SXM","sxm","채널·방향별"],["Numeric snapshot","innoimg","Float64 data and recorded metadata"],["NumPy","npy","2D·3D"],["텍스트 행렬","txt,csv,tsv,dat,asc","숫자 표"],["Raw","raw,bin","크기·형식 직접 지정"]];
+IO.ACCEPT=".nd2,.czi,.lif,.oir,.poir,.gwy,.gsf,.spm,.ardf,.pfc,"+Array.from({length:1000},(_,i)=>"."+String(i).padStart(3,"0")).join(",")+",.tif,.tiff,.btf,.png,.jpg,.jpeg,.bmp,.gif,.webp,.avif,.dm3,.dm4,.mrc,.mrcs,.st,.rec,.ali,.map,.emd,.h5,.hdf5,.bcf,.ibw,.sxm,.npy,.innoimg,.txt,.csv,.tsv,.dat,.asc,.raw,.bin";
 IO.sniff=function(name,u8){
   const n=name.toLowerCase(); const b=u8;
   if(b.length>=4&&((b[0]===0x49&&b[1]===0x49&&(b[2]===42||b[2]===43))||(b[0]===0x4D&&b[1]===0x4D&&b[2]===0&&(b[3]===42||b[3]===43)))) return "tiff";
@@ -481,7 +523,7 @@ IO.sniff=function(name,u8){
     if(b.length>=16&&h.slice(8,12)==="ARDF") return "ardf";
     if(b.length>=21&&b[0]===0x70&&b[1]===0&&b[2]===0&&b[3]===0&&b[8]===0x2A&&b[13]===0x3C&&b[14]===0&&b[15]===0x4C&&b[17]===0x4D) return "lif"; } /* 0x70 … 0x2A "<LM" (UTF-16) */
   if(/\.dm[34]$/.test(n)) return "dm"; if(/\.(mrc|mrcs|st|rec|ali|map)$/.test(n)) return "mrc"; if(/\.bcf$/.test(n)) return "bcf"; if(/\.(emd|h5|hdf5)$/.test(n)) return "hdf5";
-  if(/\.ibw$/.test(n)) return "ibw"; if(/\.sxm$/.test(n)) return "sxm"; if(/\.(avif)$/.test(n)) return "bitmap";
+  if(/\.innoimg$/.test(n)) return "innoimg"; if(/\.ibw$/.test(n)) return "ibw"; if(/\.sxm$/.test(n)) return "sxm"; if(/\.(avif)$/.test(n)) return "bitmap";
   if(/\.(txt|csv|tsv|dat|asc)$/.test(n)) return "text"; if(/\.(raw|bin)$/.test(n)) return "raw";
   return null;
 };
@@ -492,6 +534,7 @@ IO.readFile=async function(name,u8,ctx){
     case "png": return readPNG(name,u8);
     case "jpeg": case "bmp": case "gif": case "webp": case "bitmap": return readBitmap(name,u8,{jpeg:"image/jpeg",bmp:"image/bmp",gif:"image/gif",webp:"image/webp"}[k]);
     case "npy": return readNPY(name,u8);
+    case "innoimg": return readNumericSnapshot(name,u8);
     case "nd2": return IO.readND2(name,u8,ctx);
     case "czi": return IO.readCZI(name,u8,ctx);
     case "gwy": return IO.readGWY(name,u8); case "gsf": return IO.readGSF(name,u8);

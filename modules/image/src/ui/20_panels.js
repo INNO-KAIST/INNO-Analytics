@@ -18,6 +18,7 @@ function formHTML(o,im){ const v=formVals(o);
 function bindForm(el,o,onChange){ $a(el,"[data-k]").forEach(inp=>{ const p=o.params.find(q=>q.k===inp.dataset.k); const ev=inp.tagName==="SELECT"||inp.type==="checkbox"?"change":"input";
   inp.addEventListener(ev,()=>{ const v=formVals(o); v[p.k]=p.type==="bool"?inp.checked:(p.type==="num"||p.type==="int")?(inp.value===""?"":+inp.value):inp.value; if(p.type==="sel"||p.type==="bool") onChange(true); else onChange(false); }); }); }
 async function runOp(id,params,im){
+  if(!WRITE_OWNER) return;
   const o=OPS[id]; im=im||cur(); if(!im){ note("이미지를 먼저 여세요","warn"); return; } if(BUSY){ note("계산 중입니다 — 끝나면 다시 누르세요","warn"); return; }
   const P=Object.assign({},params||formVals(o),{__op:id}); _pvSeq++; clearTimeout(_pvT); clearPreview(); const pvWas=S.ui.preview; BUSY=id;
   try{ if(pvWas&&o.kind==="plane") S.ui.preview=false; const r=await runWithUnit(o,im,P); BUSY=null; if(r&&r.id) S.sel=r.id; save(); rerender(); if(pvWas&&o.kind==="plane") note("적용했습니다 — Preview 는 꺼 두었습니다 (적용한 결과에 한 번 더 미리 보이지 않도록)"); return r; }

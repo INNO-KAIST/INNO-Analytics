@@ -257,7 +257,9 @@ IC.ovalMask=function(x,y,w,h,W,H){
 IC.bilinear=function(p,x,y){ // x,y: 화소 중심이 정수+0.5 인 좌표
   const W=p.w,H=p.h,d=p.data; let fx=x-0.5, fy=y-0.5; if(fx<0) fx=0; if(fy<0) fy=0; if(fx>W-1) fx=W-1; if(fy>H-1) fy=H-1;
   const x0=Math.floor(fx), y0=Math.floor(fy), x1=Math.min(W-1,x0+1), y1=Math.min(H-1,y0+1), ax=fx-x0, ay=fy-y0;
-  return (d[y0*W+x0]*(1-ax)+d[y0*W+x1]*ax)*(1-ay)+(d[y1*W+x0]*(1-ax)+d[y1*W+x1]*ax)*ay;
+  // Ignore zero-weight neighbors, including NaN/Infinity; positive weights retain normal propagation.
+  const mul=(v,w)=>w===0?0:v*w;
+  return mul(mul(d[y0*W+x0],1-ax)+mul(d[y0*W+x1],ax),1-ay)+mul(mul(d[y1*W+x0],1-ax)+mul(d[y1*W+x1],ax),ay);
 };
 IC.lineProfile=function(p,x1,y1,x2,y2,width){
   const dx=x2-x1, dy=y2-y1, L=Math.hypot(dx,dy); const n=Math.round(L); const N=n+1; const out=new Float64Array(N);

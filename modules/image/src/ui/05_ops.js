@@ -9,7 +9,7 @@ function op(id,o){ OPS[id]=Object.assign({id,params:[],kind:"plane"},o); }
 const R=(k,label,def,o)=>Object.assign({k,label,type:"num",def},o||{});
 /* 값 단위(valueUnit·siScale — AFM 높이 nm 등): 같은 물리량을 남기는 연산만 이어받는다. 화소를 바꾸는 나머지(형 변환의 눈금 바꾸기·문턱·FFT·곱셈 등)는 지운다.
    제자리 연산은 im.ver 가 바뀌었는지로, 새 이미지는 돌려받은 이미지에 붙인다. 되돌리기는 pushUndo 의 meta 가 되살린다. */
-const KEEP_UNIT={gaussian:1,median:1,mean:1,despeckle:1,outliers:1,smooth3:1,minimum:1,maximum:1,tophat:1,subtractBg:1,sharpen:1,unsharp:1,
+const KEEP_UNIT={afmLevel:1,gaussian:1,median:1,mean:1,despeckle:1,outliers:1,smooth3:1,minimum:1,maximum:1,tophat:1,subtractBg:1,sharpen:1,unsharp:1,
   convolve:P=>{ if(!P.normalize) return false; const v=String(P.kernel).trim().split(/[\s,]+/).map(Number); return Math.abs(v.reduce((a,b)=>a+b,0))>1e-12; }, /* 합으로 나눈 커널 = 가중 평균 */
   bandpass:P=>!P.autoscale&&!P.saturate, math:P=>["add","sub","min","max","set","abs"].includes(P.fn), nanbg:1, invert:1,
   crop:1, cropbar:1, rot90:1, flip:1, rotate:1, resize:1, duplicate:1, register:1,
@@ -42,6 +42,34 @@ async function runPlaneOp(im,P,fn,argsOf,label){
 const clean=P=>{ const o={}; for(const k in P) if(k!=="__op"&&k!=="__pv") o[k]=P[k]; return o; };
 const stackParam={k:"stack",label:"Process all slices",type:"bool",def:false,stackOnly:true};
 const ijStack=P=>P.stack?" stack":"";
+
+/* AFM: fit and apply areas are independent; current plane only. */
+op("afmLevel",{label:"AFM background correction",group:"bg",kind:"image",params:[
+  R("method","Method","plane",{type:"sel",opts:[["plane","Plane (degree 1)"],["rows","Row mean"],["poly2","Polynomial (degree 2)"]]}),
+  R("fit","Fit region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]}),
+  R("apply","Apply region","all",{type:"sel",opts:[["all","Entire image"],["inside","Inside active ROI"],["outside","Outside active ROI"]]})],
+  run:async(im,P)=>{
+    if(im.rgb)throw new Error("AFM correction requires a single-channel grayscale image; RGB is not supported");
+    const method=P.method||"plane",fit=P.fit||"all",apply=P.apply||"all"; if(!["all","inside","outside"].includes(fit)||!["all","inside","outside"].includes(apply))throw new Error("Invalid AFM correction region");
+    const need=fit!=="all"||apply!=="all";const roi=need?(REPLAY?P.roi:activeRoi(im)):null;
+    const validRoi=roi&&AREA_T.has(roi.type)&&Array.isArray(roi.pts)&&((roi.type==="rect"||roi.type==="oval")?roi.pts.length===2:roi.pts.length>=3)&&roi.pts.every(pt=>Array.isArray(pt)&&pt.length===2&&Number.isFinite(pt[0])&&Number.isFinite(pt[1]));
+    if(need&&!validRoi)throw new Error(REPLAY?"AFM replay requires a valid recorded area ROI":"Select a valid area ROI for the selected fit or apply region");
+    let inside=null;if(need){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");inside=new Uint8Array(im.w*im.h);let insideCount=0;const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x])){inside[Y*im.w+X]=1;insideCount++;}}if(!insideCount)throw new Error("AFM correction: ROI region contains no image pixels");}
+    const mask=scope=>scope==="all"?null:scope==="inside"?inside:Uint8Array.from(inside,v=>v?0:1);
+    const present=["c","z","t"].map(k=>Object.prototype.hasOwnProperty.call(P,k));if(REPLAY&&present.some(Boolean)&&!present.every(Boolean))throw new Error("AFM replay requires all recorded plane coordinates");
+    const [c,z,t]=REPLAY&&present.every(Boolean)?[P.c,P.z,P.t]:[im.c,im.z,im.t];if(!Number.isInteger(c)||!Number.isInteger(z)||!Number.isInteger(t)||c<0||c>=im.nc||z<0||z>=im.nz||t<0||t>=im.nt)throw new Error("Recorded AFM plane is not available in this image");
+    const resultMode=(im.bit===8||im.bit===16)&&planesOf(im).length>1?"new-image":"in-place";
+    if(REPLAY){const recorded=P.resultMode||"in-place";if(!["in-place","new-image"].includes(recorded)||recorded!==resultMode||(P.sourceBit!=null&&P.sourceBit!==im.bit))throw new Error("AFM replay result mode or bit depth does not match the recorded operation");}
+    const sourcePlane=planeAt(im,c,z,t), result=await call("afmLevel",[sourcePlane,{method,fitMask:mask(fit),applyMask:mask(apply)}]);
+    const params={method,fit,apply,c,z,t,resultMode,sourceBit:im.bit};if(roi)params.roi={type:roi.type,pts:roi.pts.map(v=>v.slice())};
+    const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
+    if(resultMode==="new-image"){
+      const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
+      setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
+    }
+    const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
+  },
+  help:"Fits the selected region and subtracts from the chosen apply region in the current plane. Non-finite values are retained. ROI masks include pixels inside the area. For 8/16-bit stacks, the corrected plane opens as a separate 32-bit image."});
 
 /* ---------- Smooth & denoise ---------- */
 op("gaussian",{label:"Gaussian Blur",group:"smooth",params:[R("sigma","Sigma (radius)",2,{min:0.1,step:0.1,unit:"px"}),R("scaled","Scaled units",false,{type:"bool"}),stackParam],
@@ -131,7 +159,7 @@ op("resize",{label:"Scale",group:"geom",kind:"image",params:[R("factor","Scale f
     const c=im.cal; clearRois(im); setPlanes(im,outs.map(o=>o.data),{w:W,h:H,cal:c?{...c,pw:c.pw*im.w/W,ph:c.ph*im.h/H}:c},"Scale",{op:"resize",params:clean(P),label:`Scale ×${f}`}); resetView(im); },
   ij:P=>`run("Scale...", "x=${P.factor} y=${P.factor} interpolation=${P.interp==="nearest"?"None":"Bilinear"} average process");`,help:"보정(화소 크기)은 배율만큼 함께 바뀝니다."});
 op("duplicate",{label:"Duplicate",group:"geom",kind:"new",params:[R("slice","Current slice only",false,{type:"bool"})],
-  run:(im,P)=>{ let planes, nz=im.nz, nt=im.nt, nc=im.nc; if(P.slice&&isStack(im)){ planes=[]; for(let c=0;c<im.nc;c++) planes.push(Float32Array.from(planesOf(im)[pIndex(im,c,im.z,im.t)])); nz=1; nt=1; } else planes=planesOf(im).map(p=>Float32Array.from(p));
+  run:(im,P)=>{ let planes, nz=im.nz, nt=im.nt, nc=im.nc; if(P.slice&&isStack(im)){ planes=[]; for(let c=0;c<im.nc;c++) planes.push(planesOf(im)[pIndex(im,c,im.z,im.t)].slice()); nz=1; nt=1; } else planes=planesOf(im).map(p=>p.slice());
     const n=addImage({name:im.name+"-1",w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:nc,nz,nt,planes,cal:im.cal,chNames:im.chNames,zStep:nz>1?im.zStep:0},{parent:im.id,src:"derived",ops:im.ops.slice()}); n.disp=JSON.parse(JSON.stringify(im.disp));
     record({op:"duplicate",params:clean(P),label:"Duplicate"+(P.slice?" (slice)":"")},im); return n; },
   ij:P=>P.slice?`run("Duplicate...", " ");`:`run("Duplicate...", "duplicate");`});
@@ -139,7 +167,7 @@ op("duplicate",{label:"Duplicate",group:"geom",kind:"new",params:[R("slice","Cur
 op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8",{type:"sel",opts:[["8","8-bit"],["16","16-bit"],["32","32-bit"],["rgb2gray","RGB → 8-bit gray"],["split","Split channels"]]}),R("weighted","Weighted RGB (0.299/0.587/0.114)",false,{type:"bool",showIf:P=>P.to==="rgb2gray"}),R("scale","Scale when converting",true,{type:"bool",showIf:P=>P.to==="8"||P.to==="16"})],
   run:(im,P)=>{
     if(P.to==="split"){ if(im.nc<2) throw new Error("채널이 하나뿐입니다"); const names=im.rgb?["red","green","blue"]:im.chNames; let last;
-      for(let c=0;c<im.nc;c++){ const planes=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) planes.push(Float32Array.from(planesOf(im)[pIndex(im,c,z,t)]));
+      for(let c=0;c<im.nc;c++){ const planes=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) planes.push(planesOf(im)[pIndex(im,c,z,t)].slice());
         last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
       record({op:"type",params:clean(P),label:"Split Channels"},im); return last; }
     if(P.to==="rgb2gray"){ if(!im.rgb) throw new Error("RGB 이미지가 아닙니다"); const out=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=planeAt(im,0,z,t), g=planeAt(im,1,z,t), b=planeAt(im,2,z,t); out.push(IC.rgbToGray(r,g,b,!!P.weighted).data); }

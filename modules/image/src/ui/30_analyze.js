@@ -12,7 +12,7 @@ const colUnit=(k,u)=>{ if(u==null) return ""; if(k==="Area") return u==="px"?"px
 function measureRoiRow(im,r,label){
   const p=curPlaneOf(im); const c=calOf(im); const base={Label:label,Image:im.name,Slice:isStack(im)?`${im.c+1}:${im.z+1}:${im.t+1}`:"",Unit:c.unit};
   if(!r||AREA_T.has(r.type)){ const g=r?roiGeom(im,r):{mask:null,rect:{x:0,y:0,w:im.w,h:im.h},poly:null,kind:"rect"}; const m=IC.measureRoi(p,g,c); delete m._fe; delete m._el; delete m._n; return Object.assign(base,m,{Type:r?r.type:"image"}); }
-  if(r.type==="line"){ const pr=profileOf(im,r); const st=IC.stats({w:pr.y.length,h:1,bit:32,data:Float32Array.from(pr.y)}); return Object.assign(base,{Type:"line",Length:lineLen(im,r),Angle:roiAngle(r),Mean:st.mean,StdDev:st.stdDev,Min:st.min,Max:st.max,X:(r.pts[0][0]+r.pts[1][0])/2*c.pw,Y:(r.pts[0][1]+r.pts[1][1])/2*c.ph}); }
+  if(r.type==="line"){ const pr=profileOf(im,r); const st=IC.stats({w:pr.y.length,h:1,bit:32,data:Float64Array.from(pr.y)}); return Object.assign(base,{Type:"line",Length:lineLen(im,r),Angle:roiAngle(r),Mean:st.mean,StdDev:st.stdDev,Min:st.min,Max:st.max,X:(r.pts[0][0]+r.pts[1][0])/2*c.pw,Y:(r.pts[0][1]+r.pts[1][1])/2*c.ph}); }
   if(r.type==="angle") return Object.assign(base,{Type:"angle",Angle:roiAngle(r)});
   if(r.type==="point") return r.pts.map((q,k)=>{ const x=Math.floor(q[0]), y=Math.floor(q[1]); return Object.assign({},base,{Label:`${label}:${k+1}`,Type:"point",X:q[0]*c.pw,Y:q[1]*c.ph,Mean:p.data[y*im.w+x],Class:r.cls?r.cls[k]+1:1}); });
   return base;
@@ -30,6 +30,22 @@ function roiIJM(r){ if(!r) return "run(\"Select None\");\n"; const f=v=>+(+v).to
   if(r.type==="point") return `makeSelection("point", newArray(${xs.join(",")}), newArray(${ys.join(",")}));\n`;
   const kind=r.type==="free"?"freehand":r.type==="traced"?"traced":r.type==="angle"?"angle":"polygon"; return `makeSelection("${kind}", newArray(${xs.join(",")}), newArray(${ys.join(",")}));\n`; }
 
+/* AFM numerical summaries use finite pixels and explicitly include ROI mask pixels. */
+function afmHistory(im){return JSON.stringify(im.ops||[]);}
+function afmSlice(im){return `${im.c+1}:${im.z+1}:${im.t+1}`;}
+// Conservative estimate, not a guarantee of available browser memory.
+function afmRoughnessBudget(im,hasMask){const seen=new Set();let live=0;const add=v=>{if(!v)return;const b=ArrayBuffer.isView(v)?v.buffer:v instanceof ArrayBuffer?v:null;if(b&&!seen.has(b)){seen.add(b);live+=b.byteLength;}};
+  for(const planes of PX.values())for(const v of planes)add(v);for(const src of SOURCE.values())add(src.samples);for(const rows of UNDO.values())for(const row of rows)for(const v of row.planes)add(v);for(const ov of AUTO_OVL.values())add(ov.data);for(const o of ORIGINALS.values())if(o.blob instanceof Blob)live+=o.blob.size;
+  const p=curPlaneOf(im),n=im.w*im.h,estimate=live+2*p.data.byteLength+(hasMask?3*n:0);if(!Number.isSafeInteger(estimate)||!Number.isFinite(IO.MAXBYTES)||estimate>IO.MAXBYTES)throw new Error("Roughness memory estimate exceeds the image memory limit; close images or choose a smaller image");}
+
+op("afmRoughness",{label:"AFM roughness",hidden:true,kind:"measure",params:[],run:async(im,P)=>{
+  if(im.rgb)throw new Error("AFM roughness requires a grayscale image");const roi=activeRoi(im);if(roi&&!AREA_T.has(roi.type))throw new Error("Select an area ROI or clear the selection");afmRoughnessBudget(im,!!roi||!!P.maskId);let mask=null,region="Entire image";
+  if(roi){const g=roiGeom(im,roi);if(!g)throw new Error("Invalid area ROI");mask=new Uint8Array(im.w*im.h);const r=g.rect;for(let y=0;y<r.h;y++)for(let x=0;x<r.w;x++){const X=r.x+x,Y=r.y+y;if(X>=0&&Y>=0&&X<im.w&&Y<im.h&&(!g.mask||g.mask[y*r.w+x]))mask[Y*im.w+X]=1;}region=JSON.stringify({type:roi.type,pts:roi.pts});}
+  if(P.maskId){const mi=byId(P.maskId);if(!mi||mi.rgb||mi.w!==im.w||mi.h!==im.h)throw new Error("Mask image must be grayscale with matching dimensions");const md=curPlaneOf(mi).data;if(!mask)mask=new Uint8Array(im.w*im.h).fill(1);for(let i=0;i<mask.length;i++)if(!Number.isFinite(md[i])||md[i]===0)mask[i]=0;region=JSON.stringify({roi:roi?{type:roi.type,pts:roi.pts}:null,mask:{id:mi.id,name:mi.name,c:mi.c,z:mi.z,t:mi.t,rule:"finite nonzero pixels included"}});}
+  const current=curPlaneOf(im),plane=Object.assign({},current,{data:current.data.slice()}),snapshot={name:im.name,slice:afmSlice(im),valueUnit:im.valueUnit||"unknown",history:afmHistory(im),calibration:JSON.stringify(im.cal||null)};
+  const v=await call("afmRoughness",[plane,mask]);addResults({Label:snapshot.name+" — AFM roughness",Image:snapshot.name,Slice:snapshot.slice,Sa:v.sa,Sq:v.sq,Mean:v.mean,BaselineMean:v.mean,Valid:v.valid,Excluded:v.excluded,Masked:v.masked,NonFinite:v.nonFinite,ValueUnit:snapshot.valueUnit,Calibration:snapshot.calibration,Region:region,Reference:"Arithmetic mean of finite selected samples (not an ISO compliance claim)",History:snapshot.history,HistoryStatus:"Recorded history may be incomplete"});
+}});
+function measureAFMStep(im,roi){try{if(im.rgb)throw new Error("Endpoint height requires a grayscale image");if(!roi||roi.type!=="line"||roi.pts.length!==2)throw new Error("Select a straight line");const [a,b]=roi.pts;if(![...a,...b].every(Number.isFinite)||[a,b].some(q=>q[0]<0.5||q[1]<0.5||q[0]>im.w-0.5||q[1]>im.h-0.5))throw new Error("Line endpoints must be inside the image");const plane=curPlaneOf(im),start=IC.afmEndpointHeight(plane,a[0],a[1]),end=IC.afmEndpointHeight(plane,b[0],b[1]);if(!Number.isFinite(start)||!Number.isFinite(end))throw new Error("Endpoint heights must be finite");if(!Number.isFinite(end-start))throw new Error("Endpoint height difference overflow");const c=afmXYCal(im),length=IC.afmProfileDistances(a[0],a[1],b[0],b[1],2,c)[1];addResults({Label:im.name+" — endpoint height",Image:im.name,Slice:afmSlice(im),Start:start,End:end,Delta:end-start,Length:length,Unit:c.unit,ValueUnit:im.valueUnit||"unknown",Region:JSON.stringify({type:"line",pts:roi.pts}),Reference:"Bilinear endpoint heights: end minus start (width 1 px)",History:afmHistory(im),HistoryStatus:"Recorded history may be incomplete"});}catch(e){note(e.message,"warn");}}
 /* ---------- Analyze Particles ---------- */
 const PA_MAX_DEFAULT=2000; // 입자 상한 기본값 — 한 이미지에 수백 개가 보통(사용자 10-19), 넘으면 멈추고 원인 안내
 async function binaryFor(im,P){ // 이진이면 255, 아니면 Threshold 설정(방법 또는 수동 범위)
@@ -270,7 +286,7 @@ function panelAnalyze(el,im){
   ${S.particles[im.id]?particleCard(im):""}
   <hr class="im-hr"><div class="im-h">Find Maxima <span class="muted xs">점 세기 · 원자 열</span></div>
   <div id="fmForm">${formHTML(OPS.findMaxima,im)}</div><div class="im-row"><button class="btn sm" id="fmPrev">Preview points</button><span class="sp"></span><button class="btn sm" id="fmRun">Find</button><button class="btn primary sm" id="fmAuto" title="One point per particle centre, set from the image itself (polarity, particle size, touching particles split) — same mask as Analyze particles (auto). Excludes the burned-in scale bar; with an area ROI only inside. For atom columns use Find.">Find (auto)</button></div>
-  <hr class="im-hr"><div class="im-h">Tools</div>
+  <hr class="im-hr"><div class="im-h">Tools</div><div class="im-tool"><b>AFM roughness</b><span class="xs muted">Arithmetic mean reference; not an ISO compliance claim. Uses finite pixels inside the selected area ROI, or the entire image. A mask includes finite nonzero pixels.</span><label class="im-f"><span>Mask</span><select id="afmMask"><option value="">None</option>${reds.filter(x=>!x.rgb).map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></label><button class="btn sm" id="afmRoughness">Measure roughness</button></div>
   <div class="im-tool"><b>Radial Profile</b><span class="xs muted">중심 = 점·타원 ROI</span><div id="rpForm">${formHTML(OPS.radial,im)}</div><button class="btn sm" id="rpRun">Plot</button></div>
   <div class="im-tool"><b>Orientation</b><span class="xs muted">구조 텐서 (OrientationJ 정의)</span><div id="orForm">${formHTML(OPS.orientation,im)}</div><button class="btn sm" id="orRun">Analyze</button></div>
   <div class="im-tool"><b>Analyze Skeleton (2D/3D)</b><span class="xs muted">가지·접점·길이 (Fiji 와 같은 결과)${im.nz>1?" · 스택 = 3D":""}</span><div id="skForm">${formHTML(OPS.skeleton,im)}</div><button class="btn sm" id="skRun">Analyze</button></div>
@@ -284,7 +300,7 @@ function panelAnalyze(el,im){
   q("#paRun").onclick=()=>runOp("analyze",Object.assign({},A,{thr:bin?null:Object.assign({},S.ui.thr)}));
   bindForm(q("#fmForm"),OPS.findMaxima,re=>{ if(re) renderPanel(); }); bindForm(q("#rpForm"),OPS.radial,()=>{}); bindForm(q("#orForm"),OPS.orientation,()=>{}); bindForm(q("#skForm"),OPS.skeleton,re=>{ if(re) renderPanel(); }); q("#skRun").onclick=()=>runOp("skeleton");
   q("#fmRun").onclick=()=>runOp("findMaxima"); q("#fmAuto").onclick=()=>runOp("findMaximaAuto",{}); q("#fmPrev").onclick=()=>runOp("findMaxima",Object.assign({},fm,{output:"points"}));
-  q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
+  q("#afmRoughness").onclick=()=>runOp("afmRoughness",{maskId:q("#afmMask").value}); q("#rpRun").onclick=()=>runOp("radial"); q("#orRun").onclick=()=>runOp("orientation"); if(q("#zpRun")) q("#zpRun").onclick=()=>runOp("zprofile",{});
   $a(el,"[data-dist]").forEach(b=>b.onclick=()=>{ S.ui.bottom="dist"; S.ui.bottomOpen=true; drawBottom(); });
   q("#paAuto").onclick=()=>paAuto(); wireParticleCard(el,im);
   q("#anToDrop").onclick=()=>{ const d=q("#anDrop"); if(d) d.scrollIntoView({behavior:"smooth",block:"start"}); };
@@ -356,7 +372,7 @@ const csvQ=v=>{ const s=v==null?"":String(v); return /[",\n\r]/.test(s)?'"'+s.re
 function csvOf(rows,cols){ return cols.map(c=>csvQ((c.label||c.k)+(c.u?` (${c.u})`:""))).join(",")+"\n"+rows.map(r=>cols.map(c=>csvQ(r[c.k])).join(",")).join("\n"); }
 // 복사(Excel·Origin 붙여 넣기): 탭 구분, 값 안의 탭·줄바꿈은 공백 (쉼표는 그대로)
 function tsvOf(rows,cols){ const t=v=>(v==null?"":String(v)).replace(/[\t\r\n]+/g," "); return cols.map(c=>t((c.label||c.k)+(c.u?` (${c.u})`:""))).join("\t")+"\n"+rows.map(r=>cols.map(c=>t(r[c.k])).join("\t")).join("\n"); }
-function bResults(B){ const extra=["Length","Class"].filter(k=>S.results.some(r=>r[k]!=null));
+function bResults(B){ const extra=["Length","Class","Sa","Sq","BaselineMean","Valid","Excluded","Masked","NonFinite","ValueUnit","Calibration","Region","Reference","History","HistoryStatus","Start","End","Delta"].filter(k=>S.results.some(r=>r[k]!=null));
   const units=[...new Set(S.results.map(r=>r.Unit).filter(Boolean))]; const one=units.length===1?units[0]:null; // 단위가 섞이면 Unit 열로
   const cols=[{k:"Label"},...(S.results.some(r=>r.Slice)?[{k:"Slice"}]:[]),...S.measure.cols.filter(k=>S.results.some(r=>r[k]!=null)).map(k=>({k,u:one?colUnit(k,one):""})),...extra.map(k=>({k,u:one?colUnit(k,one):""})),...(one?[]:[{k:"Unit"}])];
   B.innerHTML=`<div class="im-row"><button class="btn xs" id="rsCsv" ${S.results.length?"":"disabled"}>CSV</button><button class="btn xs" id="rsCopy" title="Copy as tab-separated text (paste into Excel or Origin)" ${S.results.length?"":"disabled"}>Copy</button><button class="btn xs" id="rsClr" ${S.results.length?"":"disabled"}>Clear</button><span class="xs muted">열은 Measure ▸ Set Measurements 에서</span></div>${tableHTML(S.results,cols,{empty:"Measure (Ctrl+M) 결과가 여기에 쌓입니다."})}`;

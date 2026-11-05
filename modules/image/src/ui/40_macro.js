@@ -24,7 +24,7 @@ function panelMacro(el,im){
   <div class="im-h">Batch <span class="muted xs">열린 이미지 또는 파일 여러 개</span></div>
   <div class="im-batch">${ims.length?ims.map(x=>`<label class="im-chk"><input type="checkbox" data-bt="${x.id}" ${BATCH.sel.has(x.id)?"checked":""}> ${esc(x.name)} <span class="xs muted">${x.w}×${x.h}</span></label>`).join(""):`<div class="xs muted">No open images</div>`}</div>
   <div class="im-row"><button class="btn sm" id="mcAll">Select all</button><button class="btn primary sm" id="mcBatch" ${M.steps.length?"":"disabled"}>Run on selected images</button></div>
-  <div class="im-row"><label class="btn sm" style="cursor:pointer" title="Opens each file, applies the steps and keeps only the result tables">Choose files and run batch<input type="file" id="mcFiles" multiple accept="${IO.ACCEPT}" hidden></label><label class="im-chk"><input type="checkbox" id="mcKeep" ${BATCH.keep?"checked":""}> Keep processed images in the list</label><label class="im-chk"><input type="checkbox" id="mcZip" ${BATCH.zip?"checked":""}> Save result images as TIFF (zip)</label></div>
+  <div class="im-row"><label class="btn sm" style="cursor:pointer" title="Opens each file, applies the steps and keeps only the result tables">Choose files and run batch<input type="file" id="mcFiles" multiple accept="${IO.ACCEPT}" hidden></label><label class="im-chk"><input type="checkbox" id="mcKeep" ${BATCH.keep?"checked":""}> Keep processed images in the list</label><label class="im-chk"><input type="checkbox" id="mcZip" ${BATCH.zip?"checked":""}> Save TIFF zip: 32-bit data are float32; value units and processing history are not preserved</label></div>
   <div class="xs muted">batch 결과는 Summary·Results 표에 이미지 이름과 함께 쌓입니다. 문턱은 기록한 <b>방법</b>으로 이미지마다 다시 구합니다(수동 범위였다면 그 값 그대로).</div>`;
   const q=s=>$q(el,s);
   q("#mcRec").onchange=e=>{ M.rec=e.target.checked; save(); };
@@ -47,12 +47,13 @@ async function batchImages(list){ if(!list.length){ note("이미지를 고르세
   try{ for(let k=0;k<list.length;k++){ if(gen!==CANCEL_GEN){ note(`Batch 중단 — ${k}/${list.length} 에서`,"warn"); break; } const im=list[k]; setProg(`Batch ${k+1}/${list.length}: ${im.name}`,k/list.length); try{ const t=await runSteps(S.macro.steps,im); outs.push(t); ok++; }catch(e){ note(`${im.name}: ${e.message}`,"warn"); } } }
   finally{ hideProg(); BUSY=null; }
   if(BATCH.zip) zipImages(outs); note(`Batch 완료 — ${ok}/${list.length} 이미지`,"ok"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
-async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; let ok=0, nImg=0; const zipList=[]; const gen=CANCEL_GEN;
+async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; let ok=0, nImg=0, unpreservedIBW=0; const zipList=[]; const gen=CANCEL_GEN;
   // 옆 파일(.txt: Hitachi·JEOL 보정)은 이미지로 열지 않고 같은 이름 이미지에 넘김 (열기와 같은 규칙)
   const base=n=>n.replace(/\.[^.]+$/,"").toLowerCase(); const imgNames=new Set(files.filter(f=>!/\.txt$/i.test(f.name)).map(f=>base(f.name)));
   const side=files.filter(f=>/\.txt$/i.test(f.name)&&imgNames.has(base(f.name))); const sidecars={}; for(const f of side) sidecars[f.name.toLowerCase()]=IO._txt(new Uint8Array(await f.arrayBuffer()));
   const list=files.filter(f=>!side.includes(f));
   try{ for(let k=0;k<list.length;k++){ if(gen!==CANCEL_GEN){ note(`Batch 중단 — ${k}/${list.length} 파일에서`,"warn"); break; } const f=list[k]; setProg(`Batch ${k+1}/${list.length}: ${f.name}`,k/list.length);
+      if(/\.ibw$/i.test(f.name)){ unpreservedIBW++; note(`${f.name}: Batch images do not retain the original IBW file. Keep the original or use Open files.`,"warn"); }
       const before=new Set(S.images.map(x=>x.id));
       try{ const u8=new Uint8Array(await f.arrayBuffer()); const r=await IO.readFile(f.name,u8,{sidecars});
         for(const d of r.images){ if(gen!==CANCEL_GEN) break; nImg++; try{ const im=addImage(d,{file:f.name}); const t=await runSteps(S.macro.steps,im); if(BATCH.zip) zipList.push(tiffOf(t)); ok++; }catch(e){ if(String(e.message)==="취소") break; note(`${d.name}: ${e.message}`,"warn"); } } }
@@ -60,9 +61,9 @@ async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; 
       finally{ if(!BATCH.keep){ S.images.filter(x=>!before.has(x.id)).map(x=>x.id).forEach(id=>closeImage(id,true)); } } // 실패해도 이 파일에서 생긴 이미지는 닫음
       await sleep(0); } }
   finally{ hideProg(); BUSY=null; }
-  if(BATCH.zip&&zipList.length) downloadBlob("batch_results.zip",makeZip(zipList)); note(`Batch 완료 — ${ok}/${nImg} 이미지 (${list.length} 파일${side.length?`, 옆 .txt ${side.length}`:""}). 결과는 Summary 표`,ok===nImg?"ok":"warn"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
+  if(BATCH.zip&&zipList.length){ downloadBlob("batch_results.zip",makeZip(zipList)); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); } note(`Batch complete — ${ok}/${nImg} images (${list.length} files${side.length?`, ${side.length} sidecar files`:""}). See Summary.${unpreservedIBW?` ${unpreservedIBW} original IBW files are not retained.`:""}`,ok===nImg&&!unpreservedIBW?"ok":"warn"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
 function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
-function zipImages(list){ if(!list.length) return; downloadBlob("batch_results.zip",makeZip(list.map(tiffOf))); }
+function zipImages(list){ if(!list.length) return; downloadBlob("batch_results.zip",makeZip(list.map(tiffOf))); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); }
 /* ZIP (무압축 store) */
 const CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
 function crc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=CRC[(c^u8[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }

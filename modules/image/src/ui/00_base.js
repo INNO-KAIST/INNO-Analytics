@@ -20,7 +20,7 @@ function defState(){ return {v:1,images:[],sel:null,rois:{},roiSel:{},results:[]
       cthr:{space:"HSB",min:[0,0,0],max:[255,255,255],pass:[true,true,true],method:"Default",dark:false},
       pa:{minSize:0,maxSize:"",unitPx:false,minCirc:0.5,maxCirc:1,exclude:true,_d1019:1,holes:false,redirect:"",show:"outlines",addRoi:false,exOvl:true,outK:3},
       dist:{col:"ECD",bins:0,log:false,use:"used"},drop:{mode:"sessile",methods:["yl","poly","ellipse","circle"],needleMM:"",rhoIn:998.2,rhoOut:1.204,g:9.80665,frames:"current",physOpen:false},scalebar:{on:true,pos:"br",len:0},lw:1}}; }
-let S=defState(); const PX=new Map(); let ROOT=null, LOADED=false;
+let S=defState(); const PX=new Map(); const SOURCE=new Map(); const ORIGINALS=new Map(); const ORIGINAL_DIRTY=new Set(); let ROOT=null, LOADED=false;
 const UNDO=new Map(); // id → [{planes, meta}]
 const AUTO_OVL=new Map(); // id → {ver, w, h, data(Uint8Array)} — Auto particle mask 의 겹친 덩어리 표시 (화소 크기라 S 에 넣지 않음)
 const cur=()=>S.images.find(i=>i.id===S.sel)||null;
@@ -35,23 +35,67 @@ const calOf=im=>im&&im.cal&&im.cal.pw>0?im.cal:{pw:1,ph:1,unit:"px"};
 const unitSq=im=>{ const u=calOf(im).unit; return u==="px"?"px²":u+"²"; };
 
 /* ---------------- 저장 (IndexedDB) ---------------- */
-const DBN="innoanalytics_image", ST="kv";
+const DBN="innoanalytics_image_v2", LEGACY_DBN="innoanalytics_image", ST="kv"; let WRITE_OWNER=false; let RECOVERY_REQUIRED=false; const RECOVERY_ITEMS=[];
 let _db=null; function idb(){ if(_db) return _db; _db=new Promise((res,rej)=>{ try{ const q=indexedDB.open(DBN,1); q.onupgradeneeded=()=>q.result.createObjectStore(ST); q.onsuccess=()=>{ const db=q.result; db.onclose=()=>{ _db=null; }; db.onversionchange=()=>{ db.close(); _db=null; }; res(db); }; q.onerror=()=>{ _db=null; rej(q.error); }; }catch(e){ _db=null; rej(e); } }); return _db; } // 연결 하나를 다시 씀
 async function dbKeys(){ try{ const db=await idb(); return await new Promise(r=>{ const t=db.transaction(ST,"readonly").objectStore(ST).getAllKeys(); t.onsuccess=()=>r(t.result||[]); t.onerror=()=>r([]); }); }catch(e){ return []; } }
 async function dbGet(k){ try{ const db=await idb(); return await new Promise(r=>{ const t=db.transaction(ST,"readonly").objectStore(ST).get(k); t.onsuccess=()=>r(t.result); t.onerror=()=>r(null); }); }catch(e){ return null; } }
-async function dbPut(k,v){ try{ const db=await idb(); await new Promise((r,j)=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).put(v,k); t.oncomplete=r; t.onerror=()=>j(t.error); t.onabort=()=>j(t.error); }); return true; }catch(e){ return false; } }
-async function dbDel(k){ try{ const db=await idb(); await new Promise(r=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).delete(k); t.oncomplete=r; t.onerror=r; }); }catch(e){} }
+async function dbPut(k,v){ if(!WRITE_OWNER) return false; try{ const db=await idb(); await new Promise((r,j)=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).put(v,k); t.oncomplete=r; t.onerror=()=>j(t.error); t.onabort=()=>j(t.error); }); return true; }catch(e){ return false; } }
+async function dbDel(k){ if(!WRITE_OWNER) return; try{ const db=await idb(); await new Promise(r=>{ const t=db.transaction(ST,"readwrite"); t.objectStore(ST).delete(k); t.oncomplete=r; t.onerror=r; }); }catch(e){} }
 let _svT=null; const DIRTY=new Set(); let _quotaWarned=false;
-function save(){ clearTimeout(_svT); _svT=setTimeout(flushSave,700); }
-async function flushSave(){ clearTimeout(_svT); _svT=null; const snap=JSON.parse(JSON.stringify(S));
-  await dbPut("state",snap);
-  for(const id of [...DIRTY]){ DIRTY.delete(id); const P=PX.get(id); if(!P) { await dbDel("px:"+id); continue; } const im=byId(id); const ok=await dbPut("px:"+id,{v:im?im.ver:0,P}); // 판 번호와 함께 → 불러올 때 맞는지 확인
-    if(!ok) DIRTY.add(id); // 다음 저장 때 다시
-    if(!ok&&!_quotaWarned){ _quotaWarned=true; note("브라우저 저장 공간이 부족해 일부 이미지 화소를 저장하지 못했습니다 — 새로 고치면 그 이미지는 다시 열어야 합니다","warn"); } } }
-function markDirty(id){ DIRTY.add(id); save(); }
-try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size)) flushSave(); }); }catch(e){}
-async function loadSaved(){
-  const st=await dbGet("state"); if(!st||st.v!==1) return;
+function save(){ if(!WRITE_OWNER) return; clearTimeout(_svT); _svT=setTimeout(flushSave,700); }
+let _saving=Promise.resolve();
+function flushSave(){ if(!WRITE_OWNER) return Promise.resolve(false); clearTimeout(_svT); _svT=null;
+  _saving=_saving.catch(()=>{}).then(async()=>{
+    const ids=[...DIRTY], originals=[...ORIGINAL_DIRTY]; ids.forEach(id=>DIRTY.delete(id)); originals.forEach(id=>ORIGINAL_DIRTY.delete(id));
+    const snap=JSON.parse(JSON.stringify(S));
+    const pixels=ids.map(id=>{ const P=PX.get(id), im=byId(id); return [id,P&&im?{v:im.ver,P,source:SOURCE.get(id)||null}:null]; });
+    const files=originals.map(id=>[id,ORIGINALS.get(id)||null]);
+    try{ const db=await idb(); if(!WRITE_OWNER) throw new Error("read only"); await new Promise((resolve,reject)=>{ const tx=db.transaction(ST,"readwrite"), store=tx.objectStore(ST);
+      tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error("IndexedDB transaction aborted"));
+      try{ store.put(snap,"state");
+      for(const [id,v] of pixels){ if(v) store.put(v,"px:"+id); else store.delete("px:"+id); }
+      for(const [id,o] of files){ if(o) store.put(o,"original:"+id); }
+      const keep=new Set(snap.images.map(im=>im.originalId).filter(Boolean).map(id=>"original:"+id));
+      const keys=store.getAllKeys(); keys.onsuccess=()=>{ try{ for(const k of keys.result) if(typeof k==="string"&&k.startsWith("original:")&&!keep.has(k)) store.delete(k); }catch(e){ try{tx.abort()}catch(_){} } };
+      }catch(e){ try{ tx.abort(); }catch(_){} reject(e); } });
+    }catch(e){ ids.forEach(id=>DIRTY.add(id)); originals.forEach(id=>ORIGINAL_DIRTY.add(id)); if(!_quotaWarned){ _quotaWarned=true; note("The browser could not save the image or original file. Keep a separate copy before refreshing.","warn"); } }
+  }); return _saving;
+}
+function markDirty(id){ if(!WRITE_OWNER) return; DIRTY.add(id); save(); }
+try{ window.addEventListener("pagehide",()=>{ if(_svT||DIRTY.size||ORIGINAL_DIRTY.size) flushSave(); }); document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"&&(_svT||DIRTY.size||ORIGINAL_DIRTY.size)) flushSave(); }); }catch(e){}
+
+async function openExisting(name){ return await new Promise((resolve,reject)=>{const q=indexedDB.open(name); let absent=false; q.onupgradeneeded=()=>{absent=true;q.transaction.abort();}; q.onsuccess=()=>resolve(q.result);q.onerror=()=>absent?resolve(null):reject(q.error);}); }
+const SNAP_KEYS=Symbol("snapshot keys");
+function invalidSnapshot(snapshot,requireMarker=false){ const state=snapshot.get("state"), keys=snapshot.get(SNAP_KEYS)||[]; if(requireMarker&&!snapshot.has("migration:v2")&&(state!==undefined||keys.some(k=>typeof k==="string"&&(k.startsWith("px:")||k.startsWith("original:"))))) return true; return state===undefined?keys.some(k=>typeof k==="string"&&(k.startsWith("px:")||k.startsWith("original:"))):(!state||state.v!==1||!Array.isArray(state.images)); }
+async function readSnapshot(db){ return await new Promise((resolve,reject)=>{
+  const tx=db.transaction(ST,"readonly"),store=tx.objectStore(ST),out=new Map();
+  tx.oncomplete=()=>resolve(out); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error("snapshot aborted"));
+  const read=key=>{const q=store.get(key);q.onsuccess=()=>{if(q.result!==undefined)out.set(key,q.result);};};
+  read("migration:v2"); const state=store.get("state"), keys=store.getAllKeys();
+  state.onsuccess=()=>{if(state.result===undefined)return;out.set("state",state.result);const images=Array.isArray(state.result.images)?state.result.images:[];const refs=new Set();for(const im of images){if(im&&im.id)refs.add("px:"+im.id);if(im&&im.originalId)refs.add("original:"+im.originalId);}for(const k of refs)read(k);};
+  keys.onsuccess=()=>{out.set(SNAP_KEYS,keys.result);const st=state.result;const bad=st===undefined?keys.result.some(k=>typeof k==="string"&&(k.startsWith("px:")||k.startsWith("original:"))):(!st||st.v!==1||!Array.isArray(st.images));if(bad||(db.name===DBN&&!out.has("migration:v2")&&(st!==undefined||keys.result.some(k=>typeof k==="string"&&(k.startsWith("px:")||k.startsWith("original:"))))))for(const k of keys.result)if(typeof k==="string"&&k.startsWith("original:"))read(k);};
+}); }
+async function migrateLegacy(){
+  if(!WRITE_OWNER) throw new Error("This tab is read-only");
+  const db=await idb(), current=await readSnapshot(db); if(invalidSnapshot(current,true)) throw new Error("The new storage state is damaged; migration was not performed"); if(current.has("migration:v2")) return;
+  if(typeof indexedDB.databases!=="function") throw new Error("This browser cannot safely inspect the previous storage");
+  const names=await indexedDB.databases(); let previous=new Map();
+  if(names.some(x=>x.name===LEGACY_DBN)){ const old=await new Promise((resolve,reject)=>{ const q=indexedDB.open(LEGACY_DBN); q.onsuccess=()=>resolve(q.result); q.onerror=()=>reject(q.error); q.onupgradeneeded=()=>{q.transaction.abort(); reject(new Error("Could not inspect the previous storage"));}; }); try{ previous=await readSnapshot(old); }finally{ old.close(); } }
+  if(!WRITE_OWNER) throw new Error("This tab is read-only");
+  if(invalidSnapshot(previous)) throw new Error("The previous storage state is damaged; migration was not performed");
+  await new Promise((resolve,reject)=>{ const tx=db.transaction(ST,"readwrite"), store=tx.objectStore(ST); tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error("migration aborted")); try{for(const [k,v] of previous)if(typeof k==="string")store.put(v,k);store.put(true,"migration:v2");}catch(e){try{tx.abort()}catch(_){}reject(e)} });
+}
+async function cleanupSavedOriginals(){
+  if(!WRITE_OWNER) return; const db=await idb();
+  await new Promise((resolve,reject)=>{const tx=db.transaction(ST,"readwrite"),store=tx.objectStore(ST),state=store.get("state"),keys=store.getAllKeys();
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error("cleanup aborted"));
+    keys.onsuccess=()=>{ try{const keep=new Set(((state.result||{}).images||[]).map(im=>im.originalId).filter(Boolean).map(id=>"original:"+id));for(const k of keys.result)if(typeof k==="string"&&k.startsWith("original:")&&!keep.has(k))store.delete(k);}catch(e){try{tx.abort()}catch(_){} } };
+  });
+}
+async function loadSaved(existingDb){
+  const db=existingDb||await idb(); const snapshot=await readSnapshot(db); const st=snapshot.get("state");
+  if(invalidSnapshot(snapshot,db.name===DBN)){RECOVERY_REQUIRED=true;WRITE_OWNER=false;for(const [k,o] of snapshot)if(typeof k==="string"&&k.startsWith("original:")&&o&&o.blob instanceof Blob)RECOVERY_ITEMS.push(o);return;}
+  if(!st) return;
   const d=defState(); S=Object.assign(d,st); S.ui=Object.assign(d.ui,st.ui||{}); S.ui.thr=Object.assign(d.ui.thr,(st.ui||{}).thr||{}); S.ui.pa=Object.assign(d.ui.pa,(st.ui||{}).pa||{});
   if(!((st.ui||{}).pa||{})._d1019){ S.ui.pa._d1019=1; if(!(+S.ui.pa.minCirc>0)) S.ui.pa.minCirc=0.5; S.ui.pa.exclude=true; S.ui.thr.dark=false; } // 10-19 권장값으로 한 번 바꿈(사용자 요청) — 그 뒤 바꾼 값은 그대로
   S.ui.dist=Object.assign(d.ui.dist,(st.ui||{}).dist||{}); S.ui.scalebar=Object.assign(d.ui.scalebar,(st.ui||{}).scalebar||{}); S.ui.drop=Object.assign(d.ui.drop,(st.ui||{}).drop||{});
@@ -61,11 +105,14 @@ async function loadSaved(){
     for(const r of S.summary||[]) if(r.Unit==="pm") conv(r); for(const r of S.results||[]) if(r.Unit==="pm") conv(r); }
   for(const im of S.images||[]) if(im.cal&&im.cal.unit==="pm"){ im.cal.pw/=1e3; im.cal.ph/=1e3; im.cal.unit="nm"; } // pm 눈금 → nm (사용자 요청 10-19)
   S.measure=Object.assign(d.measure,st.measure||{}); S.macro=Object.assign(d.macro,st.macro||{});
-  const keep=[]; let stale=0; for(const im of S.images){ const R=await dbGet("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
-    if(P&&P.length===im.nc*im.nz*im.nt){ PX.set(im.id,P); keep.push(im); } }
+  const keep=[]; let stale=0; for(const im of S.images){ const R=snapshot.get("px:"+im.id); const P=R&&!Array.isArray(R)&&R.P?R.P:R; if(R&&R.P&&R.v!==im.ver){ stale++; continue; } // 화소가 기록보다 오래됨(저장 실패) → 버림
+    if(P&&P.length===im.nc*im.nz*im.nt&&(!im.hasSource||(R&&R.source&&R.source.samples))){ PX.set(im.id,P); if(R&&R.source) SOURCE.set(im.id,R.source); keep.push(im); } }
   if(stale) setTimeout(()=>note(`이미지 ${stale}개는 마지막 작업의 화소가 저장되지 않아 열지 않았습니다 — 다시 여세요`,"warn"),60);
-  { const ids=new Set(keep.map(x=>"px:"+x.id)); for(const k of await dbKeys()) if(typeof k==="string"&&k.startsWith("px:")&&!ids.has(k)) dbDel(k); } // 닫힌 이미지의 화소 지움
-  const lost=S.images.length-keep.length; S.images=keep; if(S.sel&&!byId(S.sel)) S.sel=keep[0]?keep[0].id:null;
+
+  for(const id of new Set(keep.map(i=>i.originalId).filter(Boolean))){ const o=snapshot.get("original:"+id); if(o&&o.blob instanceof Blob) ORIGINALS.set(id,o); else setTimeout(()=>note("The original IBW file is unavailable. Reopen the original file to export it.","warn"),50); }
+  const lostImages=S.images.filter(im=>!keep.includes(im)); const lost=lostImages.length;
+  if(lost){ RECOVERY_REQUIRED=true; WRITE_OWNER=false; for(const im of lostImages){const original=im.originalId&&snapshot.get("original:"+im.originalId); if(original&&original.blob instanceof Blob) RECOVERY_ITEMS.push(original);} }
+  S.images=keep; if(S.sel&&!byId(S.sel)) S.sel=keep[0]?keep[0].id:null;
   if(lost) setTimeout(()=>note(`저장되지 않은 이미지 ${lost}개는 다시 열어야 합니다`,"warn"),50);
 }
 
@@ -74,8 +121,8 @@ let MSGS=[];
 function note(m,k,act){ MSGS.unshift({m:String(m),k:k||"",act:act||null}); MSGS=MSGS.slice(0,8); drawMsg(); if(!ROOT||!$q(ROOT,"#imMsg")){ if(typeof toast==="function") toast(m,k==="warn"?"warn":k); } }
 /* 긴 알림: ' — ' 앞만 보이고 나머지(이유·권장)는 오래 대면 뜨는 말풍선 (사용자 요청 10-19) */
 function drawMsg(){ const el=ROOT&&$q(ROOT,"#imMsg"); if(!el) return; if(!MSGS.length){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false; const m=MSGS[0], old=MSGS.slice(1);
-  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span>${(()=>{ const k=m.m.indexOf(" — "); return k>0&&m.m.length>90?`<span class="tx" data-tip="${esc(m.m.slice(k+3))}">${esc(m.m.slice(0,k))} <span class="more">…</span></span>`:`<span class="tx">${esc(m.m)}</span>`; })()}${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="Close">×</button></div>${old.length?`<details class="old"><summary>Earlier notices ${old.length}</summary>${old.map(o=>`<div class="${esc(o.k)}">${esc(o.m)}</div>`).join("")}</details>`:""}`;
-  $q(el,"#imMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); }; const b=$q(el,"#imMsgA"); if(b) b.onclick=()=>{ const f=m.act.fn; m.act=null; drawMsg(); f(); }; }
+  el.innerHTML=`<div class="cur ${esc(m.k)}"><span class="ic">${m.k==="warn"?"!":m.k==="ok"?"✓":"i"}</span>${(()=>{ const k=m.m.indexOf(" — "); return k>0&&m.m.length>90?`<span class="tx" data-tip="${esc(m.m.slice(k+3))}">${esc(m.m.slice(0,k))} <span class="more">…</span></span>`:`<span class="tx">${esc(m.m)}</span>`; })()}${m.act?`<button class="btn xs" id="imMsgA">${esc(m.act.label)}</button>`:""}<button class="x" id="imMsgX" title="Close">×</button></div>${old.length?`<details class="old"><summary>Earlier notices ${old.length}</summary>${old.map((o,i)=>`<div class="${esc(o.k)}">${esc(o.m)}${o.act?` <button class="btn xs" data-old-a="${i}">${esc(o.act.label)}</button>`:""}</div>`).join("")}</details>`:""}`;
+  $q(el,"#imMsgX").onclick=()=>{ MSGS.shift(); drawMsg(); }; const b=$q(el,"#imMsgA"); if(b) b.onclick=()=>{ const f=m.act.fn; if(!m.act.persistent)m.act=null; drawMsg(); f(); }; $a(el,"[data-old-a]").forEach(button=>button.onclick=()=>{const entry=MSGS[+button.dataset.oldA+1];if(entry&&entry.act)entry.act.fn();}); }
 const _cf={}; function confirm2(k,msg){ const n=Date.now(); if(_cf[k]&&n-_cf[k]<4000){ delete _cf[k]; return true; } _cf[k]=n; note(msg,"warn"); return false; }
 
 /* ---------------- 진행 표시 ---------------- */
@@ -116,19 +163,19 @@ function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.cl
 
 /* ---------------- 이미지 추가·삭제·되돌리기 ---------------- */
 function addImage(d,o){
-  o=o||{}; const id=uid(); const nc=d.nc||1;
+  if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1;
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
-    desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||[],created:new Date().toISOString(),
+    desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||d.ops||[],historyIncomplete:!!d.historyIncomplete,snapshotPrecision:d.snapshotPrecision||null,created:new Date().toISOString(),
     file:o.file||d.file||d.name,src:o.src||"file",valueUnit:d.valueUnit||"",siScale:d.siScale>0?d.siScale:null,siUnit:d.siUnit||"",ver:1,kind:o.kind||"",fft:o.fft||null,
-    chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0};
+    hasSource:!!d.sourceSamples,originalId:o.originalId||(o.parent&&byId(o.parent)&&byId(o.parent).originalId)||null,chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0};
   im.disp=[...Array(im.rgb?1:im.nc)].map((_,c)=>({min:0,max:255,lut:(!im.rgb&&d.chLut&&d.chLut[c]&&LUTS.includes(d.chLut[c]))?d.chLut[c]:defaultLut(im,c)})); // 파일의 채널 색(nd2·czi) 우선
-  PX.set(id,d.planes);
+  PX.set(id,d.planes); if(d.sourceSamples) SOURCE.set(id,{samples:d.sourceSamples,type:d.sourceType,littleEndian:d.sourceLittleEndian,meta:d.sourceMeta||null});
   if(d.display&&d.display[0]&&!im.rgb) { im.disp[0].min=d.display[0].min; im.disp[0].max=d.display[0].max; } else resetDisplay(im); // ImageJ 와 같이 열 때는 min–max (Auto 는 사용자가)
   if(o.after){ const i=S.images.findIndex(x=>x.id===o.after); S.images.splice(i+1,0,im); } else S.images.push(im);
   S.sel=id; markDirty(id); return im;
 }
 function defaultLut(im,c){ if(im.rgb) return "rgb"; if(im.nc>1){ return ["Green","Magenta","Cyan","Red","Yellow","Blue"][c%6]; } return im.invertLut?"Inverted":"Grays"; }
-function closeImage(id,force){ const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } S.images.splice(i,1); PX.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
+function closeImage(id,force){ if(!WRITE_OWNER) return; const i=S.images.findIndex(x=>x.id===id); if(i<0) return; if(BUSY&&!force){ note("계산 중에는 이미지를 닫을 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const originalId=S.images[i].originalId; S.images.splice(i,1); if(originalId&&!S.images.some(x=>x.originalId===originalId)){ ORIGINALS.delete(originalId); ORIGINAL_DIRTY.delete(originalId); } PX.delete(id); SOURCE.delete(id); UNDO.delete(id); ctDrop(id); delete S.rois[id]; delete S.roiSel[id]; delete S.particles[id]; if(S.dropFit) delete S.dropFit[id]; if(S.dropBase) delete S.dropBase[id]; delete S.ui.views[id];
   DISP.key=null; DISP.cv=null; DISPZ.key=null; DISPZ.cv=null; OVL.key=null; OVL.thr=null; THUMB.delete(id); ADJ.key=""; ADJ.v=null; // 표시 버퍼도 놓아 줌
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB
@@ -141,13 +188,14 @@ function pushUndo(im,label){ const L=UNDO.get(im.id)||[]; const e={label,planes:
   let SEEN=new Set(); let tot=0; for(const [,LL] of UNDO) for(const x of LL) tot+=extra(x);
   if(tot>UNDO_BYTES){ for(const [id,LL] of UNDO){ while(LL.length&&tot>UNDO_BYTES&&LL[0]!==e){ const o=LL.shift(); SEEN=new Set(); tot=0; for(const [,L2] of UNDO) for(const x of L2) tot+=extra(x); void o; } void id; } }
   return e; }
-function undo(){ const im=cur(); if(!im) return; if(BUSY){ note("계산 중에는 되돌릴 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const L=UNDO.get(im.id); if(!L||!L.length){ note("되돌릴 작업이 없습니다"); return; } const u=L.pop();
+function undo(){ if(!WRITE_OWNER) return; const im=cur(); if(!im) return; if(BUSY){ note("계산 중에는 되돌릴 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } const L=UNDO.get(im.id); if(!L||!L.length){ note("되돌릴 작업이 없습니다"); return; } const u=L.pop();
   const keepCal=im.cal; PX.set(im.id,u.planes); Object.assign(im,u.meta); if(!u.calChanged) im.cal=keepCal; im.ver++; markDirty(im.id);
   // 이 되돌리기에 해당하는 매크로 단계만 지운다
   if(u.macroAt!=null&&S.macro.steps[u.macroAt]&&S.macro.steps[u.macroAt]._u===u.uid) S.macro.steps.splice(u.macroAt,1);
   invalidate(im); save(); rerender(); note(`되돌림: ${u.label}`); }
 /* 화소 교체 (제자리 연산) */
 function setPlanes(im,planes,meta,label,step){
+  if(!WRITE_OWNER) throw new Error("This tab is read-only");
   if(!byId(im.id)) throw new Error("이미지가 닫혔습니다"); // 계산 중 닫힌 이미지에 결과를 쓰지 않음
   const u=pushUndo(im,label); u.uid=uid(); const cal0=im.cal, nc0=im.nc; PX.set(im.id,planes); if(meta) Object.assign(im,meta); if(im.nc!==nc0||im.rgb) im.chNames=null; /* 채널 수가 바뀌면 이름은 더 맞지 않음 */ im.ver++; u.calChanged=im.cal!==cal0;
   if(step){ im.ops.push(step); const n=S.macro.steps.length; record(Object.assign({},step,{_u:u.uid}),im); if(S.macro.steps.length>n) u.macroAt=n; }
