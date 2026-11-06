@@ -130,7 +130,7 @@ async function readLIF(name,u8,ctx){
     if(zs.length<nz) w2.push(`Z ${nz} 장 중 ${zs.length} 장만 읽었습니다`); if(ts.length<nt) w2.push(`T ${nt} 장 중 ${ts.length} 장만 읽었습니다`);
     if(cut) w2.push(`파일이 잘려 ${cut} 면의 끝부분을 0 으로 채웠습니다 (자료 ${blk.avail}/${blk.size} 바이트)`);
     const nm=plan.length>1?`${name} · ${P.s.name}${P.nM>1?` · tile ${P.m+1}`:""}`:name;
-    const common={name:nm,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep};
+    const common={name:nm,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,colorChannels:!!rgb};
     if(rgb){ if(bit===8) images.push({...common,bit:8,rgb:true}); else images.push({...common,bit,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
     else { const names=chanNames(P.s,C); const luts=C.map(c=>LUTN[(c.lut||"").toLowerCase()]||null);
       images.push({...common,bit,rgb:false,chNames:names,chLut:luts.some(Boolean)?luts:null}); }

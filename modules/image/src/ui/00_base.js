@@ -32,6 +32,10 @@ const curPlane=()=>{ const im=cur(); return im?planeAt(im):null; };
 const isStack=im=>im&&(im.nz*im.nt>1);
 const noPm=c=>c&&c.unit==="pm"&&c.pw>0?Object.assign({},c,{pw:c.pw/1e3,ph:(c.ph||c.pw)/1e3,unit:"nm"}):(c||null); // 파일이 pm 이라 해도 nm 으로 (사용자 요청 10-19)
 const calOf=im=>im&&im.cal&&im.cal.pw>0?im.cal:{pw:1,ph:1,unit:"px"};
+// This describes the origin of the samples, not whether their physical units are calibrated.
+const SIGNAL_ORIGINS=new Set(["numeric","color-component","display-gray","unknown"]);
+const signalOrigin=im=>im&&im.rgb?"color-component":im&&SIGNAL_ORIGINS.has(im.signalOrigin)?im.signalOrigin:"unknown";
+function combineSignalOrigins(a,b){ const x=signalOrigin(a),y=signalOrigin(b); if(x==="color-component"||y==="color-component")return "color-component"; if(x==="unknown"||y==="unknown")return "unknown"; if(x==="display-gray"||y==="display-gray")return "display-gray"; return "numeric"; }
 const unitSq=im=>{ const u=calOf(im).unit; return u==="px"?"px²":u+"²"; };
 
 /* ---------------- 저장 (IndexedDB) ---------------- */
@@ -165,11 +169,14 @@ function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.cl
 function invalidateLineCompare(){ const e=document.getElementById("imLfDialog"); if(e) e.dispatchEvent(new Event("lf-invalidate")); }
 function addImage(d,o){
   invalidateLineCompare();
-  if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1;
+  if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1; const parent=o.parent&&byId(o.parent); const knownFile=o.file||d.file||''; const nameText=String(d.name||''); const inferredChannel=knownFile&&nameText.startsWith(knownFile+' · ')?nameText.slice(knownFile.length+3):'';
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
     desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||d.ops||[],historyIncomplete:!!d.historyIncomplete,snapshotPrecision:d.snapshotPrecision||null,created:new Date().toISOString(),
     file:o.file||d.file||d.name,src:o.src||"file",valueUnit:d.valueUnit||"",siScale:d.siScale>0?d.siScale:null,siUnit:d.siUnit||"",ver:1,kind:o.kind||"",fft:o.fft||null,
-    hasSource:!!d.sourceSamples,originalId:o.originalId||(o.parent&&byId(o.parent)&&byId(o.parent).originalId)||null,chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0};
+    hasSource:!!d.sourceSamples,originalId:o.originalId||(o.parent&&byId(o.parent)&&byId(o.parent).originalId)||null,colorChannels:typeof d.colorChannels==='boolean'?d.colorChannels:(d.rgb?true:(o.parent&&byId(o.parent)&&typeof byId(o.parent).colorChannels==='boolean'?byId(o.parent).colorChannels:null)),signalOrigin:d.rgb?"color-component":SIGNAL_ORIGINS.has(d.signalOrigin)?d.signalOrigin:(typeof d.colorChannels==='boolean'?(d.colorChannels?'color-component':'numeric'):(o.parent&&byId(o.parent)?signalOrigin(byId(o.parent)):"unknown")),chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0,
+    exportSourceName:d.exportSourceName||(parent&&parent.exportSourceName)||knownFile||nameText||'image',
+    exportChannel:d.exportChannel||d.channelLabel||(d.sourceMeta&&d.sourceMeta.channelLabel)||(parent&&((parent.chNames&&parent.chNames[parent.c])||parent.exportChannel))||inferredChannel,
+    exportPlane:d.exportPlane||(parent&&parent.exportPlane)||null};
   im.disp=[...Array(im.rgb?1:im.nc)].map((_,c)=>({min:0,max:255,lut:(!im.rgb&&d.chLut&&d.chLut[c]&&LUTS.includes(d.chLut[c]))?d.chLut[c]:defaultLut(im,c)})); // 파일의 채널 색(nd2·czi) 우선
   PX.set(id,d.planes); if(d.sourceSamples) SOURCE.set(id,{samples:d.sourceSamples,type:d.sourceType,littleEndian:d.sourceLittleEndian,meta:d.sourceMeta||null});
   if(d.display&&d.display[0]&&!im.rgb) { im.disp[0].min=d.display[0].min; im.disp[0].max=d.display[0].max; } else resetDisplay(im); // ImageJ 와 같이 열 때는 min–max (Auto 는 사용자가)
@@ -182,7 +189,7 @@ function closeImage(id,force){ invalidateLineCompare(); if(!WRITE_OWNER) return;
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB
 function pushUndo(im,label){ const L=UNDO.get(im.id)||[]; const e={label,planes:planesOf(im),macroAt:null,calChanged:false,
-    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
+    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,colorChannels:im.colorChannels,signalOrigin:signalOrigin(im),nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
   L.push(e); while(L.length>UNDO_MAX) L.shift(); UNDO.set(im.id,L);
   // 전체 메모리 상한: 가장 오래된 항목부터 버림 (지금 넣은 것은 남김)
   // 전체 크기: 같은 배열(한 장만 바뀐 스택의 나머지 장 등)과 지금 보이는 화소는 한 번만·세지 않음

@@ -62,7 +62,7 @@ async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; 
       await sleep(0); } }
   finally{ hideProg(); BUSY=null; }
   if(BATCH.zip&&zipList.length){ downloadBlob("batch_results.zip",makeZip(zipList)); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); } note(`Batch complete — ${ok}/${nImg} images (${list.length} files${side.length?`, ${side.length} sidecar files`:""}). See Summary.${unpreservedIBW?` ${unpreservedIBW} original IBW files are not retained.`:""}`,ok===nImg&&!unpreservedIBW?"ok":"warn"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
-function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
+function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,signalOrigin:signalOrigin(im),nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
 function zipImages(list){ if(!list.length) return; downloadBlob("batch_results.zip",makeZip(list.map(tiffOf))); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); }
 /* ZIP (무압축 store) */
 const CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();

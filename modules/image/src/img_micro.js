@@ -153,8 +153,8 @@ async function readND2(name,u8,ctx){
   const images=[];
   for(const p of sel.p){ const arr=out.get(p); const pn=pi>=0&&np>1?` · ${loops[pi].names[p]||"XY"+(p+1)}`:"";
     if(rgb){ for(let c=0;c<nCh;c++){ const planes=[]; for(let zt=0;zt<nzo*nto;zt++) for(let comp=0;comp<3;comp++) planes.push(arr[comp+3*(c+nCh*zt)]);
-        images.push({name:`${name}${pn}${nCh>1?` · ${pl[c]&&pl[c].sDescription||"C"+(c+1)}`:""}`,w:W,h:H,...(bpc===8?{bit:8,rgb:true}:{bit:bpc,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}),nc:3,nz:nzo,nt:nto,order:"czt",planes,cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut}); } }
-    else images.push({name:name+pn,w:W,h:H,bit:bpc===32?32:bpc,rgb:false,nc:nOut,nz:nzo,nt:nto,order:"czt",planes:arr,cal,calCandidates:[],info:info.slice(),warn:[],chNames,chLut,zStep:zStepOut});
+        images.push({name:`${name}${pn}${nCh>1?` · ${pl[c]&&pl[c].sDescription||"C"+(c+1)}`:""}`,w:W,h:H,...(bpc===8?{bit:8,rgb:true}:{bit:bpc,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}),colorChannels:true,nc:3,nz:nzo,nt:nto,order:"czt",planes,cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut}); } }
+    else images.push({name:name+pn,w:W,h:H,bit:bpc===32?32:bpc,rgb:false,colorChannels:false,nc:nOut,nz:nzo,nt:nto,order:"czt",planes:arr,cal,calCandidates:[],info:info.slice(),warn:[],chNames,chLut,zStep:zStepOut});
   }
   return {images,warn};
 }
@@ -269,10 +269,10 @@ async function readCZI(name,u8,ctx){
     const sIdx=+key.split(",")[0]; const exN=extra.map((d,i)=>`${d}${+key.split(",")[1+i]+1}`).join(" ");
     const tag=[ns>1||pick.length>1?`S${sIdx+1}`:"",exN].filter(Boolean).join(" ");
     const base=`${name}${tag?` · ${tag}`:""}`; const common={w:W,h:H,nz:nzo,nt:nto,order:"czt",cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut};
-    if(ng) images.push({...common,name:rgbC.length?`${base} · ${grayC.map(c=>chNames[c]).join("·")}`:base,bit:grayBit,rgb:false,nc:ng,planes:Pg,chNames:grayC.map(c=>chNames[c]),chLut:grayC.map(c=>chLut[c])});
+    if(ng) images.push({...common,name:rgbC.length?`${base} · ${grayC.map(c=>chNames[c]).join("·")}`:base,bit:grayBit,rgb:false,colorChannels:false,nc:ng,planes:Pg,chNames:grayC.map(c=>chNames[c]),chLut:grayC.map(c=>chLut[c])});
     for(const c of rgbC){ const P=Pr.get(c); const nm=nc>1?`${base} · ${chNames[c]}`:base;
       if(chKind[c].bit===8) images.push({...common,name:nm,bit:8,rgb:true,nc:3,planes:P});
-      else images.push({...common,name:nm,bit:chKind[c].bit,rgb:false,nc:3,planes:P,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
+      else images.push({...common,name:nm,bit:chKind[c].bit,rgb:false,colorChannels:true,nc:3,planes:P,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
   }
   if(images.length) images[0].metaText=xml.length>200000?xml.slice(0,200000)+"…":xml; // 원문은 첫 이미지에만 (저장 공간)
   return {images,warn};

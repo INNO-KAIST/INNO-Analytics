@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict');
+const IO=require('../src/img_io.js');
+assert.equal(typeof IO.exportPlaneNames,'function','shared plane name function is required');
+assert.throws(()=>IO.exportAfmCsvBundle({format:'matrix',planes:[null]}),/invalid/i);
+const mk=(base,channel,more={})=>({base,channel,c:0,z:0,t:0,...more});
+assert.deepEqual(IO.exportPlaneNames([mk('SKPM_AAA.ibw','Height Retrace')],'png'),['SKPM_AAA_Height Retrace.png']);
+assert.deepEqual(IO.exportPlaneNames([mk('sample.v2.ibw','NapPotentialRetrace')],'csv'),['sample.v2_NapPotentialRetrace.csv']);
+assert.deepEqual(IO.exportPlaneNames([mk('scan.data.csv','Potential')],'csv'),['scan.data_Potential.csv']);
+assert.deepEqual(IO.exportPlaneNames([mk('scan.name','Potential')],'png'),['scan.name_Potential.png']);
+assert(IO.exportPlaneNames([mk('A'.repeat(200)+'.ibw','Height Retrace')],'png')[0].includes('Height Retrace'),'long source must not erase channel');
+for(const n of ['COM¹','LPT²','COM³'])assert(!new RegExp('^'+n+'(?:\\.|$)','i').test(IO.exportPlaneNames([mk(n,'')],'png')[0]),'Windows superscript device name');
+const entries=[mk('same.ibw','Height',{imageKey:'A'}),mk('same.ibw','Height',{imageKey:'B'}),mk('same.ibw','Height',{imageKey:'A',z:1}),mk('same.ibw','height',{imageKey:'C'}),mk('../evil','x/y'),mk('CON',''),mk('a\u0301.ibw','X'),mk('á.ibw','X')];
+const names=IO.exportPlaneNames(entries,'csv');
+assert.equal(new Set(names.map(s=>s.normalize('NFC').toLowerCase())).size,names.length);
+for(const s of names){assert(!/[\\/:*?"<>|\x00-\x1f]/.test(s));assert(s.length<=200);assert(!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(s));assert(s.endsWith('.csv'));}
+const plane={name:'SKPM_AAA.ibw · Height Retrace',sourceName:'SKPM_AAA.ibw',channelName:'Height Retrace',w:2,h:2,data:new Float64Array([0,-0,NaN,1+2**-52]),c:0,z:0,t:0,signalOrigin:'numeric'};
+const result=IO.exportAfmCsvBundle({format:'matrix',planes:[plane]});
+assert.equal(result.manifest.planes[0].file,'SKPM_AAA_Height Retrace.csv');
+const multi=IO.exportAfmCsvBundle({format:'coordinates',planes:[plane,{...plane,z:1},{...plane}]});
+assert.equal(new Set(multi.manifest.planes.map(p=>p.file.toLowerCase())).size,3);
+console.log('export filenames are safe, collision-free, and matched to CSV metadata');

@@ -138,13 +138,13 @@ async function tiffDecode(T,u8,pi,limitPx){
   if(photo===0&&spp===1){ notes.push("WhiteIsZero(0=흰색) TIFF — 화소 값은 그대로 두고 LUT 를 뒤집어 보입니다"); }
   let rgb=false, palette=null, photo0inv=false;
   if(photo===3&&tg[320]){ const cm=ta(tg[320]); const n=cm.length/3; let gray=true; for(let i=0;i<n;i++) if(cm[i]!==cm[n+i]||cm[i]!==cm[2*n+i]){ gray=false; break; }
-    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=Math.min(n-1,s[i]|0); r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
+    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=Math.min(n-1,s[i]|0); r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,colorChannels:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
     palette="gray"; if(n>1&&cm[0]>cm[n-1]) { photo0inv=true; } }
   if(photo===2&&spp>=3&&bit===8){ rgb=true; }
   const planes=rgb?out.slice(0,3):out.slice(0,photo===2?Math.min(spp,3):spp);
   if(spp===4&&photo===2) notes.push("알파 채널은 버렸습니다");
   if(photo===5) notes.push("CMYK TIFF — 4 채널(C·M·Y·K)로 열었습니다 (RGB 로 바꾸지 않음)"); if(photo===6) notes.push("YCbCr TIFF — 3 채널(Y·Cb·Cr)로 열었습니다 (RGB 로 바꾸지 않음)");
-  return {W,H,bit,planes,rgb,inv:photo===0||photo0inv,notes,bits,fmt,comp,palette};
+  return {W,H,bit,planes,rgb,colorChannels:[2,5,6].includes(photo)&&spp>=3,inv:photo===0||photo0inv,notes,bits,fmt,comp,palette};
 }
 function f16(h){ const s=(h&0x8000)?-1:1, e=(h>>10)&31, m=h&1023; if(e===0) return s*Math.pow(2,-14)*(m/1024); if(e===31) return m?NaN:s*Infinity; return s*Math.pow(2,e-15)*(1+m/1024); }
 
@@ -217,7 +217,7 @@ async function readTIFF(name,u8,ctx){
     for(let k=1;k<+ij.images;k++){ const o=off+k*per; if(o+per>u8.byteLength){ warn.push(`ImageJ 스택 ${ij.images} 장 중 ${k} 장만 파일 안에 있습니다`); break; }
       const ch=[...Array(rgb0?3:1)].map(()=>new Float32Array(W*H)); const bs=bits/8;
       for(let i=0;i<W*H;i++) for(let c=0;c<ch.length;c++) ch[c][i]=rd(o+(i*spp+c)*bs);
-      decoded.push({W,H,bit:decoded[0].bit,planes:ch,rgb:rgb0,notes:[]}); }
+      decoded.push({W,H,bit:decoded[0].bit,planes:ch,rgb:rgb0,colorChannels:decoded[0].colorChannels,notes:[]}); }
     nImg=decoded.length; }
   void nImg;
   let groups=[];
@@ -244,7 +244,8 @@ async function readTIFF(name,u8,ctx){
     if(!cal&&gi===0){ const sc=sidecarCal(name,ctx,info); if(sc) cal=sc.cal; }
     if(!cal&&gi===0&&typeof G.tiffGatanScale==="function"&&p0[65027]){ try{ const gs=G.tiffGatanScale({65027:{raw:p0[65027].raw}}); if(gs&&gs.ok) cal=IO.calFromMeters(gs.nmPerPx*1e-9,gs.nmPerPx*1e-9,"Gatan 태그 65027 → "+gs.how); else if(gs&&gs.why) warn.push("Gatan TIFF: "+gs.why); }catch(e){} }
     if(!cal&&gi===0&&p0[282]&&!ij){ const xr=tv(p0[282]), ru=tv(p0[296],2); if(xr>0&&ru===3) cands.push({pw:1e4/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /cm`}); else if(xr>0&&ru===2&&![72,96,150,300,600,1200].includes(Math.round(xr))) cands.push({pw:25400/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /inch`}); }
-    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:(g.list[0]&&g.list[0].notes||[]).slice(),invertLut:!!(g.list[0]&&g.list[0].inv)}; // 파일 전체 알림은 r.warn 으로 한 번만
+    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,colorChannels:g.list.some(d=>d.colorChannels),nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:(g.list[0]&&g.list[0].notes||[]).slice(),invertLut:!!(g.list[0]&&g.list[0].inv)}; // 파일 전체 알림은 r.warn 으로 한 번만
+    if(ij&&Object.prototype.hasOwnProperty.call(ij,'inno_signal_origin'))im.signalOrigin=['numeric','color-component','display-gray','unknown'].includes(ij.inno_signal_origin)?ij.inno_signal_origin:'unknown';
     if(om&&om.psz>0&&nz>1){ const kz=IO.unitToM(om.pszu)||1e-6; im.zStep=om.psz*kz/1e-6; }
     // ImageJ 'signed 16-bit': 값 = 저장값 − 32768 (Calibration function 0, c0=−32768, c1=1)
     if(gi===0&&ij&&g.bit===16&&ij.cf==="0"&&+ij.c0===-32768&&+ij.c1===1){ for(const P of planes) for(let i=0;i<P.length;i++) P[i]-=32768; im.bit=32; im.info.push(["Signed 16-bit","ImageJ calibration c0=−32768 적용 → 32-bit 로 열었습니다"]); if(ij.min!=null) ij.min=+ij.min-32768; if(ij.max!=null) ij.max=+ij.max-32768; }
@@ -292,7 +293,7 @@ async function readPNG(name,u8){
     if(gray){ for(let i=0;i<W*H;i++) if(planes[0][i]!==planes[1][i]||planes[0][i]!==planes[2][i]){ gray=false; break; } }
     if(gray){ planes=[planes[0]]; warn.push("R=G=B 인 회색 PNG 를 한 채널로 읽었습니다"); } else rgb=bit===8; }
   const cands=[]; if(phys&&phys.unit===1&&phys.x>0&&![2835,3780,3779,11811].includes(phys.x)) cands.push({pw:1e6/phys.x,unit:"µm",src:`PNG pHYs ${phys.x} px/m`});
-  return {images:[{name,w:W,h:H,bit,rgb,nc:planes.length,nz:1,nt:1,order:"czt",planes,cal:null,calCandidates:cands,info:[["PNG",`${bd}-bit, color type ${ct}${il?", interlaced":""}`]],warn}],warn:[]};
+  return {images:[{name,w:W,h:H,bit,rgb,colorChannels:planes.length>1&&(ct===2||ct===3||ct===6),nc:planes.length,nz:1,nt:1,order:"czt",planes,cal:null,calCandidates:cands,info:[["PNG",`${bd}-bit, color type ${ct}${il?", interlaced":""}`]],warn}],warn:[]};
 }
 /* 브라우저 해독 (JPEG·BMP·GIF·WebP·AVIF) */
 async function readBitmap(name,u8,mime){
@@ -432,7 +433,7 @@ function readNPY(name,u8){
   else for(let k=0;k<N;k++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=rd(off+(k*per+i)*sz); planes.push(p); }
   const bit=kind==="u"&&sz===1||kind==="b"?8:(kind==="u"&&sz===2)?16:32;
   const w2=[]; if(chLast===4) w2.push("넷째 채널(알파)은 버렸습니다"); if(kind==="i"&&sz===8||kind==="u"&&sz===8) w2.push("64-bit 정수를 32-bit float 로 읽었습니다 (2²⁴ 넘는 값은 반올림)");
-  return {images:[{name,w:W,h:H,bit,rgb,nc:chLast?3:1,nz:chLast?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:w2,...(chLast&&!rgb?{chNames:["R","G","B"],chLut:["Red","Green","Blue"]}:{})}],warn:[]};
+  return {images:[{name,w:W,h:H,bit,rgb,colorChannels:!!chLast,nc:chLast?3:1,nz:chLast?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:w2,...(chLast&&!rgb?{chNames:["R","G","B"],chLut:["Red","Green","Blue"]}:{})}],warn:[]};
 }
 /* ============================================================ 텍스트 행렬 ============================================================ */
 function readText(name,u8){
@@ -471,10 +472,14 @@ function validateSnapshotMeta(h){
   const dims=[h.w,h.h,h.nc,h.nz,h.nt];if(dims.some(n=>!Number.isSafeInteger(n)||n<1))throw new Error("Numeric snapshot: invalid dimensions");
   const count=h.nc*h.nz*h.nt,samples=h.w*h.h*count;if(!Number.isSafeInteger(count)||count>SNAP_PLANES_MAX||!Number.isSafeInteger(samples))throw new Error("Numeric snapshot: plane limit exceeded");
   if(typeof h.rgb!=="boolean"||![8,16,32].includes(h.bit)||(h.rgb&&(h.nc!==3||h.bit!==8)))throw new Error("Numeric snapshot: inconsistent image type");
+  if(h.signalOrigin!==undefined&&!["numeric","color-component","display-gray","unknown"].includes(h.signalOrigin))throw new Error("Numeric snapshot: invalid signal origin");
+  if(h.rgb&&h.signalOrigin!==undefined&&h.signalOrigin!=="color-component")throw new Error("Numeric snapshot: inconsistent signal origin");
   if(h.cal!==null&&(!h.cal||typeof h.cal!=="object"||Array.isArray(h.cal)||typeof h.cal.unit!=="string"||!Number.isFinite(h.cal.pw)||h.cal.pw<=0||!Number.isFinite(h.cal.ph)||h.cal.ph<=0))throw new Error("Numeric snapshot: invalid calibration");
   if(typeof h.name!=="string"||typeof h.valueUnit!=="string"||typeof h.siUnit!=="string"||(h.siScale!==null&&(!Number.isFinite(h.siScale)||h.siScale<=0)))throw new Error("Numeric snapshot: invalid value metadata");
   if(h.zStep!==undefined&&h.zStep!==null&&(!Number.isFinite(h.zStep)||h.zStep<0))throw new Error("Numeric snapshot: invalid Z spacing");
   if(h.chNames!==undefined&&h.chNames!==null&&(!Array.isArray(h.chNames)||h.rgb||h.chNames.length!==h.nc||h.chNames.some(n=>typeof n!=="string")))throw new Error("Numeric snapshot: invalid channel names");
+  for(const k of ['exportSourceName','exportChannel'])if(h[k]!==undefined&&(typeof h[k]!=="string"||h[k].length>4096))throw new Error("Numeric snapshot: invalid export identity");
+  if(h.exportPlane!=null){const q=h.exportPlane;if(typeof q!=='object'||Array.isArray(q)||!['c','z','t','nc','nz','nt'].every(k=>Number.isSafeInteger(q[k]))||q.nc<1||q.nz<1||q.nt<1||q.c<0||q.c>=q.nc||q.z<0||q.z>=q.nz||q.t<0||q.t>=q.nt)throw new Error('Numeric snapshot: invalid export plane');}
   if(!Array.isArray(h.ops)||h.ops.some(o=>!o||typeof o!=="object"||Array.isArray(o)||typeof o.op!=="string"))throw new Error("Numeric snapshot: invalid history");
   if(!Array.isArray(h.snapshotPrecision)||h.snapshotPrecision.length!==count||h.snapshotPrecision.some(x=>typeof x!=="string"))throw new Error("Numeric snapshot: invalid precision metadata");
   return {count,samples};
@@ -483,7 +488,7 @@ IO.writeNumericSnapshot=function(im){
   const dims=[im.w,im.h,im.nc||1,im.nz||1,im.nt||1]; if(dims.some(n=>!Number.isSafeInteger(n)||n<1)) throw new Error("Numeric snapshot: invalid dimensions");
   const [w,h,nc,nz,nt]=dims, per=w*h, count=nc*nz*nt; if(!Number.isSafeInteger(per*count)||!Array.isArray(im.planes)||im.planes.length!==count||im.planes.some(p=>!ArrayBuffer.isView(p)||p.length!==per)) throw new Error("Numeric snapshot: invalid planes");
   const precision=im.planes.map(p=>p instanceof Float64Array?"float64":p instanceof Float32Array?"float32":p.constructor.name);
-  const header={version:1,name:String(im.name||"image"),w,h,nc,nz,nt,bit:im.bit,rgb:!!im.rgb,cal:im.cal||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",zStep:im.zStep==null?0:im.zStep,chNames:im.chNames==null?null:im.chNames,ops:im.ops||[],historyIncomplete:true,storedAs:"float64-le",snapshotPrecision:precision,priorSnapshotPrecision:im.snapshotPrecision||null,precisionNotice:"Stored values reflect current arrays; prior processing may have reduced precision."};
+  const header={version:1,name:String(im.name||"image"),exportSourceName:String(im.exportSourceName||""),exportChannel:String(im.exportChannel||""),exportPlane:im.exportPlane||null,w,h,nc,nz,nt,bit:im.bit,rgb:!!im.rgb,signalOrigin:im.rgb?"color-component":(["numeric","color-component","display-gray","unknown"].includes(im.signalOrigin)?im.signalOrigin:"unknown"),cal:im.cal||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",zStep:im.zStep==null?0:im.zStep,chNames:im.chNames==null?null:im.chNames,ops:im.ops||[],historyIncomplete:true,storedAs:"float64-le",snapshotPrecision:precision,priorSnapshotPrecision:im.snapshotPrecision||null,precisionNotice:"Stored values reflect current arrays; prior processing may have reduced precision."};
   validateSnapshotMeta(header); const meta=new TextEncoder().encode(JSON.stringify(header)), size=12+meta.length+8*per*count; if(meta.length>SNAP_META_MAX||!Number.isSafeInteger(size)||snapshotBudget(size,per*count,count,meta.length)>IO.MAXBYTES) throw new Error("Numeric snapshot: file too large");
   const out=new Uint8Array(size),d=new DataView(out.buffer);out.set([73,78,78,79,70,54,52,1]);d.setUint32(8,meta.length,true);out.set(meta,12);let offset=12+meta.length;for(const p of im.planes)for(const v of p){d.setFloat64(offset,v,true);offset+=8;}return out;
 };
@@ -493,7 +498,7 @@ function readNumericSnapshot(name,u8){
   let h;try{h=JSON.parse(tdf.decode(u8.subarray(12,start)));}catch(e){throw new Error("Numeric snapshot: invalid metadata");}
   const {count,samples}=validateSnapshotMeta(h), per=h.w*h.h; if(start+samples*8!==u8.length||snapshotBudget(u8.length,samples,count,m)>IO.MAXBYTES) throw new Error("Numeric snapshot: invalid or oversized data");
   const planes=[];let off=start;for(let k=0;k<count;k++){const p=new Float64Array(per);for(let i=0;i<per;i++,off+=8)p[i]=dv.getFloat64(off,true);planes.push(p);}
-  const im={name,w:h.w,h:h.h,nc:h.nc,nz:h.nz,nt:h.nt,bit:h.bit||32,rgb:!!h.rgb,planes,cal:h.cal||null,valueUnit:h.valueUnit||"",siScale:h.siScale||null,siUnit:h.siUnit||"",zStep:h.zStep==null?0:h.zStep,chNames:h.chNames==null?null:h.chNames,ops:Array.isArray(h.ops)?h.ops:[],historyIncomplete:true,snapshotPrecision:Array.isArray(h.snapshotPrecision)?h.snapshotPrecision:[],warn:["Snapshot stores current values; earlier precision loss and incomplete history cannot be recovered."]};return {images:[im],warn:[]};
+  const im={name,exportSourceName:h.exportSourceName||"",exportChannel:h.exportChannel||"",exportPlane:h.exportPlane||null,w:h.w,h:h.h,nc:h.nc,nz:h.nz,nt:h.nt,bit:h.bit||32,rgb:!!h.rgb,signalOrigin:h.signalOrigin||"unknown",planes,cal:h.cal||null,valueUnit:h.valueUnit||"",siScale:h.siScale||null,siUnit:h.siUnit||"",zStep:h.zStep==null?0:h.zStep,chNames:h.chNames==null?null:h.chNames,ops:Array.isArray(h.ops)?h.ops:[],historyIncomplete:true,snapshotPrecision:Array.isArray(h.snapshotPrecision)?h.snapshotPrecision:[],warn:["Snapshot stores current values; earlier precision loss and incomplete history cannot be recovered."]};return {images:[im],warn:[]};
 }
 /* ============================================================ 판별·읽기 ============================================================ */
 IO.FORMATS=[
@@ -556,12 +561,32 @@ IO.readFile=async function(name,u8,ctx){
   }
 };
 
+// Format classification describes the present samples only: a standard gray TIFF/PNG
+// cannot reveal whether an external tool previously exported a color component.
+const readFileUnclassified=IO.readFile;
+IO.readFile=async function(name,u8,ctx){
+  const kind=IO.sniff(name,u8), result=await readFileUnclassified(name,u8,ctx);
+  if(!result||!Array.isArray(result.images))return result;
+  const numericKinds=new Set(["tiff","npy","nd2","czi","lif","oir","poir","gwy","gsf","nanoscope","ardf","ibw","sxm","text","dm","mrc","bcf","hdf5"]);
+  const displayKinds=new Set(["png","jpeg","bmp","gif","webp","bitmap"]);
+  for(const im of result.images){
+    if(im.rgb||im.colorChannels===true){im.signalOrigin="color-component";continue;}
+    if(kind==="innoimg"||(kind==="tiff"&&im.signalOrigin!==undefined))continue; // Honor persisted state; older snapshots stay unknown.
+    if(displayKinds.has(kind))im.signalOrigin="display-gray";
+    else if(["nd2","czi","lif","oir","poir"].includes(kind)&&im.colorChannels!==false)im.signalOrigin="unknown";
+    else if(numericKinds.has(kind))im.signalOrigin="numeric";
+    else im.signalOrigin="unknown";
+  }
+  return result;
+};
+
 /* ============================================================ ImageJ 호환 TIFF 쓰기 ============================================================
    img: {w,h,bit,rgb,nc,nz,nt,planes,cal}  — little-endian, 비압축, ImageJ ImageDescription(보정·hyperstack) */
 IO.writeTIFF=function(img,o){
   o=o||{}; const W=img.w,H=img.h, rgb=!!img.rgb, bit=rgb?8:img.bit, bps=bit/8, spp=rgb?3:1;
   const nImg=rgb?Math.max(1,img.planes.length/3):img.planes.length;
   const descL=["ImageJ=1.54u"]; if(nImg>1) descL.push("images="+nImg);
+  if(['numeric','color-component','display-gray','unknown'].includes(img.signalOrigin))descL.push('inno_signal_origin='+img.signalOrigin);
   if(rgb&&(img.nz>1||img.nt>1)){ if(img.nz>1) descL.push("slices="+img.nz); if(img.nt>1) descL.push("frames="+img.nt); if(img.nz>1&&img.nt>1) descL.push("hyperstack=true"); }
   if(!rgb&&(img.nc>1||img.nz>1||img.nt>1)){ if(img.nc>1) descL.push("channels="+img.nc); if(img.nz>1) descL.push("slices="+img.nz); if(img.nt>1) descL.push("frames="+img.nt); if(img.nc>1||img.nt>1) descL.push("hyperstack=true"); if(img.nc>1) descL.push("mode=composite"); }
   const cal=img.cal; const uOut=cal?(cal.unit==="µm"?"micron":cal.unit):null;
@@ -611,6 +636,77 @@ function addResolution(u8,cal,resOff){
   const dvo=new DataView(out.buffer); dvo.setUint16(newOff,ents.length,true); ents.forEach((e,i)=>out.set(e,newOff+2+12*i)); dvo.setUint32(newOff+2+12*ents.length,next,true); dvo.setUint32(4,newOff,true);
   return out;
 }
+
+/* AFM CSV: the caller supplies one immutable numeric plane per entry. This
+   synchronous exporter never reads display pixels and never mutates inputs. */
+const AFM_CSV_MEMORY=128*1024*1024;
+IO.AFM_CSV_MAX_BYTES=AFM_CSV_MEMORY;
+/* Bound metadata before JSON.stringify; shared history is charged once per plane. */
+function afmCsvMetadataCost(root,limit){const todo=[[root,0]],seen=new WeakSet();let cost=0;while(todo.length){const [v,depth]=todo.pop();if(depth>32)throw new Error('CSV metadata exceeds the memory limit');cost+=32+depth*4;if(typeof v==='string')cost+=v.length*6;else if(v&&typeof v==='object'){if(seen.has(v))throw new Error('CSV metadata cannot be serialized');seen.add(v);if(ArrayBuffer.isView(v))throw new Error('CSV metadata cannot be serialized');const keys=Object.keys(v);cost+=keys.length*8;for(const k of keys){cost+=k.length*6;todo.push([v[k],depth+1]);}}if(!Number.isSafeInteger(cost)||cost>limit)throw new Error('CSV metadata exceeds the memory limit');}return cost;}
+function afmCsvNumber(x){if(Number.isNaN(x))return 'NaN';if(x===Infinity)return 'Infinity';if(x===-Infinity)return '-Infinity';return Object.is(x,-0)?'-0':String(x);}
+// Safe and deterministic across case-insensitive filesystems and ZIP extractors.
+function exportSafe(s,limit=150){
+  s=String(s||'').normalize('NFC').replace(/[\x00-\x1f\x7f/\\:*?"<>|]/g,'_').replace(/^\.+/,'_').replace(/[. ]+$/,'').trim();
+  let out='',bytes=0;const enc=new TextEncoder();for(const ch of s){const n=enc.encode(ch).length;if(bytes+n>limit)break;out+=ch;bytes+=n;}
+  out=out.replace(/[. ]+$/,'')||'image';if(/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(out))out='_'+out;return out;
+}
+function exportStem(p){
+  const raw=String(p.sourceName||p.base||p.name||'image').split(/[\\/]/).pop();
+  const source=raw.replace(/\.(?:ibw|spm|pfc|\d{3}|tiff?|btf|png|jpe?g|bmp|gif|webp|avif|npy|gwy|gsf|sxm|ardf|nd2|czi|lif|oir|poir|mrc|mrcs|st|rec|ali|map|dm[34]|emd|h5|hdf5|bcf|innoimg|txt|csv|tsv|dat|asc|raw|bin)$/i,'');
+  const label=p.channelName??p.channel;if(!label)return exportSafe(source);const labelSafe=exportSafe(label,75),available=149-new TextEncoder().encode(labelSafe).length;return exportSafe(exportSafe(source,available)+'_'+labelSafe);
+}
+IO.exportPlaneStem=exportStem;
+IO.exportPlaneNames=function(planes,extension){
+  if(!Array.isArray(planes)||!planes.length||planes.some(p=>!p||typeof p!=='object')||!['png','csv'].includes(extension))throw new Error('Invalid export filename request');
+  const bases=planes.map(p=>p.resolvedStem?exportSafe(p.resolvedStem,220):exportStem(p)),counts=new Map(),used=new Set(),nextSuffix=new Map();for(const b of bases){const k=b.normalize('NFC').toLowerCase();counts.set(k,(counts.get(k)||0)+1);}
+  return planes.map((p,i)=>{let b=bases[i],k=b.normalize('NFC').toLowerCase();
+    if(!p.resolvedStem&&(counts.get(k)>1||p.nc>1&&p.duplicateChannel||p.nz>1||p.nt>1||p.z>0||p.t>0||p.duplicateImageOrdinal)){if(p.nc>1&&p.duplicateChannel||counts.get(k)>1)b+='_C'+((p.c||0)+1);if(p.nz>1||p.z>0)b+='_Z'+((p.z||0)+1);if(p.nt>1||p.t>0)b+='_T'+((p.t||0)+1);if(p.duplicateImageOrdinal)b+='_I'+p.duplicateImageOrdinal;}
+    const stem=b,stemKey=stem.normalize('NFC').toLowerCase();let number=nextSuffix.get(stemKey)||2;while(used.has((b+'.'+extension).normalize('NFC').toLowerCase()))b=stem+'_'+number++;nextSuffix.set(stemKey,number);
+    used.add((b+'.'+extension).normalize('NFC').toLowerCase());return b+'.'+extension;
+  });
+};
+function afmCsvCRC(data){let c=0xffffffff;for(let i=0;i<data.length;i++){c^=data[i];for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
+function afmCsvZip(files){
+  const enc=new TextEncoder(),members=[];let offset=0,centralSize=0;
+  if(files.length>65535)throw new Error('CSV ZIP contains too many files');
+  for(const file of files){const name=enc.encode(file.name),data=file.data;if(name.length>65535||data.length>0xffffffff)throw new Error('CSV ZIP entry exceeds ZIP32 limits');
+    const crc=afmCsvCRC(data),local=30+name.length+data.length,central=46+name.length;
+    if(offset+local>0xffffffff||centralSize+central>0xffffffff)throw new Error('CSV ZIP exceeds ZIP32 limits');
+    members.push({name,data,crc,offset});offset+=local;centralSize+=central;}
+  const centralOffset=offset,total=offset+centralSize+22;if(total>0xffffffff)throw new Error('CSV ZIP exceeds ZIP32 limits');
+  const bytes=new Uint8Array(total),dv=new DataView(bytes.buffer);let p=0;
+  for(const m of members){dv.setUint32(p,0x04034b50,true);dv.setUint16(p+4,20,true);dv.setUint16(p+6,0x0800,true);dv.setUint32(p+14,m.crc,true);dv.setUint32(p+18,m.data.length,true);dv.setUint32(p+22,m.data.length,true);dv.setUint16(p+26,m.name.length,true);bytes.set(m.name,p+30);bytes.set(m.data,p+30+m.name.length);p+=30+m.name.length+m.data.length;}
+  for(const m of members){dv.setUint32(p,0x02014b50,true);dv.setUint16(p+4,20,true);dv.setUint16(p+6,20,true);dv.setUint16(p+8,0x0800,true);dv.setUint32(p+16,m.crc,true);dv.setUint32(p+20,m.data.length,true);dv.setUint32(p+24,m.data.length,true);dv.setUint16(p+28,m.name.length,true);dv.setUint32(p+42,m.offset,true);bytes.set(m.name,p+46);p+=46+m.name.length;}
+  dv.setUint32(p,0x06054b50,true);dv.setUint16(p+8,members.length,true);dv.setUint16(p+10,members.length,true);dv.setUint32(p+12,centralSize,true);dv.setUint32(p+16,centralOffset,true);return bytes;
+}
+IO.exportAfmCsvBundle=function(input){
+  if(!input||!['matrix','coordinates'].includes(input.format)||!Array.isArray(input.planes)||!input.planes.length)throw new Error('Choose a CSV format and at least one numeric plane');
+  if(input.planes.length>=65535)throw new Error('CSV ZIP contains too many planes');
+  const limit=input.maxBytes===undefined?AFM_CSV_MEMORY:Number(input.maxBytes);if(!Number.isSafeInteger(limit)||limit<1||limit>AFM_CSV_MEMORY)throw new Error('Invalid CSV memory limit');
+  let estimate=65536,metadataEstimate=1024;const infos=[];const exportNames=IO.exportPlaneNames(input.planes,'csv');
+  for(let i=0;i<input.planes.length;i++){
+    const p=input.planes[i];if(!p||p.rgb||!Number.isSafeInteger(p.w)||!Number.isSafeInteger(p.h)||p.w<=0||p.h<=0||!Number.isSafeInteger(p.w*p.h))throw new Error('Invalid or RGB CSV plane');
+    if(!ArrayBuffer.isView(p.data)||p.data instanceof DataView||(typeof SharedArrayBuffer!=='undefined'&&p.data.buffer instanceof SharedArrayBuffer)||p.data.length!==p.w*p.h||typeof p.data[0]!=='number')throw new Error('CSV pixel dimensions or sample type are invalid');
+    const c=p.c??0,z=p.z??0,t=p.t??0;if(![c,z,t].every(x=>Number.isSafeInteger(x)&&x>=0))throw new Error('Invalid CSV plane coordinates');
+    const cal=p.cal,valid=!!cal&&Number.isFinite(cal.pw)&&cal.pw>0&&Number.isFinite(cal.ph)&&cal.ph>0&&typeof cal.unit==='string'&&!!IO.unitToM(cal.unit);
+    const pw=valid?cal.pw:1,ph=valid?cal.ph:1,unit=valid?cal.unit:'px';if(!Number.isFinite((p.w-1)*pw)||!Number.isFinite((p.h-1)*ph))throw new Error('CSV coordinate overflow');
+    const name=String(p.name||'image'),file=exportNames[i], signal=['numeric','display-gray','color-component','unknown'].includes(p.signalOrigin)?p.signalOrigin:'unknown';
+    metadataEstimate+=afmCsvMetadataCost([name,p.valueUnit||'unknown',p.valueSource||'current',p.ops||[]],1048576-metadataEstimate)+4096;if(metadataEstimate>1048576||estimate+metadataEstimate*8>limit)throw new Error('CSV metadata exceeds the memory limit');
+    infos.push({file,name,w:p.w,h:p.h,c,z,t,valueUnit:p.valueUnit||'unknown',valueSource:p.valueSource||'current',signalOrigin:signal,signalOriginNotice:signal==='display-gray'?'Display intensity; original physical AFM signal is not recovered.':'Origin describes present samples; physical calibration must be verified separately.',xy:{unit,pw,ph,origin:'top-left pixel center',xDirection:'right',yDirection:'down'},historyIncomplete:p.historyIncomplete!==false,ops:p.ops||[]});
+    estimate+=p.w*p.h*(input.format==='matrix'?110:320)+p.h*32+4096;if(!Number.isSafeInteger(estimate)||estimate>limit)throw new Error('CSV export exceeds the memory limit');
+  }
+  const manifest={schema:'INNO-AFM-CSV-1',format:input.format,numberEncoding:'ECMAScript shortest round-trip; -0, NaN, Infinity, -Infinity',metadataSpecialNumbers:'-0 and nonfinite history numbers encoded as strings',nanPayload:'not preserved',planes:infos};
+  let json;try{json=JSON.stringify(manifest,(_key,v)=>typeof v==='number'&&(!Number.isFinite(v)||Object.is(v,-0))?afmCsvNumber(v):v,2);}catch(e){throw new Error('CSV metadata cannot be serialized');}if(json.length>1048576||estimate+json.length*8>limit)throw new Error('CSV metadata exceeds the memory limit');
+  const enc=new TextEncoder(),files=[];
+  for(let k=0;k<input.planes.length;k++){
+    const p=input.planes[k],info=infos[k],rows=[];if(input.format==='coordinates')rows.push('x,y,value');
+    for(let y=0;y<p.h;y++){if(input.format==='matrix'){const row=new Array(p.w);for(let x=0;x<p.w;x++)row[x]=afmCsvNumber(p.data[y*p.w+x]);rows.push(row.join(','));}
+      else for(let x=0;x<p.w;x++)rows.push(afmCsvNumber(x*info.xy.pw)+','+afmCsvNumber(y*info.xy.ph)+','+afmCsvNumber(p.data[y*p.w+x]));}
+    files.push({name:info.file,data:enc.encode(rows.join('\n')+'\n')});
+  }
+  files.push({name:'metadata.json',data:enc.encode(json+'\n')});const bytes=afmCsvZip(files);if(bytes.length>limit)throw new Error('CSV ZIP exceeds the memory limit');
+  return {bytes,manifest,estimatedBytes:estimate};
+};
 
 IO._tiffIFDs=tiffIFDs;
 G.IMG_IO=IO;

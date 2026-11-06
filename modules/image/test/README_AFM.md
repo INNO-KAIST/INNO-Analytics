@@ -1,5 +1,13 @@
 # AFM and Image Analysis tests
 
+## AFM CSV measured-data browser test
+
+`test_afm_csv_ibw_ui.js` reads measured files locally and requires two explicit environment variables: `INNO_AFM_MANIFEST` is a UTF-8 JSON file whose `cases` array contains records with `relative_input` and `channels` entries, and `INNO_AFM_RAW_ROOT` is the root folder containing those files. `relative_input` is resolved below that root. Set `INNO_AFM_CASE` to the zero-based case index and `INNO_AFM_CHANNEL` to a channel name to select the case and channel; otherwise the first case and its first channel are used. The file only reads the original measurement and must run from the project root against the injected HTML. With either required environment variable missing, the test prints `SKIP` and exits successfully without claiming a measured-data comparison. Keep private manifests and measurement files out of source control and do not publish them.
+
+```powershell
+node modules/image/test/test_afm_csv_ibw_ui.js
+```
+
 These are test-only dependencies; none are required by the application at runtime. Run commands from the project root with the injected `INNO Analytics.html` present. Use an isolated browser profile; the browser tests create and modify IndexedDB databases.
 
 ## Node and browser tests

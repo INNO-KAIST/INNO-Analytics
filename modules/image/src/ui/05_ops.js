@@ -110,7 +110,7 @@ function afmCommit(q,result){
   afmValidatePrepared(q);const {im,params,sourcePlane}=q,{c,z,t,resultMode,method}=params;
   const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
   if(resultMode==="new-image"){
-    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
+    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,exportChannel:(im.chNames&&im.chNames[c])||im.exportChannel||(im.nc>1?`Channel ${c+1}`:''),exportPlane:im.exportPlane||{c,z,t,nc:im.nc,nz:im.nz,nt:im.nt},w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
     setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
   }
   const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
@@ -222,10 +222,10 @@ op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8
   run:(im,P)=>{
     if(P.to==="split"){ if(im.nc<2) throw new Error("채널이 하나뿐입니다"); const names=im.rgb?["red","green","blue"]:im.chNames; let last;
       for(let c=0;c<im.nc;c++){ const planes=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) planes.push(planesOf(im)[pIndex(im,c,z,t)].slice());
-        last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
+        last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,exportChannel:names&&names[c]?names[c]:`Channel ${c+1}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
       record({op:"type",params:clean(P),label:"Split Channels"},im); return last; }
     if(P.to==="rgb2gray"){ if(!im.rgb) throw new Error("RGB 이미지가 아닙니다"); const out=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=planeAt(im,0,z,t), g=planeAt(im,1,z,t), b=planeAt(im,2,z,t); out.push(IC.rgbToGray(r,g,b,!!P.weighted).data); }
-      setPlanes(im,out,{rgb:false,nc:1,bit:8,c:0,composite:false},"RGB → 8-bit",{op:"type",params:clean(P),label:"RGB → 8-bit"}); im.disp=[{min:0,max:255,lut:"Grays"}]; return; }
+      setPlanes(im,out,{rgb:false,colorChannels:false,signalOrigin:"display-gray",valueUnit:"",siScale:null,siUnit:"",nc:1,bit:8,c:0,composite:false},"RGB → 8-bit",{op:"type",params:clean(P),label:"RGB → 8-bit"}); im.disp=[{min:0,max:255,lut:"Grays"}]; return; }
     if(im.rgb) throw new Error("RGB 는 먼저 'RGB → 8-bit gray' 또는 'Split channels'");
     const to=+P.to; if(to===im.bit){ note("이미 "+to+"-bit 입니다"); return; }
     // 비례 변환 범위: 기록된 값이 있으면 그대로(매크로 재생), 없으면 지금 표시 범위 — 화소 min–max 와 같으면 "minmax" 로 기록해 이미지마다 다시 구함
@@ -290,7 +290,7 @@ op("register",{label:"StackReg",group:"stack",kind:"image",params:[
 /* ---------- Image Calculator ---------- */
 op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image 2","",{type:"img"}),R("fn","Operation","sub",{type:"sel",opts:[["add","Add"],["sub","Subtract"],["mul","Multiply"],["div","Divide"],["and","AND"],["or","OR"],["xor","XOR"],["min","Min"],["max","Max"],["average","Average"],["difference","Difference"],["copy","Copy"],["transparent-zero","Transparent-zero"]]}),R("float","32-bit (float) result",true,{type:"bool"})],
   run:async(im,P)=>{ const b=byId(P.b)||S.images.find(x=>x.name===P.bName); if(!b) throw new Error("두 번째 이미지를 고르세요"); if(b.w!==im.w||b.h!==im.h) throw new Error("두 이미지의 크기가 같아야 합니다");
-    const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
+    const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal,signalOrigin:combineSignalOrigins(im,b)},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
   ij:P=>`imageCalculator("${{add:"Add",sub:"Subtract",mul:"Multiply",div:"Divide",and:"AND",or:"OR",xor:"XOR",min:"Min",max:"Max",average:"Average",difference:"Difference",copy:"Copy","transparent-zero":"Transparent-zero"}[P.fn]} create${P.float?" 32-bit":""}", getTitle(), "${ijq(P.bName||"image2")}");`});
 
 /* ---------- Threshold · Binary (패널이 따로 있음) ---------- */

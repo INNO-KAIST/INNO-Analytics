@@ -280,7 +280,7 @@ async function readOIR(name,u8,ctx,opt){
     if(short.length){ const base=name.replace(/\.[^.]+$/,""); w2.push(`획득 설정보다 면이 적습니다 (${short.join(", ")}) — 획득이 중간에 멈췄거나, 나머지 면이 보조 파일(${base}_00001 …)에 있습니다. 보조 파일은 함께 읽지 않습니다`); } }
   if(zs.length<nz) w2.push(`Z ${nz} 장 중 ${zs.length} 장만 읽었습니다`); if(ts.length<nt) w2.push(`T ${nt} 장 중 ${ts.length} 장만 읽었습니다`);
   const meta=[...(R.xml.lsmimage||[]),...R.xmlAll.filter(x=>!(R.xml.lsmimage||[]).includes(x)),...R.frames.slice(0,1)].join("\n");
-  const im={name:dname,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,
+  const im={name:dname,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,colorChannels:/^rgb$/i.test(color),
     metaText:meta.length>200000?meta.slice(0,200000)+"…":meta};
   if(rgb&&bit===8) Object.assign(im,{bit:8,rgb:true});
   else if(rgb) Object.assign(im,{bit,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]});
