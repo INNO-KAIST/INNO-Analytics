@@ -56429,13 +56429,13 @@ async function tiffDecode(T,u8,pi,limitPx){
   if(photo===0&&spp===1){ notes.push("WhiteIsZero(0=흰색) TIFF — 화소 값은 그대로 두고 LUT 를 뒤집어 보입니다"); }
   let rgb=false, palette=null, photo0inv=false;
   if(photo===3&&tg[320]){ const cm=ta(tg[320]); const n=cm.length/3; let gray=true; for(let i=0;i<n;i++) if(cm[i]!==cm[n+i]||cm[i]!==cm[2*n+i]){ gray=false; break; }
-    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=Math.min(n-1,s[i]|0); r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
+    if(!gray){ const r=new Float32Array(W*H),g=new Float32Array(W*H),b=new Float32Array(W*H); const s=out[0]; for(let i=0;i<W*H;i++){ const k=Math.min(n-1,s[i]|0); r[i]=cm[k]>>8; g[i]=cm[n+k]>>8; b[i]=cm[2*n+k]>>8; } return {W,H,bit:8,planes:[r,g,b],rgb:true,colorChannels:true,inv:false,notes:["색 팔레트 TIFF 를 RGB 로 바꿨습니다"],bits,fmt,comp}; }
     palette="gray"; if(n>1&&cm[0]>cm[n-1]) { photo0inv=true; } }
   if(photo===2&&spp>=3&&bit===8){ rgb=true; }
   const planes=rgb?out.slice(0,3):out.slice(0,photo===2?Math.min(spp,3):spp);
   if(spp===4&&photo===2) notes.push("알파 채널은 버렸습니다");
   if(photo===5) notes.push("CMYK TIFF — 4 채널(C·M·Y·K)로 열었습니다 (RGB 로 바꾸지 않음)"); if(photo===6) notes.push("YCbCr TIFF — 3 채널(Y·Cb·Cr)로 열었습니다 (RGB 로 바꾸지 않음)");
-  return {W,H,bit,planes,rgb,inv:photo===0||photo0inv,notes,bits,fmt,comp,palette};
+  return {W,H,bit,planes,rgb,colorChannels:[2,5,6].includes(photo)&&spp>=3,inv:photo===0||photo0inv,notes,bits,fmt,comp,palette};
 }
 function f16(h){ const s=(h&0x8000)?-1:1, e=(h>>10)&31, m=h&1023; if(e===0) return s*Math.pow(2,-14)*(m/1024); if(e===31) return m?NaN:s*Infinity; return s*Math.pow(2,e-15)*(1+m/1024); }
 
@@ -56508,7 +56508,7 @@ async function readTIFF(name,u8,ctx){
     for(let k=1;k<+ij.images;k++){ const o=off+k*per; if(o+per>u8.byteLength){ warn.push(`ImageJ 스택 ${ij.images} 장 중 ${k} 장만 파일 안에 있습니다`); break; }
       const ch=[...Array(rgb0?3:1)].map(()=>new Float32Array(W*H)); const bs=bits/8;
       for(let i=0;i<W*H;i++) for(let c=0;c<ch.length;c++) ch[c][i]=rd(o+(i*spp+c)*bs);
-      decoded.push({W,H,bit:decoded[0].bit,planes:ch,rgb:rgb0,notes:[]}); }
+      decoded.push({W,H,bit:decoded[0].bit,planes:ch,rgb:rgb0,colorChannels:decoded[0].colorChannels,notes:[]}); }
     nImg=decoded.length; }
   void nImg;
   let groups=[];
@@ -56535,7 +56535,8 @@ async function readTIFF(name,u8,ctx){
     if(!cal&&gi===0){ const sc=sidecarCal(name,ctx,info); if(sc) cal=sc.cal; }
     if(!cal&&gi===0&&typeof G.tiffGatanScale==="function"&&p0[65027]){ try{ const gs=G.tiffGatanScale({65027:{raw:p0[65027].raw}}); if(gs&&gs.ok) cal=IO.calFromMeters(gs.nmPerPx*1e-9,gs.nmPerPx*1e-9,"Gatan 태그 65027 → "+gs.how); else if(gs&&gs.why) warn.push("Gatan TIFF: "+gs.why); }catch(e){} }
     if(!cal&&gi===0&&p0[282]&&!ij){ const xr=tv(p0[282]), ru=tv(p0[296],2); if(xr>0&&ru===3) cands.push({pw:1e4/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /cm`}); else if(xr>0&&ru===2&&![72,96,150,300,600,1200].includes(Math.round(xr))) cands.push({pw:25400/xr,unit:"µm",src:`TIFF XResolution ${xr.toFixed(3)} /inch`}); }
-    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:(g.list[0]&&g.list[0].notes||[]).slice(),invertLut:!!(g.list[0]&&g.list[0].inv)}; // 파일 전체 알림은 r.warn 으로 한 번만
+    const im={name:groups.length>1?`${name} #${gi+1}`:name,w:g.W,h:g.H,bit:g.bit,rgb:g.rgb,colorChannels:g.list.some(d=>d.colorChannels),nc,nz,nt,order,planes,cal,calCandidates:cands,info:info.slice(),warn:(g.list[0]&&g.list[0].notes||[]).slice(),invertLut:!!(g.list[0]&&g.list[0].inv)}; // 파일 전체 알림은 r.warn 으로 한 번만
+    if(ij&&Object.prototype.hasOwnProperty.call(ij,'inno_signal_origin'))im.signalOrigin=['numeric','color-component','display-gray','unknown'].includes(ij.inno_signal_origin)?ij.inno_signal_origin:'unknown';
     if(om&&om.psz>0&&nz>1){ const kz=IO.unitToM(om.pszu)||1e-6; im.zStep=om.psz*kz/1e-6; }
     // ImageJ 'signed 16-bit': 값 = 저장값 − 32768 (Calibration function 0, c0=−32768, c1=1)
     if(gi===0&&ij&&g.bit===16&&ij.cf==="0"&&+ij.c0===-32768&&+ij.c1===1){ for(const P of planes) for(let i=0;i<P.length;i++) P[i]-=32768; im.bit=32; im.info.push(["Signed 16-bit","ImageJ calibration c0=−32768 적용 → 32-bit 로 열었습니다"]); if(ij.min!=null) ij.min=+ij.min-32768; if(ij.max!=null) ij.max=+ij.max-32768; }
@@ -56583,7 +56584,7 @@ async function readPNG(name,u8){
     if(gray){ for(let i=0;i<W*H;i++) if(planes[0][i]!==planes[1][i]||planes[0][i]!==planes[2][i]){ gray=false; break; } }
     if(gray){ planes=[planes[0]]; warn.push("R=G=B 인 회색 PNG 를 한 채널로 읽었습니다"); } else rgb=bit===8; }
   const cands=[]; if(phys&&phys.unit===1&&phys.x>0&&![2835,3780,3779,11811].includes(phys.x)) cands.push({pw:1e6/phys.x,unit:"µm",src:`PNG pHYs ${phys.x} px/m`});
-  return {images:[{name,w:W,h:H,bit,rgb,nc:planes.length,nz:1,nt:1,order:"czt",planes,cal:null,calCandidates:cands,info:[["PNG",`${bd}-bit, color type ${ct}${il?", interlaced":""}`]],warn}],warn:[]};
+  return {images:[{name,w:W,h:H,bit,rgb,colorChannels:planes.length>1&&(ct===2||ct===3||ct===6),nc:planes.length,nz:1,nt:1,order:"czt",planes,cal:null,calCandidates:cands,info:[["PNG",`${bd}-bit, color type ${ct}${il?", interlaced":""}`]],warn}],warn:[]};
 }
 /* 브라우저 해독 (JPEG·BMP·GIF·WebP·AVIF) */
 async function readBitmap(name,u8,mime){
@@ -56723,7 +56724,7 @@ function readNPY(name,u8){
   else for(let k=0;k<N;k++){ const p=new Float32Array(per); for(let i=0;i<per;i++) p[i]=rd(off+(k*per+i)*sz); planes.push(p); }
   const bit=kind==="u"&&sz===1||kind==="b"?8:(kind==="u"&&sz===2)?16:32;
   const w2=[]; if(chLast===4) w2.push("넷째 채널(알파)은 버렸습니다"); if(kind==="i"&&sz===8||kind==="u"&&sz===8) w2.push("64-bit 정수를 32-bit float 로 읽었습니다 (2²⁴ 넘는 값은 반올림)");
-  return {images:[{name,w:W,h:H,bit,rgb,nc:chLast?3:1,nz:chLast?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:w2,...(chLast&&!rgb?{chNames:["R","G","B"],chLut:["Red","Green","Blue"]}:{})}],warn:[]};
+  return {images:[{name,w:W,h:H,bit,rgb,colorChannels:!!chLast,nc:chLast?3:1,nz:chLast?1:N,nt:1,order:"czt",planes,cal:null,calCandidates:[],info:[["dtype",descr],["shape",shape.join("×")]],warn:w2,...(chLast&&!rgb?{chNames:["R","G","B"],chLut:["Red","Green","Blue"]}:{})}],warn:[]};
 }
 /* ============================================================ 텍스트 행렬 ============================================================ */
 function readText(name,u8){
@@ -56762,10 +56763,14 @@ function validateSnapshotMeta(h){
   const dims=[h.w,h.h,h.nc,h.nz,h.nt];if(dims.some(n=>!Number.isSafeInteger(n)||n<1))throw new Error("Numeric snapshot: invalid dimensions");
   const count=h.nc*h.nz*h.nt,samples=h.w*h.h*count;if(!Number.isSafeInteger(count)||count>SNAP_PLANES_MAX||!Number.isSafeInteger(samples))throw new Error("Numeric snapshot: plane limit exceeded");
   if(typeof h.rgb!=="boolean"||![8,16,32].includes(h.bit)||(h.rgb&&(h.nc!==3||h.bit!==8)))throw new Error("Numeric snapshot: inconsistent image type");
+  if(h.signalOrigin!==undefined&&!["numeric","color-component","display-gray","unknown"].includes(h.signalOrigin))throw new Error("Numeric snapshot: invalid signal origin");
+  if(h.rgb&&h.signalOrigin!==undefined&&h.signalOrigin!=="color-component")throw new Error("Numeric snapshot: inconsistent signal origin");
   if(h.cal!==null&&(!h.cal||typeof h.cal!=="object"||Array.isArray(h.cal)||typeof h.cal.unit!=="string"||!Number.isFinite(h.cal.pw)||h.cal.pw<=0||!Number.isFinite(h.cal.ph)||h.cal.ph<=0))throw new Error("Numeric snapshot: invalid calibration");
   if(typeof h.name!=="string"||typeof h.valueUnit!=="string"||typeof h.siUnit!=="string"||(h.siScale!==null&&(!Number.isFinite(h.siScale)||h.siScale<=0)))throw new Error("Numeric snapshot: invalid value metadata");
   if(h.zStep!==undefined&&h.zStep!==null&&(!Number.isFinite(h.zStep)||h.zStep<0))throw new Error("Numeric snapshot: invalid Z spacing");
   if(h.chNames!==undefined&&h.chNames!==null&&(!Array.isArray(h.chNames)||h.rgb||h.chNames.length!==h.nc||h.chNames.some(n=>typeof n!=="string")))throw new Error("Numeric snapshot: invalid channel names");
+  for(const k of ['exportSourceName','exportChannel'])if(h[k]!==undefined&&(typeof h[k]!=="string"||h[k].length>4096))throw new Error("Numeric snapshot: invalid export identity");
+  if(h.exportPlane!=null){const q=h.exportPlane;if(typeof q!=='object'||Array.isArray(q)||!['c','z','t','nc','nz','nt'].every(k=>Number.isSafeInteger(q[k]))||q.nc<1||q.nz<1||q.nt<1||q.c<0||q.c>=q.nc||q.z<0||q.z>=q.nz||q.t<0||q.t>=q.nt)throw new Error('Numeric snapshot: invalid export plane');}
   if(!Array.isArray(h.ops)||h.ops.some(o=>!o||typeof o!=="object"||Array.isArray(o)||typeof o.op!=="string"))throw new Error("Numeric snapshot: invalid history");
   if(!Array.isArray(h.snapshotPrecision)||h.snapshotPrecision.length!==count||h.snapshotPrecision.some(x=>typeof x!=="string"))throw new Error("Numeric snapshot: invalid precision metadata");
   return {count,samples};
@@ -56774,7 +56779,7 @@ IO.writeNumericSnapshot=function(im){
   const dims=[im.w,im.h,im.nc||1,im.nz||1,im.nt||1]; if(dims.some(n=>!Number.isSafeInteger(n)||n<1)) throw new Error("Numeric snapshot: invalid dimensions");
   const [w,h,nc,nz,nt]=dims, per=w*h, count=nc*nz*nt; if(!Number.isSafeInteger(per*count)||!Array.isArray(im.planes)||im.planes.length!==count||im.planes.some(p=>!ArrayBuffer.isView(p)||p.length!==per)) throw new Error("Numeric snapshot: invalid planes");
   const precision=im.planes.map(p=>p instanceof Float64Array?"float64":p instanceof Float32Array?"float32":p.constructor.name);
-  const header={version:1,name:String(im.name||"image"),w,h,nc,nz,nt,bit:im.bit,rgb:!!im.rgb,cal:im.cal||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",zStep:im.zStep==null?0:im.zStep,chNames:im.chNames==null?null:im.chNames,ops:im.ops||[],historyIncomplete:true,storedAs:"float64-le",snapshotPrecision:precision,priorSnapshotPrecision:im.snapshotPrecision||null,precisionNotice:"Stored values reflect current arrays; prior processing may have reduced precision."};
+  const header={version:1,name:String(im.name||"image"),exportSourceName:String(im.exportSourceName||""),exportChannel:String(im.exportChannel||""),exportPlane:im.exportPlane||null,w,h,nc,nz,nt,bit:im.bit,rgb:!!im.rgb,signalOrigin:im.rgb?"color-component":(["numeric","color-component","display-gray","unknown"].includes(im.signalOrigin)?im.signalOrigin:"unknown"),cal:im.cal||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",zStep:im.zStep==null?0:im.zStep,chNames:im.chNames==null?null:im.chNames,ops:im.ops||[],historyIncomplete:true,storedAs:"float64-le",snapshotPrecision:precision,priorSnapshotPrecision:im.snapshotPrecision||null,precisionNotice:"Stored values reflect current arrays; prior processing may have reduced precision."};
   validateSnapshotMeta(header); const meta=new TextEncoder().encode(JSON.stringify(header)), size=12+meta.length+8*per*count; if(meta.length>SNAP_META_MAX||!Number.isSafeInteger(size)||snapshotBudget(size,per*count,count,meta.length)>IO.MAXBYTES) throw new Error("Numeric snapshot: file too large");
   const out=new Uint8Array(size),d=new DataView(out.buffer);out.set([73,78,78,79,70,54,52,1]);d.setUint32(8,meta.length,true);out.set(meta,12);let offset=12+meta.length;for(const p of im.planes)for(const v of p){d.setFloat64(offset,v,true);offset+=8;}return out;
 };
@@ -56784,7 +56789,7 @@ function readNumericSnapshot(name,u8){
   let h;try{h=JSON.parse(tdf.decode(u8.subarray(12,start)));}catch(e){throw new Error("Numeric snapshot: invalid metadata");}
   const {count,samples}=validateSnapshotMeta(h), per=h.w*h.h; if(start+samples*8!==u8.length||snapshotBudget(u8.length,samples,count,m)>IO.MAXBYTES) throw new Error("Numeric snapshot: invalid or oversized data");
   const planes=[];let off=start;for(let k=0;k<count;k++){const p=new Float64Array(per);for(let i=0;i<per;i++,off+=8)p[i]=dv.getFloat64(off,true);planes.push(p);}
-  const im={name,w:h.w,h:h.h,nc:h.nc,nz:h.nz,nt:h.nt,bit:h.bit||32,rgb:!!h.rgb,planes,cal:h.cal||null,valueUnit:h.valueUnit||"",siScale:h.siScale||null,siUnit:h.siUnit||"",zStep:h.zStep==null?0:h.zStep,chNames:h.chNames==null?null:h.chNames,ops:Array.isArray(h.ops)?h.ops:[],historyIncomplete:true,snapshotPrecision:Array.isArray(h.snapshotPrecision)?h.snapshotPrecision:[],warn:["Snapshot stores current values; earlier precision loss and incomplete history cannot be recovered."]};return {images:[im],warn:[]};
+  const im={name,exportSourceName:h.exportSourceName||"",exportChannel:h.exportChannel||"",exportPlane:h.exportPlane||null,w:h.w,h:h.h,nc:h.nc,nz:h.nz,nt:h.nt,bit:h.bit||32,rgb:!!h.rgb,signalOrigin:h.signalOrigin||"unknown",planes,cal:h.cal||null,valueUnit:h.valueUnit||"",siScale:h.siScale||null,siUnit:h.siUnit||"",zStep:h.zStep==null?0:h.zStep,chNames:h.chNames==null?null:h.chNames,ops:Array.isArray(h.ops)?h.ops:[],historyIncomplete:true,snapshotPrecision:Array.isArray(h.snapshotPrecision)?h.snapshotPrecision:[],warn:["Snapshot stores current values; earlier precision loss and incomplete history cannot be recovered."]};return {images:[im],warn:[]};
 }
 /* ============================================================ 판별·읽기 ============================================================ */
 IO.FORMATS=[
@@ -56847,12 +56852,32 @@ IO.readFile=async function(name,u8,ctx){
   }
 };
 
+// Format classification describes the present samples only: a standard gray TIFF/PNG
+// cannot reveal whether an external tool previously exported a color component.
+const readFileUnclassified=IO.readFile;
+IO.readFile=async function(name,u8,ctx){
+  const kind=IO.sniff(name,u8), result=await readFileUnclassified(name,u8,ctx);
+  if(!result||!Array.isArray(result.images))return result;
+  const numericKinds=new Set(["tiff","npy","nd2","czi","lif","oir","poir","gwy","gsf","nanoscope","ardf","ibw","sxm","text","dm","mrc","bcf","hdf5"]);
+  const displayKinds=new Set(["png","jpeg","bmp","gif","webp","bitmap"]);
+  for(const im of result.images){
+    if(im.rgb||im.colorChannels===true){im.signalOrigin="color-component";continue;}
+    if(kind==="innoimg"||(kind==="tiff"&&im.signalOrigin!==undefined))continue; // Honor persisted state; older snapshots stay unknown.
+    if(displayKinds.has(kind))im.signalOrigin="display-gray";
+    else if(["nd2","czi","lif","oir","poir"].includes(kind)&&im.colorChannels!==false)im.signalOrigin="unknown";
+    else if(numericKinds.has(kind))im.signalOrigin="numeric";
+    else im.signalOrigin="unknown";
+  }
+  return result;
+};
+
 /* ============================================================ ImageJ 호환 TIFF 쓰기 ============================================================
    img: {w,h,bit,rgb,nc,nz,nt,planes,cal}  — little-endian, 비압축, ImageJ ImageDescription(보정·hyperstack) */
 IO.writeTIFF=function(img,o){
   o=o||{}; const W=img.w,H=img.h, rgb=!!img.rgb, bit=rgb?8:img.bit, bps=bit/8, spp=rgb?3:1;
   const nImg=rgb?Math.max(1,img.planes.length/3):img.planes.length;
   const descL=["ImageJ=1.54u"]; if(nImg>1) descL.push("images="+nImg);
+  if(['numeric','color-component','display-gray','unknown'].includes(img.signalOrigin))descL.push('inno_signal_origin='+img.signalOrigin);
   if(rgb&&(img.nz>1||img.nt>1)){ if(img.nz>1) descL.push("slices="+img.nz); if(img.nt>1) descL.push("frames="+img.nt); if(img.nz>1&&img.nt>1) descL.push("hyperstack=true"); }
   if(!rgb&&(img.nc>1||img.nz>1||img.nt>1)){ if(img.nc>1) descL.push("channels="+img.nc); if(img.nz>1) descL.push("slices="+img.nz); if(img.nt>1) descL.push("frames="+img.nt); if(img.nc>1||img.nt>1) descL.push("hyperstack=true"); if(img.nc>1) descL.push("mode=composite"); }
   const cal=img.cal; const uOut=cal?(cal.unit==="µm"?"micron":cal.unit):null;
@@ -56902,6 +56927,77 @@ function addResolution(u8,cal,resOff){
   const dvo=new DataView(out.buffer); dvo.setUint16(newOff,ents.length,true); ents.forEach((e,i)=>out.set(e,newOff+2+12*i)); dvo.setUint32(newOff+2+12*ents.length,next,true); dvo.setUint32(4,newOff,true);
   return out;
 }
+
+/* AFM CSV: the caller supplies one immutable numeric plane per entry. This
+   synchronous exporter never reads display pixels and never mutates inputs. */
+const AFM_CSV_MEMORY=128*1024*1024;
+IO.AFM_CSV_MAX_BYTES=AFM_CSV_MEMORY;
+/* Bound metadata before JSON.stringify; shared history is charged once per plane. */
+function afmCsvMetadataCost(root,limit){const todo=[[root,0]],seen=new WeakSet();let cost=0;while(todo.length){const [v,depth]=todo.pop();if(depth>32)throw new Error('CSV metadata exceeds the memory limit');cost+=32+depth*4;if(typeof v==='string')cost+=v.length*6;else if(v&&typeof v==='object'){if(seen.has(v))throw new Error('CSV metadata cannot be serialized');seen.add(v);if(ArrayBuffer.isView(v))throw new Error('CSV metadata cannot be serialized');const keys=Object.keys(v);cost+=keys.length*8;for(const k of keys){cost+=k.length*6;todo.push([v[k],depth+1]);}}if(!Number.isSafeInteger(cost)||cost>limit)throw new Error('CSV metadata exceeds the memory limit');}return cost;}
+function afmCsvNumber(x){if(Number.isNaN(x))return 'NaN';if(x===Infinity)return 'Infinity';if(x===-Infinity)return '-Infinity';return Object.is(x,-0)?'-0':String(x);}
+// Safe and deterministic across case-insensitive filesystems and ZIP extractors.
+function exportSafe(s,limit=150){
+  s=String(s||'').normalize('NFC').replace(/[\x00-\x1f\x7f/\\:*?"<>|]/g,'_').replace(/^\.+/,'_').replace(/[. ]+$/,'').trim();
+  let out='',bytes=0;const enc=new TextEncoder();for(const ch of s){const n=enc.encode(ch).length;if(bytes+n>limit)break;out+=ch;bytes+=n;}
+  out=out.replace(/[. ]+$/,'')||'image';if(/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(out))out='_'+out;return out;
+}
+function exportStem(p){
+  const raw=String(p.sourceName||p.base||p.name||'image').split(/[\\/]/).pop();
+  const source=raw.replace(/\.(?:ibw|spm|pfc|\d{3}|tiff?|btf|png|jpe?g|bmp|gif|webp|avif|npy|gwy|gsf|sxm|ardf|nd2|czi|lif|oir|poir|mrc|mrcs|st|rec|ali|map|dm[34]|emd|h5|hdf5|bcf|innoimg|txt|csv|tsv|dat|asc|raw|bin)$/i,'');
+  const label=p.channelName??p.channel;if(!label)return exportSafe(source);const labelSafe=exportSafe(label,75),available=149-new TextEncoder().encode(labelSafe).length;return exportSafe(exportSafe(source,available)+'_'+labelSafe);
+}
+IO.exportPlaneStem=exportStem;
+IO.exportPlaneNames=function(planes,extension){
+  if(!Array.isArray(planes)||!planes.length||planes.some(p=>!p||typeof p!=='object')||!['png','csv'].includes(extension))throw new Error('Invalid export filename request');
+  const bases=planes.map(p=>p.resolvedStem?exportSafe(p.resolvedStem,220):exportStem(p)),counts=new Map(),used=new Set(),nextSuffix=new Map();for(const b of bases){const k=b.normalize('NFC').toLowerCase();counts.set(k,(counts.get(k)||0)+1);}
+  return planes.map((p,i)=>{let b=bases[i],k=b.normalize('NFC').toLowerCase();
+    if(!p.resolvedStem&&(counts.get(k)>1||p.nc>1&&p.duplicateChannel||p.nz>1||p.nt>1||p.z>0||p.t>0||p.duplicateImageOrdinal)){if(p.nc>1&&p.duplicateChannel||counts.get(k)>1)b+='_C'+((p.c||0)+1);if(p.nz>1||p.z>0)b+='_Z'+((p.z||0)+1);if(p.nt>1||p.t>0)b+='_T'+((p.t||0)+1);if(p.duplicateImageOrdinal)b+='_I'+p.duplicateImageOrdinal;}
+    const stem=b,stemKey=stem.normalize('NFC').toLowerCase();let number=nextSuffix.get(stemKey)||2;while(used.has((b+'.'+extension).normalize('NFC').toLowerCase()))b=stem+'_'+number++;nextSuffix.set(stemKey,number);
+    used.add((b+'.'+extension).normalize('NFC').toLowerCase());return b+'.'+extension;
+  });
+};
+function afmCsvCRC(data){let c=0xffffffff;for(let i=0;i<data.length;i++){c^=data[i];for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
+function afmCsvZip(files){
+  const enc=new TextEncoder(),members=[];let offset=0,centralSize=0;
+  if(files.length>65535)throw new Error('CSV ZIP contains too many files');
+  for(const file of files){const name=enc.encode(file.name),data=file.data;if(name.length>65535||data.length>0xffffffff)throw new Error('CSV ZIP entry exceeds ZIP32 limits');
+    const crc=afmCsvCRC(data),local=30+name.length+data.length,central=46+name.length;
+    if(offset+local>0xffffffff||centralSize+central>0xffffffff)throw new Error('CSV ZIP exceeds ZIP32 limits');
+    members.push({name,data,crc,offset});offset+=local;centralSize+=central;}
+  const centralOffset=offset,total=offset+centralSize+22;if(total>0xffffffff)throw new Error('CSV ZIP exceeds ZIP32 limits');
+  const bytes=new Uint8Array(total),dv=new DataView(bytes.buffer);let p=0;
+  for(const m of members){dv.setUint32(p,0x04034b50,true);dv.setUint16(p+4,20,true);dv.setUint16(p+6,0x0800,true);dv.setUint32(p+14,m.crc,true);dv.setUint32(p+18,m.data.length,true);dv.setUint32(p+22,m.data.length,true);dv.setUint16(p+26,m.name.length,true);bytes.set(m.name,p+30);bytes.set(m.data,p+30+m.name.length);p+=30+m.name.length+m.data.length;}
+  for(const m of members){dv.setUint32(p,0x02014b50,true);dv.setUint16(p+4,20,true);dv.setUint16(p+6,20,true);dv.setUint16(p+8,0x0800,true);dv.setUint32(p+16,m.crc,true);dv.setUint32(p+20,m.data.length,true);dv.setUint32(p+24,m.data.length,true);dv.setUint16(p+28,m.name.length,true);dv.setUint32(p+42,m.offset,true);bytes.set(m.name,p+46);p+=46+m.name.length;}
+  dv.setUint32(p,0x06054b50,true);dv.setUint16(p+8,members.length,true);dv.setUint16(p+10,members.length,true);dv.setUint32(p+12,centralSize,true);dv.setUint32(p+16,centralOffset,true);return bytes;
+}
+IO.exportAfmCsvBundle=function(input){
+  if(!input||!['matrix','coordinates'].includes(input.format)||!Array.isArray(input.planes)||!input.planes.length)throw new Error('Choose a CSV format and at least one numeric plane');
+  if(input.planes.length>=65535)throw new Error('CSV ZIP contains too many planes');
+  const limit=input.maxBytes===undefined?AFM_CSV_MEMORY:Number(input.maxBytes);if(!Number.isSafeInteger(limit)||limit<1||limit>AFM_CSV_MEMORY)throw new Error('Invalid CSV memory limit');
+  let estimate=65536,metadataEstimate=1024;const infos=[];const exportNames=IO.exportPlaneNames(input.planes,'csv');
+  for(let i=0;i<input.planes.length;i++){
+    const p=input.planes[i];if(!p||p.rgb||!Number.isSafeInteger(p.w)||!Number.isSafeInteger(p.h)||p.w<=0||p.h<=0||!Number.isSafeInteger(p.w*p.h))throw new Error('Invalid or RGB CSV plane');
+    if(!ArrayBuffer.isView(p.data)||p.data instanceof DataView||(typeof SharedArrayBuffer!=='undefined'&&p.data.buffer instanceof SharedArrayBuffer)||p.data.length!==p.w*p.h||typeof p.data[0]!=='number')throw new Error('CSV pixel dimensions or sample type are invalid');
+    const c=p.c??0,z=p.z??0,t=p.t??0;if(![c,z,t].every(x=>Number.isSafeInteger(x)&&x>=0))throw new Error('Invalid CSV plane coordinates');
+    const cal=p.cal,valid=!!cal&&Number.isFinite(cal.pw)&&cal.pw>0&&Number.isFinite(cal.ph)&&cal.ph>0&&typeof cal.unit==='string'&&!!IO.unitToM(cal.unit);
+    const pw=valid?cal.pw:1,ph=valid?cal.ph:1,unit=valid?cal.unit:'px';if(!Number.isFinite((p.w-1)*pw)||!Number.isFinite((p.h-1)*ph))throw new Error('CSV coordinate overflow');
+    const name=String(p.name||'image'),file=exportNames[i], signal=['numeric','display-gray','color-component','unknown'].includes(p.signalOrigin)?p.signalOrigin:'unknown';
+    metadataEstimate+=afmCsvMetadataCost([name,p.valueUnit||'unknown',p.valueSource||'current',p.ops||[]],1048576-metadataEstimate)+4096;if(metadataEstimate>1048576||estimate+metadataEstimate*8>limit)throw new Error('CSV metadata exceeds the memory limit');
+    infos.push({file,name,w:p.w,h:p.h,c,z,t,valueUnit:p.valueUnit||'unknown',valueSource:p.valueSource||'current',signalOrigin:signal,signalOriginNotice:signal==='display-gray'?'Display intensity; original physical AFM signal is not recovered.':'Origin describes present samples; physical calibration must be verified separately.',xy:{unit,pw,ph,origin:'top-left pixel center',xDirection:'right',yDirection:'down'},historyIncomplete:p.historyIncomplete!==false,ops:p.ops||[]});
+    estimate+=p.w*p.h*(input.format==='matrix'?110:320)+p.h*32+4096;if(!Number.isSafeInteger(estimate)||estimate>limit)throw new Error('CSV export exceeds the memory limit');
+  }
+  const manifest={schema:'INNO-AFM-CSV-1',format:input.format,numberEncoding:'ECMAScript shortest round-trip; -0, NaN, Infinity, -Infinity',metadataSpecialNumbers:'-0 and nonfinite history numbers encoded as strings',nanPayload:'not preserved',planes:infos};
+  let json;try{json=JSON.stringify(manifest,(_key,v)=>typeof v==='number'&&(!Number.isFinite(v)||Object.is(v,-0))?afmCsvNumber(v):v,2);}catch(e){throw new Error('CSV metadata cannot be serialized');}if(json.length>1048576||estimate+json.length*8>limit)throw new Error('CSV metadata exceeds the memory limit');
+  const enc=new TextEncoder(),files=[];
+  for(let k=0;k<input.planes.length;k++){
+    const p=input.planes[k],info=infos[k],rows=[];if(input.format==='coordinates')rows.push('x,y,value');
+    for(let y=0;y<p.h;y++){if(input.format==='matrix'){const row=new Array(p.w);for(let x=0;x<p.w;x++)row[x]=afmCsvNumber(p.data[y*p.w+x]);rows.push(row.join(','));}
+      else for(let x=0;x<p.w;x++)rows.push(afmCsvNumber(x*info.xy.pw)+','+afmCsvNumber(y*info.xy.ph)+','+afmCsvNumber(p.data[y*p.w+x]));}
+    files.push({name:info.file,data:enc.encode(rows.join('\n')+'\n')});
+  }
+  files.push({name:'metadata.json',data:enc.encode(json+'\n')});const bytes=afmCsvZip(files);if(bytes.length>limit)throw new Error('CSV ZIP exceeds the memory limit');
+  return {bytes,manifest,estimatedBytes:estimate};
+};
 
 IO._tiffIFDs=tiffIFDs;
 G.IMG_IO=IO;
@@ -57063,8 +57159,8 @@ async function readND2(name,u8,ctx){
   const images=[];
   for(const p of sel.p){ const arr=out.get(p); const pn=pi>=0&&np>1?` · ${loops[pi].names[p]||"XY"+(p+1)}`:"";
     if(rgb){ for(let c=0;c<nCh;c++){ const planes=[]; for(let zt=0;zt<nzo*nto;zt++) for(let comp=0;comp<3;comp++) planes.push(arr[comp+3*(c+nCh*zt)]);
-        images.push({name:`${name}${pn}${nCh>1?` · ${pl[c]&&pl[c].sDescription||"C"+(c+1)}`:""}`,w:W,h:H,...(bpc===8?{bit:8,rgb:true}:{bit:bpc,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}),nc:3,nz:nzo,nt:nto,order:"czt",planes,cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut}); } }
-    else images.push({name:name+pn,w:W,h:H,bit:bpc===32?32:bpc,rgb:false,nc:nOut,nz:nzo,nt:nto,order:"czt",planes:arr,cal,calCandidates:[],info:info.slice(),warn:[],chNames,chLut,zStep:zStepOut});
+        images.push({name:`${name}${pn}${nCh>1?` · ${pl[c]&&pl[c].sDescription||"C"+(c+1)}`:""}`,w:W,h:H,...(bpc===8?{bit:8,rgb:true}:{bit:bpc,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}),colorChannels:true,nc:3,nz:nzo,nt:nto,order:"czt",planes,cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut}); } }
+    else images.push({name:name+pn,w:W,h:H,bit:bpc===32?32:bpc,rgb:false,colorChannels:false,nc:nOut,nz:nzo,nt:nto,order:"czt",planes:arr,cal,calCandidates:[],info:info.slice(),warn:[],chNames,chLut,zStep:zStepOut});
   }
   return {images,warn};
 }
@@ -57179,10 +57275,10 @@ async function readCZI(name,u8,ctx){
     const sIdx=+key.split(",")[0]; const exN=extra.map((d,i)=>`${d}${+key.split(",")[1+i]+1}`).join(" ");
     const tag=[ns>1||pick.length>1?`S${sIdx+1}`:"",exN].filter(Boolean).join(" ");
     const base=`${name}${tag?` · ${tag}`:""}`; const common={w:W,h:H,nz:nzo,nt:nto,order:"czt",cal,calCandidates:[],info:info.slice(),warn:[],zStep:zStepOut};
-    if(ng) images.push({...common,name:rgbC.length?`${base} · ${grayC.map(c=>chNames[c]).join("·")}`:base,bit:grayBit,rgb:false,nc:ng,planes:Pg,chNames:grayC.map(c=>chNames[c]),chLut:grayC.map(c=>chLut[c])});
+    if(ng) images.push({...common,name:rgbC.length?`${base} · ${grayC.map(c=>chNames[c]).join("·")}`:base,bit:grayBit,rgb:false,colorChannels:false,nc:ng,planes:Pg,chNames:grayC.map(c=>chNames[c]),chLut:grayC.map(c=>chLut[c])});
     for(const c of rgbC){ const P=Pr.get(c); const nm=nc>1?`${base} · ${chNames[c]}`:base;
       if(chKind[c].bit===8) images.push({...common,name:nm,bit:8,rgb:true,nc:3,planes:P});
-      else images.push({...common,name:nm,bit:chKind[c].bit,rgb:false,nc:3,planes:P,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
+      else images.push({...common,name:nm,bit:chKind[c].bit,rgb:false,colorChannels:true,nc:3,planes:P,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
   }
   if(images.length) images[0].metaText=xml.length>200000?xml.slice(0,200000)+"…":xml; // 원문은 첫 이미지에만 (저장 공간)
   return {images,warn};
@@ -57675,7 +57771,7 @@ async function readLIF(name,u8,ctx){
     if(zs.length<nz) w2.push(`Z ${nz} 장 중 ${zs.length} 장만 읽었습니다`); if(ts.length<nt) w2.push(`T ${nt} 장 중 ${ts.length} 장만 읽었습니다`);
     if(cut) w2.push(`파일이 잘려 ${cut} 면의 끝부분을 0 으로 채웠습니다 (자료 ${blk.avail}/${blk.size} 바이트)`);
     const nm=plan.length>1?`${name} · ${P.s.name}${P.nM>1?` · tile ${P.m+1}`:""}`:name;
-    const common={name:nm,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep};
+    const common={name:nm,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,colorChannels:!!rgb};
     if(rgb){ if(bit===8) images.push({...common,bit:8,rgb:true}); else images.push({...common,bit,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]}); }
     else { const names=chanNames(P.s,C); const luts=C.map(c=>LUTN[(c.lut||"").toLowerCase()]||null);
       images.push({...common,bit,rgb:false,chNames:names,chLut:luts.some(Boolean)?luts:null}); }
@@ -57980,7 +58076,7 @@ async function readOIR(name,u8,ctx,opt){
     if(short.length){ const base=name.replace(/\.[^.]+$/,""); w2.push(`획득 설정보다 면이 적습니다 (${short.join(", ")}) — 획득이 중간에 멈췄거나, 나머지 면이 보조 파일(${base}_00001 …)에 있습니다. 보조 파일은 함께 읽지 않습니다`); } }
   if(zs.length<nz) w2.push(`Z ${nz} 장 중 ${zs.length} 장만 읽었습니다`); if(ts.length<nt) w2.push(`T ${nt} 장 중 ${ts.length} 장만 읽었습니다`);
   const meta=[...(R.xml.lsmimage||[]),...R.xmlAll.filter(x=>!(R.xml.lsmimage||[]).includes(x)),...R.frames.slice(0,1)].join("\n");
-  const im={name:dname,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,
+  const im={name:dname,w:W,h:H,nc,nz:zs.length,nt:ts.length,order:"czt",planes,cal,calCandidates:[],info,warn:w2,zStep,colorChannels:/^rgb$/i.test(color),
     metaText:meta.length>200000?meta.slice(0,200000)+"…":meta};
   if(rgb&&bit===8) Object.assign(im,{bit:8,rgb:true});
   else if(rgb) Object.assign(im,{bit,rgb:false,chNames:["R","G","B"],chLut:["Red","Green","Blue"]});
@@ -58080,6 +58176,10 @@ const curPlane=()=>{ const im=cur(); return im?planeAt(im):null; };
 const isStack=im=>im&&(im.nz*im.nt>1);
 const noPm=c=>c&&c.unit==="pm"&&c.pw>0?Object.assign({},c,{pw:c.pw/1e3,ph:(c.ph||c.pw)/1e3,unit:"nm"}):(c||null); // 파일이 pm 이라 해도 nm 으로 (사용자 요청 10-19)
 const calOf=im=>im&&im.cal&&im.cal.pw>0?im.cal:{pw:1,ph:1,unit:"px"};
+// This describes the origin of the samples, not whether their physical units are calibrated.
+const SIGNAL_ORIGINS=new Set(["numeric","color-component","display-gray","unknown"]);
+const signalOrigin=im=>im&&im.rgb?"color-component":im&&SIGNAL_ORIGINS.has(im.signalOrigin)?im.signalOrigin:"unknown";
+function combineSignalOrigins(a,b){ const x=signalOrigin(a),y=signalOrigin(b); if(x==="color-component"||y==="color-component")return "color-component"; if(x==="unknown"||y==="unknown")return "unknown"; if(x==="display-gray"||y==="display-gray")return "display-gray"; return "numeric"; }
 const unitSq=im=>{ const u=calOf(im).unit; return u==="px"?"px²":u+"²"; };
 
 /* ---------------- 저장 (IndexedDB) ---------------- */
@@ -58213,11 +58313,14 @@ function cancelAll(){ CANCEL_GEN++; for(const c of [...CANCELS]) c(); CANCELS.cl
 function invalidateLineCompare(){ const e=document.getElementById("imLfDialog"); if(e) e.dispatchEvent(new Event("lf-invalidate")); }
 function addImage(d,o){
   invalidateLineCompare();
-  if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1;
+  if(!WRITE_OWNER) throw new Error("This tab is read-only"); o=o||{}; const id=uid(); const nc=d.nc||1; const parent=o.parent&&byId(o.parent); const knownFile=o.file||d.file||''; const nameText=String(d.name||''); const inferredChannel=knownFile&&nameText.startsWith(knownFile+' · ')?nameText.slice(knownFile.length+3):'';
   const im={id,name:d.name,w:d.w,h:d.h,bit:d.bit,rgb:!!d.rgb,nc:d.rgb?3:nc,nz:d.nz||1,nt:d.nt||1,cal:noPm(d.cal),calCandidates:(d.calCandidates||[]).map(noPm),info:d.info||[],warn:d.warn||[],
     desc:d.desc||"",metaText:d.metaText||"",databar:d.databar||null,invertLut:!!d.invertLut,c:0,z:0,t:0,composite:(nc>1&&!d.rgb),parent:o.parent||null,ops:o.ops||d.ops||[],historyIncomplete:!!d.historyIncomplete,snapshotPrecision:d.snapshotPrecision||null,created:new Date().toISOString(),
     file:o.file||d.file||d.name,src:o.src||"file",valueUnit:d.valueUnit||"",siScale:d.siScale>0?d.siScale:null,siUnit:d.siUnit||"",ver:1,kind:o.kind||"",fft:o.fft||null,
-    hasSource:!!d.sourceSamples,originalId:o.originalId||(o.parent&&byId(o.parent)&&byId(o.parent).originalId)||null,chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0};
+    hasSource:!!d.sourceSamples,originalId:o.originalId||(o.parent&&byId(o.parent)&&byId(o.parent).originalId)||null,colorChannels:typeof d.colorChannels==='boolean'?d.colorChannels:(d.rgb?true:(o.parent&&byId(o.parent)&&typeof byId(o.parent).colorChannels==='boolean'?byId(o.parent).colorChannels:null)),signalOrigin:d.rgb?"color-component":SIGNAL_ORIGINS.has(d.signalOrigin)?d.signalOrigin:(typeof d.colorChannels==='boolean'?(d.colorChannels?'color-component':'numeric'):(o.parent&&byId(o.parent)?signalOrigin(byId(o.parent)):"unknown")),chNames:Array.isArray(d.chNames)&&d.chNames.length===nc&&!d.rgb?d.chNames.slice():null,zStep:d.zStep>0?d.zStep:0,
+    exportSourceName:d.exportSourceName||(parent&&parent.exportSourceName)||knownFile||nameText||'image',
+    exportChannel:d.exportChannel||d.channelLabel||(d.sourceMeta&&d.sourceMeta.channelLabel)||(parent&&((parent.chNames&&parent.chNames[parent.c])||parent.exportChannel))||inferredChannel,
+    exportPlane:d.exportPlane||(parent&&parent.exportPlane)||null};
   im.disp=[...Array(im.rgb?1:im.nc)].map((_,c)=>({min:0,max:255,lut:(!im.rgb&&d.chLut&&d.chLut[c]&&LUTS.includes(d.chLut[c]))?d.chLut[c]:defaultLut(im,c)})); // 파일의 채널 색(nd2·czi) 우선
   PX.set(id,d.planes); if(d.sourceSamples) SOURCE.set(id,{samples:d.sourceSamples,type:d.sourceType,littleEndian:d.sourceLittleEndian,meta:d.sourceMeta||null});
   if(d.display&&d.display[0]&&!im.rgb) { im.disp[0].min=d.display[0].min; im.disp[0].max=d.display[0].max; } else resetDisplay(im); // ImageJ 와 같이 열 때는 min–max (Auto 는 사용자가)
@@ -58230,7 +58333,7 @@ function closeImage(id,force){ invalidateLineCompare(); if(!WRITE_OWNER) return;
   DIRTY.add(id); if(S.sel===id) S.sel=S.images[Math.min(i,S.images.length-1)]?S.images[Math.min(i,S.images.length-1)].id:null; save(); }
 const UNDO_MAX=8, UNDO_BYTES=1.2e9; // 이미지마다 8 단계, 모든 이미지 합쳐 1.2 GB
 function pushUndo(im,label){ const L=UNDO.get(im.id)||[]; const e={label,planes:planesOf(im),macroAt:null,calChanged:false,
-    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
+    meta:{w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,colorChannels:im.colorChannels,signalOrigin:signalOrigin(im),nc:im.nc,nz:im.nz,nt:im.nt,cal:im.cal,chNames:im.chNames||null,zStep:im.zStep||0,composite:im.composite,databar:im.databar||null,valueUnit:im.valueUnit||"",siScale:im.siScale||null,siUnit:im.siUnit||"",disp:JSON.parse(JSON.stringify(im.disp)),c:im.c,z:im.z,t:im.t,ops:im.ops.slice(),kind:im.kind}};
   L.push(e); while(L.length>UNDO_MAX) L.shift(); UNDO.set(im.id,L);
   // 전체 메모리 상한: 가장 오래된 항목부터 버림 (지금 넣은 것은 남김)
   // 전체 크기: 같은 배열(한 장만 바뀐 스택의 나머지 장 등)과 지금 보이는 화소는 한 번만·세지 않음
@@ -58377,7 +58480,7 @@ function afmCommit(q,result){
   afmValidatePrepared(q);const {im,params,sourcePlane}=q,{c,z,t,resultMode,method}=params;
   const step={op:"afmLevel",params,label:`AFM background correction (${method})`};
   if(resultMode==="new-image"){
-    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
+    const n=addImage({name:`${im.name} · AFM corrected (C${c+1}, Z${z+1}, T${t+1})`,exportChannel:(im.chNames&&im.chNames[c])||im.exportChannel||(im.nc>1?`Channel ${c+1}`:''),exportPlane:im.exportPlane||{c,z,t,nc:im.nc,nz:im.nz,nt:im.nt},w:im.w,h:im.h,bit:32,planes:[Float64Array.from(sourcePlane.data)],cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,historyIncomplete:im.historyIncomplete,snapshotPrecision:im.snapshotPrecision},{parent:im.id,src:"derived",ops:im.ops.slice()});
     setPlanes(n,[result.data],null,"AFM background correction",step);note("The corrected plane was opened as a separate 32-bit image; the original stack is unchanged.","ok");return n;
   }
   const planes=planesOf(im).slice();planes[pIndex(im,c,z,t)]=result.data;setPlanes(im,planes,{bit:32},"AFM background correction",step);
@@ -58489,10 +58592,10 @@ op("type",{label:"Type",group:"type",kind:"image",params:[R("to","Convert to","8
   run:(im,P)=>{
     if(P.to==="split"){ if(im.nc<2) throw new Error("채널이 하나뿐입니다"); const names=im.rgb?["red","green","blue"]:im.chNames; let last;
       for(let c=0;c<im.nc;c++){ const planes=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++) planes.push(planesOf(im)[pIndex(im,c,z,t)].slice());
-        last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
+        last=addImage({name:`C${c+1}-${im.name}${names&&names[c]?" ("+names[c]+")":""}`,exportChannel:names&&names[c]?names[c]:`Channel ${c+1}`,w:im.w,h:im.h,bit:im.rgb?8:im.bit,nc:1,nz:im.nz,nt:im.nt,planes,cal:im.cal,zStep:im.zStep,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit},{parent:im.id,src:"derived"}); if(!im.rgb&&im.disp[c]) last.disp[0].lut=im.disp[c].lut; }
       record({op:"type",params:clean(P),label:"Split Channels"},im); return last; }
     if(P.to==="rgb2gray"){ if(!im.rgb) throw new Error("RGB 이미지가 아닙니다"); const out=[]; for(let t=0;t<im.nt;t++) for(let z=0;z<im.nz;z++){ const r=planeAt(im,0,z,t), g=planeAt(im,1,z,t), b=planeAt(im,2,z,t); out.push(IC.rgbToGray(r,g,b,!!P.weighted).data); }
-      setPlanes(im,out,{rgb:false,nc:1,bit:8,c:0,composite:false},"RGB → 8-bit",{op:"type",params:clean(P),label:"RGB → 8-bit"}); im.disp=[{min:0,max:255,lut:"Grays"}]; return; }
+      setPlanes(im,out,{rgb:false,colorChannels:false,signalOrigin:"display-gray",valueUnit:"",siScale:null,siUnit:"",nc:1,bit:8,c:0,composite:false},"RGB → 8-bit",{op:"type",params:clean(P),label:"RGB → 8-bit"}); im.disp=[{min:0,max:255,lut:"Grays"}]; return; }
     if(im.rgb) throw new Error("RGB 는 먼저 'RGB → 8-bit gray' 또는 'Split channels'");
     const to=+P.to; if(to===im.bit){ note("이미 "+to+"-bit 입니다"); return; }
     // 비례 변환 범위: 기록된 값이 있으면 그대로(매크로 재생), 없으면 지금 표시 범위 — 화소 min–max 와 같으면 "minmax" 로 기록해 이미지마다 다시 구함
@@ -58557,7 +58660,7 @@ op("register",{label:"StackReg",group:"stack",kind:"image",params:[
 /* ---------- Image Calculator ---------- */
 op("calc",{label:"Image Calculator",group:"calc",kind:"new",params:[R("b","Image 2","",{type:"img"}),R("fn","Operation","sub",{type:"sel",opts:[["add","Add"],["sub","Subtract"],["mul","Multiply"],["div","Divide"],["and","AND"],["or","OR"],["xor","XOR"],["min","Min"],["max","Max"],["average","Average"],["difference","Difference"],["copy","Copy"],["transparent-zero","Transparent-zero"]]}),R("float","32-bit (float) result",true,{type:"bool"})],
   run:async(im,P)=>{ const b=byId(P.b)||S.images.find(x=>x.name===P.bName); if(!b) throw new Error("두 번째 이미지를 고르세요"); if(b.w!==im.w||b.h!==im.h) throw new Error("두 이미지의 크기가 같아야 합니다");
-    const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
+    const r=await call("calc",[curPlaneOf(im),curPlaneOf(b),P.fn,!!P.float]); const n=addImage({name:`Result of ${im.name}`,w:im.w,h:im.h,bit:r.bit,planes:[r.data],cal:im.cal,signalOrigin:combineSignalOrigins(im,b)},{parent:im.id,src:"derived"}); record({op:"calc",params:{...clean(P),bName:b.name},label:`Calculator ${P.fn}`},im); return n; },
   ij:P=>`imageCalculator("${{add:"Add",sub:"Subtract",mul:"Multiply",div:"Divide",and:"AND",or:"OR",xor:"XOR",min:"Min",max:"Max",average:"Average",difference:"Difference",copy:"Copy","transparent-zero":"Transparent-zero"}[P.fn]} create${P.float?" 32-bit":""}", getTitle(), "${ijq(P.bName||"image2")}");`});
 
 /* ---------- Threshold · Binary (패널이 따로 있음) ---------- */
@@ -59890,7 +59993,7 @@ async function batchFiles(files){ if(!files.length||BUSY) return; BUSY="batch"; 
       await sleep(0); } }
   finally{ hideProg(); BUSY=null; }
   if(BATCH.zip&&zipList.length){ downloadBlob("batch_results.zip",makeZip(zipList)); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); } note(`Batch complete — ${ok}/${nImg} images (${list.length} files${side.length?`, ${side.length} sidecar files`:""}). See Summary.${unpreservedIBW?` ${unpreservedIBW} original IBW files are not retained.`:""}`,ok===nImg&&!unpreservedIBW?"ok":"warn"); S.ui.bottom="summary"; S.ui.bottomOpen=true; save(); rerender(); }
-function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
+function tiffOf(im){ return {name:im.name.replace(/\.[^.]+$/,"")+".tif",data:IO.writeTIFF({w:im.w,h:im.h,bit:im.bit,rgb:im.rgb,signalOrigin:signalOrigin(im),nc:im.rgb?1:im.nc,nz:im.nz,nt:im.nt,planes:planesOf(im),cal:im.cal,zStep:im.zStep},im.rgb?{}:{min:im.disp[0].min,max:im.disp[0].max})}; }
 function zipImages(list){ if(!list.length) return; downloadBlob("batch_results.zip",makeZip(list.map(tiffOf))); note("32-bit TIFF uses float32; value units and processing history are not preserved.","warn"); }
 /* ZIP (무압축 store) */
 const CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
@@ -59946,7 +60049,7 @@ function build(root){
     <div class="card im-top">
       <div class="grp"><label class="btn primary sm" style="cursor:pointer" title="TIFF, ND2, CZI, PNG, JPEG, DM3/DM4, MRC, EMD, GWY, Nanoscope, ARDF, IBW, SXM, NPY, text … — you can also drop several files or whole folders here">Open files<input type="file" id="imFin" multiple accept="${IO.ACCEPT}" hidden></label>
         <button class="btn sm" id="imFmts" title="Supported formats">Formats</button><button class="btn sm" id="imFileMessages" ${FILE_MESSAGE_BATCHES.length?"":"disabled"}>File messages</button><span class="muted sm">or drop files here</span></div>
-      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF: 32-bit data are float32; value units and processing history are not preserved">Save TIFF</button><button class="btn sm" id="imSaveNumeric" title="Export current numeric values as Float64; earlier precision loss remains and processing history may be incomplete">Export numeric snapshot</button><button class="btn sm" id="imSaveOriginal" title="Export the entire original IBW file, including all channels and dimensions; edits are not included">Export original IBW (entire file)</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
+      <div class="grp" style="margin-left:auto"><button class="btn sm" id="imUndo" title="Undo (Ctrl+Z)">Undo</button><button class="btn sm" id="imSaveT" title="ImageJ-compatible TIFF: 32-bit data are float32; value units and processing history are not preserved">Save TIFF</button><button class="btn sm" id="imSaveCsv" title="Export numeric planes as CSV and metadata in a ZIP">Export CSV</button><button class="btn sm" id="imSaveNumeric" title="Export current numeric values as Float64; earlier precision loss remains and processing history may be incomplete">Export numeric snapshot</button><button class="btn sm" id="imSaveOriginal" title="Export the entire original IBW file, including all channels and dimensions; edits are not included">Export original IBW (entire file)</button><button class="btn sm" id="imSaveP" title="Export the view as shown (LUT, overlays, scale bar) as a full-resolution PNG">Export PNG</button><button class="btn sm" id="imClose" title="Close the current image">Close</button><button class="btn sm" id="imClear" title="Clear everything (click twice to confirm)">Clear all</button></div>
     </div>
     <div class="im-main">
       <div class="card im-list" id="imList"></div>
@@ -59967,7 +60070,7 @@ function build(root){
   const x=$q(root,".imx"), q=s=>$q(root,s);
   q("#imFin").onchange=e=>{ loadFiles(e.target.files); e.target.value=""; };
   q("#imFmts").onclick=showFormats; q("#imFileMessages").onclick=()=>showFileMessages();
-  q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveOriginal").onclick=saveOriginalIBW; q("#imSaveNumeric").onclick=saveNumericSnapshot; q("#imSaveP").onclick=exportPNG;
+  q("#imUndo").onclick=undo; q("#imSaveT").onclick=saveTIFF; q("#imSaveCsv").onclick=showAfmCsvExport; q("#imSaveOriginal").onclick=saveOriginalIBW; q("#imSaveNumeric").onclick=saveNumericSnapshot; q("#imSaveP").onclick=exportPNG;
   q("#imClose").onclick=()=>{ const im=cur(); if(im){ closeImage(im.id); rerender(); } };
   q("#imClear").onclick=()=>{ if(!S.images.length) return; if(BUSY){ note("계산 중에는 지울 수 없습니다 — 끝나거나 중단한 뒤에","warn"); return; } if(!confirm2("imclr","열린 이미지·ROI·결과를 모두 지울까요? 다시 누르면 지웁니다")) return; S.images.map(i=>i.id).forEach(id=>{ PX.delete(id); SOURCE.delete(id); UNDO.delete(id); DIRTY.add(id); }); for(const id of ORIGINALS.keys()) ORIGINAL_DIRTY.delete(id); ORIGINALS.clear(); const ui=S.ui; S=defState(); S.ui.panel=ui.panel; save(); rerender(); };
   q("#imStop").onclick=()=>{ cancelAll(); note("계산을 중단했습니다"); };
@@ -60086,13 +60189,64 @@ function askRaw(name,size){ return new Promise(res=>{ const m=modal(`<div class=
   m.addEventListener("click",e=>{ if(e.target===m||e.target.dataset.close!=null) res(null); }); }); }
 
 /* ---------- 저장·내보내기 ---------- */
-function saveNumericSnapshot(){const im=cur();if(!im)return;try{const data=IO.writeNumericSnapshot({name:im.name,w:im.w,h:im.h,nc:im.nc,nz:im.nz,nt:im.nt,bit:im.bit,rgb:im.rgb,planes:planesOf(im),cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,zStep:im.zStep,chNames:im.chNames,ops:im.ops,snapshotPrecision:im.snapshotPrecision});downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_numeric.innoimg",new Blob([data],{type:"application/octet-stream"}));note("Current values were saved as Float64. Earlier precision loss remains, and the recorded history may be incomplete.","warn");}catch(e){note("Numeric snapshot could not be saved: "+e.message,"warn");}}
+function exportIdentity(im,c,z,t){
+  const source=SOURCE.get(im.id), original=im.originalId&&ORIGINALS.get(im.originalId);
+  const sourceName=im.exportSourceName||(original&&original.name)||im.file||im.name||'image',name=String(im.name||''),prefix=String(sourceName)+' · ';
+  const channel=im.nc>1&&!im.rgb?((im.chNames&&im.chNames[c])||`Channel ${c+1}`):(im.exportChannel||(source&&source.meta&&source.meta.channelLabel)||(name.startsWith(prefix)?name.slice(prefix.length):''));
+  const originalPlane=im.nc===1&&im.nz===1&&im.nt===1?im.exportPlane:null;
+  return Object.assign({sourceName,channelName:channel||'',c,z,t,nc:im.nc,nz:im.nz,nt:im.nt},originalPlane||{});
+}
+function exportNameContext(){
+  const planes=[],keys=[],ctx=new Map();let total=0;
+  const ordered=S.images.slice().sort((a,b)=>String(a.id)<String(b.id)?-1:String(a.id)>String(b.id)?1:0);
+  for(const im of ordered){const nc=im.rgb?1:im.nc;total+=nc*im.nz*im.nt;if(!Number.isSafeInteger(total)||total>=65535)throw new Error('Too many open image planes to create unique export filenames');for(let t=0;t<im.nt;t++)for(let z=0;z<im.nz;z++)for(let c=0;c<nc;c++){planes.push(exportIdentity(im,c,z,t));keys.push({id:im.id,key:`${c},${z},${t}`});}}
+  const names=IO.exportPlaneNames(planes,'png');for(let i=0;i<keys.length;i++){const {id,key}=keys[i];let m=ctx.get(id);if(!m)ctx.set(id,m=new Map());m.set(key,names[i].slice(0,-4));}
+  return ctx;
+}
+function exportNameIdentity(im,c,z,t,ctx){const info=exportIdentity(im,c,z,t),m=ctx.get(im.id),resolvedStem=m&&m.get(`${c},${z},${t}`);if(!resolvedStem)throw new Error('The selected image plane has no export filename');return {...info,resolvedStem};}
+function exportPngName(im){
+  return IO.exportPlaneNames([exportNameIdentity(im,im.rgb?0:im.c,im.z,im.t,exportNameContext())],'png')[0];
+}
+/* CSV serialization is synchronous: pixels and metadata cannot change between selection and ZIP construction. */
+function afmCsvMetadataBudget(value){const stack=[value],seen=new WeakSet();let n=0;while(stack.length){const v=stack.pop();if(typeof v==="string"){n+=v.length*6;if(n>262144)throw new Error("CSV metadata is too large");}else if(v&&typeof v==="object"){if(seen.has(v))throw new Error("CSV metadata has repeated or cyclic objects");seen.add(v);for(const k of Object.keys(v)){n+=k.length*6+32;if(n>262144)throw new Error("CSV metadata is too large");stack.push(v[k]);}}else {n+=32;if(n>262144)throw new Error("CSV metadata is too large");}}}
+function afmCsvAvailableMemory(){const seen=new Set();let live=0;const add=v=>{if(!v)return;const b=ArrayBuffer.isView(v)?v.buffer:v instanceof ArrayBuffer?v:null;if(b&&!seen.has(b)){seen.add(b);live+=b.byteLength;}};for(const ps of PX.values())for(const v of ps)add(v);for(const src of SOURCE.values())add(src.samples);for(const rows of UNDO.values())for(const row of rows)for(const v of row.planes)add(v);for(const ov of AUTO_OVL.values())add(ov.data);for(const o of ORIGINALS.values())if(o.blob instanceof Blob)live+=o.blob.size;const left=Math.floor(IO.MAXBYTES-live);if(!Number.isSafeInteger(left)||left<65536)throw new Error("Insufficient image memory; close images and retry");return Math.min(IO.AFM_CSV_MAX_BYTES,left);}
+function afmCsvOriginal(im,c,z,t){
+  const s=SOURCE.get(im.id),m=s&&s.meta,o=im.originalId&&ORIGINALS.get(im.originalId);
+  if(!s||!m||!o||!(o.blob instanceof Blob)||im.src!=="file"||im.historyIncomplete||im.rgb||im.nc!==1||im.nz!==1||im.nt!==1||c!==0||z!==0||t!==0||m.orientation!=="y-reversed"||!Array.isArray(m.dimensions)||m.dimensions[0]!==im.w||m.dimensions[1]!==im.h||s.samples.length!==im.w*im.h)throw new Error("Original IBW plane or its provenance cannot be verified; reopen the original file");
+  const geometry=new Set(["crop","cropbar","flip","rotate","rot90","resize","register","type"]);if((im.ops||[]).some(x=>!x||!x.op||geometry.has(x.op)))throw new Error("Original IBW geometry cannot be verified after this operation; reopen the original file");
+  const units=m.dimensionUnits,ext=m.extendedDimensionUnits,scale=m.scale;
+  if(!Array.isArray(units)||!Array.isArray(ext)||!Array.isArray(scale)||!Number.isFinite(scale[0])||!Number.isFinite(scale[1])||!scale[0]||!scale[1])throw new Error("Original IBW XY calibration cannot be verified");
+  const ux=units[0]||ext[0],uy=units[1]||ext[1],kx=IO.unitToM(ux),ky=IO.unitToM(uy);
+  if(!kx||!ky||!im.cal||!IO.unitToM(im.cal.unit))throw new Error("Original IBW XY calibration cannot be verified");
+  const x=Math.abs(scale[0])*kx,y=Math.abs(scale[1])*ky,ik=IO.unitToM(im.cal.unit);if(Math.abs(im.cal.pw*ik-x)>Math.abs(x)*1e-12||Math.abs(im.cal.ph*ik-y)>Math.abs(y)*1e-12)throw new Error("Original IBW XY calibration has changed; reopen the original file");
+  const isAsylum=(Array.isArray(im.info)&&im.info.some(v=>v&&v[0]==="ImagingMode"))||/(?:^|\n)\s*MicroscopeModel\s*:/i.test(im.metaText||""),vu=isAsylum&&m.channelLabel?IO.arChannelUnit(m.channelLabel):m.dataUnit;
+  if(typeof vu!=="string"||!vu.trim()||vu.trim().toLowerCase()==='unknown')throw new Error("Original IBW value unit cannot be verified");
+  return {data:s.samples,cal:IO.calFromMeters(x,y,"Original Igor wave scaling",ux),valueUnit:vu||"unknown"};
+}
+function showAfmCsvExport(){if(!cur())return;const m=modal(`<div class="im-h">Export AFM numeric CSV</div><label class="im-f"><span>Format</span><select class="im-sel" id="imCsvFormat"><option value="matrix">Matrix (rows and columns)</option><option value="coordinates">Coordinates (x, y, value)</option></select></label><label class="im-f"><span>Values</span><select class="im-sel" id="imCsvSource"><option value="current">Current values (includes edits)</option><option value="original">Verified original IBW samples</option></select></label><label class="im-f"><span>Planes</span><select class="im-sel" id="imCsvScope"><option value="current">Selected C/Z/T plane</option><option value="all">All planes of all open images</option></select></label><p class="xs muted">ZIP contains CSV and metadata.json. Coordinates are relative to the top-left pixel center; x increases right and y down. Original values may use different units. Display-gray values are image intensity, not recovered physical AFM data. Standard image formats cannot establish prior processing. Excel may round long numbers.</p><div class="im-row"><button class="btn sm" data-close>Cancel</button><button class="btn primary sm" id="imCsvExport">Export ZIP</button></div><div id="imCsvError" class="note warn sm" hidden></div>`);
+  const cleanup=()=>{document.removeEventListener('keydown',outsideGuard,true);m.removeEventListener('keydown',insideGuard);observer.disconnect();};
+  const close=()=>{cleanup();m.hidden=true;m.innerHTML='';};
+  function outsideGuard(e){if(!m.contains(e.target)){e.preventDefault();e.stopImmediatePropagation();if(e.key==='Escape')close();else m.querySelector('#imCsvFormat')?.focus();}}
+  function insideGuard(e){e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close();}else if(e.ctrlKey||e.metaKey||e.altKey)e.preventDefault();}
+  const observer=new MutationObserver(()=>{if(!m.isConnected||m.hidden)cleanup();});observer.observe(document.body,{childList:true,subtree:true});document.addEventListener('keydown',outsideGuard,true);m.addEventListener('keydown',insideGuard);const priorClick=m.onclick;m.onclick=e=>{priorClick(e);if(m.hidden)cleanup();};m.querySelector('#imCsvFormat').focus();
+  m.querySelector('#imCsvExport').onclick=()=>{try{
+    if(BUSY)throw new Error("Wait for the current operation to finish");const format=m.querySelector('#imCsvFormat').value,source=m.querySelector('#imCsvSource').value,all=m.querySelector('#imCsvScope').value==='all',images=all?S.images.slice():[cur()];if(!images.length||images.some(i=>!i))throw new Error("Open an image first");
+    const invalid=images.filter(i=>!["numeric","display-gray"].includes(signalOrigin(i)));if(invalid.length)throw new Error("RGB/color components or unverified signal origin are not supported; reopen the original numeric image: "+invalid.map(i=>i.name).join(", "));
+    let totalPlanes=0;for(const im of images){totalPlanes+=all?im.nc*im.nz*im.nt:1;afmCsvMetadataBudget([im.name,im.cal,im.ops,im.chNames]);}if(!Number.isSafeInteger(totalPlanes)||totalPlanes>=65535)throw new Error("Too many planes for CSV ZIP");
+    const naming=exportNameContext(),planes=[];for(const im of images){const coords=[];if(all){for(let t=0;t<im.nt;t++)for(let z=0;z<im.nz;z++)for(let c=0;c<im.nc;c++)coords.push([c,z,t]);}else coords.push([im.c,im.z,im.t]);for(const [c,z,t] of coords){const origin=signalOrigin(im),v=source==='original'?afmCsvOriginal(im,c,z,t):{data:planeAt(im,c,z,t).data,cal:im.cal,valueUnit:origin==='display-gray'?'image intensity':im.valueUnit||'unknown'};planes.push({name:im.name+(im.chNames&&im.chNames[c]?' · '+im.chNames[c]:''),...exportNameIdentity(im,c,z,t,naming),c,z,t,w:im.w,h:im.h,data:v.data,cal:v.cal,valueUnit:v.valueUnit,signalOrigin:source==='original'?'numeric':origin,valueSource:source,historyIncomplete:source==='original'?false:!!im.historyIncomplete,ops:source==='original'?[]:im.ops||[]});}}
+    const limit=afmCsvAvailableMemory(),r=IO.exportAfmCsvBundle({format,planes,maxBytes:limit});
+    const sameSource=images.length===1||!!images[0].originalId&&images.every(i=>i.originalId===images[0].originalId);
+    const zipName=planes.length===1?r.manifest.planes[0].file.replace(/\.csv$/i,'.zip'):sameSource?IO.exportPlaneNames([{sourceName:planes[0].sourceName,channelName:'CSV'}],'csv')[0].replace(/\.csv$/i,'.zip'):'AFM_numeric_CSV.zip';
+    downloadBlob(zipName,new Blob([r.bytes],{type:'application/zip'}));close();note('CSV and metadata ZIP prepared; Excel may round long numbers.','ok');
+  }catch(e){const err=m.querySelector('#imCsvError');err.hidden=false;err.textContent=e.message||String(e);}};
+}
+function saveNumericSnapshot(){const im=cur();if(!im)return;try{const id=exportIdentity(im,im.c,im.z,im.t);const data=IO.writeNumericSnapshot({name:im.name,exportSourceName:id.sourceName,exportChannel:im.nc>1?'':id.channelName,exportPlane:im.exportPlane||null,w:im.w,h:im.h,nc:im.nc,nz:im.nz,nt:im.nt,bit:im.bit,rgb:im.rgb,signalOrigin:signalOrigin(im),planes:planesOf(im),cal:im.cal,valueUnit:im.valueUnit,siScale:im.siScale,siUnit:im.siUnit,zStep:im.zStep,chNames:im.chNames,ops:im.ops,snapshotPrecision:im.snapshotPrecision});downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_numeric.innoimg",new Blob([data],{type:"application/octet-stream"}));note("Current values were saved as Float64. Earlier precision loss remains, and the recorded history may be incomplete.","warn");}catch(e){note("Numeric snapshot could not be saved: "+e.message,"warn");}}
 function saveOriginalIBW(){ const im=cur(), o=im&&im.originalId&&ORIGINALS.get(im.originalId); if(!o){ note("No original IBW file is available for this image. Reopen the original file.","warn"); return; } downloadBlob(o.name,o.blob); note("The entire original IBW file was saved, including all channels and dimensions; edits are not included.","ok"); }
 function saveTIFF(){ const im=cur(); if(!im) return; const t=tiffOf(im); downloadBlob(t.name,new Blob([t.data],{type:"image/tiff"})); note(`${t.name} — 32-bit TIFF uses float32; value units and processing history are not preserved.`,"warn"); }
-function exportPNG(){ const im=cur(); if(!im) return; const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
+function exportPNG(){ const im=cur(); if(!im) return; let filename;try{filename=exportPngName(im);}catch(e){note(e.message||String(e),"warn");return;} const c=document.createElement("canvas"); c.width=im.w; c.height=im.h; const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
   if(fullScale(im)===1){ const D=buildDisplay(im); g.drawImage(D.cv,0,0); } else { const hs=Math.max(1,Math.floor(8e6/im.w)); for(let y=0;y<im.h;y+=hs){ const st=renderRegion(im,{x:0,y,w:im.w,h:Math.min(hs,im.h-y),sc:1}); g.drawImage(st,0,y); } } // 큰 이미지도 원래 해상도 (띠로 나눠)
   const v={zoom:1,x:0,y:0}; drawThreshold(im,g,v); drawParticles(im,g,v); if(S.ui.showAll!==false) roiList(im).forEach(r=>drawRoi(g,v,r,false,im)); const a=activeRoi(im); if(a) drawRoi(g,v,a,false,im); drawScaleBar(im,g,v,im.w,im.h);
-  c.toBlob(b=>downloadBlob(im.name.replace(/\.[^.]+$/,"")+"_view.png",b),"image/png"); }
+  c.toBlob(b=>downloadBlob(filename,b),"image/png"); }
 
 /* ---------- 단축키 ---------- */
 function onKey(e){
